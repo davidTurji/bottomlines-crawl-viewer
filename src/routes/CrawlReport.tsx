@@ -3,6 +3,7 @@ import { useParams } from "react-router-dom";
 import { useGoogleLogin } from "@react-oauth/google";
 import { api, ApiError, type Summary } from "../lib/api";
 import HeroWidget from "../components/HeroWidget";
+import LinesDiff from "../components/LinesDiff";
 import DeveloperDrilldown from "../components/DeveloperDrilldown";
 import MatchedTables from "../components/MatchedTables";
 import ChatDrawer from "../components/ChatDrawer";
@@ -122,27 +123,44 @@ export default function CrawlReport() {
 
   return (
     <Shell>
-      <header className="mb-6">
-        <p className="text-sm uppercase tracking-wide text-muted-foreground">
-          Bottomlines Crawl — weekly report
-        </p>
-        <h1 className="font-display text-3xl font-semibold">
-          Crawl #{summary.crawl_id}
-        </h1>
-        <p className="mt-1 text-sm text-muted-foreground">
-          {summary.source === "weekly"
-            ? "Automatic weekly crawl"
-            : summary.source === "on_demand"
-              ? "On-demand crawl"
-              : summary.source}
-          {" · "}
-          {summary.counters.developer_count.toLocaleString()} developers scanned{" · "}
-          {summary.counters.matched.lines.toLocaleString()} matched lines
-        </p>
+      <header className="mb-6 flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
+        <div>
+          <p className="text-sm uppercase tracking-wide text-muted-foreground">
+            Bottomlines Crawl — weekly report
+          </p>
+          <h1 className="font-display text-3xl font-semibold">
+            {summary.finished_at
+              ? `Week of ${new Date(summary.finished_at).toLocaleDateString(undefined, {
+                  month: "short",
+                  day: "numeric",
+                  year: "numeric",
+                })}`
+              : `Crawl #${summary.crawl_id}`}
+          </h1>
+          <p className="mt-1 text-sm text-muted-foreground">
+            {summary.source === "weekly"
+              ? "Automatic weekly crawl"
+              : summary.source === "on_demand"
+                ? "On-demand crawl"
+                : summary.source}
+            {" · "}
+            {summary.counters.developer_count.toLocaleString()} developers scanned{" · "}
+            {summary.counters.matched.lines.toLocaleString()} matched lines
+            {summary.previous_job_id && (
+              <>
+                {" · "}compared to crawl #{summary.previous_job_id}
+              </>
+            )}
+          </p>
+        </div>
+        <div className="rounded-lg border border-border bg-muted/40 px-4 py-2 text-xs text-muted-foreground">
+          Retention: two weeks. This report expires when next week's runs.
+        </div>
       </header>
 
       <div className="space-y-6">
         <HeroWidget summary={summary} />
+        <LinesDiff token={token} />
         <DeveloperDrilldown token={token} />
         <MatchedTables token={token} />
       </div>
