@@ -1,0 +1,83 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* Copied and trimmed from bottomlines-app so the look matches. Racing
+   green primary on warm ivory, Inter for body, Schibsted Grotesk for
+   display, DM Mono for numbers. */
+@layer base {
+  :root {
+    --font-sans: "Inter", -apple-system, BlinkMacSystemFont, sans-serif;
+    --font-display: "Schibsted Grotesk", "Inter", sans-serif;
+
+    --background: 44 42% 96%;
+    --foreground: 152 25% 12%;
+
+    --card: 0 0% 100%;
+    --card-foreground: 152 25% 12%;
+
+    --primary: 152 58% 20%;
+    --primary-foreground: 44 42% 96%;
+
+    --secondary: 152 12% 92%;
+    --secondary-foreground: 152 25% 12%;
+
+    --muted: 152 12% 92%;
+    --muted-foreground: 152 8% 40%;
+
+    --accent: 152 25% 88%;
+    --accent-foreground: 152 25% 12%;
+
+    --destructive: 0 72% 40%;
+    --destructive-foreground: 0 0% 98%;
+
+    --border: 152 15% 85%;
+    --input: 152 15% 85%;
+    --ring: 152 58% 20%;
+
+    --radius: 0.6rem;
+
+    /* Semantic tone triplets */
+    --tone-ok: 152 45% 26%;
+    --tone-ok-bg: 152 60% 94%;
+    --tone-ok-border: 152 40% 78%;
+
+    --tone-warn: 32 90% 30%;
+    --tone-warn-bg: 44 96% 92%;
+    --tone-warn-border: 38 80% 75%;
+
+    --tone-critical: 0 72% 35%;
+    --tone-critical-bg: 0 90% 96%;
+    --tone-critical-border: 0 65% 80%;
+
+    --tone-info: 210 65% 40%;
+    --tone-info-bg: 210 90% 96%;
+    --tone-info-border: 210 65% 82%;
+
+    --tone-neutral: 152 8% 40%;
+    --tone-neutral-bg: 152 12% 94%;
+    --tone-neutral-border: 152 15% 82%;
+
+    --gradient-primary: linear-gradient(135deg, hsl(152 58% 20%), hsl(160 55% 32%));
+    --gradient-dark: linear-gradient(135deg, hsl(152 52% 13%), hsl(152 58% 20%));
+  }
+
+  html {
+    font-size: clamp(13.5px, 10px + 0.3125vw, 18px);
+  }
+
+  body {
+    @apply bg-background text-foreground font-sans;
+    -webkit-font-smoothing: antialiased;
+  }
+
+  h1, h2, h3, h4, h5, h6 {
+    font-family: var(--font-display);
+    letter-spacing: -0.01em;
+  }
+
+  .num {
+    font-family: "DM Mono", ui-monospace, monospace;
+    font-variant-numeric: tabular-nums;
+  }
+}
