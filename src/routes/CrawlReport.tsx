@@ -4,6 +4,7 @@ import { useGoogleLogin } from "@react-oauth/google";
 import { api, ApiError, type Summary } from "../lib/api";
 import HeroWidget from "../components/HeroWidget";
 import DeveloperDrilldown from "../components/DeveloperDrilldown";
+import MatchedTables from "../components/MatchedTables";
 import ChatDrawer from "../components/ChatDrawer";
 
 type State =
@@ -143,6 +144,7 @@ export default function CrawlReport() {
       <div className="space-y-6">
         <HeroWidget summary={summary} />
         <DeveloperDrilldown token={token} />
+        <MatchedTables token={token} />
       </div>
 
       <ChatDrawer token={token} />

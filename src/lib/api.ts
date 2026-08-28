@@ -65,6 +65,11 @@ export const api = {
       "GET",
       `/v1/viewer/${token}/matched-developers?page=${page}&page_size=100`,
     ),
+  matchedBundles: (token: string, page = 1) =>
+    req<MatchedBundlesPage>(
+      "GET",
+      `/v1/viewer/${token}/matched-bundles?page=${page}&page_size=100`,
+    ),
   chat: async function* (
     token: string,
     prompt: string,
@@ -189,6 +194,23 @@ export type MatchedDevelopersPage = {
   page_size: number;
   total: number;
   rows: MatchedDeveloper[];
+};
+
+export type MatchedBundle = {
+  store: string;
+  bundle_id: string;
+  app_name: string | null;
+  developer_id: number;
+  developer_name: string | null;
+  developer_domain: string | null;
+  line_count: number;
+};
+
+export type MatchedBundlesPage = {
+  page: number;
+  page_size: number;
+  total: number;
+  rows: MatchedBundle[];
 };
 
 export type ChatFrame =
