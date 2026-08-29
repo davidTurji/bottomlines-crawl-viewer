@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useParams, Link } from "react-router-dom";
 import { ChevronDown } from "lucide-react";
 import {
@@ -14,34 +14,58 @@ import InlineAskAI from "@/components/InlineAskAI";
 import { formatWeek } from "@/components/WeekContextBadge";
 import { cn } from "@/lib/utils";
 
-const OVERVIEW_SUGGESTIONS = [
-  // Eligibility / compliance — the questions a publisher's ad-ops person
-  // actually asks: "am I allowed to sell this?", "was I allowed last week?",
-  // "what broke?". Every chip below is guaranteed to hit a curated answer
-  // in CHAT_ENTRIES (mockData.ts) — verified by the chip-match simulation.
-  "Am I still eligible to sell Chomp Studios?",
-  "Was I authorized on Kite Interactive last week?",
-  "Which of my seats became non-compliant this week?",
-  "Which publishers newly authorized me this week?",
-  "Which publishers de-authorized me?",
-  "How many seats am I compliant on right now?",
-  "Am I at risk of being filtered by buyers next week?",
-  "What broke my compliance this week?",
-  "Which DIRECT lines did I lose?",
-  "Am I on legit inventory or arbitrage?",
-  "What should I do to restore compliance?",
-  // Data / crawl movement
-  "Compare this week to last week for me.",
-  "Which publisher lost the most?",
-  "What's the biggest change on CTV this week?",
-  "Which cert IDs changed and does it matter?",
-  "Show me all new resellers.",
-  // IAB knowledge
-  "What does DIRECT vs RESELLER mean?",
-  "What is OWNERDOMAIN?",
-  "What is the SupplyChain object?",
-  "How does app-ads.txt discovery work?",
-];
+/**
+ * Build the Ask AI chip list.
+ *
+ * Two chips carry a specific example pulled from THIS tenant's actual
+ * crawl data so the example reads as real, not as a static demo:
+ *
+ * - the eligibility chip names a real matched **app** (top row in
+ *   matchedBundles by line count) — "Am I still eligible to sell X?"
+ * - the retro authorization chip names a real de-authorized **publisher**
+ *   (top developer that lost the most matched lines this week) —
+ *   "Was I authorized on Y last week?"
+ *
+ * Both fall back to generic phrasing while the data loads, and both
+ * fallbacks are guaranteed to hit a curated answer in CHAT_ENTRIES
+ * (mockData.ts) so the chip never lands on the default.
+ */
+function buildSuggestions(
+  topMatchedAppName: string | null,
+  topDroppedDeveloperName: string | null,
+): string[] {
+  const eligibleChip = topMatchedAppName
+    ? `Am I still eligible to sell ${topMatchedAppName}?`
+    : "Am I still eligible to sell my top matched app?";
+  const wasAuthChip = topDroppedDeveloperName
+    ? `Was I authorized on ${topDroppedDeveloperName} last week?`
+    : "Was I authorized last week on a publisher I lost?";
+  return [
+    // Eligibility / compliance
+    eligibleChip,
+    wasAuthChip,
+    "Which of my seats became non-compliant this week?",
+    "Which publishers newly authorized me this week?",
+    "Which publishers de-authorized me?",
+    "How many seats am I compliant on right now?",
+    "Am I at risk of being filtered by buyers next week?",
+    "What broke my compliance this week?",
+    "Which DIRECT lines did I lose?",
+    "Am I on legit inventory or arbitrage?",
+    "What should I do to restore compliance?",
+    // Data / crawl movement
+    "Compare this week to last week for me.",
+    "Which publisher lost the most?",
+    "What's the biggest change on CTV this week?",
+    "Which cert IDs changed and does it matter?",
+    "Show me all new resellers.",
+    // IAB knowledge
+    "What does DIRECT vs RESELLER mean?",
+    "What is OWNERDOMAIN?",
+    "What is the SupplyChain object?",
+    "How does app-ads.txt discovery work?",
+  ];
+}
 
 /**
  * OVERVIEW page, "Your weekly crawl".
@@ -63,6 +87,11 @@ export default function CrawlReport() {
   const [summary, setSummary] = useState<Summary | null>(null);
   const [previous, setPrevious] = useState<Summary | null>(null);
   const [error, setError] = useState<string | null>(null);
+  // Dynamic Ask-AI chip examples pulled from this tenant's actual crawl.
+  const [topMatchedAppName, setTopMatchedAppName] = useState<string | null>(null);
+  const [topDroppedDeveloperName, setTopDroppedDeveloperName] = useState<
+    string | null
+  >(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -80,10 +109,36 @@ export default function CrawlReport() {
         if (!cancelled) setPrevious(p);
       })
       .catch(() => {});
+    // Top matched app by line count → seeds the "Am I still eligible to
+    // sell X?" chip with a real app name from this crawl.
+    api
+      .matchedBundles(token, 1)
+      .then((r) => {
+        if (cancelled) return;
+        const top = r.rows[0];
+        if (top?.app_name) setTopMatchedAppName(top.app_name);
+      })
+      .catch(() => {});
+    // Top developer that lost the most matched lines → seeds the "Was I
+    // authorized on Y last week?" chip. developerEvents(event="removed")
+    // is already ordered by lines_removed desc on both mock + live paths.
+    api
+      .developerEvents(token, "removed", 1)
+      .then((r) => {
+        if (cancelled) return;
+        const top = r.rows[0];
+        if (top?.developer_name) setTopDroppedDeveloperName(top.developer_name);
+      })
+      .catch(() => {});
     return () => {
       cancelled = true;
     };
   }, [token]);
+
+  const suggestions = useMemo(
+    () => buildSuggestions(topMatchedAppName, topDroppedDeveloperName),
+    [topMatchedAppName, topDroppedDeveloperName],
+  );
 
   if (error) {
     return (
@@ -220,7 +275,7 @@ export default function CrawlReport() {
           in a thread below the composer. */}
       <InlineAskAI
         token={token}
-        suggestions={OVERVIEW_SUGGESTIONS}
+        suggestions={suggestions}
         placeholder="Ask about your crawl"
       />
 

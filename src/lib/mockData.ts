@@ -795,27 +795,27 @@ const CHAT_ENTRIES: ChatEntry[] = [
   // "compliant", etc.
   {
     triggers: ["still eligible", "am i eligible", "eligible to sell"],
-    body: `Yes — you're still eligible to sell **Chomp Studios** (chompstudios.com, iOS) as of this week's crawl.
+    body: `Yes — you're still eligible to sell **{{TARGET}}** as of this week's crawl.
 
-- Their app-ads.txt lists **18 lines matching your seats** — all added this week (net-new publisher for you).
+- Their app-ads.txt lists **18 lines matching your seats** this week.
 - **6 on Magnite** (your strongest DIRECT relationship), **5 on OpenX**, **4 on Pubmatic**.
 - **No cert-ID rotations** on any of your seats with them.
-- **SupplyChain check**: a bid with \`asi=magnite.com, sid=<your-magnite-seat>\` in schain node 0 will pass authorization. However, Chomp does NOT declare \`OWNERDOMAIN\` yet, so a strict SPO-first DSP may treat \`schain.complete\` as 0 on their first bid.
+- **SupplyChain check**: a bid with \`asi=magnite.com, sid=<your-magnite-seat>\` in schain node 0 will pass authorization. However, {{TARGET}} does NOT declare \`OWNERDOMAIN\` yet, so a strict SPO-first DSP may treat \`schain.complete\` as 0 on their first bid.
 
-**Bottom line:** eligible today, at slight risk of being downweighted by SPO-strict buyers until Chomp adds \`OWNERDOMAIN=chompstudios.com\` to their app-ads.txt. Ask them.`,
+**Bottom line:** eligible today, at slight risk of being downweighted by SPO-strict buyers until {{TARGET}} adds an \`OWNERDOMAIN\` variable to their app-ads.txt. Ask them.`,
   },
   {
     triggers: ["was i authorized", "authorized on", "authorized last week"],
-    body: `On **Kite Interactive** (kiteinteractive.com, iOS): **last week yes, this week no.**
+    body: `On **{{TARGET}}**: **last week yes, this week no.**
 
 Last week's crawl had **22 lines** matching your seats:
 - appnexus.com — 8 lines (mix of DIRECT and RESELLER)
 - rubiconproject.com — 9 lines (mostly RESELLER)
 - google.com — 5 lines (DIRECT)
 
-This week's crawl finds **zero lines**. Kite either purged their entire ads.txt or their domain returned a 404 for the second consecutive week. Per ads.txt v1.1 §3.1, a 404 is treated as "no advertising system authorized" — so any buyer that runs authorization checks will start filtering every bid coming from Kite starting on the next crawl.
+This week's crawl finds **zero lines**. {{TARGET}} either purged their entire ads.txt or their domain returned a 404 for the second consecutive week. Per ads.txt v1.1 §3.1, a 404 is treated as "no advertising system authorized" — so any buyer that runs authorization checks will start filtering every bid coming from {{TARGET}} starting on the next crawl.
 
-**Action:** reach out to Kite ad-ops directly. If they legitimately dropped you, that's contractual and you're done; if the ads.txt is missing accidentally (deploy regression, domain issue), they need to republish it before next Monday's crawl.`,
+**Action:** reach out to {{TARGET}} ad-ops directly. If they legitimately dropped you, that's contractual and you're done; if the ads.txt is missing accidentally (deploy regression, domain issue), they need to republish it before next Monday's crawl.`,
   },
   {
     triggers: ["non-compliant", "became non", "went non", "lost compliance"],
@@ -1194,11 +1194,36 @@ Ask me anything specific: an SSP name, "what is app-ads.txt", "why did X drop", 
   },
 ];
 
+/**
+ * Extract the "target" name from a prompt that references a specific app
+ * or publisher. Used by the two entries that carry a {{TARGET}}
+ * placeholder — an eligibility question and a retro authorization
+ * question — so the mock answer reflects whichever name the dynamic
+ * chip put in the prompt, not a hardcoded example.
+ *
+ * Match order: "sell X?", "sell X.", "authorized on X last week",
+ * "authorized on X?". Case is preserved because we splice the name
+ * back into a proper-noun position.
+ */
+function extractTarget(prompt: string): string | null {
+  const sell = prompt.match(/sell\s+([^?.!]+?)(?:\s+last week)?[?.!]?\s*$/i);
+  if (sell?.[1]) return sell[1].trim();
+  const authOn = prompt.match(/authorized on\s+([^?.!]+?)(?:\s+last week)?[?.!]?\s*$/i);
+  if (authOn?.[1]) return authOn[1].trim();
+  return null;
+}
+
 function pickChatResponse(prompt: string): string {
   const p = prompt.toLowerCase().trim();
   for (const entry of CHAT_ENTRIES) {
     if (entry.triggers.includes("__default__")) continue;
-    if (entry.triggers.some((t) => p.includes(t))) return entry.body;
+    if (entry.triggers.some((t) => p.includes(t))) {
+      if (entry.body.includes("{{TARGET}}")) {
+        const target = extractTarget(prompt) ?? "this publisher";
+        return entry.body.replaceAll("{{TARGET}}", target);
+      }
+      return entry.body;
+    }
   }
   return CHAT_ENTRIES[CHAT_ENTRIES.length - 1].body;
 }
