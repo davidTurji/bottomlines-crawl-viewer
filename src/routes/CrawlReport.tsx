@@ -15,31 +15,32 @@ import { formatWeek } from "@/components/WeekContextBadge";
 import { cn } from "@/lib/utils";
 
 const OVERVIEW_SUGGESTIONS = [
-  // Data — this week
-  "What lines were added this week?",
-  "Which publisher lost the most?",
-  "Which SSP moved the most on my seats?",
-  "Which publishers dropped my lines?",
-  "What changed for Magnite?",
-  "Show me all new resellers.",
-  "Which cert IDs changed and does it matter?",
-  "What's the biggest change on CTV this week?",
-  // Data — comparison
+  // Eligibility / compliance — the questions a publisher's ad-ops person
+  // actually asks: "am I allowed to sell this?", "was I allowed last week?",
+  // "what broke?". Every chip below is guaranteed to hit a curated answer
+  // in CHAT_ENTRIES (mockData.ts) — verified by the chip-match simulation.
+  "Am I still eligible to sell Chomp Studios?",
+  "Was I authorized on Kite Interactive last week?",
+  "Which of my seats became non-compliant this week?",
+  "Which publishers newly authorized me this week?",
+  "Which publishers de-authorized me?",
+  "How many seats am I compliant on right now?",
+  "Am I at risk of being filtered by buyers next week?",
+  "What broke my compliance this week?",
+  "Which DIRECT lines did I lose?",
+  "Am I on legit inventory or arbitrage?",
+  "What should I do to restore compliance?",
+  // Data / crawl movement
   "Compare this week to last week for me.",
-  "Which publishers I've never seen before appeared this week?",
-  // Action / recommendation
-  "Are any of my seats unauthorized?",
-  "What should I do about the removed lines?",
-  "Should I contact any of these publishers?",
+  "Which publisher lost the most?",
+  "What's the biggest change on CTV this week?",
+  "Which cert IDs changed and does it matter?",
+  "Show me all new resellers.",
   // IAB knowledge
-  "What is app-ads.txt?",
   "What does DIRECT vs RESELLER mean?",
   "What is OWNERDOMAIN?",
-  "What is MANAGERDOMAIN?",
-  "What is INVENTORYPARTNERDOMAIN?",
-  "How does the SupplyChain object work?",
-  "What is sellers.json?",
-  "Why does supply-path authorization matter?",
+  "What is the SupplyChain object?",
+  "How does app-ads.txt discovery work?",
 ];
 
 /**
