@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useParams, Link } from "react-router-dom";
 import { ChevronDown } from "lucide-react";
 import {
@@ -11,6 +11,7 @@ import {
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Card } from "@/components/ui/card";
 import InlineAskAI from "@/components/InlineAskAI";
+import { AskAIDrawer, type AskAIDrawerHandle } from "@/components/AskAIDrawer";
 import { formatWeek } from "@/components/WeekContextBadge";
 import { cn } from "@/lib/utils";
 
@@ -139,6 +140,11 @@ export default function CrawlReport() {
     () => buildSuggestions(topMatchedAppName, topDroppedDeveloperName),
     [topMatchedAppName, topDroppedDeveloperName],
   );
+  // Ref lets the on-page composer + chip rail open the drawer with the
+  // question already flying, so a click reads as one gesture instead of
+  // "type here, then find the drawer to see the answer".
+  const drawerRef = useRef<AskAIDrawerHandle>(null);
+  const ask = (q: string) => drawerRef.current?.askAndOpen(q);
 
   if (error) {
     return (
@@ -269,14 +275,20 @@ export default function CrawlReport() {
         </div>
       </div>
 
-      {/* Ask AI, inline, between the KPIs and the drilldown. Same shape
-          bottomlines-app uses on the "Your Bottom Line" page: pill input
-          with a sparkle glyph + horizontal suggestion rail; answers grow
-          in a thread below the composer. */}
+      {/* Ask AI, matching the console: on-page pill composer + chip rail
+          is the visible trigger; the actual conversation happens in a
+          right-side drawer that opens on submit or chip click. Pill
+          launcher hidden — the composer above IS the visible trigger. */}
       <InlineAskAI
+        suggestions={suggestions}
+        onAsk={ask}
+        placeholder="Ask about your crawl"
+      />
+      <AskAIDrawer
+        ref={drawerRef}
         token={token}
         suggestions={suggestions}
-        placeholder="Ask about your crawl"
+        hideLauncher
       />
 
       {/* Matched developer drilldown. Card-per-publisher list styled the
