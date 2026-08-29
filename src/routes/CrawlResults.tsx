@@ -47,31 +47,6 @@ const PLATFORMS = [
   "tvOS",
 ] as const;
 
-/** Stores the app bundles come from. */
-const STORES = ["ios", "android", "roku", "vizio", "samsung", "firetv", "ctv"] as const;
-
-const PLATFORM_TONES: Record<string, string> = {
-  Web: "hsl(var(--tone-info))",
-  iOS: "hsl(var(--tone-ok))",
-  Android: "hsl(var(--tone-warn))",
-  Roku: "hsl(var(--tone-critical))",
-  Samsung: "hsl(var(--tone-special))",
-  Vizio: "hsl(var(--tone-neutral))",
-  CTV: "hsl(var(--primary))",
-  FireTV: "hsl(var(--tone-warn))",
-  tvOS: "hsl(var(--tone-info))",
-};
-
-const STORE_TONES: Record<string, string> = {
-  ios: "hsl(var(--tone-ok))",
-  android: "hsl(var(--tone-warn))",
-  roku: "hsl(var(--tone-critical))",
-  vizio: "hsl(var(--tone-neutral))",
-  samsung: "hsl(var(--tone-special))",
-  firetv: "hsl(var(--tone-info))",
-  ctv: "hsl(var(--primary))",
-};
-
 export default function CrawlResults() {
   const { token = "" } = useParams();
   const [summary, setSummary] = useState<Summary | null>(null);
@@ -107,23 +82,6 @@ export default function CrawlResults() {
 
   const totalDevs = devs.length;
   const totalBundles = bundles.length;
-
-  const devsByPlatform = useMemo(() => {
-    const m: Record<string, number> = {};
-    for (const d of devs) {
-      const key = d.platform ?? "Other";
-      m[key] = (m[key] ?? 0) + 1;
-    }
-    return m;
-  }, [devs]);
-
-  const bundlesByStore = useMemo(() => {
-    const m: Record<string, number> = {};
-    for (const b of bundles) {
-      m[b.store] = (m[b.store] ?? 0) + 1;
-    }
-    return m;
-  }, [bundles]);
 
   const bundlesByDeveloper = useMemo(() => {
     const m: Record<number, MatchedBundle[]> = {};
@@ -380,53 +338,6 @@ function DeveloperRow({
         </div>
       </CollapsibleContent>
     </Collapsible>
-  );
-}
-
-function SegmentedBar({
-  buckets,
-  total,
-  className,
-}: {
-  buckets: { key: string; label: string; value: number; color: string }[];
-  total: number;
-  className?: string;
-}) {
-  const visible = buckets.filter((b) => b.value > 0);
-  return (
-    <div className={`space-y-3 ${className ?? ""}`}>
-      <div className="flex h-3 w-full gap-[2px]">
-        {visible.map((b) => (
-          <div
-            key={b.key}
-            className="first:rounded-l-md last:rounded-r-md"
-            style={{ flexGrow: b.value, backgroundColor: b.color }}
-            title={`${b.label}: ${b.value.toLocaleString()}`}
-          />
-        ))}
-      </div>
-      <div className="flex flex-wrap gap-2">
-        {visible.map((b) => {
-          const pct = total ? Math.round((b.value / total) * 100) : 0;
-          return (
-            <span
-              key={b.key}
-              className="inline-flex items-center gap-2 rounded-full border border-border bg-white px-3 py-1 text-xs text-slate-700"
-            >
-              <span
-                className="h-2 w-2 flex-shrink-0 rounded-full"
-                style={{ backgroundColor: b.color }}
-              />
-              <span className="font-medium">{b.label}</span>
-              <span className="font-mono tabular-nums text-slate-500">
-                {b.value.toLocaleString()}
-              </span>
-              <span className="text-[10px] text-slate-400">{pct}%</span>
-            </span>
-          );
-        })}
-      </div>
-    </div>
   );
 }
 
