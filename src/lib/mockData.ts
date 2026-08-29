@@ -787,6 +787,150 @@ export function linesForDeveloper(developer_id: number): LineEvent[] {
 type ChatEntry = { triggers: string[]; body: string };
 
 const CHAT_ENTRIES: ChatEntry[] = [
+  // ── Eligibility / compliance ─────────────────────────────────
+  // These live FIRST because they answer the questions a publisher
+  // actually opens the report to ask: "am I still allowed to sell X",
+  // "what broke this week", "am I at risk". More specific compliance
+  // triggers come before broad ones so "restore compliance" beats bare
+  // "compliant", etc.
+  {
+    triggers: ["still eligible", "am i eligible", "eligible to sell"],
+    body: `Yes — you're still eligible to sell **Chomp Studios** (chompstudios.com, iOS) as of this week's crawl.
+
+- Their app-ads.txt lists **18 lines matching your seats** — all added this week (net-new publisher for you).
+- **6 on Magnite** (your strongest DIRECT relationship), **5 on OpenX**, **4 on Pubmatic**.
+- **No cert-ID rotations** on any of your seats with them.
+- **SupplyChain check**: a bid with \`asi=magnite.com, sid=<your-magnite-seat>\` in schain node 0 will pass authorization. However, Chomp does NOT declare \`OWNERDOMAIN\` yet, so a strict SPO-first DSP may treat \`schain.complete\` as 0 on their first bid.
+
+**Bottom line:** eligible today, at slight risk of being downweighted by SPO-strict buyers until Chomp adds \`OWNERDOMAIN=chompstudios.com\` to their app-ads.txt. Ask them.`,
+  },
+  {
+    triggers: ["was i authorized", "authorized on", "authorized last week"],
+    body: `On **Kite Interactive** (kiteinteractive.com, iOS): **last week yes, this week no.**
+
+Last week's crawl had **22 lines** matching your seats:
+- appnexus.com — 8 lines (mix of DIRECT and RESELLER)
+- rubiconproject.com — 9 lines (mostly RESELLER)
+- google.com — 5 lines (DIRECT)
+
+This week's crawl finds **zero lines**. Kite either purged their entire ads.txt or their domain returned a 404 for the second consecutive week. Per ads.txt v1.1 §3.1, a 404 is treated as "no advertising system authorized" — so any buyer that runs authorization checks will start filtering every bid coming from Kite starting on the next crawl.
+
+**Action:** reach out to Kite ad-ops directly. If they legitimately dropped you, that's contractual and you're done; if the ads.txt is missing accidentally (deploy regression, domain issue), they need to republish it before next Monday's crawl.`,
+  },
+  {
+    triggers: ["non-compliant", "became non", "went non", "lost compliance"],
+    body: `Your compliance status shifted on **12 seat lines this week**. Breakdown:
+
+**Compliant → non-compliant (12 seats):**
+- **8 seats** on 4 publishers who dropped their entire ads.txt lines for you (Kite Interactive, Cinder & Sky, Meridian Sports Media, Sable Broadcasting).
+- **3 seats** where the DIRECT relationship was downgraded to RESELLER on active publishers. Not spec-breaking per ads.txt v1.1 §3.3, but many DSP quality scores weight DIRECT higher.
+- **1 seat** where the cert-ID rotated AND the account-ID rotated together (needs manual re-verification with the SSP).
+
+**Stayed compliant:** 1,337,480 of 1,337,492 lines (99.999%). The vast majority of your matched inventory is untouched.
+
+**Newly compliant this week:** 12 seats on the 6 net-new publishers (Chomp, Roost, Deep Sea, Aurora, Pixel Cauldron, Northlight).
+
+**Net:** -0 seats vs last week (12 lost, 12 gained). But it's not the same 12 — you traded 4 established publishers for 6 mobile-first ones. That's a materially different portfolio, not a wash.`,
+  },
+  {
+    triggers: ["newly authorized", "newly listed", "publishers newly", "who newly"],
+    body: `**6 publishers newly authorized you this week**, adding 47 net-new matching lines:
+
+| Publisher | Platform | New lines | Top SSPs |
+|---|---|---|---|
+| Chomp Studios | iOS | 18 | Magnite (6), OpenX (5), Pubmatic (4) |
+| Roost Media | Roku CTV | 14 | SpotX (5), Beachfront (4), Magnite (3) |
+| Deep Sea Games | Android | 11 | Pubmatic (4), SmartAdServer (3) |
+| Aurora TV Networks | CTV | 9 | Sharethrough (4), Magnite (3) |
+| Pixel Cauldron | iOS | 8 | OpenX (3), SmartAdServer (2) |
+| Northlight Games | Android | 7 | Pubmatic (3), Magnite (2) |
+
+All six are publishing valid app-ads.txt discovered through their app store's \`appstore:developer_url\` meta tag. **None declare \`OWNERDOMAIN\`** — worth a note to your account managers so a strict SPO buyer's SupplyChain check doesn't flag these as \`complete=0\`. One-line fix on their side.`,
+  },
+  {
+    triggers: ["de-authorized", "deauthorized", "who dropped me", "who removed me"],
+    body: `**4 publishers de-authorized you this week** (removed every one of your matched lines):
+
+1. **Kite Interactive** (kiteinteractive.com, iOS) — 22 lines gone (AppNexus 8, Rubicon 9, Google 5).
+2. **Cinder & Sky** (cinderandsky.co, Web) — 16 lines gone (Google 7, Criteo 5, Yahoo 4).
+3. **Meridian Sports Media** (meridiansports.io, iOS) — 12 lines gone (AppNexus 6, Yahoo 4, Rubicon 2).
+4. **Sable Broadcasting** (sablebroadcast.tv, Samsung CTV) — 9 lines gone (Rubicon 5, plus 4 more).
+
+Per ads.txt v1.1, a missing entry = publisher no longer authorizes that relationship. Buyers running strict authorization checks will filter every bid on this inventory starting next crawl.
+
+Common pattern for this shape of drop is a publisher moving to a sales-house exclusive (which would show up as a \`MANAGERDOMAIN\` in their new ads.txt). None of these four declared one, so it's more likely a plain contract wind-down or an accidental ads.txt rewrite. Worth 4 emails.`,
+  },
+  {
+    triggers: ["how many seats", "how many am i compliant", "how many compliant", "compliance rate", "authorization rate"],
+    body: `**You're compliant on 1,337,492 matched lines** across **8,412 publishers** and **24,781 apps** — that's the full set the ads.txt / app-ads.txt discovery marked as valid for you this crawl.
+
+Vs last week (1,338,549 lines / 8,408 devs / 24,614 apps): **-1,057 lines, +4 developers, +167 apps**.
+
+- Line count dropped slightly because 4 high-line-count publishers fully dropped you (Kite, Cinder & Sky, Meridian, Sable — 59 lines combined) and the 6 new publishers came in with fewer lines each.
+- Developer breadth grew (+4 net) and app coverage grew a lot (+167).
+- Net-positive trend for **supply diversity** even though gross line count dipped.
+
+Compliance rate (matched lines / total attempted lines this week): **99.06%** (12 seat-level compliance losses out of 1,337,504 attempted). Last week it was 99.02%. Slight improvement.`,
+  },
+  {
+    triggers: ["at risk", "filtered by buyers", "get filtered", "risk of being"],
+    body: `**High-risk items this week — buyers doing strict supply-path checks will start filtering these next crawl:**
+
+1. **12 DIRECT seat lines fully removed** (see "de-authorized" — Kite, Cinder & Sky, Meridian, Sable). Buyers that require a matching ads.txt entry for the schain node will filter every bid on these publishers.
+2. **6 new publishers don't publish OWNERDOMAIN** (Chomp, Roost, Deep Sea, Aurora, Pixel Cauldron, Northlight). Buyers that check \`schain.nodes[0].domain == ads.txt OWNERDOMAIN\` may treat the chain as \`complete=0\`. Not fatal for most DSPs; SPO-first DSPs will downweight.
+3. **1 seat needs manual re-verification** — cert-ID + account-ID both rotated on the same seat.
+
+**Low-risk (safe to ignore):**
+- 43 cert-ID rotations without a relationship change — benign per ads.txt v1.1 §3.3 (cert IDs are being superseded by the \`identifiers\` object in sellers.json anyway and may be deprecated in a future spec revision).
+- 3 DIRECT→RESELLER downgrades on stable relationships — spec-legal per v1.1 §3.3, just a preference signal.`,
+  },
+  {
+    triggers: ["broke my compliance", "what broke", "root cause"],
+    body: `Three things broke compliance this week:
+
+1. **Four publishers fully dropped you** (Kite, Cinder & Sky, Meridian, Sable — 59 lines combined). Most impactful — these were 3+ month-old, high-line-count relationships.
+2. **Three DIRECT → RESELLER downgrades** on active publishers. Not spec-breaking (both are valid per ads.txt v1.1 §3.3), but DSP quality scores often weight DIRECT higher, and SPO paths through DIRECT are shorter.
+3. **One dual-rotation** (cert-ID + account-ID together) on an existing seat needs manual re-verification with the SSP.
+
+**Root cause is publisher-side, not yours** — no change to your ads.txt or seat configuration would have prevented any of this. The fix is contact + re-authorization on the four dropped publishers, plus a quick email to the SSP on the dual-rotation seat.`,
+  },
+  {
+    triggers: ["direct lines", "direct line", "lost direct", "direct relationships"],
+    body: `You lost **8 DIRECT lines this week** (removed by publisher-side ads.txt updates):
+
+- **appnexus.com, xf-4402, DIRECT**: Kite Interactive dropped this line entirely.
+- **rubiconproject.com, 22890, DIRECT**: Sable Broadcasting removed their only DIRECT with you on Samsung CTV.
+- **google.com, pub-9083…, DIRECT**: Cinder and Sky purged all Google DIRECT lines.
+- **appnexus.com, xf-2201, DIRECT**: Meridian Sports Media dropped it.
+- Plus 4 more — filter Line changes by "removed" + "My seats only" to see the full list.
+
+**Why DIRECT lines matter more than RESELLER:** most DSP quality scores weight them higher (fewer intermediaries), they carry lower reseller-margin skim in SPO-optimized paths, and in a complete SupplyChain object a DIRECT origin node results in a shorter chain — buyers prefer short chains.
+
+**Restore priority:** these 8 DIRECT lines should be the first outreach this week. Losing DIRECT and keeping RESELLER on the same SSP is worse than losing both, because your bids now compete against your own reseller path.`,
+  },
+  {
+    triggers: ["arbitrage", "legit inventory", "supply-path", "supply path optim"],
+    body: `**Arbitrage screening from this week's crawl:**
+
+- All 8,412 matched publishers have valid ads.txt / app-ads.txt — basic authorization is clean.
+- **Only ~40% declare \`OWNERDOMAIN\` (ads.txt v1.1)**. Without it, buyers can't strictly verify that the entity being paid at schain node 0 actually owns the inventory. The door is open for undeclared re-labeling ("arbitrage") on the other ~60%.
+- **Zero publishers this week declared \`MANAGERDOMAIN\`** for any of your markets. If any of your traffic actually flows through a sales house, you can't currently prove that from ads.txt alone — the SPO signal is missing.
+- **No \`INVENTORYPARTNERDOMAIN\` chains observed** on your matched inventory this week (typical for non-CTV / non-syndicated inventory).
+
+**Verdict:** the crawl passes basic authorization for every matched line. Arbitrage risk is **medium on the ~60% of publishers without OWNERDOMAIN**. Worth pushing your top-20 publishers by revenue to adopt v1.1 variables so their schain becomes strictly verifiable end to end — that's a competitive advantage vs publishers who don't.`,
+  },
+  {
+    triggers: ["restore compliance", "how to fix", "how do i fix", "recover compliance", "what should i do to restore"],
+    body: `Playbook for this week's compliance gaps:
+
+1. **Email the 4 fully-dropped publishers** (Kite Interactive, Cinder & Sky, Meridian Sports Media, Sable Broadcasting). Confirm whether the ads.txt change is intentional. If yes, no action; if not, ask them to restore your lines before next Monday's crawl.
+2. **Ask the 6 new publishers** (Chomp, Roost, Deep Sea, Aurora, Pixel Cauldron, Northlight) **to add \`OWNERDOMAIN=<their-domain>\`** to their app-ads.txt. One-line change on their side, big compliance win for you with SPO-strict DSPs.
+3. **Re-verify the 1 dual-rotation seat** with the SSP directly — needs a new cert-ID confirmation.
+4. **43 cert-ID-only rotations** — no action needed. Benign per ads.txt v1.1 §3.3.
+5. **Nothing to change on your ads.txt or seats.** All this week's gaps are publisher-side.
+
+Total effort: ~6 emails. Expected result: 8–12 of the 12 lost seats restored by next crawl.`,
+  },
   // ── Data questions ────────────────────────────────────────────
   {
     triggers: ["who removed", "which publishers dropped", "publisher lost the most"],
