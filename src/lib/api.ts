@@ -1,5 +1,12 @@
 const BASE = (import.meta.env.VITE_API_BASE as string) ?? "/api";
 
+// ── Mock mode ─────────────────────────────────────────────────────
+// Turned on with ``VITE_MOCK=true`` at ``vite dev`` start. Every
+// function head short-circuits to a deterministic mock, no backend
+// required, useful for UI-only reviews and screenshots.
+// The mock adapter lives in src/lib/mockData.ts.
+export const MOCK = (import.meta.env.VITE_MOCK as string | undefined) === "true";
+
 export class ApiError extends Error {
   constructor(public status: number, message: string) {
     super(message);
@@ -25,23 +32,49 @@ async function req<T>(
 }
 
 export const api = {
-  auth: (token: string, idToken: string) =>
-    req<{ ok: boolean; email: string; customer_id: number }>(
+  auth: async (_token: string, _idToken: string) => {
+    if (MOCK) return { ok: true, email: "you@publisherstudios.com", customer_id: 42 };
+    return req<{ ok: boolean; email: string; customer_id: number }>(
       "POST",
       `/v1/viewer/auth`,
-      { token, id_token: idToken },
-    ),
-  summary: (token: string) => req<Summary>("GET", `/v1/viewer/${token}/summary`),
-  developerEvents: (
+      { token: _token, id_token: _idToken },
+    );
+  },
+  summary: async (token: string) => {
+    if (MOCK) {
+      const { mockSummary } = await import("./mockData");
+      return mockSummary;
+    }
+    return req<Summary>("GET", `/v1/viewer/${token}/summary`);
+  },
+  previousSummary: async (_token: string) => {
+    // Return the previous week's summary for the same customer, so any
+    // page can render a "this-week vs last-week" comparison. In MOCK,
+    // we serve a plausible prior week; in production this would be a
+    // backend endpoint parameterised by the previous_job_id in the
+    // current summary.
+    if (MOCK) {
+      const { mockPreviousSummary } = await import("./mockData");
+      return mockPreviousSummary;
+    }
+    // TODO wire /v1/viewer/{token}/summary?crawl_id=<previous_job_id>
+    return null as Summary | null;
+  },
+  developerEvents: async (
     token: string,
     event: "added" | "removed" | "changed",
     page = 1,
-  ) =>
-    req<DeveloperEventsPage>(
+  ) => {
+    if (MOCK) {
+      const { mockDeveloperEvents } = await import("./mockData");
+      return mockDeveloperEvents(event, page);
+    }
+    return req<DeveloperEventsPage>(
       "GET",
       `/v1/viewer/${token}/developer-events?event=${event}&page=${page}&page_size=50`,
-    ),
-  lineEvents: (
+    );
+  },
+  lineEvents: async (
     token: string,
     filters: {
       event?: "added" | "removed" | "cert_changed";
@@ -51,6 +84,10 @@ export const api = {
       page?: number;
     } = {},
   ) => {
+    if (MOCK) {
+      const { mockLineEvents } = await import("./mockData");
+      return mockLineEvents(filters);
+    }
     const q = new URLSearchParams();
     for (const [k, v] of Object.entries(filters)) {
       if (v !== undefined && v !== null && v !== "") q.set(k, String(v));
@@ -60,15 +97,72 @@ export const api = {
       `/v1/viewer/${token}/line-events?${q.toString()}`,
     );
   },
-  matchedDevelopers: (token: string, page = 1) =>
-    req<MatchedDevelopersPage>(
+  matchedDevelopers: async (token: string, page = 1) => {
+    if (MOCK) {
+      const { mockMatchedDevelopers } = await import("./mockData");
+      return mockMatchedDevelopers(page);
+    }
+    return req<MatchedDevelopersPage>(
       "GET",
       `/v1/viewer/${token}/matched-developers?page=${page}&page_size=100`,
-    ),
+    );
+  },
+  matchedBundles: async (token: string, page = 1) => {
+    if (MOCK) {
+      const { mockMatchedBundles } = await import("./mockData");
+      return mockMatchedBundles(page);
+    }
+    return req<MatchedBundlesPage>(
+      "GET",
+      `/v1/viewer/${token}/matched-bundles?page=${page}&page_size=100`,
+    );
+  },
+  /**
+   * Line events scoped to a single developer, used by the nested-row
+   * expansion on the Results page. In mock mode, reads the same seeded map
+   * used by the summary counters. In live mode, calls the shared line-events
+   * endpoint with a developer_id filter.
+   */
+  linesForDeveloper: async (token: string, developer_id: number) => {
+    if (MOCK) {
+      const { linesForDeveloper } = await import("./mockData");
+      const rows = linesForDeveloper(developer_id);
+      return {
+        page: 1,
+        page_size: rows.length || 1,
+        total: rows.length,
+        rows,
+      } as LineEventsPage;
+    }
+    const q = new URLSearchParams({ developer_id: String(developer_id) });
+    return req<LineEventsPage>(
+      "GET",
+      `/v1/viewer/${token}/line-events?${q.toString()}`,
+    );
+  },
+  /** Bundles for a single developer, for the nested expansion. */
+  bundlesForDeveloper: async (token: string, developer_id: number) => {
+    if (MOCK) {
+      const { bundlesForDeveloper } = await import("./mockData");
+      return bundlesForDeveloper(developer_id);
+    }
+    // Live mode: no per-developer bundles endpoint yet, so fall back to
+    // filtering the first page of the shared list.
+    const page = await req<MatchedBundlesPage>(
+      "GET",
+      `/v1/viewer/${token}/matched-bundles?page=1&page_size=500`,
+    );
+    return page.rows.filter((r) => r.developer_id === developer_id);
+  },
   chat: async function* (
     token: string,
     prompt: string,
   ): AsyncGenerator<ChatFrame> {
+    if (MOCK) {
+      const { mockChatStream } = await import("./mockData");
+      for await (const frame of mockChatStream(prompt)) yield frame;
+      return;
+    }
     const res = await fetch(`${BASE}/v1/viewer/${token}/chat`, {
       method: "POST",
       credentials: "include",
@@ -189,6 +283,23 @@ export type MatchedDevelopersPage = {
   page_size: number;
   total: number;
   rows: MatchedDeveloper[];
+};
+
+export type MatchedBundle = {
+  store: string;
+  bundle_id: string;
+  app_name: string | null;
+  developer_id: number;
+  developer_name: string | null;
+  developer_domain: string | null;
+  line_count: number;
+};
+
+export type MatchedBundlesPage = {
+  page: number;
+  page_size: number;
+  total: number;
+  rows: MatchedBundle[];
 };
 
 export type ChatFrame =

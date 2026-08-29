@@ -1,83 +1,662 @@
-@tailwind base;
+﻿@tailwind base;
 @tailwind components;
 @tailwind utilities;
 
-/* Copied and trimmed from bottomlines-app so the look matches. Racing
-   green primary on warm ivory, Inter for body, Schibsted Grotesk for
-   display, DM Mono for numbers. */
+/* Kill the legacy three-bouncing-dots loader everywhere.
+   The unified PageLoader has replaced it as the app's canonical loading
+   indicator, but the older markup is still inlined across ~14 pages. Rather
+   than surgically edit each site, this override hides every dot so nothing
+   flashes on top of, or ahead of, the new spinner. */
+.animate-dot-bounce {
+  display: none !important;
+}
+
+/* Definition of the design system. All colors, gradients, fonts, etc should be defined here. 
+All colors MUST be HSL.
+*/
+
 @layer base {
   :root {
+    /* Clarity.ai — "Racing Green" theme: heritage racing green on warm ivory.
+       Chosen in the 2026-07 design review (was: sky blue on light gray). */
+
+    /* Font tokens — overridable by theme presets (ThemePresetSwitcher).
+       --font-sans drives UI/body text, --font-display drives headings. */
     --font-sans: "Inter", -apple-system, BlinkMacSystemFont, sans-serif;
     --font-display: "Schibsted Grotesk", "Inter", sans-serif;
 
-    --background: 44 42% 96%;
-    --foreground: 152 25% 12%;
+    --background: 45 25% 97%;
+    --foreground: 150 30% 8%;
 
     --card: 0 0% 100%;
-    --card-foreground: 152 25% 12%;
+    --card-foreground: 150 30% 8%;
 
+    --popover: 0 0% 100%;
+    --popover-foreground: 150 30% 8%;
+
+    /* Racing Green */
     --primary: 152 58% 20%;
-    --primary-foreground: 44 42% 96%;
+    --primary-foreground: 0 0% 100%;
 
-    --secondary: 152 12% 92%;
-    --secondary-foreground: 152 25% 12%;
+    --secondary: 148 12% 90%;
+    --secondary-foreground: 152 40% 12%;
 
-    --muted: 152 12% 92%;
-    --muted-foreground: 152 8% 40%;
+    --muted: 148 12% 94%;
+    --muted-foreground: 150 8% 40%;
 
-    --accent: 152 25% 88%;
-    --accent-foreground: 152 25% 12%;
+    --accent: 152 30% 92%;
+    --accent-foreground: 152 58% 15%;
 
-    --destructive: 0 72% 40%;
-    --destructive-foreground: 0 0% 98%;
+    --destructive: 0 84% 60%;
+    --destructive-foreground: 0 0% 100%;
 
-    --border: 152 15% 85%;
-    --input: 152 15% 85%;
-    --ring: 152 58% 20%;
+    --border: 148 12% 87%;
+    --input: 148 12% 87%;
+    --ring: 152 58% 25%;
 
-    --radius: 0.6rem;
+    --radius: 0.75rem;
 
-    /* Semantic tone triplets */
-    --tone-ok: 152 45% 26%;
-    --tone-ok-bg: 152 60% 94%;
-    --tone-ok-border: 152 40% 78%;
+    /* Sidebar — deep racing green.
+       Foreground is a green-tinted near-white (not pure #fff) so long nav
+       lists read softer against the dark rail; primary is nudged toward the
+       teal of the bottomline.ai logomark so the accent and the brand match. */
+    --sidebar-background: 152 52% 13%;
+    --sidebar-foreground: 150 25% 96%;
+    --sidebar-primary: 163 52% 55%;
+    --sidebar-primary-foreground: 152 52% 10%;
+    --sidebar-accent: 152 48% 19%;
+    --sidebar-accent-foreground: 150 25% 96%;
+    --sidebar-border: 152 45% 20%;
+    --sidebar-ring: 163 52% 55%;
 
-    --tone-warn: 32 90% 30%;
-    --tone-warn-bg: 44 96% 92%;
-    --tone-warn-border: 38 80% 75%;
+    /* Alias: keep bottomline-* pointing to brand colors so existing class names still work */
+    --bottomline-green: 152 58% 22%;
+    --bottomline-green-hover: 152 58% 28%;
+    --bottomline-dark: 152 52% 10%;
+    --bottomline-dark-lighter: 152 48% 16%;
+    --bottomline-border: 148 12% 87%;
 
-    --tone-critical: 0 72% 35%;
-    --tone-critical-bg: 0 90% 96%;
-    --tone-critical-border: 0 65% 80%;
+    /* Alert Colors */
+    --alert-green: 152 50% 20%;
+    --alert-green-border: 152 50% 30%;
+    --alert-green-text: 145 40% 62%;
 
-    --tone-info: 210 65% 40%;
-    --tone-info-bg: 210 90% 96%;
-    --tone-info-border: 210 65% 82%;
+    /* Status tones — the semantic signal scale used by the Crawler suite
+       (and available console-wide). Each tone ships three values so a pill,
+       chip or table cell always pairs a readable foreground with a tint
+       background and a matching hairline border:
 
-    --tone-neutral: 152 8% 40%;
-    --tone-neutral-bg: 152 12% 94%;
-    --tone-neutral-border: 152 15% 82%;
+         <tone>          → foreground / icon / number
+         <tone>-bg       → tint fill behind it
+         <tone>-border   → hairline
 
-    --gradient-primary: linear-gradient(135deg, hsl(152 58% 20%), hsl(160 55% 32%));
-    --gradient-dark: linear-gradient(135deg, hsl(152 52% 13%), hsl(152 58% 20%));
+       Tuned for the ivory background: foregrounds sit at ~34-45% lightness
+       so every pair clears WCAG AA on --background, and hues are pulled
+       toward the Racing Green primary rather than the old sky-blue set.
+       Exposed to Tailwind as text-ok / bg-ok-bg / border-ok-border etc. */
+    --tone-ok: 152 58% 26%;
+    --tone-ok-bg: 152 40% 94%;
+    --tone-ok-border: 152 32% 78%;
+
+    --tone-warn: 35 88% 32%;
+    --tone-warn-bg: 42 88% 94%;
+    --tone-warn-border: 40 70% 78%;
+
+    --tone-critical: 0 68% 42%;
+    --tone-critical-bg: 0 78% 96%;
+    --tone-critical-border: 0 58% 86%;
+
+    --tone-info: 212 68% 38%;
+    --tone-info-bg: 210 80% 95%;
+    --tone-info-border: 210 58% 84%;
+
+    /* Reserved for IPD / inferred supply-chain matches, which the suite has
+       always drawn in violet — kept distinct from the four signal tones. */
+    --tone-special: 276 52% 44%;
+    --tone-special-bg: 278 66% 96%;
+    --tone-special-border: 278 42% 87%;
+
+    --tone-neutral: 150 8% 38%;
+    --tone-neutral-bg: 148 12% 94%;
+    --tone-neutral-border: 148 12% 84%;
+
+    /* Gradients */
+    --gradient-primary: linear-gradient(135deg, hsl(152 58% 20%), hsl(152 58% 12%));
+    --gradient-dark: linear-gradient(135deg, hsl(152 52% 10%), hsl(152 48% 15%));
+
+    /* Responsive sidebar widths — rem-based so the rail scales with the
+       fluid root font size (14rem ≈ 196px on a laptop, 224px @ 1920w).
+       Sized up alongside the larger text-only nav labels. */
+    --sidebar-width: 14rem;
+    --sidebar-width-icon: 3.5rem;
+  }
+
+  .dark {
+    /* Clarity uses light theme everywhere — dark class mirrors root */
+    --background: 45 25% 97%;
+    --foreground: 150 30% 8%;
+    --card: 0 0% 100%;
+    --card-foreground: 150 30% 8%;
+    --popover: 0 0% 100%;
+    --popover-foreground: 150 30% 8%;
+    --primary: 152 58% 20%;
+    --primary-foreground: 0 0% 100%;
+    --secondary: 148 12% 90%;
+    --secondary-foreground: 152 40% 12%;
+    --muted: 148 12% 94%;
+    --muted-foreground: 150 8% 40%;
+    --accent: 152 30% 92%;
+    --accent-foreground: 152 58% 15%;
+    --destructive: 0 84% 60%;
+    --destructive-foreground: 0 0% 100%;
+    --border: 148 12% 87%;
+    --input: 148 12% 87%;
+    --ring: 152 58% 25%;
+  }
+
+  /* Custom date picker styling for light theme */
+  input[type="date"]::-webkit-calendar-picker-indicator {
+    background-image: url('data:image/svg+xml;charset=UTF-8,<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="rgba(71,85,105,0.8)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="18" rx="2" ry="2"></rect><line x1="16" y1="2" x2="16" y2="6"></line><line x1="8" y1="2" x2="8" y2="6"></line><line x1="3" y1="10" x2="21" y2="10"></line></svg>');
+    background-repeat: no-repeat;
+    background-position: center;
+    background-size: 16px;
+    opacity: 0.7;
+    cursor: pointer;
+    padding: 4px;
+    border-radius: 4px;
+    transition: opacity 0.2s ease;
+  }
+
+  input[type="date"]::-webkit-calendar-picker-indicator:hover {
+    opacity: 1;
+    background-color: rgba(0, 0, 0, 0.06);
+  }
+
+  input[type="date"]::-webkit-datetime-edit {
+    color: hsl(222 47% 11%);
+    padding: 0;
+  }
+
+  input[type="date"]::-webkit-datetime-edit-text {
+    color: hsl(215 16% 47%);
+  }
+
+  input[type="date"]::-webkit-datetime-edit-month-field,
+  input[type="date"]::-webkit-datetime-edit-day-field,
+  input[type="date"]::-webkit-datetime-edit-year-field {
+    color: hsl(222 47% 11%);
+    background: transparent;
+    border: none;
+    outline: none;
+  }
+
+  input[type="date"]::-webkit-datetime-edit-month-field:focus,
+  input[type="date"]::-webkit-datetime-edit-day-field:focus,
+  input[type="date"]::-webkit-datetime-edit-year-field:focus {
+    background: rgba(0, 0, 0, 0.05);
+    border-radius: 2px;
+  }
+
+  * {
+    @apply border-border;
+    max-width: 100%;
+    box-sizing: border-box;
+  }
+
+  /* Sidebar surface — a barely-there top-to-bottom deepening of the racing
+     green so the rail reads as one lit panel instead of a flat fill. Rides
+     on top of the bg-sidebar color (background-image layers over it), so it
+     applies to both the desktop rail and the mobile Sheet. */
+  [data-sidebar="sidebar"] {
+    background-image: linear-gradient(180deg, hsl(152 50% 15.5%) 0%, hsl(153 55% 10%) 100%);
+  }
+
+  /* Mobile sidebar Sheet border-bleed fix */
+  @media (max-width: 767px) {
+    [data-sidebar="sidebar"][data-mobile="true"] {
+      border: 0 !important;
+      outline: none !important;
+      box-shadow: none !important;
+    }
+  }
+
+  /* Recharts click targets pick up the browser's default focus rectangle
+     on click (ugly black box around slices/bars). Every chart in the app
+     already signals selection with color/opacity, so kill the outline. */
+  .recharts-wrapper *:focus,
+  .recharts-wrapper *:focus-visible,
+  .recharts-surface *:focus,
+  .recharts-surface *:focus-visible {
+    outline: none !important;
+  }
+
+  /* Eliminate 300ms tap delay on all interactive elements */
+  a,
+  button,
+  [role="button"],
+  input,
+  select,
+  textarea,
+  [data-sidebar="menu-button"] {
+    touch-action: manipulation;
   }
 
   html {
-    font-size: clamp(13.5px, 10px + 0.3125vw, 18px);
+    overflow: hidden;
+    height: 100vh;
+    height: 100dvh; /* Dynamic viewport height for mobile */
+    /* 100% not 100vw: 100vw includes the scrollbar gutter and ignores
+       safe-area insets, causing a few px of horizontal scroll on mobile. */
+    width: 100%;
+  }
+
+  /* Desktop density: FLUID root font size. Every rem-based dimension
+     (Tailwind spacing, heading sizes, sidebar width, card padding…) scales
+     with the viewport width, so the console adapts itself to the screen:
+       ~13.5px on small laptops → 14px @ 1280w → 16px @ 1920w → 18px cap
+     on ultrawides (slope: 10px + 0.3125vw). Mobile stays at the browser
+     default so touch targets don't collapse. Layout math is preserved
+     because everything scales proportionally — unlike CSS `zoom`, which
+     broke the viewport. NOTE: fixed `px` utilities (text-[11px] etc.)
+     opt OUT of this scale — use rem-based sizes for anything that should
+     adapt. */
+  @media (min-width: 768px) {
+    html {
+      font-size: clamp(13.5px, 10px + 0.3125vw, 18px);
+    }
   }
 
   body {
-    @apply bg-background text-foreground font-sans;
-    -webkit-font-smoothing: antialiased;
+    @apply bg-background text-foreground;
+    font-family: var(--font-sans);
+    font-feature-settings:
+      "rlig" 1,
+      "calt" 1;
+    overflow: hidden;
+    height: 100vh;
+    height: 100dvh;
+    width: 100%;
+    /* Remove body padding - let components handle safe areas */
+    -webkit-tap-highlight-color: transparent;
+    -webkit-touch-callout: none;
   }
 
-  h1, h2, h3, h4, h5, h6 {
+  h1,
+  h2,
+  h3,
+  h4,
+  h5,
+  h6 {
     font-family: var(--font-display);
-    letter-spacing: -0.01em;
   }
 
-  .num {
-    font-family: "DM Mono", ui-monospace, monospace;
+  /* Give shadcn Card components a subtle elevation so they pop off the light background */
+  [data-slot="card"] {
+    box-shadow:
+      0 1px 3px 0 rgba(0, 0, 0, 0.06),
+      0 1px 2px -1px rgba(0, 0, 0, 0.04);
+  }
+
+  /* Sidebar: the display grotesk (same face as page headings) so the nav
+     rail reads as brand chrome rather than body text. Antialiased smoothing
+     keeps white text crisp on the dark green — subpixel rendering fringes
+     it toward grey. */
+  [data-sidebar] {
+    font-family: var(--font-display) !important;
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+  }
+
+  #root {
+    height: 100%;
+    width: 100%;
+    overflow: hidden;
+  }
+
+  /* Hide scrollbars globally — use size:0 instead of display:none so that
+     .tbl and other classes can override just the size via higher specificity,
+     without needing to fight display:none with !important. */
+  * {
+    scrollbar-width: none; /* Firefox */
+    -ms-overflow-style: none; /* IE and Edge */
+  }
+
+  *::-webkit-scrollbar {
+    width: 0; /* Chrome/Safari: zero-size = invisible, no space taken */
+    height: 0;
+  }
+
+  /* Responsive table container */
+  .table-container {
+    @apply w-full overflow-x-auto;
+  }
+
+  /* Mobile-first responsive utilities */
+  @media (max-width: 768px) {
+    /* Allow native page scrolling + pull-to-refresh on mobile */
+    html,
+    body,
+    #root {
+      height: auto;
+      min-height: 100dvh;
+      overflow-y: auto;
+      overflow-x: hidden;
+      -webkit-overflow-scrolling: touch;
+    }
+
+    .sidebar-mobile-hidden {
+      transform: translateX(-100%);
+    }
+
+    .sidebar-mobile-visible {
+      transform: translateX(0);
+    }
+  }
+
+  /* Calendar current day styling - purple */
+  .rdp-day_today {
+    background-color: hsl(270 95% 75%) !important;
+    color: hsl(0 0% 8%) !important;
+    font-weight: 600 !important;
+  }
+
+  .rdp-day_today:hover {
+    background-color: hsl(270 95% 70%) !important;
+  }
+
+  /* Calendar date range styling */
+  .rdp-day_range_start {
+    background-color: hsl(var(--primary)) !important;
+    color: hsl(var(--primary-foreground)) !important;
+    font-weight: 600 !important;
+  }
+
+  .rdp-day_range_start:hover {
+    background-color: hsl(199 89% 42%) !important;
+  }
+
+  .rdp-day_range_end {
+    background-color: hsl(0 70% 50%) !important;
+    color: hsl(0 0% 98%) !important;
+    font-weight: 600 !important;
+  }
+
+  .rdp-day_range_end:hover {
+    background-color: hsl(0 70% 45%) !important;
+  }
+
+  .rdp-day_range_middle {
+    background-color: hsl(var(--muted)) !important;
+    color: hsl(var(--muted-foreground)) !important;
+  }
+
+  .rdp-day_selected {
+    background-color: hsl(var(--primary)) !important;
+    color: hsl(var(--primary-foreground)) !important;
+    font-weight: 600 !important;
+  }
+}
+
+/*
+ * Table scrollbar — applied via .tbl on each table wrapper div.
+ *
+ * Strategy: the global rule uses width/height:0 (not display:none) so that
+ * .tbl can override just the SIZE via higher CSS specificity (class > universal).
+ * No display property is touched anywhere — the browser controls scrollbar
+ * visibility based on overflow-x:auto, so it ONLY appears when content actually
+ * overflows. Zero layout impact at any zoom level.
+ */
+.tbl {
+  scrollbar-width: thin; /* Firefox: thin scrollbar, no layout shift */
+  scrollbar-color: rgba(0, 0, 0, 0.15) transparent;
+}
+
+/* Specificity 0,1,0 beats global *::-webkit-scrollbar 0,0,0 — size wins */
+.tbl::-webkit-scrollbar {
+  height: 5px; /* horizontal scrollbar height */
+  width: 5px; /* vertical scrollbar width */
+}
+
+.tbl::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.tbl::-webkit-scrollbar-thumb {
+  background: rgba(0, 0, 0, 0.15);
+  border-radius: 3px;
+}
+
+.tbl::-webkit-scrollbar-thumb:hover {
+  background: rgba(0, 0, 0, 0.28);
+}
+
+/*
+ * Page-level vertical scrollbar — applied to the Layout's <main> container.
+ *
+ * Same opt-in strategy as .tbl: higher CSS specificity than the global
+ * `*::-webkit-scrollbar { width: 0 }` rule overrides the size, so the
+ * scrollbar becomes visible. The browser still only shows it when content
+ * actually overflows, so short pages keep a clean edge.
+ */
+.scroll-y {
+  scrollbar-width: thin; /* Firefox */
+  scrollbar-color: rgba(0, 0, 0, 0.15) transparent;
+}
+
+.scroll-y::-webkit-scrollbar {
+  width: 8px;
+}
+
+.scroll-y::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.scroll-y::-webkit-scrollbar-thumb {
+  background: rgba(0, 0, 0, 0.15);
+  border-radius: 4px;
+}
+
+.scroll-y::-webkit-scrollbar-thumb:hover {
+  background: rgba(0, 0, 0, 0.28);
+}
+
+/* Hide scrollbars but keep overflow scrollable (wheel / trackpad / touch) */
+.tbl.tbl-no-scrollbar {
+  scrollbar-width: none;
+  -ms-overflow-style: none;
+}
+
+.tbl.tbl-no-scrollbar::-webkit-scrollbar {
+  display: none;
+  width: 0;
+  height: 0;
+}
+
+/*
+ * Billing inspect edit mode: frost only the tbody (inside the card). The active row
+ * uses z-index > 5 so it paints above this ::before; other rows sit below (z-0).
+ */
+.billing-table-edit-tbody {
+  position: relative;
+}
+
+.billing-table-edit-tbody::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  z-index: 5;
+  pointer-events: none;
+  border-radius: 0 0 calc(var(--radius) - 1px) calc(var(--radius) - 1px);
+  backdrop-filter: blur(10px);
+  -webkit-backdrop-filter: blur(10px);
+  background: hsl(210 40% 96% / 0.55);
+}
+
+/* Custom scrollbar styles for visible scrollbars - OVERRIDE GLOBAL HIDDEN */
+.scrollbar-visible,
+.scrollbar-visible * {
+  scrollbar-width: thin !important;
+  scrollbar-color: #c1c8d4 #f1f5f9 !important;
+  -ms-overflow-style: scrollbar !important;
+}
+
+.scrollbar-visible::-webkit-scrollbar,
+.scrollbar-visible *::-webkit-scrollbar {
+  display: block !important;
+  height: 12px !important;
+  width: 12px !important;
+  background: #f1f5f9 !important;
+}
+
+.scrollbar-visible::-webkit-scrollbar-track,
+.scrollbar-visible *::-webkit-scrollbar-track {
+  background: #f1f5f9 !important;
+  border-radius: 6px !important;
+}
+
+.scrollbar-visible::-webkit-scrollbar-thumb,
+.scrollbar-visible *::-webkit-scrollbar-thumb {
+  background: #c1c8d4 !important;
+  border-radius: 6px !important;
+  border: 2px solid #f1f5f9 !important;
+  min-height: 40px !important;
+}
+
+.scrollbar-visible::-webkit-scrollbar-thumb:hover,
+.scrollbar-visible *::-webkit-scrollbar-thumb:hover {
+  background: #94a3b8 !important;
+}
+
+.scrollbar-visible::-webkit-scrollbar-corner,
+.scrollbar-visible *::-webkit-scrollbar-corner {
+  background: #f1f5f9 !important;
+}
+
+/* 3D Flip Card Animation */
+.perspective-1000 {
+  perspective: 1000px;
+}
+
+.transform-style-3d {
+  transform-style: preserve-3d;
+}
+
+.rotate-y-180 {
+  transform: rotateY(180deg);
+}
+
+.backface-hidden {
+  backface-visibility: hidden;
+}
+
+/* Mobile touch improvements - disable pinch zoom */
+@media (max-width: 640px) {
+  html {
+    touch-action: pan-x pan-y;
+    overscroll-behavior: none;
+    /* Prevent elastic overscroll on iOS that causes header overlap */
+    overflow: hidden;
+    position: fixed;
+    width: 100%;
+    height: 100%;
+  }
+
+  body {
+    touch-action: pan-x pan-y;
+    overscroll-behavior: none;
+    overflow: hidden;
+    position: fixed;
+    width: 100%;
+    height: 100%;
+  }
+
+  /* Completely disable pinch zoom on the entire app */
+  #root {
+    touch-action: pan-x pan-y;
+    overflow: hidden;
+    position: fixed;
+    width: 100%;
+    height: 100%;
+  }
+
+  /* Prevent text selection on double tap */
+  .touch-manipulation {
+    touch-action: manipulation;
+    -webkit-user-select: none;
+    user-select: none;
+  }
+
+  /* Ensure numbers display properly and don't jump during load */
+  .tabular-nums {
     font-variant-numeric: tabular-nums;
+    min-width: 0;
+  }
+}
+
+/* iOS Safe Area utilities */
+.safe-area-top {
+  padding-top: env(safe-area-inset-top);
+}
+
+.safe-area-bottom {
+  padding-bottom: env(safe-area-inset-bottom);
+}
+
+.safe-area-left {
+  padding-left: env(safe-area-inset-left);
+}
+
+.safe-area-right {
+  padding-right: env(safe-area-inset-right);
+}
+
+/* iOS native app feel */
+@supports (-webkit-touch-callout: none) {
+  /* iOS Safari specific styles */
+  html {
+    /* Prevent pull-to-refresh on iOS */
+    overscroll-behavior-y: none;
+  }
+
+  /* Smooth momentum scrolling with GPU compositing */
+  .overflow-auto {
+    -webkit-overflow-scrolling: touch;
+    will-change: scroll-position;
+  }
+
+  /* Status bar aware header on iOS */
+  .safe-area-top {
+    padding-top: max(env(safe-area-inset-top), 0px);
+  }
+
+  /* Bottom safe area for home indicator */
+  .safe-area-bottom {
+    padding-bottom: max(env(safe-area-inset-bottom), 0px);
+  }
+}
+
+/* Standalone PWA mode - full screen without browser chrome */
+@media (display-mode: standalone) {
+  .safe-area-top {
+    padding-top: env(safe-area-inset-top);
+  }
+}
+
+/* Collapsible (Radix) — smooth height animation without text blur */
+@keyframes collapsible-down-soft {
+  from {
+    height: 0;
+  }
+  to {
+    height: var(--radix-collapsible-content-height);
+  }
+}
+
+@keyframes collapsible-up-soft {
+  from {
+    height: var(--radix-collapsible-content-height);
+  }
+  to {
+    height: 0;
   }
 }
