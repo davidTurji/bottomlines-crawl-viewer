@@ -15,10 +15,31 @@ import { formatWeek } from "@/components/WeekContextBadge";
 import { cn } from "@/lib/utils";
 
 const OVERVIEW_SUGGESTIONS = [
+  // Data — this week
   "What lines were added this week?",
   "Which publisher lost the most?",
   "Which SSP moved the most on my seats?",
+  "Which publishers dropped my lines?",
+  "What changed for Magnite?",
+  "Show me all new resellers.",
+  "Which cert IDs changed and does it matter?",
+  "What's the biggest change on CTV this week?",
+  // Data — comparison
+  "Compare this week to last week for me.",
+  "Which publishers I've never seen before appeared this week?",
+  // Action / recommendation
   "Are any of my seats unauthorized?",
+  "What should I do about the removed lines?",
+  "Should I contact any of these publishers?",
+  // IAB knowledge
+  "What is app-ads.txt?",
+  "What does DIRECT vs RESELLER mean?",
+  "What is OWNERDOMAIN?",
+  "What is MANAGERDOMAIN?",
+  "What is INVENTORYPARTNERDOMAIN?",
+  "How does the SupplyChain object work?",
+  "What is sellers.json?",
+  "Why does supply-path authorization matter?",
 ];
 
 /**

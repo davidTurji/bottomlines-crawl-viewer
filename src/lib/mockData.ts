@@ -23,6 +23,7 @@ import type {
   MatchedBundlesPage,
   ChatFrame,
 } from "./api";
+import { buildSystemPrompt } from "./knowledge";
 
 // ─────────────────────────────────────────────────────────────────
 // Summary (hero + counters)
@@ -771,32 +772,46 @@ export function linesForDeveloper(developer_id: number): LineEvent[] {
 // Chat SSE stream (mock)
 // ─────────────────────────────────────────────────────────────────
 
-const CHAT_RESPONSES: Record<string, string> = {
-  DEFAULT: `Here is the short read of this week:
+/**
+ * Mock chat responses.
+ *
+ * Two families:
+ * - Data questions grounded in this week's + last week's mock summary.
+ * - IAB spec questions grounded in the knowledge package in ../knowledge.
+ *
+ * The lookup is keyword-based: each entry declares a set of trigger phrases;
+ * the first match wins. Order matters — put narrower topics before broader
+ * ones (e.g. "app-ads.txt" before "ads.txt" so the CTV question doesn't get
+ * eaten by the web-ads.txt entry).
+ */
+type ChatEntry = { triggers: string[]; body: string };
 
-- **184 lines removed**, mostly from rubiconproject.com (42), appnexus.com (38) and google.com (29).
-- **127 lines added**, led by magnite.com, openx.com and pubmatic.com. Most of those additions are on new mobile publishers (Chomp Studios, Roost Media, Deep Sea Games).
-
-The removals cluster on three publishers this week: Kite Interactive, Cinder and Sky, and Meridian Sports Media. That is 22, 16, and 12 lines gone. It looks like a cleanup of older relationships. Worth checking whether those publishers moved to a sales-house partner.`,
-
-  "who removed my lines this week?": `Four publishers dropped your matched lines entirely this week:
+const CHAT_ENTRIES: ChatEntry[] = [
+  // ── Data questions ────────────────────────────────────────────
+  {
+    triggers: ["who removed", "which publishers dropped", "publisher lost the most"],
+    body: `Four publishers dropped your matched lines entirely this week:
 
 1. **Kite Interactive** (kiteinteractive.com, iOS): 22 lines removed (Rubicon 9, AppNexus 8, Google 5).
 2. **Cinder and Sky** (cinderandsky.co, Web): 16 lines (Google 7, Criteo 5, Yahoo 4).
 3. **Meridian Sports Media** (meridiansports.io, iOS): 12 lines (AppNexus 6, Yahoo 4, Rubicon 2).
 4. **Sable Broadcasting** (sablebroadcast.tv, Samsung CTV): 9 lines (Rubicon 5).
 
-A missing ads.txt entry means the publisher no longer authorizes that relationship. These are real removals, not fetch errors.`,
-
-  "what changed for magnite?": `Magnite (magnite.com) added **34 new lines this week**, with no removals and no cert changes. Details:
+A missing ads.txt entry means the publisher no longer authorizes that relationship. These are real removals, not fetch errors — worth a note to the account team on each before next week's crawl.`,
+  },
+  {
+    triggers: ["magnite"],
+    body: `Magnite (magnite.com) added **34 new lines this week**, with no removals and no cert changes.
 
 - **New publishers on Magnite**: Chomp Studios (+6), Roost Media (+3), Aurora TV Networks (+3), Northlight Games (+2).
 - **Existing publishers where Magnite grew**: Riverstone Publishers (+4), Copperline Studios (+2).
 - **No cert-id changes** for Magnite on your seats this week.
 
-This is one of the cleanest single-partner expansions in the diff. If Magnite is a priority for you, confirm the owner domain is aligned on the new publishers next week.`,
-
-  "show me all new resellers.": `There are **127 new reseller lines** and 43 new direct lines added this week. Reseller only:
+Cleanest single-partner expansion in this diff. If Magnite is a priority for you, confirm the OWNERDOMAIN is set correctly on the new publishers next week — that's what ties their ads.txt back to Magnite's sellers.json entry.`,
+  },
+  {
+    triggers: ["new reseller", "show me all new resellers", "reseller lines"],
+    body: `**127 new reseller lines** and 43 new direct lines added this week. Reseller only:
 
 | SSP | New reseller lines | Notable publishers |
 |---|---|---|
@@ -807,30 +822,270 @@ This is one of the cleanest single-partner expansions in the diff. If Magnite is
 | smartadserver.com | 8 | Deep Sea Games, Pixel Cauldron |
 | adform.com | 7 | Riverstone Publishers |
 
-Every one of these reseller nodes is a live counterparty in the seller list, so the payment path looks clean.`,
-
-  "which of my seats are unauthorized?": `You have **12 seat lines removed this week**, which means 12 of your declared partner relationships are no longer authorized by the publisher:
+Every one of these reseller nodes has a live counterparty in the seller list, so the payment path looks clean.`,
+  },
+  {
+    triggers: ["unauthorized", "which of my seats are unauthor"],
+    body: `You have **12 seat lines removed this week**, which means 12 of your declared partner relationships are no longer authorized by the publisher:
 
 - **appnexus.com, xf-4402, DIRECT**: Kite Interactive dropped this line entirely.
 - **rubiconproject.com, 22890, DIRECT**: Sable Broadcasting removed it (was your only direct with them on Samsung CTV).
-- **google.com, pub-9083..., DIRECT**: Cinder and Sky purged all Google lines this week.
+- **google.com, pub-9083…, DIRECT**: Cinder and Sky purged all Google lines this week.
 - **Plus 9 more**. Turn on the "My seats only" filter in Line changes to see the full list.
 
 A removed line means the publisher no longer lists your partner as authorized. Buyers that check for authorization will start filtering these on the next crawl.`,
-};
+  },
+  {
+    triggers: ["compare", "vs last week", "this and last week", "week over week"],
+    body: `Week-over-week rollup (this week's crawl vs last week's):
+
+| Metric | Last week | This week | Change |
+|---|---|---|---|
+| Publisher domains fetched | 1,299,402 | 1,305,881 | +6,479 |
+| Matched publishers | 8,408 | 8,412 | +4 |
+| Matched apps | 24,614 | 24,781 | +167 |
+| Lines added (weekly diff) | 92 | 127 | +35 |
+| Lines removed (weekly diff) | 74 | 184 | +110 |
+| Cert changes | 28 | 43 | +15 |
+
+The story this week: churn is elevated on the removed side (2.5× last week's pace) with three publishers accounting for most of it. Additions are broad-based, mostly new mobile publishers coming online with Magnite / OpenX / Pubmatic seats.`,
+  },
+  {
+    triggers: ["ctv", "connected tv"],
+    body: `**CTV movement this week:**
+
+- **Roku**: Roost Media added 14 lines across SpotX (5), Beachfront (4), Magnite (3).
+- **Samsung**: Sable Broadcasting removed 9 lines (mostly Rubicon).
+- **Vizio**: Copperline Studios grew +6 / -1 with 2 cert changes on SpotX.
+- **CTV (Aurora TV Networks)**: 9 lines added across Sharethrough (4) and Magnite (3).
+
+CTV inventory relies on the app-ads.txt flow, discovered via each app's store listing → developer URL → \`/app-ads.txt\`. If any of the above look off, the fastest debug is: (1) check the app store page for a valid \`appstore:developer_url\` meta tag, (2) confirm the developer domain resolves an \`app-ads.txt\`, (3) look for an \`inventorypartnerdomain=\` line pointing at the real content owner.`,
+  },
+  {
+    triggers: ["cert", "certification"],
+    body: `**43 cert-ID changes this week** (an SSP rotated its Certification Authority ID for the same seat):
+
+- amazon-adsystem.com (12), adform.com (9), criteo.com (7), spotx.tv (5), beachfront.com (4).
+
+Cert-ID rotations are usually benign — an SSP re-issues its TAG ID or migrates from one certification authority to another. They only warrant attention if the publisher/SSP relationship changes at the same time (i.e. cert change + DIRECT→RESELLER, or cert change + removal). None of this week's cert changes coincide with a relationship change on your seats.
+
+Note per ads.txt v1.1 §3.3, field 4 (Cert ID) is being superseded by the \`identifiers\` object in sellers.json and may be deprecated entirely in a future spec revision.`,
+  },
+  {
+    triggers: ["what should i do", "action", "recommend"],
+    body: `Top three things to do off this week's crawl:
+
+1. **Reach out on the four full-drop publishers** (Kite, Cinder & Sky, Meridian, Sable). Ask if the removals are permanent (contract expired, moved to a sales house) or accidental (ads.txt rewrite that missed lines). If it's a sales-house move, check whether they set a \`MANAGERDOMAIN\` per ads.txt v1.1.
+2. **Confirm your seats on the six new mobile / CTV publishers** (Chomp, Roost, Deep Sea, Aurora, Pixel Cauldron, Northlight). Their app-ads.txt now authorizes you — good moment to make sure the developer-URL flow is complete on your DSP end.
+3. **Double-check the 12 lines lost on your own seats**. These are the ones a buyer will start filtering next crawl.
+
+The 43 cert changes are noise — no action.`,
+  },
+  {
+    triggers: ["never matches", "never seen", "roster"],
+    body: `Of the 8,412 publishers whose ads.txt was crawled this week, **8,412 matched at least one of your seats** — that's the whole matched developer set on your Overview page.
+
+The **6 net-new publishers** (Chomp Studios, Roost Media, Deep Sea Games, Aurora TV Networks, Pixel Cauldron, Northlight Games) all matched fresh. The **8 that fell off** (Kite Interactive, Cinder & Sky, Meridian Sports Media, Sable Broadcasting, plus 4 more) had lines removed to zero.
+
+If you want the negative case — seats you carry that no publisher ever authorizes — that's a different report; we can wire it once the "seats without matches" endpoint lands.`,
+  },
+  // ── IAB spec questions ────────────────────────────────────────
+  {
+    triggers: ["what is app-ads", "app-ads.txt", "app ads txt"],
+    body: `**app-ads.txt** is the IAB extension of ads.txt to apps distributed through app stores (mobile, CTV, connected devices). Instead of the file living on the *content* domain, it lives on the developer's *website* domain.
+
+The discovery flow:
+1. The bid request carries a \`storeurl\` (e.g. \`https://itunes.apple.com/us/app/id1110145109\`).
+2. The verifier fetches that page, parses the three required \`<meta>\` tags — \`appstore:developer_url\`, \`appstore:bundle_id\`, \`appstore:store_id\`.
+3. The developer URL is canonicalized: strip \`www.\`/\`m.\`, keep at most the leading subdomain, respect the public-suffix list.
+4. Verifier fetches \`https://<canonical-developer-domain>/app-ads.txt\` (falling back to HTTP, and if the developer URL had a subdomain, falling back to the parent domain).
+5. Records are parsed with the SAME syntax as ads.txt, except the \`subdomain=\` directive is unused and must be ignored.
+
+Key subtlety: index apps by \`(store-domain, bundle_id or store_id) → developer-domain\`, not by the raw \`storeurl\`. The same app can have many locale/campaign URL variants.`,
+  },
+  {
+    triggers: ["direct vs reseller", "difference between direct and reseller", "what does direct mean", "what does reseller mean"],
+    body: `Per ads.txt v1.1 §3.3, field 3:
+
+- **DIRECT** — the publisher (content owner) directly controls the account in field 2 on the SSP in field 1. This usually implies a direct business contract between publisher and SSP.
+- **RESELLER** — the publisher has authorized another entity to control that account and resell the ad space via the SSP.
+
+Two implications:
+- A single publisher line can carry both — \`silverssp.com, 9675, RESELLER\` and \`silverssp.com, 5569, DIRECT\` on the same SSP is legal (different accounts).
+- Field 3 is case-insensitive per the spec. Some publishers spell it \`Reseller\`; both are valid.
+
+For supply-path optimization, buyers prefer DIRECT paths (fewer intermediaries taking margin). A publisher who sells everything via a single sales house should still declare that in \`MANAGERDOMAIN\` — the sales house's ads.txt will carry the DIRECT lines.`,
+  },
+  {
+    triggers: ["supply chain", "schain", "supply path", "supplychain object"],
+    body: `The **OpenRTB SupplyChain Object** (\`schain\`) is attached to every bid request and lists every party being paid on this specific transaction, ordered from origin publisher outward.
+
+Node shape:
+\`\`\`json
+{ "asi": "ssp.com", "sid": "1234", "hp": 1, "name": "...", "domain": "..." }
+\`\`\`
+- \`asi\` = the SSP domain (matches field 1 in ads.txt AND hosts a sellers.json).
+- \`sid\` = the seller ID at that SSP (matches field 2 in ads.txt AND a seller entry in that SSP's sellers.json).
+- \`hp\` = 1 if this node is in the payment chain.
+
+The chain's \`complete\` flag is critical: \`complete: 1\` means every hop is present; \`complete: 0\` means an upstream rebroadcaster couldn't reconstruct history and some serious DSPs simply won't spend on it.
+
+Together with ads.txt (who's authorized) and sellers.json (who each seller IS), schain gives a buyer end-to-end verification that this bid request came through a legitimate, declared path.`,
+  },
+  {
+    triggers: ["sellers.json", "sellers json"],
+    body: `**sellers.json** is a JSON file every SSP / exchange should publish at \`https://<ssp-domain>/sellers.json\`. It maps each \`seller_id\` that SSP transacts on behalf of to a real business entity.
+
+Each entry has:
+- \`seller_id\` (matches field 2 in the publisher's ads.txt and \`sid\` in schain nodes)
+- \`name\` and \`domain\` (the legal entity — publisher's \`domain\` should match \`OWNERDOMAIN\` in ads.txt v1.1)
+- \`seller_type\`: \`PUBLISHER\` (owned-and-operated), \`INTERMEDIARY\` (reseller), or \`BOTH\`
+- \`is_confidential\`: if true, the SSP is intentionally hiding identity
+
+Buyers cache the file offline (avoids per-bid identity lookups) and use it to cross-reference every \`asi\`/\`sid\` pair in a bid request's SupplyChain object against the publisher's ads.txt.
+
+Ads.txt v1.1 field 4 (Certification Authority ID) is being superseded by the sellers.json \`identifiers\` object and may be deprecated entirely in a future ads.txt release.`,
+  },
+  {
+    triggers: ["ownerdomain", "owner domain"],
+    body: `**OWNERDOMAIN** (introduced in ads.txt v1.1, §3.5.1) declares the PSL+1 business domain that owns the site.
+
+\`\`\`
+OWNERDOMAIN=mediacompany.com
+greenadexchange.com, XF7342, DIRECT, 5jyxf8k54
+\`\`\`
+
+Why it matters: for a complete OpenRTB SupplyChain object, node[0]'s \`sellers.domain\` (from the SSP's sellers.json) MUST match the publisher's \`OWNERDOMAIN\`. Without it, buyers can't verify that the entity being paid at the origin actually owns the inventory.
+
+Rules:
+- Only the first occurrence is used.
+- Recommended even when it equals the ads.txt host domain.
+- Sellers listed as \`BOTH\` in sellers.json should declare OWNERDOMAIN in every ads.txt they own OR represent — this is how buyers detect arbitrage on multi-entity operators.`,
+  },
+  {
+    triggers: ["managerdomain", "manager domain", "sales house"],
+    body: `**MANAGERDOMAIN** (ads.txt v1.1 §3.5.1) declares a primary or exclusive monetization partner — typically a sales house — when the publisher itself is NOT selling its own inventory in a given market.
+
+Syntax: \`MANAGERDOMAIN=<PSL+1 domain>[, <ISO 3166-1 alpha-2 country code>]\`. One entry per country, plus optionally a global default (no country code).
+
+\`\`\`
+OWNERDOMAIN=mediacompany.com
+MANAGERDOMAIN=yellowmediamanager.com, FR
+MANAGERDOMAIN=bluemediamanager.com, US
+MANAGERDOMAIN=defaultmanager.com
+\`\`\`
+
+For inventory monetized by the manager, that manager's domain should be node[0] in a complete SupplyChain object. This is a strategic lever for publishers doing SPO — you're telling buyers "here is my preferred route; anything else is a longer path."`,
+  },
+  {
+    triggers: ["inventorypartnerdomain", "inventory partner"],
+    body: `**INVENTORYPARTNERDOMAIN** (ads.txt v1.0.3, added for CTV / OTT) lets a distributor delegate a whole block of authorized sellers to a content partner.
+
+The traditional CTV pattern is unwieldy — a vMVPD carrying content from Programmer A had to copy every one of Programmer A's SSP lines into its own app-ads.txt. The v1.0.3 pattern collapses that to one line:
+
+\`\`\`
+# vMVPD B's app-ads.txt
+ssp.com, vwxyz, DIRECT
+inventorypartnerdomain=programmerA.com
+\`\`\`
+
+The crawler now fetches \`http://programmerA.com/ads.txt\` and treats every seat there as authorized for vMVPD B's inventory. **Only one hop** — an \`inventorypartnerdomain\` line in Programmer A's own ads.txt is NOT followed.
+
+Bid-request requirement: this delegation is only honored when the bid request itself carries \`app.inventorypartnerdomain\` or \`site.inventorypartnerdomain\` per OpenRTB.`,
+  },
+  {
+    triggers: ["subdomain", "subdomain="],
+    body: `The **\`subdomain=\`** variable lets a root ads.txt point crawlers at a subdomain that has its own distinct authorized-sellers list.
+
+\`\`\`
+# example.com/ads.txt
+greenadexchange.com, 12345, DIRECT, d75815a79
+subdomain=divisionone.example.com
+\`\`\`
+
+Rules per §3.5.1 and §5.5:
+- Only ROOT domains can refer to subdomains. Subdomains must not refer to further subdomains.
+- The data on the subdomain is bound to the subdomain, NOT the parent.
+- \`subdomain=\` is exempt from public-suffix truncation.
+- If a subdomain isn't declared in the root's ads.txt OR the subdomain doesn't serve its own file, the subdomain inherits the root's authorized set.
+
+Important: \`subdomain=\` is **unused in app-ads.txt** and must be ignored there.`,
+  },
+  {
+    triggers: ["what is ads.txt", "what does ads.txt do", "why ads.txt", "purpose of ads"],
+    body: `**ads.txt** (Authorized Digital Sellers) is an IAB Tech Lab standard where a publisher publishes a plain-text file at \`https://<domain>/ads.txt\` declaring exactly which SSPs / exchanges are authorized to sell that publisher's inventory, and under what account IDs.
+
+The problem it solves: before ads.txt, a rogue seller could offer counterfeit inventory to buyers claiming to be a well-known publisher — the buyer had no cheap way to check. With ads.txt, buyers fetch the publisher's file and reject any bid request whose \`(SSP-domain, publisher-id)\` pair isn't on the list.
+
+Record format is 3 required fields, comma-separated:
+\`\`\`
+<SSP domain>, <publisher account ID at that SSP>, DIRECT|RESELLER [, cert authority ID]
+\`\`\`
+
+Version 1.1 (August 2022) added \`OWNERDOMAIN\` and \`MANAGERDOMAIN\` to tie ads.txt into sellers.json and enable supply-path optimization signals.`,
+  },
+  {
+    triggers: ["placeholder", "empty ads.txt", "authorize nobody"],
+    body: `A publisher who authorizes **nobody** must not simply serve an empty file — after March 1, 2020, that behavior is deprecated because it's indistinguishable from a webserver error.
+
+The correct signal per ads.txt v1.1 §3.2.1 is one placeholder line:
+
+\`\`\`
+placeholder.example.com, placeholder, DIRECT, placeholder
+\`\`\`
+
+\`example.com\` is used because it's an IETF-reserved domain (RFC 6761) that will never be a real SSP. This is a "file adheres to the spec AND declares no authorized sellers" signal, distinct from a 404 or an empty body.`,
+  },
+  // ── Fallback ──────────────────────────────────────────────────
+  {
+    triggers: ["__default__"],
+    body: `Here is the short read of this week:
+
+- **184 lines removed**, mostly from rubiconproject.com (42), appnexus.com (38) and google.com (29).
+- **127 lines added**, led by magnite.com, openx.com and pubmatic.com. Most of those additions are on new mobile publishers (Chomp Studios, Roost Media, Deep Sea Games).
+
+The removals cluster on three publishers: Kite Interactive, Cinder and Sky, and Meridian Sports Media — 22, 16, and 12 lines gone. Looks like a cleanup of older relationships; worth checking whether they moved to a sales-house partner (which would show up as a \`MANAGERDOMAIN\` in their ads.txt).
+
+Ask me anything specific: an SSP name, "what is app-ads.txt", "why did X drop", "what should I do".`,
+  },
+];
 
 function pickChatResponse(prompt: string): string {
   const p = prompt.toLowerCase().trim();
-  for (const [key, val] of Object.entries(CHAT_RESPONSES)) {
-    if (key === "DEFAULT") continue;
-    if (p.includes(key.toLowerCase().replace(/[?.]/g, ""))) return val;
+  for (const entry of CHAT_ENTRIES) {
+    if (entry.triggers.includes("__default__")) continue;
+    if (entry.triggers.some((t) => p.includes(t))) return entry.body;
   }
-  return CHAT_RESPONSES.DEFAULT;
+  return CHAT_ENTRIES[CHAT_ENTRIES.length - 1].body;
+}
+
+/**
+ * Compose (and log, once per conversation) the full system prompt that would
+ * be sent to Gemini in live mode, so the wiring is exercised end-to-end even
+ * without a real LLM. Same shape the future live chat will use — swap
+ * mockChatStream for a Gemini SSE call and the system prompt is already
+ * assembled correctly.
+ */
+let systemPromptLogged = false;
+function logSystemPromptOnce() {
+  if (systemPromptLogged) return;
+  const prompt = buildSystemPrompt({
+    currentSummary: mockSummary,
+    previousSummary: mockPreviousSummary,
+  });
+  // eslint-disable-next-line no-console
+  console.info(
+    "[mock chat] system prompt composed (%d chars). Inspect in devtools.",
+    prompt.length,
+    prompt,
+  );
+  systemPromptLogged = true;
 }
 
 export async function* mockChatStream(
   prompt: string,
 ): AsyncGenerator<ChatFrame> {
+  logSystemPromptOnce();
   const response = pickChatResponse(prompt);
   // Chunk word-by-word to look like a streaming LLM.
   const words = response.split(/(\s+)/);
