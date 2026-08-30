@@ -22,6 +22,11 @@ export default {
       },
     },
     extend: {
+      screens: {
+        /* Sub-sm step for very narrow phones — lets rows drop their least
+           important token below 420px instead of overflowing. */
+        xs: "420px",
+      },
       fontFamily: {
         /* sans/display resolve through the CSS font tokens in index.css
 				   (Inter + Schibsted Grotesk — the chosen Racing Green pairing). */
@@ -195,6 +200,12 @@ export default {
           from: { opacity: "0", transform: "translate3d(0, 10px, 0)" },
           to: { opacity: "1", transform: "translate3d(0, 0, 0)" },
         },
+        /* Publisher spotlight modal: zoom-and-rise entrance over the
+           blurred page. Transform/opacity only, GPU composited. */
+        "modal-pop": {
+          from: { opacity: "0", transform: "scale(0.94) translate3d(0, 14px, 0)" },
+          to: { opacity: "1", transform: "scale(1) translate3d(0, 0, 0)" },
+        },
         /* Walkthrough "press this" beat. A halo that expands and fades
 				   out of the control, plus a small lift on the control itself,
 				   so the eye lands on the one button the step is asking for.
@@ -226,6 +237,7 @@ export default {
         "sheet-overlay-out": "sheet-overlay-out 0.2s ease-in both",
         "dot-bounce": "dot-bounce 0.8s ease-in-out infinite",
         "auth-rise": "auth-rise 0.4s cubic-bezier(0.22, 1, 0.36, 1) both",
+        "modal-pop": "modal-pop 0.28s cubic-bezier(0.22, 1, 0.36, 1) both",
         "tour-beat": "tour-beat 1.6s cubic-bezier(0.4, 0, 0.2, 1) infinite",
       },
     },

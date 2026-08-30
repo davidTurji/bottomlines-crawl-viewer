@@ -20,6 +20,7 @@ import type {
   LineEventsPage,
   LineEvent,
   MatchedDevelopersPage,
+  MatchedBundle,
   MatchedBundlesPage,
   ChatFrame,
 } from "./api";
@@ -697,12 +698,59 @@ export function mockMatchedBundles(page: number): MatchedBundlesPage {
 }
 
 /**
+ * Apps for developers that appear only in the weekly event tables — the
+ * removed-you publishers (no longer matched, so absent from
+ * MATCHED_BUNDLES) and newly-matched developers whose event id has no
+ * roster twin. Kept OUT of MATCHED_BUNDLES so the Results page counters
+ * and the "matched this week" semantics stay truthful; only the
+ * per-developer expansion reads this map.
+ */
+function buildEventDevBundles(): Record<number, MatchedBundle[]> {
+  const covered = new Set(MATCHED_BUNDLES.map((b) => b.developer_id));
+  const map: Record<number, MatchedBundle[]> = {};
+  [...DEV_ADDED, ...DEV_REMOVED, ...DEV_CHANGED]
+    .filter((d) => !covered.has(d.developer_id))
+    .forEach((dev, di) => {
+      const n = 2 + (di % 3);
+      const name = dev.developer_name ?? "App";
+      const platform = (dev.developer_platform ?? "web").toLowerCase();
+      const rows: MatchedBundle[] = [];
+      for (let i = 0; i < n; i += 1) {
+        const store = STORES.includes(platform as (typeof STORES)[number])
+          ? platform
+          : STORES[(di + i) % STORES.length];
+        const noun = APP_NOUNS[(di * 5 + i * 3) % APP_NOUNS.length];
+        rows.push({
+          store,
+          bundle_id: bundleIdFor(store, name, di * 7 + i),
+          app_name: `${name.split(/\s+/)[0]} ${noun}`,
+          developer_id: dev.developer_id,
+          developer_name: dev.developer_name,
+          developer_domain: dev.developer_domain,
+          line_count: Math.max(
+            1,
+            Math.round(
+              Math.max(dev.matched_lines_current, dev.matched_lines_prev) / n,
+            ),
+          ),
+        });
+      }
+      map[dev.developer_id] = rows;
+    });
+  return map;
+}
+
+const EVENT_DEV_BUNDLES = buildEventDevBundles();
+
+/**
  * Bundles grouped by developer_id so the nested "Results" list can expand a
  * developer row and reveal every app that developer publishes without a
- * second request.
+ * second request. Falls back to the event-developer seed for publishers
+ * outside this week's matched roster.
  */
 export function bundlesForDeveloper(developer_id: number) {
-  return MATCHED_BUNDLES.filter((b) => b.developer_id === developer_id);
+  const matched = MATCHED_BUNDLES.filter((b) => b.developer_id === developer_id);
+  return matched.length ? matched : (EVENT_DEV_BUNDLES[developer_id] ?? []);
 }
 
 // ─────────────────────────────────────────────────────────────────
@@ -762,6 +810,70 @@ function buildLinesByDeveloper(): Record<number, LineEvent[]> {
 }
 
 const LINES_BY_DEVELOPER = buildLinesByDeveloper();
+
+/**
+ * Exact line events for every developer named in the weekly event tables
+ * (newly matched / removed you / changed), so the Overview's expandable
+ * rows render a git-style diff whose row counts reconcile with the +N/-N
+ * the row header advertises. Each top_ssp contributes its advertised count
+ * of rows first, the remainder cycles through filler SSPs. Replaces the
+ * thinner 1-3 row entry the top-20 builder may have seeded for the same
+ * developer — the event tables are the richer truth.
+ */
+const FILLER_SSPS = [
+  "sovrn.com",
+  "triplelift.com",
+  "adform.com",
+  "improvedigital.com",
+  "smartadserver.com",
+  "yahoo.com",
+  "amazon-adsystem.com",
+  "adyoulike.com",
+];
+
+/** Deterministic 16-hex cert id, so the diff reads like real TAG certs. */
+function certIdFor(seed: number): string {
+  const a = ((seed * 2654435761) >>> 0).toString(16).padStart(8, "0");
+  const b = ((seed * 40503 + 0x9e3779b9) >>> 0).toString(16).padStart(8, "0");
+  return a + b;
+}
+
+function buildEventDevLines(dev: DeveloperEvent): LineEvent[] {
+  const total = dev.lines_added + dev.lines_removed + dev.lines_cert_changed;
+  const sspSeq: string[] = [];
+  for (const t of dev.top_ssps) {
+    for (let i = 0; i < t.count; i += 1) sspSeq.push(t.ssp_domain);
+  }
+  for (let i = 0; sspSeq.length < total; i += 1) {
+    sspSeq.push(FILLER_SSPS[i % FILLER_SSPS.length]);
+  }
+  const kinds: ("added" | "removed" | "cert_changed")[] = [
+    ...Array<"added">(dev.lines_added).fill("added"),
+    ...Array<"removed">(dev.lines_removed).fill("removed"),
+    ...Array<"cert_changed">(dev.lines_cert_changed).fill("cert_changed"),
+  ];
+  return kinds.map((evt, i) => {
+    const ssp = sspSeq[i];
+    return {
+      developer_id: dev.developer_id,
+      developer_name: dev.developer_name,
+      developer_domain: dev.developer_domain,
+      file_kind: dev.developer_platform === "Web" ? "ads_txt" : "app_ads_txt",
+      ssp_domain: ssp,
+      publisher_id: `${ssp.split(".")[0]}-${(dev.developer_id % 8999) + 1000 + i * 7}`,
+      relationship: i % 3 === 0 ? "DIRECT" : "RESELLER",
+      event: evt,
+      old_cert_id: evt === "added" ? null : certIdFor(dev.developer_id * 31 + i),
+      new_cert_id: evt === "removed" ? null : certIdFor(dev.developer_id * 57 + i),
+      matched_seat: true,
+      occurred_at: dev.occurred_at,
+    };
+  });
+}
+
+for (const dev of [...DEV_ADDED, ...DEV_REMOVED, ...DEV_CHANGED]) {
+  LINES_BY_DEVELOPER[dev.developer_id] = buildEventDevLines(dev);
+}
 
 /** All matched-seat line events for one developer. Empty array if unknown. */
 export function linesForDeveloper(developer_id: number): LineEvent[] {

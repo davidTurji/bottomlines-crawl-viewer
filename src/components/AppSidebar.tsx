@@ -17,7 +17,7 @@ import {
   CollapsibleContent,
   CollapsibleTrigger,
 } from "@/components/ui/collapsible";
-import bottomlineSidebarLogo from "@/assets/bottomline-sidebar-logo.png";
+import pathfinderSidebarLogo from "@/assets/pathfinder-sidebar-logo.png";
 
 /**
  * Crawler-only rail, trimmed from bottomlines-app's AppSidebar.
@@ -76,8 +76,6 @@ export function AppSidebar() {
 
   const items: { to: string; label: string; end?: boolean }[] = [
     { to: `/crawl-report/${token}`, label: "Overview", end: true },
-    { to: `/crawl-report/${token}/changes`, label: "Line changes" },
-    { to: `/crawl-report/${token}/results`, label: "Results" },
   ];
 
   return (
@@ -92,11 +90,11 @@ export function AppSidebar() {
           to={`/crawl-report/${token}`}
           className="flex items-center px-2 h-12 sm:h-14 border-b border-sidebar-border/50 transition-colors duration-150 hover:bg-sidebar-accent/40"
           onClick={handleMobileNavClick}
-          aria-label="bottomline.ai, Overview"
+          aria-label="bottomlines Pathfinder, Overview"
         >
           <img
-            src={bottomlineSidebarLogo}
-            alt="bottomline.ai"
+            src={pathfinderSidebarLogo}
+            alt="bottomlines Pathfinder"
             draggable={false}
             className="h-10 sm:h-12 w-auto max-w-full object-contain object-left select-none"
           />

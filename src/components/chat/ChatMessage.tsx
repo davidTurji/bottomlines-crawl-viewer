@@ -20,7 +20,7 @@ import { cn } from "@/lib/utils";
 export function UserBubble({ children }: { children: React.ReactNode }) {
   return (
     <div className="flex justify-end">
-      <div className="max-w-[85%] whitespace-pre-wrap rounded-2xl bg-slate-100 px-3.5 py-2 text-[13.5px] leading-relaxed text-slate-900">
+      <div className="max-w-[85%] whitespace-pre-wrap break-words rounded-2xl bg-slate-100 px-3.5 py-2 text-[13.5px] leading-relaxed text-slate-900">
         {children}
       </div>
     </div>
@@ -240,11 +240,11 @@ function MarkdownText({ text }: { text: string }) {
   const blocks = parseMarkdown(text);
   if (blocks.length === 0) {
     return (
-      <p className="whitespace-pre-wrap text-[13.5px] leading-relaxed text-slate-800">{text}</p>
+      <p className="whitespace-pre-wrap break-words text-[13.5px] leading-relaxed text-slate-800">{text}</p>
     );
   }
   return (
-    <div className="space-y-2 text-[13.5px] leading-relaxed text-slate-800">
+    <div className="space-y-2 break-words text-[13.5px] leading-relaxed text-slate-800">
       {blocks.map((b, i) => {
         if (b.kind === "p") {
           return (

@@ -194,7 +194,7 @@ export const AskAIDrawer = forwardRef<AskAIDrawerHandle, AskAIDrawerProps>(
           <button
             type="button"
             onClick={() => setOpen(true)}
-            className="fixed bottom-6 right-6 z-40 inline-flex items-center gap-2 rounded-full bg-primary px-5 py-3 text-sm font-semibold text-primary-foreground shadow-lg transition-transform hover:-translate-y-0.5 hover:shadow-xl"
+            className="fixed bottom-[max(1.5rem,env(safe-area-inset-bottom))] right-4 z-40 inline-flex items-center gap-2 rounded-full bg-primary px-5 py-3 text-sm font-semibold text-primary-foreground shadow-lg transition-transform hover:-translate-y-0.5 hover:shadow-xl sm:right-6"
           >
             <Sparkles className="h-4 w-4" />
             Ask AI
@@ -211,9 +211,9 @@ export const AskAIDrawer = forwardRef<AskAIDrawerHandle, AskAIDrawerProps>(
               <aside
                 role="dialog"
                 aria-label={title}
-                className="fixed inset-y-0 right-0 z-50 flex w-full max-w-[440px] flex-col border-l border-border bg-white shadow-2xl"
+                className="fixed inset-y-0 right-0 z-50 flex w-full max-w-[440px] flex-col border-l border-border bg-white pt-[env(safe-area-inset-top)] shadow-2xl"
               >
-                <header className="flex h-[46px] flex-shrink-0 items-center gap-2 border-b border-border/50 px-5">
+                <header className="flex h-[46px] flex-shrink-0 items-center gap-2 border-b border-border/50 px-4 sm:px-5">
                   <Sparkles className="h-4 w-4 flex-shrink-0 text-primary" />
                   <h2 className="truncate text-[13px] font-medium text-foreground">{title}</h2>
                   <button
@@ -236,7 +236,7 @@ export const AskAIDrawer = forwardRef<AskAIDrawerHandle, AskAIDrawerProps>(
                       )}
                     </div>
                   ) : (
-                    <div className="flex flex-col gap-6 px-5 py-6">
+                    <div className="flex flex-col gap-6 px-4 py-6 sm:px-5">
                       {messages.map((m) =>
                         m.role === "user" ? (
                           <UserBubble key={m.id}>{m.content}</UserBubble>
@@ -255,7 +255,7 @@ export const AskAIDrawer = forwardRef<AskAIDrawerHandle, AskAIDrawerProps>(
                   )}
                 </div>
 
-                <div className="flex-shrink-0 px-5 pb-5 pt-2">
+                <div className="flex-shrink-0 px-4 pb-[max(1.25rem,env(safe-area-inset-bottom))] pt-2 sm:px-5">
                   <ChatComposer
                     compact
                     value={composer}

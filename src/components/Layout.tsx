@@ -100,7 +100,7 @@ export default function Layout({ children, email = "you@publisherstudios.com" }:
               the right. iOS safe-area aware. */}
           <header className="flex h-12 sm:h-14 shrink-0 items-center justify-between border-b border-slate-200/80 px-2 sm:px-6 bg-white/95 backdrop-blur-sm mt-[env(safe-area-inset-top)] md:mt-0 isolate">
             <div className="flex items-center gap-1.5 sm:gap-2">
-              <SidebarTrigger className="text-slate-500 hover:bg-slate-100 lg:hidden h-8 w-8 p-0" />
+              <SidebarTrigger className="text-slate-500 hover:bg-slate-100 md:hidden h-8 w-8 p-0" />
             </div>
 
             <div className="flex items-center gap-2">

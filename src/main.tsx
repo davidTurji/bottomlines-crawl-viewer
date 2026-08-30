@@ -5,8 +5,6 @@ import { GoogleOAuthProvider } from "@react-oauth/google";
 
 import Layout from "./components/Layout";
 import CrawlReport from "./routes/CrawlReport";
-import CrawlChanges from "./routes/CrawlChanges";
-import CrawlResults from "./routes/CrawlResults";
 import { MOCK } from "./lib/api";
 import "./index.css";
 
@@ -27,22 +25,6 @@ const tree = (
         element={
           <Layout>
             <CrawlReport />
-          </Layout>
-        }
-      />
-      <Route
-        path="/crawl-report/:token/changes"
-        element={
-          <Layout>
-            <CrawlChanges />
-          </Layout>
-        }
-      />
-      <Route
-        path="/crawl-report/:token/results"
-        element={
-          <Layout>
-            <CrawlResults />
           </Layout>
         }
       />
