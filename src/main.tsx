@@ -1,20 +1,26 @@
 import React from "react";
 import ReactDOM from "react-dom/client";
 import { BrowserRouter, Navigate, Route, Routes } from "react-router-dom";
-import { GoogleOAuthProvider } from "@react-oauth/google";
 
 import Layout from "./components/Layout";
+import LoginGate from "./components/LoginGate";
 import CrawlReport from "./routes/CrawlReport";
 import CrawlChanges from "./routes/CrawlChanges";
 import CrawlResults from "./routes/CrawlResults";
-import { MOCK } from "./lib/api";
 import "./index.css";
 
-const GOOGLE_CLIENT_ID =
-  (import.meta.env.VITE_GOOGLE_OAUTH_CLIENT_ID as string | undefined) ??
-  // Mock mode never actually calls Google, but the provider still
-  // wants a non-empty string to not warn loudly at boot.
-  (MOCK ? "mock-client-id.apps.googleusercontent.com" : "");
+/**
+ * Route tree. Every report page sits behind LoginGate: the app renders
+ * optimistically, and the first 401 from a data endpoint swaps the page
+ * for the username + password card (see LoginGate.tsx). Auth is a
+ * session cookie set by POST /v1/viewer/auth — no Google OAuth, no
+ * client id, nothing identity-shaped in the bundle.
+ */
+const page = (el: React.ReactNode) => (
+  <LoginGate>
+    <Layout>{el}</Layout>
+  </LoginGate>
+);
 
 const tree = (
   <BrowserRouter>
@@ -22,36 +28,13 @@ const tree = (
       {/* Landing auto-redirects to the demo report so the reviewer sees
           the shell without clicking anything. */}
       <Route path="/" element={<Navigate to="/crawl-report/demo-token" replace />} />
-      <Route
-        path="/crawl-report/:token"
-        element={
-          <Layout>
-            <CrawlReport />
-          </Layout>
-        }
-      />
-      <Route
-        path="/crawl-report/:token/changes"
-        element={
-          <Layout>
-            <CrawlChanges />
-          </Layout>
-        }
-      />
-      <Route
-        path="/crawl-report/:token/results"
-        element={
-          <Layout>
-            <CrawlResults />
-          </Layout>
-        }
-      />
+      <Route path="/crawl-report/:token" element={page(<CrawlReport />)} />
+      <Route path="/crawl-report/:token/changes" element={page(<CrawlChanges />)} />
+      <Route path="/crawl-report/:token/results" element={page(<CrawlResults />)} />
     </Routes>
   </BrowserRouter>
 );
 
 ReactDOM.createRoot(document.getElementById("root")!).render(
-  <React.StrictMode>
-    <GoogleOAuthProvider clientId={GOOGLE_CLIENT_ID}>{tree}</GoogleOAuthProvider>
-  </React.StrictMode>,
+  <React.StrictMode>{tree}</React.StrictMode>,
 );

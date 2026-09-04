@@ -34,18 +34,15 @@ import { formatWeek } from "@/components/WeekContextBadge";
  * relationship on screen: click a developer, see their lines and their apps.
  */
 
-/** Platforms the crawler cares about. Order matches the top-of-page bar. */
-const PLATFORMS = [
-  "Web",
-  "iOS",
-  "Android",
-  "Roku",
-  "Samsung",
-  "Vizio",
-  "CTV",
-  "FireTV",
-  "tvOS",
-] as const;
+/**
+ * The exact platform vocabulary the crawler DB uses (developers.platform,
+ * set by the import profiles in bottomlines-crawl/import_profiles.py:
+ * CTV, Mobile, Web). The dropdown must offer exactly these values, since
+ * the filter below is a strict string equality against d.platform —
+ * offering finer-grained labels (iOS, Roku, …) would silently match
+ * nothing.
+ */
+const PLATFORMS = ["Web", "Mobile", "CTV"] as const;
 
 export default function CrawlResults() {
   const { token = "" } = useParams();
