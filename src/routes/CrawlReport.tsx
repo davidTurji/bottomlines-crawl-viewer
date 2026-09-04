@@ -657,8 +657,14 @@ function LinesGroup({
   );
 }
 
-/** Small right-aligned number pair used on the drilldown row header. */
-function MiniStat({
+/**
+ * Small right-aligned number pair used on the drilldown row header.
+ *
+ * Exported because the Discovered lines cards are deliberate siblings of
+ * PublisherCard: same stat treatment, same label size, same tabular figures.
+ * Copying it would let the two drift apart a pixel at a time.
+ */
+export function MiniStat({
   label,
   value,
   emphasis,

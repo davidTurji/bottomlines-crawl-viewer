@@ -1,7 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import {
-  ArrowDownRight,
-  ArrowUpRight,
   CalendarClock,
   ChevronDown,
   Download,
@@ -20,6 +18,8 @@ import {
 } from "../lib/api";
 import { formatWeek } from "@/components/WeekContextBadge";
 import { useReportScope } from "@/lib/reportScope";
+import { cn } from "@/lib/utils";
+import { MiniStat } from "./CrawlReport";
 
 /**
  * DISCOVERED LINES.
@@ -129,8 +129,11 @@ export default function CrawlDiscovered() {
   // crawl, which is a normal thing to be, not an error.
   const noDiscovery = !loading && !error && total === 0 && anyDiscovered === false;
 
+  // max-w-5xl, wider than the 4xl this page started at: the primary slot now
+  // carries the whole ads.txt line, cert included, and at 4xl a long cert was
+  // truncated on a full-size desktop rather than only on a narrow one.
   return (
-    <div className="mx-auto w-full max-w-4xl space-y-7 px-4 py-6 sm:px-6 lg:py-10">
+    <div className="mx-auto w-full max-w-5xl space-y-7 px-4 py-6 sm:px-6 lg:py-10">
       {/* Page header */}
       <div className="flex flex-col justify-between gap-3 sm:flex-row sm:items-start">
         <div className="min-w-0">
@@ -201,7 +204,7 @@ export default function CrawlDiscovered() {
       )}
 
       {!loading && !error && rows.length > 0 && (
-        <div className="space-y-2.5">
+        <div className="space-y-3">
           {rows.map((line) => {
             const key = lineKey(line);
             return (
@@ -251,8 +254,20 @@ export default function CrawlDiscovered() {
 /* ── The card ──────────────────────────────────────────────────────── */
 
 /**
- * One line. Collapsed, it shows the line and two facts about it. Expanded,
- * it shows every publisher carrying it.
+ * One line, built as a deliberate sibling of PublisherCard on the overview
+ * page: same rounded-3xl white card, same shadow, same 44px disc on the
+ * left, same right-aligned MiniStats, same chevron, same tinted expanded
+ * body. A reader who has learned one row has learned both.
+ *
+ * The one difference is the family colour. Publishers wear the brand's
+ * racing green (bg-accent / text-primary); a discovered line is not a
+ * publisher, so it wears the design system's own blue, the `info` tone
+ * (--tone-info in index.css), on both the disc and the expanded tint.
+ *
+ * The primary slot carries the whole ads.txt line, cert included, because
+ * that string IS the unit of this page. It truncates rather than wraps: a
+ * card that changes height with the length of a cert id stops reading as
+ * a row in a list.
  *
  * The whole face is the button, so a click anywhere opens it, and the
  * chevron is decoration rather than a second, smaller target.
@@ -317,22 +332,29 @@ function LineCard({
   }, [open, token, key, embedded, line]);
 
   const delta = deltaOf(line);
+  const initial = (line.ssp_domain.replace(/^www\./i, "").charAt(0) || "?")
+    .toUpperCase();
+  const count = line.placements_count;
 
   return (
     <div
-      className={[
-        "overflow-hidden rounded-2xl border bg-card transition-colors duration-200",
-        open
-          ? "border-primary/25"
-          : "border-border hover:border-slate-300",
-      ].join(" ")}
+      className={cn(
+        "overflow-hidden rounded-3xl border border-border bg-white shadow-sm transition-colors",
+        open && "shadow-md",
+      )}
     >
       <button
         type="button"
         onClick={onToggle}
         aria-expanded={open}
-        className="group flex w-full items-start gap-4 px-5 py-5 text-left sm:px-6"
+        className="flex w-full items-center gap-4 px-4 py-4 text-left sm:px-5"
       >
+        {/* The SSP's initial, in the info tone. Same disc as the publisher
+            rows, a different family colour. */}
+        <div className="flex h-11 w-11 flex-shrink-0 items-center justify-center rounded-full bg-info-bg text-base font-semibold text-info">
+          {initial}
+        </div>
+
         <div className="min-w-0 flex-1">
           {/*
             The line, verbatim and dominant. The cert id is appended inside
@@ -341,93 +363,130 @@ function LineCard({
             it would misrepresent the file. Muting it instead lets the eye
             stop after the relationship, which is where the meaning ends,
             while the full line stays copyable as one string.
+
+            truncate, not wrap: this is the row's identity slot, and a row
+            whose height depends on the length of a hex string stops reading
+            as one of a list.
           */}
-          {/* break-words, not break-all: a narrow screen should move the
-              whole cert to the next line, never split a hex string down the
-              middle, which stops it reading as one value. */}
-          <code className="block break-words font-mono text-[13px] font-medium leading-relaxed text-slate-900 sm:text-[15px]">
+          <code className="block truncate font-mono text-[13px] font-semibold tracking-tight text-slate-900 sm:text-[15px]">
             {line.ssp_domain}, {line.publisher_id}, {line.relationship}
             {line.cert_id && (
               <span className="font-normal text-slate-400">, {line.cert_id}</span>
             )}
           </code>
 
-          <div className="mt-3 flex flex-wrap items-center gap-x-4 gap-y-2">
-            <span className="text-[12px] text-slate-500">
+          {/* The secondary line. On mobile the MiniStats are hidden, so the
+              publisher count moves here; "new this week" is the one fact a
+              pair of numbers cannot state, so it stays at every width. */}
+          <div className="mt-0.5 flex items-center gap-2.5 truncate text-xs text-slate-500">
+            <span className="sm:hidden">
               <span className="font-mono tabular-nums text-slate-700">
-                {line.placements_count.toLocaleString()}
+                {count.toLocaleString()}
               </span>{" "}
-              {line.placements_count === 1 ? "publisher" : "publishers"}
+              {count === 1 ? "publisher" : "publishers"}
             </span>
-            <DeltaChip delta={delta} />
+            {delta.kind === "new" && (
+              <span className="inline-flex flex-shrink-0 items-center gap-1.5">
+                <span aria-hidden className="h-1.5 w-1.5 rounded-full bg-info" />
+                new this week
+              </span>
+            )}
+          </div>
+        </div>
+
+        {/* Three reserved columns rather than three optional ones. A line
+            with no previous week, or no move, leaves its slot empty instead
+            of sliding the others across, so the numbers stack into a column
+            down the list rather than jittering card to card. */}
+        <div className="hidden items-center gap-6 text-right sm:flex">
+          <div className="w-[72px]">
+            {line.previous_placements_count != null && (
+              <MiniStat
+                label="Last week"
+                value={line.previous_placements_count}
+              />
+            )}
+          </div>
+          <div className="w-[72px]">
+            <MiniStat label="This week" value={count} emphasis />
+          </div>
+          <div className="w-[72px]">
+            {(delta.kind === "up" || delta.kind === "down") && (
+              <>
+                <div className="text-[10px] uppercase tracking-wide text-slate-500">
+                  Change
+                </div>
+                {/* Down is amber, not red: a publisher dropping a line is
+                    worth attention but is a normal fact about the market,
+                    not a failure. */}
+                <div
+                  className={cn(
+                    "font-mono text-sm tabular-nums",
+                    delta.kind === "up" ? "text-ok" : "text-warn",
+                  )}
+                >
+                  {delta.kind === "up" ? "+" : "-"}
+                  {delta.n.toLocaleString()}
+                </div>
+              </>
+            )}
           </div>
         </div>
 
         <ChevronDown
           aria-hidden
-          strokeWidth={1.5}
-          className={[
-            "mt-1 h-4 w-4 flex-shrink-0 transition-[transform,color] duration-200",
-            open
-              ? "rotate-180 text-primary/70"
-              : "text-slate-300 group-hover:text-slate-400",
-          ].join(" ")}
+          className={cn(
+            "h-4 w-4 flex-shrink-0 text-slate-400 transition-transform",
+            open && "rotate-180",
+          )}
         />
       </button>
 
       {open && (
-        <div className="border-t border-border/70 bg-muted/30 px-5 py-4 sm:px-6">
-          <div className="mb-3 text-[11px] text-slate-500">
-            Where it was found
+        <div className="border-t border-border bg-info-bg/40 px-4 pb-4 pt-3 sm:px-5">
+          <div className="mb-1 flex items-baseline justify-between">
+            <span className="text-xs font-medium text-slate-700">
+              Where it was found
+            </span>
+            {Array.isArray(placements) && (
+              <span className="font-mono text-[11px] tabular-nums text-slate-500">
+                {placements.length.toLocaleString()}
+              </span>
+            )}
           </div>
           {placements === "loading" || placements === null ? (
-            <p className="py-2 text-[12px] text-slate-400">Loading...</p>
+            <p className="py-2 text-xs text-slate-500">Loading...</p>
           ) : placements === "error" ? (
-            <p className="py-2 text-[12px] text-critical">
+            <p className="py-2 text-xs text-critical">
               Could not load the publishers for this line.
             </p>
           ) : placements.length === 0 ? (
-            <p className="py-2 text-[12px] text-slate-400">
+            <p className="py-2 text-xs text-slate-500">
               No publishers recorded.
             </p>
           ) : (
             /* Capped and scrollable: a line on four hundred publishers would
                otherwise run for thousands of pixels and push every other
-               card off the screen. Long lists fade out at the bottom edge
-               rather than guillotining a row, which is both calmer and the
-               only cue that there is more below (the scrollbar is hidden
-               app-wide until you touch the track). */
-            <div
-              className={[
-                "scroll-y max-h-[320px] overflow-y-auto pr-1",
-                placements.length > 8
-                  ? "[mask-image:linear-gradient(to_bottom,black_calc(100%-28px),transparent)]"
-                  : "",
-              ].join(" ")}
-            >
-              <div className="relative space-y-1.5 pl-5">
-                <span
-                  aria-hidden
-                  className="absolute bottom-4 left-[7px] top-0 w-px bg-border"
-                />
+               card off the screen. */
+            /* The border and the rounding live on the SCROLLER, not the
+               list, so a capped list clips at a clean rounded edge instead
+               of running a half-row past the frame. */
+            <div className="scroll-y max-h-[320px] overflow-y-auto rounded-md border border-border bg-white">
+              <ul className="divide-y divide-border">
                 {placements.map((p, i) => (
-                  <div
+                  <li
                     key={`${p.developer_domain}|${p.found_in}|${i}`}
-                    className="relative flex w-full items-center gap-3 rounded-full border border-border/70 bg-white px-3.5 py-1.5"
+                    className="flex items-baseline gap-3 px-3 py-1.5 font-mono text-[11px] tabular-nums"
                   >
-                    <span
-                      aria-hidden
-                      className="absolute -left-[13px] top-1/2 h-px w-3 bg-border"
-                    />
-                    <code className="min-w-0 flex-1 truncate font-mono text-[11px] text-slate-800 sm:text-xs">
+                    <span className="truncate text-slate-800">
                       {p.developer_domain}
-                    </code>
-                    <span className="flex-shrink-0 text-[10px] text-slate-400">
+                    </span>
+                    <span className="ml-auto flex-shrink-0 text-[10px] text-slate-400">
                       {p.found_in}
                     </span>
-                  </div>
+                  </li>
                 ))}
-              </div>
+              </ul>
             </div>
           )}
         </div>
@@ -450,56 +509,6 @@ function deltaOf(line: DiscoveredLine): Delta {
   if (d > 0) return { kind: "up", n: d };
   if (d < 0) return { kind: "down", n: -d };
   return { kind: "flat" };
-}
-
-/**
- * The week-over-week move, and the only place on the card face that carries
- * colour.
- *
- *   up      racing green, the brand's own affirmative. More publishers
- *           carrying the line is the outcome the weekly crawl is run for.
- *   down    amber, not red. A publisher dropping a line is worth a reader's
- *           attention, but it is a normal fact about the market, not a
- *           failure or an error, and red would say otherwise.
- *   new     no fill and no arrow, just a green dot and the word. A line
- *           seen for the first time has no previous number, so any "+198"
- *           would be an invented comparison.
- *   flat    plain muted text. A grey badge for "nothing happened" is the
- *           loudest way to say nothing happened.
- */
-function DeltaChip({ delta }: { delta: Delta }) {
-  if (delta.kind === "flat") {
-    return (
-      <span className="text-[12px] text-slate-400">no change since last week</span>
-    );
-  }
-  if (delta.kind === "new") {
-    return (
-      <span className="inline-flex items-center gap-1.5 text-[12px] text-slate-500">
-        <span aria-hidden className="h-1.5 w-1.5 rounded-full bg-primary/70" />
-        new this week
-      </span>
-    );
-  }
-  const up = delta.kind === "up";
-  const Icon = up ? ArrowUpRight : ArrowDownRight;
-  return (
-    <span
-      className={[
-        "inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-[11px] font-medium",
-        up
-          ? "border-ok-border bg-ok-bg text-ok"
-          : "border-warn-border bg-warn-bg text-warn",
-      ].join(" ")}
-    >
-      <Icon aria-hidden strokeWidth={2} className="h-3 w-3" />
-      <span className="tabular-nums">
-        {up ? "+" : "-"}
-        {delta.n.toLocaleString()}
-      </span>
-      <span className="font-normal opacity-80">since last week</span>
-    </span>
-  );
 }
 
 /* ── Summary ───────────────────────────────────────────────────────── */
