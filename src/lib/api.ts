@@ -31,11 +31,21 @@ export function onUnauthorized(handler: (() => void) | null) {
   unauthorizedHandler = handler;
 }
 
+// ── Auth epoch ───────────────────────────────────────────────────
+// Guards against a stale-401 re-lock race: a data request fired
+// before sign-in can come back 401 *after* the login succeeded, and
+// must not throw the freshly signed-in user back to the gate. Each
+// request captures the epoch at call start; a successful auth bumps
+// it, so any 401 from a pre-login in-flight request sees a mismatched
+// epoch and stays silent (the page still gets its ApiError).
+let authEpoch = 0;
+
 async function req<T>(
   method: string,
   path: string,
   body?: unknown,
 ): Promise<T> {
+  const epochAtStart = authEpoch;
   const res = await fetch(`${BASE}${path}`, {
     method,
     credentials: "include",
@@ -46,7 +56,11 @@ async function req<T>(
     // The auth endpoint's own 401 means "wrong credentials", not
     // "session expired": it must not re-trip the gate, only surface
     // as the form's error state.
-    if (res.status === 401 && !path.endsWith("/viewer/auth")) {
+    if (
+      res.status === 401 &&
+      !path.endsWith("/viewer/auth") &&
+      epochAtStart === authEpoch
+    ) {
       unauthorizedHandler?.();
     }
     const detail = await res.text().catch(() => "");
@@ -63,11 +77,15 @@ export const api = {
    */
   auth: async (token: string, username: string, password: string) => {
     if (MOCK) return { ok: true, email: "you@publisherstudios.com", customer_id: 42 };
-    return req<{ ok: boolean; email: string; customer_id: number }>(
+    const out = await req<{ ok: boolean; email: string; customer_id: number }>(
       "POST",
       `/v1/viewer/auth`,
       { token, username, password },
     );
+    // New session established: invalidate the 401 fan-out for every
+    // request that was already in flight before this sign-in.
+    authEpoch++;
+    return out;
   },
   summary: async (token: string) => {
     if (MOCK) {

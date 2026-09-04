@@ -40,6 +40,10 @@ server {
         proxy_set_header Authorization $http_authorization;
         proxy_ssl_server_name on;
         proxy_read_timeout 120s;
+        # SSE-friendly: the future chat endpoint streams text/event-stream
+        # frames, and nginx's default response buffering would hold them
+        # back until the buffer fills. Harmless for plain JSON responses.
+        proxy_buffering off;
     }
 
     # Long-cache immutable Vite chunks (they have hashed filenames).

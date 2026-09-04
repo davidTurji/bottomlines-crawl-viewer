@@ -11,11 +11,11 @@ Standalone Vite + React + Tailwind SPA that renders a weekly Bottomlines Crawl r
 
 ```bash
 npm install
-export VITE_API_BASE=http://localhost:8000   # bottomlines-crawl API (dev proxy target for /api)
+export VITE_PROXY_TARGET=http://localhost:8000   # bottomlines-crawl API (dev proxy upstream; this is the default)
 npm run dev
 ```
 
-Opens on http://localhost:5181. The Vite proxy forwards `/api/*` to the API with the `/api` prefix stripped, mirroring production nginx.
+Opens on http://localhost:5181. The browser always fetches from `/api` (leave `VITE_API_BASE` unset — it defaults to `/api`, keeping requests same-origin so the httpOnly session cookie sticks); the Vite dev proxy forwards `/api/*` to `VITE_PROXY_TARGET` with the `/api` prefix stripped, mirroring production nginx. To develop against the real backend, set `VITE_PROXY_TARGET` to the Cloud Run API URL instead — do not point `VITE_API_BASE` at it, or fetches go cross-origin and auth breaks.
 
 Flags:
 
