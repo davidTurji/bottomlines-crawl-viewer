@@ -1,6 +1,7 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { ChevronDown } from "lucide-react";
 import { NavLink, useLocation } from "react-router-dom";
+import { api } from "@/lib/api";
 import {
   Sidebar,
   SidebarContent,
@@ -34,9 +35,32 @@ import { useReportScope } from "@/lib/reportScope";
  */
 export function AppSidebar() {
   const { isMobile, openMobile, setOpenMobile } = useSidebar();
-  const { basePath } = useReportScope();
+  const { basePath, token } = useReportScope();
   const location = useLocation();
   const currentPath = location.pathname;
+
+  // Does this crawl have discovered lines at all? One cheap probe (a single
+  // row, we only read `total`) decides whether the rail carries the
+  // "Discovered lines" entry. Default false so the entry never flashes in
+  // and out: it appears once, when we know there is something behind it.
+  // Any failure (401 before login, dead token, offline) leaves it hidden,
+  // which is the honest default for a section we cannot prove exists.
+  const [hasDiscovered, setHasDiscovered] = useState(false);
+  useEffect(() => {
+    if (!token) return;
+    let alive = true;
+    api
+      .discovered(token, { page: 1, page_size: 1 })
+      .then((p) => {
+        if (alive) setHasDiscovered((p?.total ?? 0) > 0);
+      })
+      .catch(() => {
+        if (alive) setHasDiscovered(false);
+      });
+    return () => {
+      alive = false;
+    };
+  }, [token]);
 
   const [openSections, setOpenSections] = useState<Set<string>>(new Set(["crawler"]));
 
@@ -83,11 +107,15 @@ export function AppSidebar() {
     { to: basePath, label: "Overview", end: true },
     { to: `${basePath}/changes`, label: "Line changes" },
     { to: `${basePath}/results`, label: "Results" },
-    // Always listed, even for a seat-line-only crawl: the page explains
-    // that discovery was not used, which is a truthful answer the reader
-    // can act on. A link that appears and disappears per crawl would leave
-    // them wondering whether the section exists at all.
-    { to: `${basePath}/discovered`, label: "Discovered lines" },
+    // Listed ONLY when this crawl actually discovered something (David,
+    // 2026-09-04: "only when you actually discover lines you show it").
+    // A seat-line-only crawl has no discovery story to tell, so an entry
+    // leading to an explanatory empty page is noise on a customer-facing
+    // report. The route itself stays registered, so a direct link still
+    // resolves; this only governs the rail.
+    ...(hasDiscovered
+      ? [{ to: `${basePath}/discovered`, label: "Discovered lines" }]
+      : []),
   ];
 
   return (
