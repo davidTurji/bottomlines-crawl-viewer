@@ -23,8 +23,8 @@ import { useReportScope } from "@/lib/reportScope";
 /**
  * Crawler-only rail, trimmed from bottomlines-app's AppSidebar.
  *
- * A single SidebarGroup labelled "Crawler" containing two links, each mapped
- * to a route under the current report. Links are built from the scope's
+ * A single SidebarGroup labelled "Crawler" whose links each map to a route
+ * under the current report. Links are built from the scope's
  * basePath, not from the token, so a reader who arrived on a readable URL
  * (/selectmedia/0904-0644) keeps readable URLs as they navigate, and a
  * reader on a tokened share link keeps tokened ones. The chat drawer stays as a fixed
@@ -83,6 +83,11 @@ export function AppSidebar() {
     { to: basePath, label: "Overview", end: true },
     { to: `${basePath}/changes`, label: "Line changes" },
     { to: `${basePath}/results`, label: "Results" },
+    // Always listed, even for a seat-line-only crawl: the page explains
+    // that discovery was not used, which is a truthful answer the reader
+    // can act on. A link that appears and disappears per crawl would leave
+    // them wondering whether the section exists at all.
+    { to: `${basePath}/discovered`, label: "Discovered lines" },
   ];
 
   return (

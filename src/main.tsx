@@ -13,6 +13,7 @@ import {
 } from "./components/ReportNoticeCard";
 import CrawlReport from "./routes/CrawlReport";
 import CrawlChanges from "./routes/CrawlChanges";
+import CrawlDiscovered from "./routes/CrawlDiscovered";
 import CrawlResults from "./routes/CrawlResults";
 import "./index.css";
 
@@ -23,8 +24,10 @@ import "./index.css";
  *   /{customer-slug}/{crawl-short-id}   the readable customer link
  *
  * Each shape is a scope route (see ReportScopeRoutes.tsx) whose element
- * supplies the share token and renders the shell; the three pages hang off
- * it as children, so both shapes render literally the same components.
+ * supplies the share token and renders the shell; every page hangs off it as
+ * a child, so both shapes render literally the same components. A page added
+ * to reportPages below is therefore reachable under both URL shapes at once,
+ * which is why "discovered" needed one line rather than two.
  *
  * Every report page sits behind LoginGate: the app renders optimistically,
  * and the first 401 from a data endpoint swaps the page for the username +
@@ -49,6 +52,7 @@ const reportPages = (
     <Route index element={<CrawlReport />} />
     <Route path="changes" element={<CrawlChanges />} />
     <Route path="results" element={<CrawlResults />} />
+    <Route path="discovered" element={<CrawlDiscovered />} />
     {/* Unknown sub-path of a valid report: the link is fine, the page
         name is not. Send the reader to the overview. */}
     <Route path="*" element={<ReportSubpathRedirect />} />

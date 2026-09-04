@@ -17,6 +17,8 @@ import type {
   Summary,
   DeveloperEventsPage,
   DeveloperEvent,
+  DiscoveredLine,
+  DiscoveredPage,
   LineEventsPage,
   LineEvent,
   MatchedDevelopersPage,
@@ -765,6 +767,185 @@ const LINES_BY_DEVELOPER = buildLinesByDeveloper();
 /** All matched-seat line events for one developer. Empty array if unknown. */
 export function linesForDeveloper(developer_id: number): LineEvent[] {
   return LINES_BY_DEVELOPER[developer_id] ?? [];
+}
+
+// ─────────────────────────────────────────────────────────────────
+// Discovered lines
+// ─────────────────────────────────────────────────────────────────
+
+/*
+ * Seed for the "Discovered lines" page: the sheet a discovery crawl
+ * produces, where a line is kept because its SSP domain is on the run's
+ * discover_domains list, not because it matched an exact seat line.
+ *
+ * Modelled on the operator's real case: a crawl for carambola.com and
+ * carambo.la with no seat lines at all. Most rows therefore carry one of
+ * those two domains; a couple of others are mixed in because an operator
+ * usually lists every domain a partner is known to publish under.
+ *
+ * Shape is DISCOVERED_COLUMNS from bottomlines-crawl
+ * services/run_export.py, and the ordering matches _DISCOVERED_SQL
+ * (developer_domain, ssp_domain, publisher_id) so a screenshot of this
+ * table and the downloaded workbook read the same way.
+ */
+
+/** Discovery domains, weighted: the two real ones dominate. */
+const DISCOVERY_SSPS: { domain: string; weight: number }[] = [
+  { domain: "carambola.com", weight: 46 },
+  { domain: "carambo.la", weight: 34 },
+  { domain: "carambolamedia.com", weight: 12 },
+  { domain: "sonobi.com", weight: 8 },
+];
+
+const DISCOVERY_SSP_PICK: string[] = DISCOVERY_SSPS.flatMap((s) =>
+  Array<string>(s.weight).fill(s.domain),
+);
+
+/* 20 x 9 = 180 distinct developer names, so the sheet spans ~180 domains
+ * the way a real discovery run does: a long list of publishers nobody on
+ * the customer side has heard of, which is exactly the point of the page. */
+const DISCOVERED_PREFIX = [
+  "Hollow Creek", "Ridgeline", "Copper Kettle", "Saltmarsh", "Bright Anvil",
+  "Fernhill", "Windward", "Barrowfield", "Lowtide", "Kestrelwood",
+  "Amber Row", "Northbank", "Stonefall", "Wildergreen", "Pale Harbor",
+  "Tinderbox", "Clearwater", "Highfen", "Rookery", "Gladewater",
+];
+
+const DISCOVERED_SUFFIX = [
+  "Media", "Studios", "Networks", "Publishers", "Interactive",
+  "Broadcasting", "Games", "Digital", "Press",
+];
+
+/** A publisher account id in the shape the named SSP hands out. */
+function discoveredPublisherId(ssp: string, n: number): string {
+  if (ssp === "sonobi.com") return `sb-${(n % 90_000) + 10_000}`;
+  if (ssp === "carambo.la") return `${(n % 900_000) + 100_000}`;
+  if (ssp === "carambolamedia.com") return `cm${(n % 90_000) + 10_000}`;
+  return `${(n % 9_000_000) + 1_000_000}`;
+}
+
+/** A TAG-ish 16-hex cert id; only some publishers bother to print one. */
+function discoveredCertId(n: number): string {
+  let out = "";
+  let x = (n * 2_246_822_519 + 374_761_393) >>> 0;
+  for (let i = 0; i < 16; i += 1) {
+    x ^= x << 13;
+    x >>>= 0;
+    x ^= x >>> 17;
+    x ^= x << 5;
+    x >>>= 0;
+    out += "0123456789abcdef"[x % 16];
+  }
+  return out;
+}
+
+function buildDiscovered(): DiscoveredLine[] {
+  const rnd = xorshift(90_210);
+  const rows: DiscoveredLine[] = [];
+  let n = 0;
+  for (let i = 0; i < DISCOVERED_PREFIX.length * DISCOVERED_SUFFIX.length; i += 1) {
+    const name = `${DISCOVERED_PREFIX[i % DISCOVERED_PREFIX.length]} ${
+      DISCOVERED_SUFFIX[Math.floor(i / DISCOVERED_PREFIX.length) % DISCOVERED_SUFFIX.length]
+    }`;
+    const platform = PLATFORMS[Math.floor(rnd() * PLATFORMS.length)];
+    const domain = domainFor(name, platform, i);
+    // A web-only publisher has no store presence, so no app count and no
+    // app-ads.txt; everyone else is app-first with a handful of titles.
+    const isWeb = platform === "Web";
+    const appCount = isWeb ? 0 : 1 + Math.floor(rnd() * 40);
+    // Long tail: most publishers carry one to four of these lines, a few
+    // carry a dozen because they run the SSP across many placements.
+    const r = rnd();
+    const lineCount =
+      r < 0.08
+        ? 8 + Math.floor(rnd() * 7)
+        : r < 0.35
+          ? 4 + Math.floor(rnd() * 5)
+          : 2 + Math.floor(rnd() * 4);
+    for (let k = 0; k < lineCount; k += 1) {
+      n += 1;
+      const ssp = DISCOVERY_SSP_PICK[Math.floor(rnd() * DISCOVERY_SSP_PICK.length)];
+      const hasCert = rnd() < 0.55;
+      // A publisher normally holds one account per SSP and repeats it
+      // across relationships, cert ids and both files; a minority run a
+      // second account (a sales house, a legacy migration), so the id is
+      // keyed on the publisher and the SSP rather than on the row.
+      const account = i * 97 + (rnd() < 0.22 ? 1_013 : 0);
+      rows.push({
+        developer_domain: domain,
+        developer_name: name,
+        developer_platform: platform,
+        ssp_domain: ssp,
+        publisher_id: discoveredPublisherId(ssp, account),
+        relationship: rnd() < 0.42 ? "DIRECT" : "RESELLER",
+        cert_id: hasCert ? discoveredCertId(n + i) : "",
+        // A web publisher can only be found in ads.txt; an app publisher
+        // usually in app-ads.txt, sometimes in both files.
+        found_in: isWeb ? "ads.txt" : rnd() < 0.78 ? "app-ads.txt" : "ads.txt",
+        developer_app_count: appCount,
+      });
+    }
+  }
+  // The SQL SELECTs DISTINCT, so two identical (developer, ssp, publisher
+  // id, relationship, cert, file) facts collapse into one row there and
+  // must collapse here too.
+  const seen = new Set<string>();
+  const deduped = rows.filter((r) => {
+    const key = [
+      r.developer_domain,
+      r.ssp_domain,
+      r.publisher_id,
+      r.relationship,
+      r.cert_id,
+      r.found_in,
+    ].join("|");
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
+  // Same ORDER BY as _DISCOVERED_SQL.
+  return deduped.sort(
+    (a, b) =>
+      a.developer_domain.localeCompare(b.developer_domain) ||
+      a.ssp_domain.localeCompare(b.ssp_domain) ||
+      a.publisher_id.localeCompare(b.publisher_id),
+  );
+}
+
+const DISCOVERED = buildDiscovered();
+
+/**
+ * Filtering matches the live line-events behaviour: ssp_domain is a
+ * case-insensitive substring, so typing "caramb" keeps both carambola.com
+ * and carambo.la, and "la" keeps carambo.la alone.
+ *
+ * Mock-only escape hatch: adding ``?discovery=none`` to the URL empties the
+ * sheet, which is how the seat-line-only empty state is reviewed without a
+ * second fixture set. Never reached in a production build, where MOCK is
+ * false and this module is tree-shaken out.
+ */
+export function mockDiscovered(opts: {
+  page?: number;
+  page_size?: number;
+  ssp_domain?: string;
+}): DiscoveredPage {
+  const page = opts.page ?? 1;
+  const pageSize = opts.page_size ?? 50;
+  const emptied =
+    typeof window !== "undefined" &&
+    new URLSearchParams(window.location.search).get("discovery") === "none";
+  let pool = emptied ? [] : DISCOVERED;
+  if (opts.ssp_domain) {
+    const needle = opts.ssp_domain.trim().toLowerCase();
+    pool = pool.filter((r) => r.ssp_domain.toLowerCase().includes(needle));
+  }
+  const start = (page - 1) * pageSize;
+  return {
+    page,
+    page_size: pageSize,
+    total: pool.length,
+    rows: pool.slice(start, start + pageSize),
+  };
 }
 
 // ─────────────────────────────────────────────────────────────────

@@ -4,10 +4,10 @@ import { createContext, useContext } from "react";
  * The report a page is currently rendering, decoupled from how the URL
  * spelled it.
  *
- * Two URL shapes reach the same three pages:
+ * Two URL shapes reach the same set of pages:
  *
- *   /crawl-report/{token}[/changes|/results]     the signed share link
- *   /{customer-slug}/{crawl-short-id}[/...]      the readable link
+ *   /crawl-report/{token}[/changes|/results|/discovered]   the share link
+ *   /{customer-slug}/{crawl-short-id}[/...]                the readable link
  *
  * Pages used to read `token` straight off useParams(), which only exists
  * in the first shape. They now read it from here instead, so the readable

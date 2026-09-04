@@ -258,6 +258,37 @@ export const api = {
     );
     return page.rows.filter((r) => r.developer_id === developer_id);
   },
+  /**
+   * Lines the crawl kept because their SSP domain is on the run's discovery
+   * list, rather than because they matched an exact seat line.
+   *
+   * A discovery-only crawl (the operator asks "who carries carambola.com?"
+   * with no seat lines at all) produces rows here and nowhere else, so this
+   * is its own endpoint rather than a flag on line-events: the shape is the
+   * export's Discovered sheet, one row per developer x SSP x publisher id x
+   * file, not a week-over-week event.
+   *
+   * Column contract mirrors DISCOVERED_COLUMNS in the crawler's
+   * services/run_export.py, so this screen and the downloaded workbook
+   * cannot disagree.
+   */
+  discovered: async (
+    token: string,
+    opts: { page?: number; page_size?: number; ssp_domain?: string } = {},
+  ) => {
+    if (MOCK) {
+      const { mockDiscovered } = await import("./mockData");
+      return mockDiscovered(opts);
+    }
+    const q = new URLSearchParams();
+    q.set("page", String(opts.page ?? 1));
+    q.set("page_size", String(opts.page_size ?? 50));
+    if (opts.ssp_domain) q.set("ssp_domain", opts.ssp_domain);
+    return req<DiscoveredPage>(
+      "GET",
+      `/v1/viewer/${token}/discovered?${q.toString()}`,
+    );
+  },
   chat: async function* (
     token: string,
     prompt: string,
@@ -404,6 +435,43 @@ export type MatchedBundlesPage = {
   page_size: number;
   total: number;
   rows: MatchedBundle[];
+};
+
+/**
+ * One discovered line, keyed exactly like the export workbook's Discovered
+ * sheet (DISCOVERED_COLUMNS / _DISCOVERED_SQL in the crawler repo):
+ *
+ *   developer_domain      Developer domain
+ *   developer_name        Developer
+ *   developer_platform    Platform
+ *   ssp_domain            SSP domain
+ *   publisher_id          Publisher ID
+ *   relationship          Relationship
+ *   cert_id               Cert ID
+ *   found_in              Found in        ("ads.txt" | "app-ads.txt")
+ *   developer_app_count   Apps
+ *
+ * The SQL COALESCEs the three text columns to "" rather than NULL, so they
+ * are typed as plain strings here, and found_in arrives pre-rendered as the
+ * filename the reader recognises, not the internal file_kind enum.
+ */
+export type DiscoveredLine = {
+  developer_domain: string;
+  developer_name: string;
+  developer_platform: string;
+  ssp_domain: string;
+  publisher_id: string;
+  relationship: string;
+  cert_id: string;
+  found_in: string;
+  developer_app_count: number;
+};
+
+export type DiscoveredPage = {
+  page: number;
+  page_size: number;
+  total: number;
+  rows: DiscoveredLine[];
 };
 
 export type ChatFrame =
