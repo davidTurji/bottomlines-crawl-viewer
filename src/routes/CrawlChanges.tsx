@@ -1,8 +1,8 @@
 import { useEffect, useState } from "react";
-import { useParams } from "react-router-dom";
 import { ArrowDown, ArrowUp, RotateCw, ShieldCheck } from "lucide-react";
 
 import { api, type LineEvent, type Summary } from "../lib/api";
+import { useReportScope } from "@/lib/reportScope";
 import {
   Table,
   TableBody,
@@ -30,7 +30,7 @@ import { cn } from "@/lib/utils";
 type Bucket = "all" | "added" | "removed" | "cert_changed";
 
 export default function CrawlChanges() {
-  const { token = "" } = useParams();
+  const { token } = useReportScope();
   const [summary, setSummary] = useState<Summary | null>(null);
   const [previous, setPrevious] = useState<Summary | null>(null);
   const [bucket, setBucket] = useState<Bucket>("all");

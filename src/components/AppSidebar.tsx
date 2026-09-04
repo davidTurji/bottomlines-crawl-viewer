@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { ChevronDown } from "lucide-react";
-import { NavLink, useLocation, useParams } from "react-router-dom";
+import { NavLink, useLocation } from "react-router-dom";
 import {
   Sidebar,
   SidebarContent,
@@ -18,19 +18,23 @@ import {
   CollapsibleTrigger,
 } from "@/components/ui/collapsible";
 import bottomlineSidebarLogo from "@/assets/bottomline-sidebar-logo.png";
+import { useReportScope } from "@/lib/reportScope";
 
 /**
  * Crawler-only rail, trimmed from bottomlines-app's AppSidebar.
  *
  * A single SidebarGroup labelled "Crawler" containing two links, each mapped
- * to a route under the current share token. The chat drawer stays as a fixed
+ * to a route under the current report. Links are built from the scope's
+ * basePath, not from the token, so a reader who arrived on a readable URL
+ * (/selectmedia/0904-0644) keeps readable URLs as they navigate, and a
+ * reader on a tokened share link keeps tokened ones. The chat drawer stays as a fixed
  * FAB in the corner of the overview page — that is more idiomatic for a
  * share-by-link viewer where the assistant is scoped to the report, not a
  * top-level surface.
  */
 export function AppSidebar() {
   const { isMobile, openMobile, setOpenMobile } = useSidebar();
-  const { token = "" } = useParams();
+  const { basePath } = useReportScope();
   const location = useLocation();
   const currentPath = location.pathname;
 
@@ -51,7 +55,8 @@ export function AppSidebar() {
     if (isMobile && openMobile) setOpenMobile(false);
   };
 
-  const activeSection = currentPath.startsWith(`/crawl-report/${token}`) ? "crawler" : null;
+  const activeSection =
+    basePath && currentPath.startsWith(basePath) ? "crawler" : null;
 
   const chevron = (key: string) => (
     <ChevronDown
@@ -75,9 +80,9 @@ export function AppSidebar() {
   };
 
   const items: { to: string; label: string; end?: boolean }[] = [
-    { to: `/crawl-report/${token}`, label: "Overview", end: true },
-    { to: `/crawl-report/${token}/changes`, label: "Line changes" },
-    { to: `/crawl-report/${token}/results`, label: "Results" },
+    { to: basePath, label: "Overview", end: true },
+    { to: `${basePath}/changes`, label: "Line changes" },
+    { to: `${basePath}/results`, label: "Results" },
   ];
 
   return (
@@ -89,7 +94,7 @@ export function AppSidebar() {
         {/* Brand slot — matches the app: h-12 sm:h-14, hairline divider, logo
             object-contain object-left. Click-through to Overview. */}
         <NavLink
-          to={`/crawl-report/${token}`}
+          to={basePath}
           className="flex items-center px-2 h-12 sm:h-14 border-b border-sidebar-border/50 transition-colors duration-150 hover:bg-sidebar-accent/40"
           onClick={handleMobileNavClick}
           aria-label="bottomline.ai, Overview"

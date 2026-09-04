@@ -46,6 +46,11 @@ async function req<T>(
   body?: unknown,
 ): Promise<T> {
   const epochAtStart = authEpoch;
+  // Path without its query string, so the two exemptions below compare
+  // whole endpoints. A prefix test would misfire on a share token that
+  // happens to start with "resolve" (/v1/viewer/resolveXYZ/summary) and
+  // silently switch the sign-in gate off for that reader.
+  const endpoint = path.split("?")[0];
   const res = await fetch(`${BASE}${path}`, {
     method,
     credentials: "include",
@@ -56,9 +61,13 @@ async function req<T>(
     // The auth endpoint's own 401 means "wrong credentials", not
     // "session expired": it must not re-trip the gate, only surface
     // as the form's error state.
+    // Likewise the resolve endpoint: it runs *before* any session
+    // exists (it is what turns a readable URL into a token), so its
+    // failures are "no such report", never "session expired".
     if (
       res.status === 401 &&
-      !path.endsWith("/viewer/auth") &&
+      !endpoint.endsWith("/viewer/auth") &&
+      endpoint !== "/v1/viewer/resolve" &&
       epochAtStart === authEpoch
     ) {
       unauthorizedHandler?.();
@@ -70,6 +79,20 @@ async function req<T>(
 }
 
 export const api = {
+  /**
+   * Turn a readable report URL — /{customer-slug}/{crawl-short-id}, e.g.
+   * /selectmedia/0904-0644 — into the share token every other endpoint is
+   * keyed by. Public by design: it hands out a token, it does not read
+   * report data, so the password gate still stands behind it.
+   *
+   * In MOCK mode any slug resolves to the demo token, so the readable
+   * routes are exercisable with VITE_MOCK=true and no backend.
+   */
+  resolve: async (slug: string, shortId: string) => {
+    if (MOCK) return { token: "demo-token" };
+    const q = new URLSearchParams({ slug, short_id: shortId });
+    return req<{ token: string }>("GET", `/v1/viewer/resolve?${q.toString()}`);
+  },
   /**
    * Username + password sign-in for a share token. The API answers with
    * an httpOnly session cookie (hence credentials:"include" in req());

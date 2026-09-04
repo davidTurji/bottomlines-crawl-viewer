@@ -1,5 +1,4 @@
 import { useEffect, useMemo, useState } from "react";
-import { useParams } from "react-router-dom";
 import {
   CalendarClock,
   ChevronRight,
@@ -19,6 +18,7 @@ import {
   CollapsibleTrigger,
 } from "@/components/ui/collapsible";
 import { formatWeek } from "@/components/WeekContextBadge";
+import { useReportScope } from "@/lib/reportScope";
 
 /**
  * RESULTS page, "Matched inventory".
@@ -45,7 +45,7 @@ import { formatWeek } from "@/components/WeekContextBadge";
 const PLATFORMS = ["Web", "Mobile", "CTV"] as const;
 
 export default function CrawlResults() {
-  const { token = "" } = useParams();
+  const { token } = useReportScope();
   const [summary, setSummary] = useState<Summary | null>(null);
   const [devs, setDevs] = useState<MatchedDeveloper[]>([]);
   const [bundles, setBundles] = useState<MatchedBundle[]>([]);

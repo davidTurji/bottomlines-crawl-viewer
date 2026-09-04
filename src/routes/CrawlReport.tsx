@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { useParams, Link } from "react-router-dom";
+import { Link } from "react-router-dom";
 import { ChevronDown } from "lucide-react";
 import {
   api,
@@ -14,6 +14,7 @@ import { Card } from "@/components/ui/card";
 import InlineAskAI from "@/components/InlineAskAI";
 import { formatWeek } from "@/components/WeekContextBadge";
 import { cn } from "@/lib/utils";
+import { useReportScope } from "@/lib/reportScope";
 
 const OVERVIEW_SUGGESTIONS = [
   "What lines were added this week?",
@@ -38,7 +39,7 @@ const OVERVIEW_SUGGESTIONS = [
  */
 
 export default function CrawlReport() {
-  const { token = "" } = useParams();
+  const { token, basePath } = useReportScope();
   const [summary, setSummary] = useState<Summary | null>(null);
   const [previous, setPrevious] = useState<Summary | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -177,7 +178,7 @@ export default function CrawlReport() {
                   ? computeDelta(matchedDevs, prevMatchedDevs)
                   : null
               }
-              linkTo={`/crawl-report/${token}/results`}
+              linkTo={`${basePath}/results`}
             />
             <SplitStat
               number={matchedApps}
@@ -187,7 +188,7 @@ export default function CrawlReport() {
                   ? computeDelta(matchedApps, prevMatchedApps)
                   : null
               }
-              linkTo={`/crawl-report/${token}/results`}
+              linkTo={`${basePath}/results`}
             />
           </div>
         </div>

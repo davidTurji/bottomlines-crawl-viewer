@@ -1,7 +1,7 @@
 import { FormEvent, useEffect, useState } from "react";
-import { useParams } from "react-router-dom";
 import { Lock } from "lucide-react";
 import { api, ApiError, MOCK, onUnauthorized } from "@/lib/api";
+import { useReportScope } from "@/lib/reportScope";
 import bottomlineSidebarLogo from "@/assets/bottomline-sidebar-logo.png";
 
 /**
@@ -17,7 +17,7 @@ import bottomlineSidebarLogo from "@/assets/bottomline-sidebar-logo.png";
  * MOCK mode never 401s, so the gate is invisible there by construction.
  */
 export default function LoginGate({ children }: { children: React.ReactNode }) {
-  const { token = "" } = useParams();
+  const { token } = useReportScope();
   const [locked, setLocked] = useState(false);
   const [epoch, setEpoch] = useState(0);
 
