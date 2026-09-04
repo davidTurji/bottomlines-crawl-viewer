@@ -50,7 +50,7 @@ export function AppSidebar() {
     if (!token) return;
     let alive = true;
     api
-      .discovered(token, { page: 1, page_size: 1 })
+      .discoveredLines(token, { page: 1, page_size: 1 })
       .then((p) => {
         if (alive) setHasDiscovered((p?.total ?? 0) > 0);
       })

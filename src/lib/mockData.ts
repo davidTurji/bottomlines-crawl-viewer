@@ -18,7 +18,11 @@ import type {
   DeveloperEventsPage,
   DeveloperEvent,
   DiscoveredLine,
-  DiscoveredPage,
+  DiscoveredLineKey,
+  DiscoveredLinesPage,
+  DiscoveredPlacement,
+  DiscoveredPlacementsPage,
+  DiscoveredTotals,
   LineEventsPage,
   LineEvent,
   MatchedDevelopersPage,
@@ -774,19 +778,19 @@ export function linesForDeveloper(developer_id: number): LineEvent[] {
 // ─────────────────────────────────────────────────────────────────
 
 /*
- * Seed for the "Discovered lines" page: the sheet a discovery crawl
- * produces, where a line is kept because its SSP domain is on the run's
+ * Seed for the "Discovered lines" page, grouped by LINE rather than by
+ * (publisher x line): a line is kept because its SSP domain is on the run's
  * discover_domains list, not because it matched an exact seat line.
  *
  * Modelled on the operator's real case: a crawl for carambola.com and
- * carambo.la with no seat lines at all. Most rows therefore carry one of
+ * carambo.la with no seat lines at all. Most lines therefore carry one of
  * those two domains; a couple of others are mixed in because an operator
  * usually lists every domain a partner is known to publish under.
  *
- * Shape is DISCOVERED_COLUMNS from bottomlines-crawl
- * services/run_export.py, and the ordering matches _DISCOVERED_SQL
- * (developer_domain, ssp_domain, publisher_id) so a screenshot of this
- * table and the downloaded workbook read the same way.
+ * Shape and ordering are the contract documented on api.discoveredLines:
+ * placements_count DESC, then ssp_domain, then publisher_id, with a
+ * previous-crawl count on every line so the weekly delta is a real
+ * subtraction rather than a decoration.
  */
 
 /** Discovery domains, weighted: the two real ones dominate. */
@@ -801,19 +805,26 @@ const DISCOVERY_SSP_PICK: string[] = DISCOVERY_SSPS.flatMap((s) =>
   Array<string>(s.weight).fill(s.domain),
 );
 
-/* 20 x 9 = 180 distinct developer names, so the sheet spans ~180 domains
- * the way a real discovery run does: a long list of publishers nobody on
- * the customer side has heard of, which is exactly the point of the page. */
+/* 40 x 16 = 640 distinct publisher names, so the widest line (431
+ * publishers) has a real roster to draw from without repeating anyone, and
+ * the roster reads the way a discovery run's does: a long list of
+ * publishers nobody on the customer side has heard of, which is exactly the
+ * point of the page. */
 const DISCOVERED_PREFIX = [
   "Hollow Creek", "Ridgeline", "Copper Kettle", "Saltmarsh", "Bright Anvil",
   "Fernhill", "Windward", "Barrowfield", "Lowtide", "Kestrelwood",
   "Amber Row", "Northbank", "Stonefall", "Wildergreen", "Pale Harbor",
   "Tinderbox", "Clearwater", "Highfen", "Rookery", "Gladewater",
+  "Thistledown", "Oxbow", "Marlstone", "Quiet Harbor", "Bramblewick",
+  "Falconridge", "Greyhawk", "Hartfield", "Ivory Gate", "Junipergrove",
+  "Kelpwood", "Larkfield", "Millrace", "Netherfold", "Orchard Row",
+  "Pinewater", "Quarryside", "Redgate", "Sablewood", "Thornbury",
 ];
 
 const DISCOVERED_SUFFIX = [
   "Media", "Studios", "Networks", "Publishers", "Interactive",
-  "Broadcasting", "Games", "Digital", "Press",
+  "Broadcasting", "Games", "Digital", "Press", "Group",
+  "Labs", "Collective", "Partners", "Works", "House", "Company",
 ];
 
 /** A publisher account id in the shape the named SSP hands out. */
@@ -839,80 +850,261 @@ function discoveredCertId(n: number): string {
   return out;
 }
 
-function buildDiscovered(): DiscoveredLine[] {
-  const rnd = xorshift(90_210);
-  const rows: DiscoveredLine[] = [];
-  let n = 0;
-  for (let i = 0; i < DISCOVERED_PREFIX.length * DISCOVERED_SUFFIX.length; i += 1) {
+/** The publisher roster a discovery crawl walks. Deduped by domain. */
+type MockDiscoveryPublisher = {
+  developer_domain: string;
+  developer_name: string;
+  platform: string;
+};
+
+function buildDiscoveryPublishers(): MockDiscoveryPublisher[] {
+  const rnd = xorshift(51_477);
+  const seen = new Set<string>();
+  const out: MockDiscoveryPublisher[] = [];
+  const total = DISCOVERED_PREFIX.length * DISCOVERED_SUFFIX.length;
+  for (let i = 0; i < total; i += 1) {
     const name = `${DISCOVERED_PREFIX[i % DISCOVERED_PREFIX.length]} ${
-      DISCOVERED_SUFFIX[Math.floor(i / DISCOVERED_PREFIX.length) % DISCOVERED_SUFFIX.length]
+      DISCOVERED_SUFFIX[
+        Math.floor(i / DISCOVERED_PREFIX.length) % DISCOVERED_SUFFIX.length
+      ]
     }`;
     const platform = PLATFORMS[Math.floor(rnd() * PLATFORMS.length)];
-    const domain = domainFor(name, platform, i);
-    // A web-only publisher has no store presence, so no app count and no
-    // app-ads.txt; everyone else is app-first with a handful of titles.
-    const isWeb = platform === "Web";
-    const appCount = isWeb ? 0 : 1 + Math.floor(rnd() * 40);
-    // Long tail: most publishers carry one to four of these lines, a few
-    // carry a dozen because they run the SSP across many placements.
-    const r = rnd();
-    const lineCount =
-      r < 0.08
-        ? 8 + Math.floor(rnd() * 7)
-        : r < 0.35
-          ? 4 + Math.floor(rnd() * 5)
-          : 2 + Math.floor(rnd() * 4);
-    for (let k = 0; k < lineCount; k += 1) {
-      n += 1;
-      const ssp = DISCOVERY_SSP_PICK[Math.floor(rnd() * DISCOVERY_SSP_PICK.length)];
-      const hasCert = rnd() < 0.55;
-      // A publisher normally holds one account per SSP and repeats it
-      // across relationships, cert ids and both files; a minority run a
-      // second account (a sales house, a legacy migration), so the id is
-      // keyed on the publisher and the SSP rather than on the row.
-      const account = i * 97 + (rnd() < 0.22 ? 1_013 : 0);
-      rows.push({
-        developer_domain: domain,
-        developer_name: name,
-        developer_platform: platform,
-        ssp_domain: ssp,
-        publisher_id: discoveredPublisherId(ssp, account),
-        relationship: rnd() < 0.42 ? "DIRECT" : "RESELLER",
-        cert_id: hasCert ? discoveredCertId(n + i) : "",
-        // A web publisher can only be found in ads.txt; an app publisher
-        // usually in app-ads.txt, sometimes in both files.
-        found_in: isWeb ? "ads.txt" : rnd() < 0.78 ? "app-ads.txt" : "ads.txt",
-        developer_app_count: appCount,
-      });
-    }
+    const developer_domain = domainFor(name, platform, i);
+    if (seen.has(developer_domain)) continue;
+    seen.add(developer_domain);
+    out.push({ developer_domain, developer_name: name, platform });
   }
-  // The SQL SELECTs DISTINCT, so two identical (developer, ssp, publisher
-  // id, relationship, cert, file) facts collapse into one row there and
-  // must collapse here too.
+  return out;
+}
+
+const DISCOVERY_PUBLISHERS = buildDiscoveryPublishers();
+
+/** A line before its placements are attached. */
+type MockLineSpec = {
+  ssp_domain: string;
+  publisher_id: string;
+  relationship: string;
+  cert_id: string;
+  placements_count: number;
+  previous_placements_count: number | null;
+};
+
+/*
+ * The head of the list, written by hand rather than generated, for one
+ * reason: the first screen has to show all four delta states. A reviewer
+ * looking at a screenshot should be able to see "up", "down", "no change"
+ * and "new" without scrolling or filtering, and a generator seeded to
+ * produce a pleasing head is a generator that will stop producing one the
+ * next time the seed moves.
+ *
+ * The counts are the operator's real shape: two lines carried by hundreds
+ * of publishers, then a fall-off.
+ */
+const DISCOVERED_HEAD: MockLineSpec[] = [
+  {
+    ssp_domain: "carambola.com",
+    publisher_id: "1042318",
+    relationship: "RESELLER",
+    cert_id: "4a7be0c1d9f23b58",
+    placements_count: 431,
+    previous_placements_count: 402, // up 29
+  },
+  {
+    ssp_domain: "carambo.la",
+    publisher_id: "618402",
+    relationship: "RESELLER",
+    cert_id: "",
+    placements_count: 387,
+    previous_placements_count: 391, // down 4
+  },
+  {
+    ssp_domain: "carambola.com",
+    publisher_id: "2884190",
+    relationship: "DIRECT",
+    cert_id: "b1f4c72e5a08d9c3",
+    placements_count: 264,
+    previous_placements_count: 264, // no change
+  },
+  {
+    ssp_domain: "carambo.la",
+    publisher_id: "774061",
+    relationship: "RESELLER",
+    cert_id: "9c02ea41b7d5f6a8",
+    placements_count: 198,
+    previous_placements_count: null, // new this week
+  },
+  {
+    ssp_domain: "carambola.com",
+    publisher_id: "3390514",
+    relationship: "RESELLER",
+    cert_id: "",
+    placements_count: 176,
+    previous_placements_count: 151, // up 25
+  },
+  {
+    ssp_domain: "carambolamedia.com",
+    publisher_id: "cm41288",
+    relationship: "RESELLER",
+    cert_id: "77d3b0e9c142a5fb",
+    placements_count: 143,
+    previous_placements_count: 158, // down 15
+  },
+];
+
+/*
+ * The tail. Long-tailed on purpose: a handful of lines on 90+ publishers,
+ * a band in the twenties to eighties, and most on a single digit's worth,
+ * which is what a discovery run against two partner domains actually
+ * returns.
+ */
+function buildDiscoveredTail(): MockLineSpec[] {
+  const rnd = xorshift(90_210);
+  const out: MockLineSpec[] = [];
+  for (let i = 0; i < 164; i += 1) {
+    const ssp = DISCOVERY_SSP_PICK[Math.floor(rnd() * DISCOVERY_SSP_PICK.length)];
+    const account = 7 + i * 97;
+    const r = rnd();
+    const placements_count =
+      r < 0.05
+        ? 90 + Math.floor(rnd() * 130)
+        : r < 0.18
+          ? 24 + Math.floor(rnd() * 60)
+          : r < 0.47
+            ? 6 + Math.floor(rnd() * 16)
+            : 1 + Math.floor(rnd() * 5);
+    // Delta mix, weighted so growth leads (a discovery domain a partner is
+    // actively selling spreads week over week) without hiding the losses.
+    const d = rnd();
+    const swing = (pct: number) =>
+      1 + Math.floor(rnd() * Math.max(2, Math.round(placements_count * pct)));
+    let previous_placements_count: number | null;
+    if (d < 0.14) {
+      previous_placements_count = null; // new this week
+    } else if (d < 0.52) {
+      previous_placements_count = Math.max(1, placements_count - swing(0.12));
+    } else if (d < 0.76) {
+      previous_placements_count = placements_count + swing(0.1);
+    } else {
+      previous_placements_count = placements_count;
+    }
+    out.push({
+      ssp_domain: ssp,
+      publisher_id: discoveredPublisherId(ssp, account),
+      relationship: rnd() < 0.28 ? "DIRECT" : "RESELLER",
+      cert_id: rnd() < 0.5 ? discoveredCertId(account + i) : "",
+      placements_count,
+      previous_placements_count,
+    });
+  }
+  return out;
+}
+
+/**
+ * Publishers carrying one line. Walks a contiguous window of the roster
+ * from a per-line offset, so two lines overlap the way two accounts on the
+ * same SSP really do, every publisher on a line is distinct, and the whole
+ * thing stays deterministic across reloads.
+ */
+function placementsFor(spec: MockLineSpec, i: number): DiscoveredPlacement[] {
+  const pool = DISCOVERY_PUBLISHERS;
+  const rnd = xorshift(1_000_003 + i * 7_919);
+  const start = (i * 137) % pool.length;
+  const count = Math.min(spec.placements_count, pool.length);
+  const rows: DiscoveredPlacement[] = [];
+  for (let k = 0; k < count; k += 1) {
+    const pub = pool[(start + k) % pool.length];
+    rows.push({
+      developer_domain: pub.developer_domain,
+      developer_name: pub.developer_name,
+      platform: pub.platform,
+      // A web publisher can only be found in ads.txt; an app publisher is
+      // usually in app-ads.txt and occasionally in both.
+      found_in:
+        pub.platform === "Web"
+          ? "ads.txt"
+          : rnd() < 0.8
+            ? "app-ads.txt"
+            : "ads.txt",
+    });
+  }
+  return rows.sort(
+    (a, b) =>
+      a.developer_domain.localeCompare(b.developer_domain) ||
+      a.found_in.localeCompare(b.found_in),
+  );
+}
+
+function buildDiscoveredLines(): DiscoveredLine[] {
+  const specs = [...DISCOVERED_HEAD, ...buildDiscoveredTail()];
+  // A line's identity is the four-tuple, so collapse duplicates the way
+  // GROUP BY would.
   const seen = new Set<string>();
-  const deduped = rows.filter((r) => {
-    const key = [
-      r.developer_domain,
-      r.ssp_domain,
-      r.publisher_id,
-      r.relationship,
-      r.cert_id,
-      r.found_in,
-    ].join("|");
+  const unique = specs.filter((s) => {
+    const key = [s.ssp_domain, s.publisher_id, s.relationship, s.cert_id].join("|");
     if (seen.has(key)) return false;
     seen.add(key);
     return true;
   });
-  // Same ORDER BY as _DISCOVERED_SQL.
-  return deduped.sort(
+  // Same ORDER BY the endpoint promises: widest first, then alphabetical.
+  unique.sort(
     (a, b) =>
-      a.developer_domain.localeCompare(b.developer_domain) ||
+      b.placements_count - a.placements_count ||
       a.ssp_domain.localeCompare(b.ssp_domain) ||
       a.publisher_id.localeCompare(b.publisher_id),
   );
+  return unique.map((s, i) => ({ ...s, placements: placementsFor(s, i) }));
 }
 
-const DISCOVERED = buildDiscovered();
+const DISCOVERED_LINES = buildDiscoveredLines();
+
+/**
+ * Lines that were in last week's crawl and are gone from this one, by
+ * discovery domain. They exist only so the summary row's previous-week
+ * total is honest: the rows a crawl returns cover lines that still exist,
+ * so summing them would erase every disappearance and make every week look
+ * like growth. The live endpoint counts the previous crawl directly and
+ * never needs this table.
+ */
+const DISCOVERY_VANISHED: Record<string, { lines: number; placements: number }> = {
+  "carambola.com": { lines: 4, placements: 62 },
+  "carambo.la": { lines: 3, placements: 41 },
+  "carambolamedia.com": { lines: 1, placements: 9 },
+  "sonobi.com": { lines: 0, placements: 0 },
+};
+
+/** Embed threshold, mirroring the rule stated in the api.ts contract. */
+const DISCOVERED_EMBED_MAX = 20;
+
+function discoveredTotals(pool: DiscoveredLine[]): DiscoveredTotals {
+  let placements = 0;
+  let previous_lines = 0;
+  let previous_placements = 0;
+  const ssps = new Set<string>();
+  for (const l of pool) {
+    placements += l.placements_count;
+    ssps.add(l.ssp_domain);
+    if (l.previous_placements_count != null) {
+      previous_lines += 1;
+      previous_placements += l.previous_placements_count;
+    }
+  }
+  for (const ssp of ssps) {
+    const gone = DISCOVERY_VANISHED[ssp];
+    if (!gone) continue;
+    previous_lines += gone.lines;
+    previous_placements += gone.placements;
+  }
+  return {
+    lines: pool.length,
+    placements,
+    previous_lines: pool.length === 0 ? null : previous_lines,
+    previous_placements: pool.length === 0 ? null : previous_placements,
+  };
+}
+
+function lineKeyOf(k: DiscoveredLineKey): string {
+  return [k.ssp_domain, k.publisher_id, k.relationship, k.cert_id].join("|");
+}
 
 /**
  * Filtering matches the live line-events behaviour: ssp_domain is a
@@ -920,21 +1112,21 @@ const DISCOVERED = buildDiscovered();
  * and carambo.la, and "la" keeps carambo.la alone.
  *
  * Mock-only escape hatch: adding ``?discovery=none`` to the URL empties the
- * sheet, which is how the seat-line-only empty state is reviewed without a
+ * list, which is how the seat-line-only empty state is reviewed without a
  * second fixture set. Never reached in a production build, where MOCK is
  * false and this module is tree-shaken out.
  */
-export function mockDiscovered(opts: {
+export function mockDiscoveredLines(opts: {
   page?: number;
   page_size?: number;
   ssp_domain?: string;
-}): DiscoveredPage {
+}): DiscoveredLinesPage {
   const page = opts.page ?? 1;
   const pageSize = opts.page_size ?? 50;
   const emptied =
     typeof window !== "undefined" &&
     new URLSearchParams(window.location.search).get("discovery") === "none";
-  let pool = emptied ? [] : DISCOVERED;
+  let pool = emptied ? [] : DISCOVERED_LINES;
   if (opts.ssp_domain) {
     const needle = opts.ssp_domain.trim().toLowerCase();
     pool = pool.filter((r) => r.ssp_domain.toLowerCase().includes(needle));
@@ -944,7 +1136,33 @@ export function mockDiscovered(opts: {
     page,
     page_size: pageSize,
     total: pool.length,
-    rows: pool.slice(start, start + pageSize),
+    totals: discoveredTotals(pool),
+    // Strip the embedded placements above the threshold, exactly as the
+    // proposed endpoint would, so the card's fetch-on-expand path is what
+    // a mock review actually exercises on the wide lines.
+    rows: pool.slice(start, start + pageSize).map((l) =>
+      l.placements && l.placements.length <= DISCOVERED_EMBED_MAX
+        ? l
+        : { ...l, placements: undefined },
+    ),
+  };
+}
+
+export function mockDiscoveredLinePlacements(
+  key: DiscoveredLineKey,
+  opts: { page?: number; page_size?: number },
+): DiscoveredPlacementsPage {
+  const page = opts.page ?? 1;
+  const pageSize = opts.page_size ?? 100;
+  const wanted = lineKeyOf(key);
+  const line = DISCOVERED_LINES.find((l) => lineKeyOf(l) === wanted);
+  const rows = line?.placements ?? [];
+  const start = (page - 1) * pageSize;
+  return {
+    page,
+    page_size: pageSize,
+    total: rows.length,
+    rows: rows.slice(start, start + pageSize),
   };
 }
 

@@ -259,34 +259,171 @@ export const api = {
     return page.rows.filter((r) => r.developer_id === developer_id);
   },
   /**
-   * Lines the crawl kept because their SSP domain is on the run's discovery
-   * list, rather than because they matched an exact seat line.
+   * ─────────────────────────────────────────────────────────────────
+   * DISCOVERED LINES — proposed backend contract
+   * ─────────────────────────────────────────────────────────────────
    *
-   * A discovery-only crawl (the operator asks "who carries carambola.com?"
-   * with no seat lines at all) produces rows here and nowhere else, so this
-   * is its own endpoint rather than a flag on line-events: the shape is the
-   * export's Discovered sheet, one row per developer x SSP x publisher id x
-   * file, not a week-over-week event.
+   * The old endpoint returned the export workbook's Discovered sheet
+   * verbatim: one row per (developer x SSP x publisher id x file). That is
+   * the right shape for a spreadsheet and the wrong shape for the screen,
+   * because the reader's unit is THE LINE. The same
+   * "carambola.com, 1042318, RESELLER" appears on four hundred publishers
+   * and produced four hundred rows, which buried the one fact the weekly
+   * crawl exists to deliver: is this line on more publishers than it was
+   * last week, or fewer.
    *
-   * Column contract mirrors DISCOVERED_COLUMNS in the crawler's
-   * services/run_export.py, so this screen and the downloaded workbook
-   * cannot disagree.
+   * So the API groups. Two endpoints, both token-scoped like every other
+   * viewer call, both behind the same session cookie:
+   *
+   * ── 1. The list ───────────────────────────────────────────────────
+   *
+   *   GET /v1/viewer/{token}/discovered-lines
+   *       ?page=1                 (1-based, default 1)
+   *       &page_size=50           (default 50, cap 200)
+   *       &ssp_domain=caramb      (optional, case-insensitive SUBSTRING
+   *                                match on ssp_domain, same semantics as
+   *                                the line-events filter)
+   *
+   *   200 →
+   *   {
+   *     "page": 1,
+   *     "page_size": 50,
+   *     "total": 170,               // distinct lines matching the filter
+   *     "totals": {                 // whole filtered set, NOT this page
+   *       "lines": 170,
+   *       "placements": 4102,
+   *       "previous_lines": 158,    // null if there is no previous crawl
+   *       "previous_placements": 3894
+   *     },
+   *     "rows": [
+   *       {
+   *         "ssp_domain": "carambola.com",
+   *         "publisher_id": "1042318",
+   *         "relationship": "RESELLER",
+   *         "cert_id": "4a7be0c1d9f23b58",   // "" when the file omits it
+   *         "placements_count": 431,
+   *         "previous_placements_count": 402, // null = line is new this week
+   *         "placements": [ ...DiscoveredPlacement ]  // OPTIONAL, see below
+   *       }
+   *     ]
+   *   }
+   *
+   *   Ordering: placements_count DESC, then ssp_domain ASC, then
+   *   publisher_id ASC. Head first, because "which of my lines is the most
+   *   widely carried" is the question the page is opened with, and the
+   *   secondary keys make the order total and therefore stable across
+   *   pages.
+   *
+   *   A line's identity is the whole four-tuple
+   *   (ssp_domain, publisher_id, relationship, cert_id). Two rows that
+   *   differ only in cert_id are two different ads.txt lines and must stay
+   *   apart: a publisher rotating a cert is exactly the change the report
+   *   has to be able to show.
+   *
+   *   `placements` is an OPTIONAL embed. The backend SHOULD include it when
+   *   placements_count <= 20 and MUST omit it above that, so one widely
+   *   carried line cannot turn a page of 50 into a multi-megabyte payload.
+   *   The client treats a present array as authoritative and falls back to
+   *   endpoint 2 when it is absent, so the threshold can be retuned server
+   *   side without a frontend change.
+   *
+   *   `previous_placements_count` is null in exactly two cases, which the
+   *   UI renders identically ("new"): the line did not exist in the
+   *   previous crawl, or there is no previous crawl at all. When there is
+   *   no previous crawl, `totals.previous_*` are also null, which is how
+   *   the summary row knows to say "first crawl" instead of a direction.
+   *
+   *   `totals` is computed over the FILTERED set, not the page and not the
+   *   whole crawl, so the summary row on screen always describes exactly
+   *   the cards under it. `previous_placements` must be counted in the
+   *   previous crawl (restricted to the same discovery domains and the same
+   *   ssp_domain filter), NOT derived by summing the rows above: rows only
+   *   cover lines that still exist this week, so a line that vanished
+   *   entirely would silently drop out of last week's total and make every
+   *   week look like growth.
+   *
+   * ── 2. One line's placements ──────────────────────────────────────
+   *
+   *   GET /v1/viewer/{token}/discovered-lines/placements
+   *       ?ssp_domain=carambola.com    (all four required, EXACT match)
+   *       &publisher_id=1042318
+   *       &relationship=RESELLER
+   *       &cert_id=                    (empty string is a valid value)
+   *       &page=1
+   *       &page_size=100               (default 100, cap 500)
+   *
+   *   200 →
+   *   {
+   *     "page": 1, "page_size": 100, "total": 431,
+   *     "rows": [
+   *       {
+   *         "developer_domain": "hollowcreekmedia.com",
+   *         "developer_name": "Hollow Creek Media",
+   *         "platform": "Web",
+   *         "found_in": "ads.txt"        // "ads.txt" | "app-ads.txt"
+   *       }
+   *     ]
+   *   }
+   *
+   *   The key travels as query params rather than a path segment on
+   *   purpose: publisher_id is publisher-controlled free text (slashes,
+   *   spaces and dots all occur in the wild) and cert_id is legitimately
+   *   the empty string, neither of which survives a path segment cleanly.
+   *
+   *   Ordering: developer_domain ASC, then found_in ASC. Alphabetical, so
+   *   a reader scanning a 400-row list can find a publisher by eye, and so
+   *   a publisher listed in both files shows its two rows adjacent.
+   *
+   *   `found_in` arrives pre-rendered as the filename the reader
+   *   recognises, not the internal file_kind enum, matching the old
+   *   Discovered sheet.
+   *
+   *   404 is NOT the answer for an unknown line key; an empty rows array
+   *   with total 0 is, because 404 on a token-scoped path trips the
+   *   dead-share-link handler above and would throw the reader out of a
+   *   report that is perfectly alive.
    */
-  discovered: async (
+  discoveredLines: async (
     token: string,
     opts: { page?: number; page_size?: number; ssp_domain?: string } = {},
   ) => {
     if (MOCK) {
-      const { mockDiscovered } = await import("./mockData");
-      return mockDiscovered(opts);
+      const { mockDiscoveredLines } = await import("./mockData");
+      return mockDiscoveredLines(opts);
     }
     const q = new URLSearchParams();
     q.set("page", String(opts.page ?? 1));
     q.set("page_size", String(opts.page_size ?? 50));
     if (opts.ssp_domain) q.set("ssp_domain", opts.ssp_domain);
-    return req<DiscoveredPage>(
+    return req<DiscoveredLinesPage>(
       "GET",
-      `/v1/viewer/${token}/discovered?${q.toString()}`,
+      `/v1/viewer/${token}/discovered-lines?${q.toString()}`,
+    );
+  },
+  /**
+   * Every publisher carrying one discovered line, for the card expansion.
+   * Only called when the list response did not embed `placements`, i.e. for
+   * the wide lines, which are the ones worth a round trip.
+   */
+  discoveredLinePlacements: async (
+    token: string,
+    key: DiscoveredLineKey,
+    opts: { page?: number; page_size?: number } = {},
+  ) => {
+    if (MOCK) {
+      const { mockDiscoveredLinePlacements } = await import("./mockData");
+      return mockDiscoveredLinePlacements(key, opts);
+    }
+    const q = new URLSearchParams();
+    q.set("ssp_domain", key.ssp_domain);
+    q.set("publisher_id", key.publisher_id);
+    q.set("relationship", key.relationship);
+    q.set("cert_id", key.cert_id);
+    q.set("page", String(opts.page ?? 1));
+    q.set("page_size", String(opts.page_size ?? 100));
+    return req<DiscoveredPlacementsPage>(
+      "GET",
+      `/v1/viewer/${token}/discovered-lines/placements?${q.toString()}`,
     );
   },
   chat: async function* (
@@ -438,40 +575,85 @@ export type MatchedBundlesPage = {
 };
 
 /**
- * One discovered line, keyed exactly like the export workbook's Discovered
- * sheet (DISCOVERED_COLUMNS / _DISCOVERED_SQL in the crawler repo):
- *
- *   developer_domain      Developer domain
- *   developer_name        Developer
- *   developer_platform    Platform
- *   ssp_domain            SSP domain
- *   publisher_id          Publisher ID
- *   relationship          Relationship
- *   cert_id               Cert ID
- *   found_in              Found in        ("ads.txt" | "app-ads.txt")
- *   developer_app_count   Apps
- *
- * The SQL COALESCEs the three text columns to "" rather than NULL, so they
- * are typed as plain strings here, and found_in arrives pre-rendered as the
- * filename the reader recognises, not the internal file_kind enum.
+ * One place a discovered line was found: a publisher, and which of their two
+ * files carried it. The SQL COALESCEs the text columns to "" rather than
+ * NULL, so they are plain strings here.
  */
-export type DiscoveredLine = {
+export type DiscoveredPlacement = {
   developer_domain: string;
   developer_name: string;
-  developer_platform: string;
+  platform: string;
+  /** "ads.txt" or "app-ads.txt", pre-rendered, not the file_kind enum. */
+  found_in: string;
+};
+
+/**
+ * One discovered ads.txt line, which is the unit this page is built on.
+ *
+ * The first four fields ARE the line as it appears in the file, in file
+ * order, and together they are its identity:
+ *
+ *   carambola.com, 1042318, RESELLER, 4a7be0c1d9f23b58
+ *   ssp_domain     publisher_id  relationship  cert_id
+ *
+ * cert_id is "" (never null) when the publisher's file omits the fourth
+ * field, which is the majority case.
+ */
+export type DiscoveredLine = {
   ssp_domain: string;
   publisher_id: string;
   relationship: string;
   cert_id: string;
-  found_in: string;
-  developer_app_count: number;
+  /** Publishers carrying this exact line in this crawl. */
+  placements_count: number;
+  /**
+   * The same count in the previous crawl, which is what the weekly delta
+   * chip is computed from. Null means there is nothing to compare against:
+   * either the line is new this week, or this is the first crawl.
+   */
+  previous_placements_count: number | null;
+  /**
+   * Embedded placements, present only for narrow lines (see the contract
+   * note on api.discoveredLines). Absent means "ask the placements
+   * endpoint", it never means "this line has no placements".
+   */
+  placements?: DiscoveredPlacement[];
 };
 
-export type DiscoveredPage = {
+/** The four fields that identify a line, for the placements endpoint. */
+export type DiscoveredLineKey = {
+  ssp_domain: string;
+  publisher_id: string;
+  relationship: string;
+  cert_id: string;
+};
+
+/**
+ * Crawl-wide (well, filter-wide) counts for the summary row. Backend
+ * computes these over the filtered set; the client must not sum the rows,
+ * which only cover lines that still exist this week.
+ */
+export type DiscoveredTotals = {
+  lines: number;
+  placements: number;
+  /** Both null when there is no previous crawl to compare against. */
+  previous_lines: number | null;
+  previous_placements: number | null;
+};
+
+export type DiscoveredLinesPage = {
   page: number;
   page_size: number;
   total: number;
+  totals: DiscoveredTotals;
   rows: DiscoveredLine[];
+};
+
+export type DiscoveredPlacementsPage = {
+  page: number;
+  page_size: number;
+  total: number;
+  rows: DiscoveredPlacement[];
 };
 
 export type ChatFrame =
