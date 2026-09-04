@@ -31,6 +31,23 @@ export function onUnauthorized(handler: (() => void) | null) {
   unauthorizedHandler = handler;
 }
 
+// ── 404 fan-out (dead share token) ───────────────────────────────
+// A revoked, deleted or expired report answers 404, not 401: there is
+// no report behind the token, so there are no credentials that would
+// open it. Sending that reader to the sign-in card would have them
+// retype a password that can never work, so it trips its own handler
+// and the gate shows the expired-link card instead.
+//
+// Only the token-scoped endpoints (/v1/viewer/{token}/...) count. The
+// resolve endpoint is deliberately excluded: it has no token yet, and
+// the readable scope route already renders the expired card itself.
+let deadLinkHandler: (() => void) | null = null;
+export function onDeadLink(handler: (() => void) | null) {
+  deadLinkHandler = handler;
+}
+
+const TOKEN_SCOPED = /^\/v1\/viewer\/[^/]+\/.+$/;
+
 // ── Auth epoch ───────────────────────────────────────────────────
 // Guards against a stale-401 re-lock race: a data request fired
 // before sign-in can come back 401 *after* the login succeeded, and
@@ -44,6 +61,7 @@ async function req<T>(
   method: string,
   path: string,
   body?: unknown,
+  signal?: AbortSignal,
 ): Promise<T> {
   const epochAtStart = authEpoch;
   // Path without its query string, so the two exemptions below compare
@@ -56,8 +74,14 @@ async function req<T>(
     credentials: "include",
     headers: body ? { "Content-Type": "application/json" } : {},
     body: body ? JSON.stringify(body) : undefined,
+    signal,
   });
   if (!res.ok) {
+    // A dead token: no report to sign in to, so the gate shows the
+    // expired-link card rather than the password form.
+    if (res.status === 404 && TOKEN_SCOPED.test(endpoint)) {
+      deadLinkHandler?.();
+    }
     // The auth endpoint's own 401 means "wrong credentials", not
     // "session expired": it must not re-trip the gate, only surface
     // as the form's error state.
@@ -87,11 +111,21 @@ export const api = {
    *
    * In MOCK mode any slug resolves to the demo token, so the readable
    * routes are exercisable with VITE_MOCK=true and no backend.
+   *
+   * Takes a signal because this call sits in front of the whole app: a
+   * backend that accepts the connection and then never answers would
+   * otherwise leave the reader on a spinner forever, so the caller
+   * arms an abort timeout (see ReportScopeRoutes.tsx).
    */
-  resolve: async (slug: string, shortId: string) => {
+  resolve: async (slug: string, shortId: string, signal?: AbortSignal) => {
     if (MOCK) return { token: "demo-token" };
     const q = new URLSearchParams({ slug, short_id: shortId });
-    return req<{ token: string }>("GET", `/v1/viewer/resolve?${q.toString()}`);
+    return req<{ token: string }>(
+      "GET",
+      `/v1/viewer/resolve?${q.toString()}`,
+      undefined,
+      signal,
+    );
   },
   /**
    * Username + password sign-in for a share token. The API answers with

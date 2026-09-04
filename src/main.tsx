@@ -4,9 +4,13 @@ import { BrowserRouter, Navigate, Route, Routes } from "react-router-dom";
 
 import {
   ReadableReportScope,
-  ReportNoticeCard,
+  ReportSubpathRedirect,
   TokenReportScope,
 } from "./components/ReportScopeRoutes";
+import {
+  EXPIRED_LINK_MESSAGE,
+  ReportNoticeCard,
+} from "./components/ReportNoticeCard";
 import CrawlReport from "./routes/CrawlReport";
 import CrawlChanges from "./routes/CrawlChanges";
 import CrawlResults from "./routes/CrawlResults";
@@ -30,15 +34,24 @@ import "./index.css";
  *
  * Route ranking, not ordering, keeps the two apart: react-router scores a
  * static segment above a dynamic one, so /crawl-report/xyz always matches
- * the tokened route and never /:slug/:shortId. The readable scope matches
- * exactly two segments plus its named children, so it cannot swallow an
- * arbitrary deep path either — those fall to the catch-all.
+ * the tokened route and never /:slug/:shortId. /:slug/:shortId is still
+ * greedy about everything else, though, so two things fence it in:
+ *
+ *   - reserved first segments (src/lib/reservedPaths.ts) are never read
+ *     as a customer slug, so a missing /assets/... chunk falling through
+ *     nginx's SPA rule cannot fire a resolve call or render the shell;
+ *   - the trailing "*" child below turns a mistyped sub-path under a real
+ *     report into a redirect to that report's overview, rather than the
+ *     dead-end card, which would be a lie about a link that works.
  */
 const reportPages = (
   <>
     <Route index element={<CrawlReport />} />
     <Route path="changes" element={<CrawlChanges />} />
     <Route path="results" element={<CrawlResults />} />
+    {/* Unknown sub-path of a valid report: the link is fine, the page
+        name is not. Send the reader to the overview. */}
+    <Route path="*" element={<ReportSubpathRedirect />} />
   </>
 );
 
@@ -57,14 +70,10 @@ const tree = (
         {reportPages}
       </Route>
 
-      {/* Anything else — a one-segment path, a deep path under no report —
-          gets the same honest dead-end card rather than a blank screen. */}
-      <Route
-        path="*"
-        element={
-          <ReportNoticeCard message="This report link is not valid or has expired." />
-        }
-      />
+      {/* Anything else — a one-segment path, or a reserved first segment
+          the router was handed because no real file matched — gets the
+          same honest dead-end card rather than a blank screen. */}
+      <Route path="*" element={<ReportNoticeCard message={EXPIRED_LINK_MESSAGE} />} />
     </Routes>
   </BrowserRouter>
 );
