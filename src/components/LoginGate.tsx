@@ -1,7 +1,11 @@
 import { FormEvent, useEffect, useState } from "react";
-import { useParams } from "react-router-dom";
 import { Lock } from "lucide-react";
-import { api, ApiError, MOCK, onUnauthorized } from "@/lib/api";
+import { api, ApiError, MOCK, onDeadLink, onUnauthorized } from "@/lib/api";
+import { useReportScope } from "@/lib/reportScope";
+import {
+  EXPIRED_LINK_MESSAGE,
+  ReportNoticeCard,
+} from "@/components/ReportNoticeCard";
 import bottomlineSidebarLogo from "@/assets/bottomline-sidebar-logo.png";
 
 /**
@@ -14,17 +18,37 @@ import bottomlineSidebarLogo from "@/assets/bottomline-sidebar-logo.png";
  * children remount (epoch key bump) so every page refetches with the
  * fresh session cookie instead of showing its stale error state.
  *
+ * Two failures, two different answers, and telling them apart is the
+ * whole point of the dead-link branch:
+ *
+ *   401  the report exists, these credentials do not open it   -> form
+ *   404  there is no report behind this token any more         -> card
+ *
+ * A revoked or expired report used to reach the form and be told the
+ * username and password did not match, which sent the reader off to
+ * retype a password that could never work. It now gets the same
+ * expired-link card the readable scope route shows.
+ *
  * MOCK mode never 401s, so the gate is invisible there by construction.
  */
 export default function LoginGate({ children }: { children: React.ReactNode }) {
-  const { token = "" } = useParams();
+  const { token } = useReportScope();
   const [locked, setLocked] = useState(false);
+  const [dead, setDead] = useState(false);
   const [epoch, setEpoch] = useState(0);
 
   useEffect(() => {
     onUnauthorized(() => setLocked(true));
-    return () => onUnauthorized(null);
+    onDeadLink(() => setDead(true));
+    return () => {
+      onUnauthorized(null);
+      onDeadLink(null);
+    };
   }, []);
+
+  if (dead && !MOCK) {
+    return <ReportNoticeCard message={EXPIRED_LINK_MESSAGE} />;
+  }
 
   if (locked && !MOCK) {
     return (
@@ -34,6 +58,7 @@ export default function LoginGate({ children }: { children: React.ReactNode }) {
           setLocked(false);
           setEpoch((e) => e + 1);
         }}
+        onDeadLink={() => setDead(true)}
       />
     );
   }
@@ -49,9 +74,11 @@ export default function LoginGate({ children }: { children: React.ReactNode }) {
 function LoginCard({
   token,
   onAuthed,
+  onDeadLink: onDead,
 }: {
   token: string;
   onAuthed: () => void;
+  onDeadLink: () => void;
 }) {
   const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
@@ -67,7 +94,16 @@ function LoginCard({
       await api.auth(token, username.trim(), password);
       onAuthed();
     } catch (err) {
-      if (err instanceof ApiError && (err.status === 401 || err.status === 403)) {
+      const status = err instanceof ApiError ? err.status : 0;
+      // 404 no such report, 410 it was there and is gone, 403 the token
+      // was revoked. None of the three is a credentials problem, and no
+      // password the reader could type would change the answer, so they
+      // all get the expired-link card instead of the form's error line.
+      if (status === 404 || status === 410 || status === 403) {
+        onDead();
+        return;
+      }
+      if (status === 401) {
         setError("That username and password did not match. Please try again.");
       } else {
         setError("Could not reach the server. Please try again in a moment.");
