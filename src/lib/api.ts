@@ -7,10 +7,28 @@ const BASE = (import.meta.env.VITE_API_BASE as string) ?? "/api";
 // The mock adapter lives in src/lib/mockData.ts.
 export const MOCK = (import.meta.env.VITE_MOCK as string | undefined) === "true";
 
+// ── AI chat flag ─────────────────────────────────────────────────
+// The MVP backend ships no chat endpoint, so the Ask AI surface is
+// hidden unless explicitly enabled (VITE_ENABLE_CHAT=true), e.g. for
+// mock-mode demos. Default off.
+export const ENABLE_CHAT =
+  (import.meta.env.VITE_ENABLE_CHAT as string | undefined) === "true";
+
 export class ApiError extends Error {
   constructor(public status: number, message: string) {
     super(message);
   }
+}
+
+// ── 401 fan-out ──────────────────────────────────────────────────
+// The LoginGate registers one handler here; any data request that
+// comes back 401 trips it, which swaps the app for the sign-in card.
+// A callback registry rather than a thrown-error convention because
+// pages already catch ApiError for their own error states, and the
+// gate must fire regardless of what a page does with the error.
+let unauthorizedHandler: (() => void) | null = null;
+export function onUnauthorized(handler: (() => void) | null) {
+  unauthorizedHandler = handler;
 }
 
 async function req<T>(
@@ -25,6 +43,12 @@ async function req<T>(
     body: body ? JSON.stringify(body) : undefined,
   });
   if (!res.ok) {
+    // The auth endpoint's own 401 means "wrong credentials", not
+    // "session expired": it must not re-trip the gate, only surface
+    // as the form's error state.
+    if (res.status === 401 && !path.endsWith("/viewer/auth")) {
+      unauthorizedHandler?.();
+    }
     const detail = await res.text().catch(() => "");
     throw new ApiError(res.status, detail || `${method} ${path} → ${res.status}`);
   }
@@ -32,12 +56,17 @@ async function req<T>(
 }
 
 export const api = {
-  auth: async (_token: string, _idToken: string) => {
+  /**
+   * Username + password sign-in for a share token. The API answers with
+   * an httpOnly session cookie (hence credentials:"include" in req());
+   * the JSON body only confirms who signed in.
+   */
+  auth: async (token: string, username: string, password: string) => {
     if (MOCK) return { ok: true, email: "you@publisherstudios.com", customer_id: 42 };
     return req<{ ok: boolean; email: string; customer_id: number }>(
       "POST",
       `/v1/viewer/auth`,
-      { token: _token, id_token: _idToken },
+      { token, username, password },
     );
   },
   summary: async (token: string) => {

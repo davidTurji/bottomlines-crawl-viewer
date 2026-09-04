@@ -4,6 +4,7 @@ import { ChevronDown } from "lucide-react";
 import {
   api,
   ApiError,
+  ENABLE_CHAT,
   type Summary,
   type DeveloperEvent,
   type MatchedDeveloper,
@@ -195,12 +196,16 @@ export default function CrawlReport() {
       {/* Ask AI, inline, between the KPIs and the drilldown. Same shape
           bottomlines-app uses on the "Your Bottom Line" page: pill input
           with a sparkle glyph + horizontal suggestion rail; answers grow
-          in a thread below the composer. */}
-      <InlineAskAI
-        token={token}
-        suggestions={OVERVIEW_SUGGESTIONS}
-        placeholder="Ask about your crawl"
-      />
+          in a thread below the composer. Gated off by default: the MVP
+          backend has no chat endpoint. Set VITE_ENABLE_CHAT=true (e.g.
+          alongside VITE_MOCK=true) to bring it back. */}
+      {ENABLE_CHAT && (
+        <InlineAskAI
+          token={token}
+          suggestions={OVERVIEW_SUGGESTIONS}
+          placeholder="Ask about your crawl"
+        />
+      )}
 
       {/* Matched developer drilldown. Card-per-publisher list styled the
           same way as bottomlines-app's HierarchyCard: colored disc,

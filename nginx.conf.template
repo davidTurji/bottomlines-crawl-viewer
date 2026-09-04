@@ -1,0 +1,72 @@
+# nginx config for the viewer SPA on Cloud Run, modeled on
+# bottomlines-manage-console/nginx.conf plus the /api reverse proxy from
+# bottomlines-app's house pattern.
+#
+# This is a TEMPLATE: nginx:alpine's stock entrypoint runs every file in
+# /etc/nginx/templates/*.template through envsubst at container start
+# (see docker-entrypoint.sh, which derives CRAWLER_API_HOST from
+# CRAWLER_API_URL first). Only ${CRAWLER_API_URL} and ${CRAWLER_API_HOST}
+# are substituted — every other $var below is nginx's own.
+#
+# Port 8080 is Cloud Run's requirement (its ingress sends traffic there;
+# the default 80 is closed).
+server {
+    listen 8080;
+    server_name _;
+    root /usr/share/nginx/html;
+    index index.html;
+
+    # This is a private, credentialed report viewer: never indexed, and
+    # never leaking report URLs (which carry share tokens) via Referer.
+    # NOTE: nginx add_header does NOT inherit into a location that adds
+    # its own headers, so every location below that uses add_header must
+    # repeat these two.
+    add_header X-Robots-Tag "noindex, nofollow" always;
+    add_header Referrer-Policy "no-referrer" always;
+
+    # Reverse proxy to the crawler API. The trailing slash on proxy_pass
+    # strips the /api prefix, so /api/v1/viewer/... upstream becomes
+    # /v1/viewer/... — the exact behavior of the vite.config.ts dev proxy
+    # (rewrite ^/api -> ""). Same-origin by construction, so the httpOnly
+    # session cookie set by POST /v1/viewer/auth sticks with no CORS and
+    # no SameSite gymnastics.
+    location /api/ {
+        proxy_pass ${CRAWLER_API_URL}/;
+        proxy_set_header Host ${CRAWLER_API_HOST};
+        # Forward the viewer's own credentials (session cookie travels in
+        # Cookie automatically; Authorization passes through untouched).
+        # Deliberately NOT injecting any shared key here: that would
+        # authenticate every caller and reduce the login to decoration.
+        proxy_set_header Authorization $http_authorization;
+        proxy_ssl_server_name on;
+        proxy_read_timeout 120s;
+    }
+
+    # Long-cache immutable Vite chunks (they have hashed filenames).
+    location /assets/ {
+        add_header Cache-Control "public, max-age=31536000, immutable";
+        add_header X-Robots-Tag "noindex, nofollow" always;
+        add_header Referrer-Policy "no-referrer" always;
+        try_files $uri =404;
+    }
+
+    # index.html must NOT be cached: it names the current asset hashes,
+    # so a stale copy pins the browser to a previous build. no-store per
+    # the viewer's privacy posture (report data behind it is credentialed).
+    location = /index.html {
+        add_header Cache-Control "no-store" always;
+        add_header X-Robots-Tag "noindex, nofollow" always;
+        add_header Referrer-Policy "no-referrer" always;
+    }
+
+    # SPA fallback. Every non-asset URL that isn't a real file lands on
+    # the React shell and the router decides what to render. The fallback
+    # is served with THIS location's headers (not the /index.html
+    # location's), so the no-store rule is repeated here.
+    location / {
+        add_header Cache-Control "no-store" always;
+        add_header X-Robots-Tag "noindex, nofollow" always;
+        add_header Referrer-Policy "no-referrer" always;
+        try_files $uri $uri/ /index.html;
+    }
+}
