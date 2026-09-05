@@ -186,6 +186,7 @@ export const api = {
       developer_id?: number;
       matched_seat_only?: boolean;
       page?: number;
+      page_size?: number;
     } = {},
   ) => {
     if (MOCK) {

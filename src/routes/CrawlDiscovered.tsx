@@ -413,7 +413,7 @@ function LineCard({
           <div className="w-[72px]">
             {(delta.kind === "up" || delta.kind === "down") && (
               <>
-                <div className="text-[10px] uppercase tracking-wide text-slate-500">
+                <div className="text-[10px] font-medium tracking-wide text-slate-500">
                   Change
                 </div>
                 {/* Down is amber, not red: a publisher dropping a line is

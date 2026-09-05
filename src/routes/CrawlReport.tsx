@@ -675,7 +675,9 @@ export function MiniStat({
 }) {
   return (
     <div>
-      <div className="text-[10px] uppercase tracking-wide text-slate-500">
+      {/* Sentence case, never uppercase: the house rule is that labels read
+          as words, not as shouting. */}
+      <div className="text-[10px] font-medium tracking-wide text-slate-500">
         {label}
       </div>
       <div

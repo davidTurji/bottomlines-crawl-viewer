@@ -419,35 +419,160 @@ const SSPS_REMOVED = [
   "adtech.com",
 ];
 
+/*
+ * The publisher roster a line can land on.
+ *
+ * A real week's diff is not 127 unrelated events: an SSP changes its own
+ * file and the same ads.txt line then appears on, or disappears from, every
+ * publisher that syndicates it. So the seed is generated LINE FIRST, and
+ * each line fans out across some number of these publishers. Grouping the
+ * rows back up by (ssp, publisher id, relationship, cert pair, event) is
+ * what the Line changes page does, and without a fan-out every group would
+ * be a group of one, which is the shape that made the old table read as a
+ * wall of identical rows.
+ *
+ * The roster reuses the developers the developer-level panes already show,
+ * deduped, so a reader who opens a line and then a publisher sees the same
+ * names in both places.
+ */
+const LINE_PUBLISHERS: {
+  developer_id: number;
+  developer_name: string;
+  developer_domain: string;
+  platform: string;
+}[] = (() => {
+  const seen = new Set<number>();
+  const out: {
+    developer_id: number;
+    developer_name: string;
+    developer_domain: string;
+    platform: string;
+  }[] = [];
+  for (const d of [...DEV_ADDED, ...DEV_CHANGED, ...DEV_REMOVED]) {
+    if (seen.has(d.developer_id)) continue;
+    seen.add(d.developer_id);
+    out.push({
+      developer_id: d.developer_id,
+      developer_name: d.developer_name ?? `Publisher #${d.developer_id}`,
+      developer_domain: d.developer_domain ?? `pub-${d.developer_id}.example`,
+      platform: d.developer_platform ?? "Web",
+    });
+  }
+  // A few publishers that only ever show up in the line diff, so a line's
+  // roster is not always a subset of the developer panes.
+  for (const extra of [
+    { developer_id: 60_118, developer_name: "Harbor Point Media", developer_domain: "harborpoint.com", platform: "Web" },
+    { developer_id: 27_640, developer_name: "Ironwood Media", developer_domain: "ironwoodmedia.tv", platform: "Roku" },
+    { developer_id: 39_255, developer_name: "Kestrel Games", developer_domain: "kestrelgames.games", platform: "Android" },
+    { developer_id: 71_083, developer_name: "Tidewater Publishers", developer_domain: "tidewaterpub.com", platform: "Web" },
+    { developer_id: 18_446, developer_name: "Halcyon Networks", developer_domain: "halcyon.tv", platform: "Samsung" },
+    { developer_id: 55_907, developer_name: "Ember Peak Studios", developer_domain: "emberpeak.io", platform: "iOS" },
+    { developer_id: 84_312, developer_name: "Foundry Row Media", developer_domain: "foundryrow.com", platform: "Web" },
+  ]) {
+    if (seen.has(extra.developer_id)) continue;
+    seen.add(extra.developer_id);
+    out.push(extra);
+  }
+  return out;
+})();
+
+/** A 16-hex TAG-ID, the shape of a real ads.txt fourth field. */
+function certId(seed: number): string {
+  let h = (seed * 2_654_435_761) >>> 0;
+  let out = "";
+  while (out.length < 16) {
+    h = (h * 1_664_525 + 1_013_904_223) >>> 0;
+    out += h.toString(16).padStart(8, "0");
+  }
+  return out.slice(0, 16);
+}
+
+/**
+ * How many publishers the nth line of a bucket moved on. A decaying head
+ * plus a long tail of ones, which is how the real distribution looks: a
+ * handful of lines move everywhere, most move on one publisher.
+ */
+const FANOUT = [11, 9, 7, 6, 5, 4, 3, 3, 2, 2, 1, 1, 1, 1];
+
+/** The nth line's fan-out: the head decays a little on each pass, so a
+ *  bucket's cards carry a spread of counts rather than a run of identical
+ *  ones. */
+function fanoutFor(line: number): number {
+  return Math.max(1, FANOUT[line % FANOUT.length] - Math.floor(line / FANOUT.length));
+}
+
+/** Matches summary.hero_diff.line_totals_matched_seat. */
+const MATCHED_SEAT_TARGETS: Record<string, number> = {
+  added: 12,
+  removed: 27,
+  cert_changed: 6,
+};
+
 function seededLines(
   ssps: string[],
   event: "added" | "removed" | "cert_changed",
   seed: number,
 ): LineEvent[] {
   const rows: LineEvent[] = [];
-  for (let i = 0; i < seed; i += 1) {
-    const ssp = ssps[i % ssps.length];
-    const dev = i < DEV_ADDED.length ? DEV_ADDED[i] : DEV_ADDED[i % DEV_ADDED.length];
-    const removedDev =
-      i < DEV_REMOVED.length ? DEV_REMOVED[i] : DEV_REMOVED[i % DEV_REMOVED.length];
-    const chosenDev = event === "removed" ? removedDev : dev;
-    const relationship = i % 3 === 0 ? "DIRECT" : "RESELLER";
-    rows.push({
-      developer_id: chosenDev.developer_id,
-      developer_name: chosenDev.developer_name,
-      developer_domain: chosenDev.developer_domain,
-      file_kind: chosenDev.developer_platform === "Web" ? "ads_txt" : "app_ads_txt",
-      ssp_domain: ssp,
-      publisher_id: `${
-        ssp.split(".")[0]
-      }-${1000 + ((i * 37 + seed * 11) % 8999)}`,
-      relationship,
-      event,
-      old_cert_id: event === "removed" || event === "cert_changed" ? `old-cert-${i}` : null,
-      new_cert_id: event === "added" || event === "cert_changed" ? `new-cert-${i}` : null,
-      matched_seat: i % 4 === 0,
-      occurred_at: "2026-08-25T09:18:30Z",
-    });
+  let line = 0;
+  while (rows.length < seed) {
+    const remaining = seed - rows.length;
+    const fanout = Math.min(fanoutFor(line), remaining);
+    const ssp = ssps[line % ssps.length];
+    const relationship = line % 3 === 0 ? "DIRECT" : "RESELLER";
+    const publisherId = `${ssp.split(".")[0]}-${
+      1000 + ((line * 37 + seed * 11) % 8999)
+    }`;
+    const oldCert = certId(seed * 101 + line * 7);
+    const newCert = certId(seed * 313 + line * 13 + 1);
+    for (let j = 0; j < fanout; j += 1) {
+      const pub = LINE_PUBLISHERS[(line * 5 + j) % LINE_PUBLISHERS.length];
+      rows.push({
+        developer_id: pub.developer_id,
+        developer_name: pub.developer_name,
+        developer_domain: pub.developer_domain,
+        file_kind: pub.platform === "Web" ? "ads_txt" : "app_ads_txt",
+        ssp_domain: ssp,
+        publisher_id: publisherId,
+        relationship,
+        event,
+        old_cert_id:
+          event === "removed"
+            ? oldCert
+            : event === "cert_changed"
+              ? oldCert
+              : null,
+        new_cert_id:
+          event === "added"
+            ? newCert
+            : event === "cert_changed"
+              ? newCert
+              : null,
+        matched_seat: false,
+        occurred_at: "2026-08-25T09:18:30Z",
+      });
+    }
+    line += 1;
+  }
+  // Seat matches are a property of the line, not of the individual
+  // placement, so they are stamped a whole line at a time and the totals
+  // land on the same numbers the summary card reports.
+  const seatTarget = MATCHED_SEAT_TARGETS[event];
+  let stamped = 0;
+  for (let i = 0; i < rows.length && stamped < seatTarget; i += 1) {
+    const r = rows[i];
+    if (i % 7 !== 0) continue;
+    const key = `${r.ssp_domain}|${r.publisher_id}|${r.relationship}`;
+    for (const other of rows) {
+      if (
+        stamped < seatTarget &&
+        !other.matched_seat &&
+        `${other.ssp_domain}|${other.publisher_id}|${other.relationship}` === key
+      ) {
+        other.matched_seat = true;
+        stamped += 1;
+      }
+    }
   }
   return rows;
 }
