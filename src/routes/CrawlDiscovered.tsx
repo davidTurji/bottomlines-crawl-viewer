@@ -722,7 +722,11 @@ async function downloadCsv(token: string, ssp: string) {
   ] as const;
   const acc: DiscoveredLine[] = [];
   const pageSize = 200;
-  const cap = 20;
+  // Was 20 pages, so this CSV silently stopped at 4,000 lines. A customer
+  // exporting their discovered lines got a file that reads as complete and
+  // is not, which is the same fault the workbook had at 200,000 rows. The
+  // ceiling that remains is a runaway guard, far above any real crawl.
+  const cap = 2_000;
   for (let pageNo = 1; pageNo <= cap; pageNo += 1) {
     const r = await api.discoveredLines(token, {
       page: pageNo,

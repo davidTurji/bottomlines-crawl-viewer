@@ -55,8 +55,22 @@ import { computeDelta, MiniStat, SplitStat } from "./CrawlReport";
 
 const PAGE_SIZE = 40;
 
-/** How many pages of line events to walk before giving up. */
-const FETCH_CAP = 12;
+/**
+ * How many pages of line events to walk before giving up.
+ *
+ * This was 12 pages of 500, so a crawl with more than 6,000 line changes
+ * showed the first 6,000 and said so in small grey text. That is the same
+ * fault the export had at 200,000 rows: a partial answer to "what changed
+ * this week" reads exactly like a complete one, and the crawls it happens
+ * on are the large ones, which is to say the paying ones.
+ *
+ * The page fetches everything now. The cap that remains is a runaway
+ * guard rather than a policy, set far above any real crawl, and the page
+ * still says plainly when it bites. Each page is a small JSON slice and
+ * the whole set is served from the frozen snapshot with no database
+ * behind it, so the cost of walking them is bounded and local.
+ */
+const FETCH_CAP = 400;
 const FETCH_PAGE_SIZE = 500;
 
 type Bucket = "all" | "added" | "removed" | "cert_changed";
