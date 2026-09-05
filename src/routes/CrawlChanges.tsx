@@ -241,6 +241,7 @@ export default function CrawlChanges() {
         <WeekLine
           week={weekLabel}
           previousWeek={prevWeekLabel}
+          isFirstCrawl={summary?.previous_job_id === null}
           className="mt-1.5"
         />
       </div>

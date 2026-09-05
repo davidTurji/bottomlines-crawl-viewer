@@ -151,18 +151,37 @@ export const api = {
     }
     return req<Summary>("GET", `/v1/viewer/${token}/summary`);
   },
-  previousSummary: async (_token: string) => {
-    // Return the previous week's summary for the same customer, so any
-    // page can render a "this-week vs last-week" comparison. In MOCK,
-    // we serve a plausible prior week; in production this would be a
-    // backend endpoint parameterised by the previous_job_id in the
-    // current summary.
+  /**
+   * The previous week's summary for the same customer, which is what every
+   * "vs last week" delta on every page is measured against.
+   *
+   * Two calls, because the previous crawl's id is a fact only the current
+   * summary knows: read this token's summary, then re-read the same
+   * endpoint with `?crawl_id=` set to its `previous_job_id`. The endpoint
+   * scopes that id to the token's own customer chain and 404s otherwise,
+   * so passing it back is not a way to read someone else's crawl.
+   *
+   * Answers `null`, never throws, for the three ordinary ways there is no
+   * previous week: this is the customer's first crawl
+   * (`previous_job_id` is null), the prior job has been erased (404), or
+   * the summary call itself failed. Every caller renders "no prior week to
+   * compare" for a null, which is the honest reading of all three.
+   */
+  previousSummary: async (token: string): Promise<Summary | null> => {
     if (MOCK) {
       const { mockPreviousSummary } = await import("./mockData");
       return mockPreviousSummary;
     }
-    // TODO wire /v1/viewer/{token}/summary?crawl_id=<previous_job_id>
-    return null as Summary | null;
+    try {
+      const current = await req<Summary>("GET", `/v1/viewer/${token}/summary`);
+      if (current.previous_job_id == null) return null;
+      return await req<Summary>(
+        "GET",
+        `/v1/viewer/${token}/summary?crawl_id=${current.previous_job_id}`,
+      );
+    } catch {
+      return null;
+    }
   },
   developerEvents: async (
     token: string,

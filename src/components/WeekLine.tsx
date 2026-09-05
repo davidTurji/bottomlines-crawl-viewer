@@ -19,10 +19,20 @@ import { cn } from "@/lib/utils";
 export function WeekLine({
   week,
   previousWeek,
+  isFirstCrawl,
   className,
 }: {
   week: string | null;
   previousWeek?: string | null;
+  /**
+   * True only when the crawl itself reports no predecessor. A missing
+   * `previousWeek` is NOT enough to claim this: the prior summary can also
+   * be absent because that request failed or the old job was erased, and
+   * telling a customer on their tenth crawl that this is their first would
+   * be worse than saying nothing. Absent this flag, an unknown prior week
+   * is simply left unmentioned.
+   */
+  isFirstCrawl?: boolean;
   className?: string;
 }) {
   if (!week) return null;
@@ -34,9 +44,9 @@ export function WeekLine({
           , compared with{" "}
           <span className="font-medium text-slate-700">{previousWeek}</span>
         </>
-      ) : (
+      ) : isFirstCrawl ? (
         <>, the first crawl, with no prior week to compare</>
-      )}
+      ) : null}
     </p>
   );
 }
