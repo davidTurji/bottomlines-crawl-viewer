@@ -29,6 +29,9 @@ import type {
   MatchedBundlesPage,
   ChatFrame,
 } from "./api";
+// The discovered-lines ORDER BY, shared with the page's sort control so the
+// mock endpoint and the client's "default" option cannot disagree.
+import { compareDefault } from "./discoveredSort";
 
 // ─────────────────────────────────────────────────────────────────
 // Summary (hero + counters)
@@ -1170,13 +1173,16 @@ function buildDiscoveredLines(): DiscoveredLine[] {
     seen.add(key);
     return true;
   });
-  // Same ORDER BY the endpoint promises: widest first, then alphabetical.
-  unique.sort(
-    (a, b) =>
-      b.placements_count - a.placements_count ||
-      a.ssp_domain.localeCompare(b.ssp_domain) ||
-      a.publisher_id.localeCompare(b.publisher_id),
-  );
+  // Same ORDER BY the endpoint promises: new lines first, then the biggest
+  // weekly gains, then everything else widest-first. The comparator is the
+  // shared one in ./discoveredSort, which the page's sort control also uses,
+  // so the server order and the client's "default" option cannot drift.
+  //
+  // Sorted as specs (no placements attached yet) because the comparator only
+  // reads the four identity fields and the two counts, all of which a spec
+  // already has; attaching first would build 640-row rosters for lines the
+  // sort is about to move anyway.
+  unique.sort(compareDefault);
   return unique.map((s, i) => ({ ...s, placements: placementsFor(s, i) }));
 }
 

@@ -309,11 +309,32 @@ export const api = {
    *     ]
    *   }
    *
-   *   Ordering: placements_count DESC, then ssp_domain ASC, then
-   *   publisher_id ASC. Head first, because "which of my lines is the most
-   *   widely carried" is the question the page is opened with, and the
-   *   secondary keys make the order total and therefore stable across
-   *   pages.
+   *   Ordering, in three bands, because the question a WEEKLY crawl is
+   *   opened with is "what changed", not "what is biggest":
+   *
+   *     1. Lines that are NEW this week (previous_placements_count IS NULL),
+   *        placements_count DESC among themselves. A line that did not exist
+   *        seven days ago is the largest change there is.
+   *     2. Lines that GREW, by (placements_count - previous_placements_count)
+   *        DESC, then placements_count DESC.
+   *     3. Everything else, flat or shrunk, placements_count DESC.
+   *
+   *   Then, in every band, ssp_domain ASC, publisher_id ASC, relationship
+   *   ASC, cert_id ASC. Those four are the line's identity, so the order is
+   *   TOTAL, which is what keeps a paged list from repeating or dropping a
+   *   row between page 1 and page 2. Note that ssp_domain + publisher_id
+   *   alone is not unique (a rotated cert is two lines sharing both), which
+   *   is why the tiebreak runs the whole tuple.
+   *
+   *   Reference implementation: `compareDefault` in src/lib/discoveredSort.ts,
+   *   which the mock endpoint sorts with and which the page's sort control
+   *   offers as its default option. Any backend implementation must produce
+   *   the same order, or the page's first screen stops being the first
+   *   screen once a second page exists.
+   *
+   *   The old order (placements_count DESC alone) is still reachable in the
+   *   UI as the "Most publishers" sort, but it is no longer the default and
+   *   the endpoint should not return it.
    *
    *   A line's identity is the whole four-tuple
    *   (ssp_domain, publisher_id, relationship, cert_id). Two rows that

@@ -1,12 +1,5 @@
-import { useCallback, useEffect, useRef, useState } from "react";
-import {
-  CalendarClock,
-  ChevronDown,
-  Download,
-  Radar,
-  RotateCw,
-  Search,
-} from "lucide-react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { ChevronDown, Download, Radar, RotateCw } from "lucide-react";
 
 import {
   api,
@@ -16,10 +9,17 @@ import {
   type DiscoveredTotals,
   type Summary,
 } from "../lib/api";
-import { formatWeek } from "@/components/WeekContextBadge";
+import {
+  SORT_OPTIONS,
+  type SortKey,
+  sortDiscoveredLines,
+} from "../lib/discoveredSort";
+import { FilterAction, FilterBar, FilterSearch, FilterSelect } from "@/components/FilterBar";
+import { PageShell } from "@/components/PageShell";
+import { formatWeek, WeekLine } from "@/components/WeekLine";
 import { useReportScope } from "@/lib/reportScope";
 import { cn } from "@/lib/utils";
-import { MiniStat } from "./CrawlReport";
+import { computeDelta, MiniStat, SplitStat } from "./CrawlReport";
 
 /**
  * DISCOVERED LINES.
@@ -38,6 +38,14 @@ import { MiniStat } from "./CrawlReport";
  * opens the roster of publishers carrying it, and which of their two files
  * it was found in.
  *
+ * ORDER. The default is not "widest first" but "newest first": lines with
+ * no previous week lead, then the biggest weekly gains, then the standing
+ * picture widest-first. That order is the endpoint's contract, not a client
+ * opinion (see api.discoveredLines and compareDefault in
+ * src/lib/discoveredSort.ts), which is what lets it survive paging. The
+ * sort control offers four alternatives, and those ARE client-side, over
+ * the loaded page only; the bar says so whenever it matters.
+ *
  * Data contract, including the exact endpoints this page wants built, is
  * documented on api.discoveredLines in src/lib/api.ts.
  */
@@ -47,6 +55,7 @@ const PAGE_SIZE = 50;
 export default function CrawlDiscovered() {
   const { token } = useReportScope();
   const [summary, setSummary] = useState<Summary | null>(null);
+  const [previous, setPrevious] = useState<Summary | null>(null);
   const [rows, setRows] = useState<DiscoveredLine[]>([]);
   const [total, setTotal] = useState(0);
   const [totals, setTotals] = useState<DiscoveredTotals | null>(null);
@@ -56,6 +65,7 @@ export default function CrawlDiscovered() {
   const [error, setError] = useState<string | null>(null);
   const [exporting, setExporting] = useState(false);
   const [open, setOpen] = useState<Set<string>>(new Set());
+  const [sort, setSort] = useState<SortKey>("default");
 
   // Whether this crawl has any discovered lines at all, independent of the
   // filter. Without it an over-narrow filter would render the "this crawl
@@ -70,6 +80,13 @@ export default function CrawlDiscovered() {
     api
       .summary(token)
       .then((s) => !cancelled && setSummary(s))
+      .catch(() => {});
+    // Only for the week line's "compared with" date. The comparison figures
+    // themselves come from the discovered-lines totals, not from here, so a
+    // failure costs the date and nothing else.
+    api
+      .previousSummary(token)
+      .then((p) => !cancelled && setPrevious(p))
       .catch(() => {});
     return () => {
       cancelled = true;
@@ -120,8 +137,32 @@ export default function CrawlDiscovered() {
   const weekLabel = summary?.finished_at
     ? formatWeek(new Date(summary.finished_at))
     : null;
+  const prevWeekLabel = previous?.finished_at
+    ? formatWeek(new Date(previous.finished_at))
+    : null;
 
   const pageCount = Math.max(1, Math.ceil(total / PAGE_SIZE));
+
+  /*
+   * THE LOCAL SORT, and the one honesty problem in it.
+   *
+   * "Do it locally" is what was asked for, and locally is what this is: it
+   * reorders `rows`, which is the page the endpoint just handed back, and
+   * it never refetches. On the default option that is free of consequence,
+   * because the default IS the endpoint's ORDER BY, so re-sorting is a
+   * no-op and page 3 of "New and biggest gains" is genuinely the third
+   * slice of the whole list.
+   *
+   * Every other option is only true of what is on screen. Pick "Biggest
+   * decrease" on a list of 170 lines and you get the biggest decrease among
+   * these 50, not among the 170. That is a real way to mislead somebody, so
+   * the bar says it out loud (`localOnly` below) rather than leaving the
+   * reader to infer it from a page number. Making these sorts global means
+   * a `sort=` parameter on the endpoint, which is a backend change and was
+   * explicitly not what was asked for.
+   */
+  const sorted = useMemo(() => sortDiscoveredLines(rows, sort), [rows, sort]);
+  const localOnly = sort !== "default" && pageCount > 1;
   const startRow = total === 0 ? 0 : (page - 1) * PAGE_SIZE + 1;
   const endRow = Math.min(total, page * PAGE_SIZE);
 
@@ -129,61 +170,121 @@ export default function CrawlDiscovered() {
   // crawl, which is a normal thing to be, not an error.
   const noDiscovery = !loading && !error && total === 0 && anyDiscovered === false;
 
-  // max-w-5xl, wider than the 4xl this page started at: the primary slot now
-  // carries the whole ads.txt line, cert included, and at 4xl a long cert was
-  // truncated on a full-size desktop rather than only on a narrow one.
+  // Last week's figures. Null on a first crawl, where there is no prior week
+  // and inventing a delta would be a lie. Suppressed under a filter too: the
+  // totals then describe a slice while last week's describe the whole week,
+  // and the percentage would be confident and wrong.
+  const prevLines = totals?.previous_lines ?? null;
+  const prevPlacements = totals?.previous_placements ?? null;
+  const comparable = !filter;
+
   return (
-    <div className="mx-auto w-full max-w-5xl space-y-7 px-4 py-6 sm:px-6 lg:py-10">
+    <PageShell>
       {/* Page header */}
-      <div className="flex flex-col justify-between gap-3 sm:flex-row sm:items-start">
-        <div className="min-w-0">
-          <h1 className="text-xl font-bold leading-tight tracking-tight text-slate-900 sm:text-2xl">
-            Discovered lines
-          </h1>
-          <p className="mt-1 max-w-xl text-sm leading-relaxed text-slate-500">
-            Every line this crawl found carrying one of your discovery
-            domains, and how far each one moved since last week. Open a line
-            to see the publishers carrying it.
-          </p>
-        </div>
-        {weekLabel && (
-          <div className="inline-flex flex-shrink-0 items-center gap-2 self-start rounded-full border border-border bg-white/60 px-3 py-1 text-[12px] text-slate-600 shadow-sm">
-            <CalendarClock className="h-3.5 w-3.5 text-primary" />
-            <span className="font-medium text-slate-800">{weekLabel}</span>
-          </div>
-        )}
+      <div className="min-w-0">
+        <h1 className="text-xl font-bold leading-tight tracking-tight text-slate-900 sm:text-2xl">
+          Discovery
+        </h1>
+        <p className="mt-1 max-w-2xl text-sm leading-relaxed text-slate-500">
+          Every line on the open web carrying one of your domains, whether or
+          not it sits on a seat you sold. Open a line to see which publishers
+          carry it.
+        </p>
+        <WeekLine
+          week={weekLabel}
+          previousWeek={prevWeekLabel}
+          className="mt-1.5"
+        />
       </div>
 
-      {/* One calm row, not a wall of stat cards: how many lines, how many
-          placements those lines add up to, and which way the week went. */}
+      {/* One KPI card, full width. It was two: this one, plus a second card
+          that put last week's placements next to this week's. Once each
+          stat here carries its own "vs last week" delta, that second card
+          was the same comparison spelled out a second way, so it went. */}
       {!noDiscovery && totals && (
-        <SummaryRow totals={totals} filtered={Boolean(filter)} />
-      )}
-
-      {/* Filter + export. Deliberately quiet chrome: the cards are the page. */}
-      {!noDiscovery && (
-        <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-          <div className="relative">
-            <Search className="pointer-events-none absolute left-3.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-slate-400" />
-            <input
-              value={ssp}
-              onChange={(e) => setSsp(e.target.value)}
-              placeholder="Filter by SSP domain"
-              aria-label="Filter by SSP domain"
-              className="h-9 w-full rounded-full border border-border bg-white pl-9 pr-3 text-sm text-slate-900 outline-none transition-colors placeholder:text-slate-400 focus:border-primary/40 sm:w-[280px]"
+        <div className="rounded-2xl border border-border bg-white p-5 shadow-sm">
+          <div className="mb-3 flex items-baseline justify-between gap-3">
+            <div>
+              <div className="font-display text-sm font-medium text-slate-700">
+                Lines carrying your domains
+              </div>
+              <div className="text-[11px] text-slate-500">
+                {prevLines == null && prevPlacements == null
+                  ? "First crawl, no prior week to compare"
+                  : "Found across every publisher we scanned, against last week"}
+              </div>
+            </div>
+            {filter && (
+              <span className="text-xs text-slate-500">this filter</span>
+            )}
+          </div>
+          <div className="grid grid-cols-2 divide-x divide-border overflow-hidden rounded-xl border border-border">
+            <SplitStat
+              number={totals.lines}
+              label="Distinct lines"
+              delta={
+                comparable && prevLines != null
+                  ? computeDelta(totals.lines, prevLines)
+                  : null
+              }
+            />
+            <SplitStat
+              number={totals.placements}
+              label="Publisher placements"
+              delta={
+                comparable && prevPlacements != null
+                  ? computeDelta(totals.placements, prevPlacements)
+                  : null
+              }
             />
           </div>
-          <button
-            onClick={() => {
-              setExporting(true);
-              downloadCsv(token, filter).finally(() => setExporting(false));
-            }}
-            disabled={exporting || total === 0}
-            className="inline-flex items-center gap-1.5 self-start rounded-full border border-border bg-white px-3.5 py-1.5 text-xs font-medium text-slate-600 transition-colors hover:border-primary/30 hover:text-primary disabled:opacity-40 disabled:hover:border-border disabled:hover:text-slate-600"
-          >
-            <Download className="h-3.5 w-3.5" />
-            {exporting ? "Preparing..." : "Export CSV"}
-          </button>
+        </div>
+      )}
+
+      {/* Filter, sort and export. Search and sort are ONE bar, hairline
+          divided, in the console's filter-bar language rather than two
+          controls floating side by side; export keeps its place on the
+          right. Deliberately quiet chrome: the cards are the page. */}
+      {!noDiscovery && (
+        <div className="space-y-2">
+          {/* Search, sort and export are ONE bar spanning the row. The
+              export used to be a separate pill outside it, a different
+              height from the search and free to wrap onto its own line. */}
+          <FilterBar className="w-full min-w-0">
+            <FilterSearch
+              value={ssp}
+              onChange={setSsp}
+              placeholder="Filter by SSP domain"
+            />
+            <FilterSelect
+              value={sort}
+              onChange={setSort}
+              options={SORT_OPTIONS}
+              leading="Sort"
+              ariaLabel="Sort discovered lines"
+            />
+            <FilterAction
+              icon={Download}
+              disabled={exporting || total === 0}
+              onClick={() => {
+                setExporting(true);
+                downloadCsv(token, filter).finally(() => setExporting(false));
+              }}
+            >
+              {exporting ? "Preparing..." : "Export CSV"}
+            </FilterAction>
+          </FilterBar>
+          {/* Only when it can actually mislead: a sort that is not the
+              endpoint's own order, on a list long enough to have a second
+              page. One page, or the default sort, and this line would be
+              noise. */}
+          {localOnly && (
+            <p className="text-[11px] leading-relaxed text-slate-400">
+              This sort reorders the {rows.length.toLocaleString()} lines on
+              this page. The full list of {total.toLocaleString()} stays in
+              new and biggest gains order.
+            </p>
+          )}
         </div>
       )}
 
@@ -203,9 +304,9 @@ export default function CrawlDiscovered() {
         </p>
       )}
 
-      {!loading && !error && rows.length > 0 && (
+      {!loading && !error && sorted.length > 0 && (
         <div className="space-y-3">
-          {rows.map((line) => {
+          {sorted.map((line) => {
             const key = lineKey(line);
             return (
               <LineCard
@@ -247,7 +348,7 @@ export default function CrawlDiscovered() {
           </div>
         </div>
       )}
-    </div>
+    </PageShell>
   );
 }
 
@@ -335,11 +436,37 @@ function LineCard({
   const initial = (line.ssp_domain.replace(/^www\./i, "").charAt(0) || "?")
     .toUpperCase();
   const count = line.placements_count;
+  const isNew = delta.kind === "new";
 
+  /*
+   * NEWNESS, SIGNALLED BY THE GROUND RATHER THAN BY A BADGE.
+   *
+   * A new line now leads the list, so the reader meets a run of them first
+   * and needs to know where that run ENDS without reading a word. Three
+   * changes do it, all inside the existing `info` tone, no new colour:
+   *
+   *   - the card ground goes to info-bg at 60%, a cool tint that separates
+   *     cleanly from the warm ivory page and from the plain white of every
+   *     other card;
+   *   - the hairline goes to info-border, so the card is outlined in the
+   *     same family it is filled with;
+   *   - the disc inverts, solid info with white type, which makes it the
+   *     strongest blue on the page and the thing the eye lands on first.
+   *
+   * The small blue dot that used to sit beside "new this week" is gone: on
+   * a tinted card with a solid disc it was a fourth statement of the same
+   * fact, and four is a highlighter. The words stay, now in the info tone,
+   * because "new" is the one thing a pair of numbers cannot say.
+   *
+   * Restraint is load-bearing here. The tint is a tint, not a fill: ten new
+   * cards in a row have to read as a calm band at the top of the list, not
+   * as ten alerts.
+   */
   return (
     <div
       className={cn(
-        "overflow-hidden rounded-3xl border border-border bg-white shadow-sm transition-colors",
+        "overflow-hidden rounded-3xl border shadow-sm transition-colors",
+        isNew ? "border-info-border bg-info-bg/60" : "border-border bg-white",
         open && "shadow-md",
       )}
     >
@@ -350,8 +477,14 @@ function LineCard({
         className="flex w-full items-center gap-4 px-4 py-4 text-left sm:px-5"
       >
         {/* The SSP's initial, in the info tone. Same disc as the publisher
-            rows, a different family colour. */}
-        <div className="flex h-11 w-11 flex-shrink-0 items-center justify-center rounded-full bg-info-bg text-base font-semibold text-info">
+            rows, a different family colour, and solid rather than tinted
+            when the line is new. */}
+        <div
+          className={cn(
+            "flex h-11 w-11 flex-shrink-0 items-center justify-center rounded-full text-base font-semibold",
+            isNew ? "bg-info text-white" : "bg-info-bg text-info",
+          )}
+        >
           {initial}
         </div>
 
@@ -385,9 +518,8 @@ function LineCard({
               </span>{" "}
               {count === 1 ? "publisher" : "publishers"}
             </span>
-            {delta.kind === "new" && (
-              <span className="inline-flex flex-shrink-0 items-center gap-1.5">
-                <span aria-hidden className="h-1.5 w-1.5 rounded-full bg-info" />
+            {isNew && (
+              <span className="flex-shrink-0 font-medium text-info">
                 new this week
               </span>
             )}
@@ -443,7 +575,17 @@ function LineCard({
       </button>
 
       {open && (
-        <div className="border-t border-border bg-info-bg/40 px-4 pb-4 pt-3 sm:px-5">
+        <div
+          className={cn(
+            "border-t px-4 pb-4 pt-3 sm:px-5",
+            // On a new card the body is already sitting on an info tint, so
+            // it deepens slightly and keeps the card's own hairline family
+            // rather than reverting to the neutral border mid-card.
+            isNew
+              ? "border-info-border bg-info-bg/80"
+              : "border-border bg-info-bg/40",
+          )}
+        >
           <div className="mb-1 flex items-baseline justify-between">
             <span className="text-xs font-medium text-slate-700">
               Where it was found
@@ -518,58 +660,6 @@ function deltaOf(line: DiscoveredLine): Delta {
  * the endpoint's `totals` block, which is scoped to the active filter, so
  * this row always describes exactly the cards underneath it.
  */
-function SummaryRow({
-  totals,
-  filtered,
-}: {
-  totals: DiscoveredTotals;
-  filtered: boolean;
-}) {
-  const prev = totals.previous_placements;
-  const moved = prev == null ? null : totals.placements - prev;
-
-  return (
-    <div className="flex flex-wrap items-baseline gap-x-8 gap-y-3 border-y border-border/70 py-4">
-      <Figure value={totals.lines} label={totals.lines === 1 ? "line" : "lines"} />
-      <Figure
-        value={totals.placements}
-        label={totals.placements === 1 ? "placement" : "placements"}
-      />
-      <span className="text-[12px] leading-relaxed">
-        {moved == null ? (
-          <span className="text-slate-400">
-            first crawl, no prior week to compare
-          </span>
-        ) : moved > 0 ? (
-          <span className="text-ok">
-            {moved.toLocaleString()} more placements than last week
-          </span>
-        ) : moved < 0 ? (
-          <span className="text-warn">
-            {Math.abs(moved).toLocaleString()} fewer placements than last week
-          </span>
-        ) : (
-          <span className="text-slate-400">
-            the same number of placements as last week
-          </span>
-        )}
-        {filtered && <span className="text-slate-400"> (this filter)</span>}
-      </span>
-    </div>
-  );
-}
-
-function Figure({ value, label }: { value: number; label: string }) {
-  return (
-    <span className="flex items-baseline gap-2">
-      <span className="font-mono text-xl font-semibold tabular-nums tracking-tight text-slate-900">
-        {value.toLocaleString()}
-      </span>
-      <span className="text-[12px] text-slate-500">{label}</span>
-    </span>
-  );
-}
-
 /* ── Empty state ───────────────────────────────────────────────────── */
 
 /**

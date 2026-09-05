@@ -14,7 +14,6 @@ import {
 import CrawlReport from "./routes/CrawlReport";
 import CrawlChanges from "./routes/CrawlChanges";
 import CrawlDiscovered from "./routes/CrawlDiscovered";
-import CrawlResults from "./routes/CrawlResults";
 import "./index.css";
 
 /**
@@ -51,10 +50,16 @@ const reportPages = (
   <>
     <Route index element={<CrawlReport />} />
     <Route path="changes" element={<CrawlChanges />} />
-    <Route path="results" element={<CrawlResults />} />
-    <Route path="discovered" element={<CrawlDiscovered />} />
+    <Route path="discovery" element={<CrawlDiscovered />} />
+    {/* The page was called "Discovered lines" and lived at /discovered
+        until it was renamed. Kept as a redirect rather than dropped: a
+        share link a customer already has in their inbox must not break
+        because we renamed a page. */}
+    <Route path="discovered" element={<Navigate to="../discovery" replace />} />
     {/* Unknown sub-path of a valid report: the link is fine, the page
-        name is not. Send the reader to the overview. */}
+        name is not. Send the reader to the overview. This is also what
+        now catches /results, the retired Matched inventory page, so an
+        older share link lands on the overview instead of a dead end. */}
     <Route path="*" element={<ReportSubpathRedirect />} />
   </>
 );

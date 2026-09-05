@@ -12,7 +12,8 @@ import {
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Card } from "@/components/ui/card";
 import InlineAskAI from "@/components/InlineAskAI";
-import { formatWeek } from "@/components/WeekContextBadge";
+import { PageShell } from "@/components/PageShell";
+import { formatWeek } from "@/components/WeekLine";
 import { cn } from "@/lib/utils";
 import { useReportScope } from "@/lib/reportScope";
 
@@ -39,7 +40,7 @@ const OVERVIEW_SUGGESTIONS = [
  */
 
 export default function CrawlReport() {
-  const { token, basePath } = useReportScope();
+  const { token } = useReportScope();
   const [summary, setSummary] = useState<Summary | null>(null);
   const [previous, setPrevious] = useState<Summary | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -94,16 +95,21 @@ export default function CrawlReport() {
   const added = summary.hero_diff.line_totals.added;
   const removed = summary.hero_diff.line_totals.removed;
   const certChanged = summary.hero_diff.line_totals.cert_changed;
-  const addedOnSeat = summary.hero_diff.line_totals_matched_seat.added;
-  const removedOnSeat = summary.hero_diff.line_totals_matched_seat.removed;
 
   const matchedDevs = summary.counters.matched.developers;
   const matchedApps = summary.counters.matched.apps;
   const prevMatchedDevs = previous?.counters.matched.developers ?? null;
   const prevMatchedApps = previous?.counters.matched.apps ?? null;
 
+  // Last week's OWN added/removed totals, so "+32 lines added" can say
+  // whether 32 is a busy week or a quiet one. Comparing this week's added
+  // against last week's added is like for like; comparing it against last
+  // week's matched inventory would not be.
+  const prevAdded = previous?.hero_diff.line_totals.added ?? null;
+  const prevRemoved = previous?.hero_diff.line_totals.removed ?? null;
+
   return (
-    <div className="mx-auto w-full max-w-7xl space-y-5 px-4 py-6 sm:px-6 lg:py-8">
+    <PageShell className="space-y-5">
       {/* Page header. One line summary of what got scanned, no floating
           date chip. The h1 and its subtitle already carry the week. */}
       <div>
@@ -143,14 +149,16 @@ export default function CrawlReport() {
               prefix="+"
               number={added}
               label="Lines added"
-              hint={`${addedOnSeat.toLocaleString()} on your seats`}
+              delta={prevAdded != null ? computeDelta(added, prevAdded) : null}
             />
             <SplitStat
               tone="critical"
               prefix="-"
               number={removed}
               label="Lines removed"
-              hint={`${removedOnSeat.toLocaleString()} on your seats`}
+              delta={
+                prevRemoved != null ? computeDelta(removed, prevRemoved) : null
+              }
             />
           </div>
         </div>
@@ -170,6 +178,12 @@ export default function CrawlReport() {
             </span>
           </div>
           <div className="grid grid-cols-2 divide-x divide-border overflow-hidden rounded-xl border border-border">
+            {/* No longer linked out. The Matched inventory page these used
+                to open restated this card's two numbers and then listed the
+                same publishers the drilldown below already lists, so the
+                link led a reader sideways into a copy of the page they were
+                already on. The roster lives under "Matched publishers"
+                below; the exhaustive per-app list lives in the export. */}
             <SplitStat
               number={matchedDevs}
               label="Matched developers"
@@ -178,7 +192,6 @@ export default function CrawlReport() {
                   ? computeDelta(matchedDevs, prevMatchedDevs)
                   : null
               }
-              linkTo={`${basePath}/results`}
             />
             <SplitStat
               number={matchedApps}
@@ -188,7 +201,6 @@ export default function CrawlReport() {
                   ? computeDelta(matchedApps, prevMatchedApps)
                   : null
               }
-              linkTo={`${basePath}/results`}
             />
           </div>
         </div>
@@ -225,7 +237,7 @@ export default function CrawlReport() {
         </div>
         <DrilldownList token={token} />
       </div>
-    </div>
+    </PageShell>
   );
 }
 
@@ -271,7 +283,7 @@ function DeltaChip({ delta }: { delta: Delta }) {
   );
 }
 
-function SplitStat({
+export function SplitStat({
   number,
   label,
   hint,
@@ -284,7 +296,7 @@ function SplitStat({
   label: string;
   hint?: string;
   prefix?: string;
-  tone?: "ok" | "critical";
+  tone?: "ok" | "critical" | "warn";
   linkTo?: string;
   delta?: Delta | null;
 }) {
@@ -293,7 +305,9 @@ function SplitStat({
       ? "text-ok"
       : tone === "critical"
         ? "text-critical"
-        : "text-slate-900";
+        : tone === "warn"
+          ? "text-warn"
+          : "text-slate-900";
   const body = (
     <>
       <div className="flex items-baseline gap-1">

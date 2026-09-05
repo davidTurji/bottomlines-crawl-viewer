@@ -1,8 +1,8 @@
 import { useEffect, useMemo, useState } from "react";
 import {
   ArrowRight,
-  CalendarClock,
   ChevronDown,
+  Download,
   Minus,
   Plus,
   RefreshCw,
@@ -11,11 +11,12 @@ import {
 } from "lucide-react";
 
 import { api, type LineEvent, type Summary } from "../lib/api";
-import { formatWeek } from "@/components/WeekContextBadge";
+import { formatWeek, WeekLine } from "@/components/WeekLine";
 import { useReportScope } from "@/lib/reportScope";
+import { PageShell } from "@/components/PageShell";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { cn } from "@/lib/utils";
-import { MiniStat } from "./CrawlReport";
+import { computeDelta, MiniStat, SplitStat } from "./CrawlReport";
 
 /**
  * LINE CHANGES.
@@ -122,16 +123,6 @@ export default function CrawlChanges() {
 
   const groups = useMemo(() => groupByLine(rows), [rows]);
 
-  const counts = useMemo(
-    () => ({
-      all: groups.length,
-      added: groups.filter((g) => g.event === "added").length,
-      removed: groups.filter((g) => g.event === "removed").length,
-      cert_changed: groups.filter((g) => g.event === "cert_changed").length,
-    }),
-    [groups],
-  );
-
   // In All the three buckets are woven together in proportion, so the first
   // screen shows added, removed and cert changes side by side instead of the
   // server's added-then-removed-then-cert ordering. Within a bucket the
@@ -158,6 +149,75 @@ export default function CrawlChanges() {
     ? formatWeek(new Date(previous.finished_at))
     : null;
 
+  // The KPI row re-scopes to the selected tab, so the numbers on top always
+  // describe the cards underneath them rather than the whole week. Picking
+  // "Removed" and reading a total that still counts additions was the old
+  // page's worst lie.
+  const kpi = useMemo(() => {
+    const selected =
+      bucket === "all" ? groups : groups.filter((g) => g.event === bucket);
+    const publishers = new Set<string>();
+    // "Apps" is app-ads.txt inventory: the same developer identity, counted
+    // only where the change landed in its app file. Same split the overview
+    // draws between matched developers and matched applications, so the two
+    // pages count the same way.
+    const apps = new Set<string>();
+    let placements = 0;
+    // Per event, in the SAME unit the summary's hero_diff uses: one count
+    // per (line x publisher file), not per distinct line. See the KPI's
+    // comment on why the distinction decides which number gets a delta.
+    const byEvent: Record<EventKind, number> = {
+      added: 0,
+      removed: 0,
+      cert_changed: 0,
+    };
+    for (const g of selected) {
+      placements += g.publishers.length;
+      byEvent[g.event] += g.publishers.length;
+      for (const p of g.publishers) {
+        const id = p.developer_domain ?? String(p.developer_id);
+        publishers.add(id);
+        if (fileLabel(p.file_kind) === "app-ads.txt") apps.add(id);
+      }
+    }
+    return {
+      lines: selected.length,
+      placements,
+      byEvent,
+      publishers: publishers.size,
+      apps: apps.size,
+    };
+  }, [groups, bucket]);
+
+  // Last week's own totals for the same three events, so each KPI can say
+  // whether this week was busier than the last.
+  //
+  // WHICH NUMBER THIS CAN BE COMPARED AGAINST. `hero_diff.line_totals`
+  // counts one per (line x publisher file) — 127 additions last week means
+  // 127 file entries, not 127 distinct lines. This page's cards are one per
+  // DISTINCT line, so its `counts.added` (32) is a different unit entirely.
+  // Putting last week's 92 next to this week's 32 produced a confident
+  // "-65.2%" that measured nothing. The delta therefore rides on
+  // `kpi.byEvent`, which is counted the same way the summary counts, and
+  // the distinct-line figure carries no delta because no prior-week
+  // distinct-line count exists to compare it to.
+  //
+  // Suppressed under a filter for the same reason: the counts on screen
+  // then describe a slice while last week's describe the whole week.
+  const comparable = !filter && !matchedSeatOnly;
+  const prevCounts = useMemo(
+    () => ({
+      added: previous?.hero_diff.line_totals.added ?? null,
+      removed: previous?.hero_diff.line_totals.removed ?? null,
+      cert_changed: previous?.hero_diff.line_totals.cert_changed ?? null,
+    }),
+    [previous],
+  );
+  const deltaFor = (event: EventKind, current: number) => {
+    const prev = prevCounts[event];
+    return comparable && prev != null ? computeDelta(current, prev) : null;
+  };
+
   const toggle = (key: string) =>
     setOpen((prev) => {
       const next = new Set(prev);
@@ -167,64 +227,120 @@ export default function CrawlChanges() {
     });
 
   return (
-    <div className="mx-auto w-full max-w-5xl space-y-7 px-4 py-6 sm:px-6 lg:py-10">
+    <PageShell>
       {/* Page header */}
-      <div className="flex flex-col justify-between gap-3 sm:flex-row sm:items-start">
-        <div className="min-w-0">
-          <h1 className="text-xl font-bold leading-tight tracking-tight text-slate-900 sm:text-2xl">
-            Line changes
-          </h1>
-          <p className="mt-1 max-w-xl text-sm leading-relaxed text-slate-500">
-            Every ads.txt and app-ads.txt line that appeared, disappeared, or
-            had its cert rotated since{" "}
-            {prevWeekLabel
-              ? `the crawl of ${prevWeekLabel}`
-              : "the previous crawl"}
-            . Open a line to see the publishers it moved on.
-          </p>
-        </div>
-        {weekLabel && (
-          <div className="inline-flex flex-shrink-0 items-center gap-2 self-start rounded-full border border-border bg-white/60 px-3 py-1 text-[12px] text-slate-600 shadow-sm">
-            <CalendarClock className="h-3.5 w-3.5 text-primary" />
-            <span className="font-medium text-slate-800">{weekLabel}</span>
-          </div>
-        )}
+      <div className="min-w-0">
+        <h1 className="text-xl font-bold leading-tight tracking-tight text-slate-900 sm:text-2xl">
+          Changes
+        </h1>
+        <p className="mt-1 max-w-2xl text-sm leading-relaxed text-slate-500">
+          Your lines that publishers added, dropped, or re-certified since the
+          previous crawl. Open any line to see exactly which publishers moved
+          it.
+        </p>
+        <WeekLine
+          week={weekLabel}
+          previousWeek={prevWeekLabel}
+          className="mt-1.5"
+        />
       </div>
 
-      {/* One calm row: how many lines moved, and how many publisher records
-          that adds up to. Both are counted from the cards on screen, so the
-          row always describes what is underneath it. */}
+      {/* The KPI row, scoped to the selected tab. Same two-card shape as the
+          overview so a reader who has seen one has seen both. */}
       {!loading && !error && (
-        <SummaryRow
-          lines={counts.all}
-          placements={rows.length}
-          filtered={Boolean(filter) || matchedSeatOnly}
-        />
+        <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
+          <div className="rounded-2xl border border-border bg-white p-5 shadow-sm">
+            <div className="mb-3 flex items-baseline justify-between gap-3">
+              <div>
+                <div className="font-display text-sm font-medium text-slate-700">
+                  {bucket === "all"
+                    ? "This week's changes"
+                    : TONES[bucket].label}
+                </div>
+                <div className="text-[11px] text-slate-500">
+                  {bucket === "all"
+                    ? "Relative to last week"
+                    : "This tab only"}
+                </div>
+              </div>
+              <span className="text-xs text-slate-500">
+                {bucket === "all"
+                  ? `${kpi.byEvent.cert_changed.toLocaleString()} cert changes`
+                  : `${kpi.lines.toLocaleString()} distinct lines`}
+              </span>
+            </div>
+            <div className="grid grid-cols-2 divide-x divide-border overflow-hidden rounded-xl border border-border">
+              {bucket === "all" ? (
+                <>
+                  <SplitStat
+                    tone="ok"
+                    prefix="+"
+                    number={kpi.byEvent.added}
+                    label="Lines added"
+                    delta={deltaFor("added", kpi.byEvent.added)}
+                  />
+                  <SplitStat
+                    tone="critical"
+                    prefix="-"
+                    number={kpi.byEvent.removed}
+                    label="Lines removed"
+                    delta={deltaFor("removed", kpi.byEvent.removed)}
+                  />
+                </>
+              ) : (
+                <>
+                  <SplitStat
+                    tone={
+                      bucket === "added"
+                        ? "ok"
+                        : bucket === "removed"
+                          ? "critical"
+                          : "warn"
+                    }
+                    number={kpi.placements}
+                    label={TONES[bucket].label}
+                    delta={deltaFor(bucket, kpi.placements)}
+                  />
+                  <SplitStat number={kpi.lines} label="Distinct lines" />
+                </>
+              )}
+            </div>
+          </div>
+
+          <div className="rounded-2xl border border-border bg-white p-5 shadow-sm">
+            <div className="mb-3 flex items-baseline justify-between gap-3">
+              <div>
+                <div className="font-display text-sm font-medium text-slate-700">
+                  Where they landed
+                </div>
+                <div className="text-[11px] text-slate-500">
+                  Across the lines shown below
+                </div>
+              </div>
+              <span className="text-xs text-slate-500">
+                {kpi.lines.toLocaleString()} lines
+              </span>
+            </div>
+            <div className="grid grid-cols-2 divide-x divide-border overflow-hidden rounded-xl border border-border">
+              <SplitStat number={kpi.publishers} label="Publishers affected" />
+              <SplitStat number={kpi.apps} label="Apps affected" />
+            </div>
+          </div>
+        </div>
       )}
 
       {/* Controls: the bucket, the seat toggle, the SSP filter. */}
       <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
+        {/* The same plain segmented control the overview's drilldown wears.
+            The per-tab counts it used to carry now live in the KPI row
+            directly above, which re-scopes with the tab, so printing them
+            on the control as well was the same number twice. */}
         <Tabs value={bucket} onValueChange={(v) => setBucket(v as Bucket)}>
-          <TabsList className="h-auto flex-wrap justify-start rounded-full bg-muted p-1">
-            <BucketTab value="all" label="All" count={counts.all} />
-            <BucketTab
-              value="added"
-              label="Added"
-              count={counts.added}
-              tone="text-ok"
-            />
-            <BucketTab
-              value="removed"
-              label="Removed"
-              count={counts.removed}
-              tone="text-critical"
-            />
-            <BucketTab
-              value="cert_changed"
-              label="Cert changes"
-              count={counts.cert_changed}
-              tone="text-warn"
-            />
+          <TabsList>
+            <TabsTrigger value="all">All</TabsTrigger>
+            <TabsTrigger value="added">Added</TabsTrigger>
+            <TabsTrigger value="removed">Removed</TabsTrigger>
+            <TabsTrigger value="cert_changed">Cert changes</TabsTrigger>
           </TabsList>
         </Tabs>
 
@@ -323,7 +439,7 @@ export default function CrawlChanges() {
           </div>
         </div>
       )}
-    </div>
+    </PageShell>
   );
 }
 
@@ -351,7 +467,6 @@ function ChangeCard({
   const tone = TONES[group.event];
   const Icon = tone.icon;
   const count = group.publishers.length;
-  const seats = group.publishers.filter((p) => p.matched_seat).length;
 
   // The cert that belongs to the line as it stands. A rotation has two, and
   // gets its own row below rather than a fourth field that cannot show a
@@ -398,30 +513,16 @@ function ChangeCard({
             )}
           </code>
 
-          {/* The event, in words, in its tone. This is the fact the old
-              table hid in an unlabelled arrow column. */}
-          <div className="mt-1.5 flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1 text-xs text-slate-500">
-            <span
-              className={cn(
-                "inline-flex flex-shrink-0 items-center rounded-full border px-2 py-0.5 text-[11px] font-medium",
-                tone.chip,
-              )}
-            >
-              {tone.label}
-            </span>
-            <span className="truncate">
-              {tone.preposition}{" "}
-              <span className="font-mono tabular-nums text-slate-700">
-                {count.toLocaleString()}
-              </span>{" "}
-              {count === 1 ? "publisher" : "publishers"}
-            </span>
-            {seats > 0 && (
-              <span className="inline-flex flex-shrink-0 items-center gap-1.5 text-info">
-                <span aria-hidden className="h-1.5 w-1.5 rounded-full bg-info" />
-                your seat
-              </span>
-            )}
+          {/* One quiet line of reach, nothing else. The toned disc on the
+              left already says which of the three things happened, so
+              repeating it in a coloured chip was the same fact twice and
+              put a second piece of colour on a card that only needs one. */}
+          <div className="mt-1.5 truncate text-xs text-slate-500">
+            {tone.preposition}{" "}
+            <span className="font-mono tabular-nums text-slate-700">
+              {count.toLocaleString()}
+            </span>{" "}
+            {count === 1 ? "publisher" : "publishers"}
           </div>
 
           {/* A cert rotation is inherently old to new, so it renders as
@@ -453,9 +554,6 @@ function ChangeCard({
           <div className="w-[76px]">
             <MiniStat label="Publishers" value={count} emphasis />
           </div>
-          <div className="w-[76px]">
-            {seats > 0 && <MiniStat label="Your seats" value={seats} />}
-          </div>
         </div>
 
         <ChevronDown
@@ -474,13 +572,24 @@ function ChangeCard({
             tone.tint,
           )}
         >
-          <div className="mb-1 flex items-baseline justify-between gap-3">
+          <div className="mb-2 flex items-center justify-between gap-3">
             <span className="text-xs font-medium text-slate-700">
               {tone.expandedTitle}
+              <span className="ml-2 font-mono tabular-nums font-normal text-slate-500">
+                {count.toLocaleString()}
+              </span>
             </span>
-            <span className="font-mono text-[11px] tabular-nums text-slate-500">
-              {count.toLocaleString()}
-            </span>
+            {/* The list on screen stays capped and scrollable; anyone who
+                needs to act on the whole roster (chase a removal, brief a
+                partner) needs it in a spreadsheet, not in a scroll box. */}
+            <button
+              type="button"
+              onClick={() => exportPublishers(group)}
+              className="inline-flex flex-shrink-0 items-center gap-1.5 rounded-full border border-border bg-white px-2.5 py-1 text-[11px] font-medium text-slate-600 shadow-sm transition-colors hover:bg-muted"
+            >
+              <Download aria-hidden className="h-3 w-3" />
+              Export
+            </button>
           </div>
           {/* Capped and scrollable: a line that moved on hundreds of
               publishers would otherwise push every other card off screen. */}
@@ -497,11 +606,6 @@ function ChangeCard({
                   <span className="hidden truncate text-slate-500 sm:inline">
                     {p.developer_name ?? ""}
                   </span>
-                  {p.matched_seat && (
-                    <span className="flex-shrink-0 text-[10px] text-info">
-                      your seat
-                    </span>
-                  )}
                   {/* Rendered, never the raw enum: this is a customer's
                       screen, and "APP_ADS_TXT" is not a file name. */}
                   <span className="ml-auto flex-shrink-0 text-[10px] text-slate-400">
@@ -526,100 +630,77 @@ const TONES: Record<
     preposition: string;
     expandedTitle: string;
     disc: string;
-    chip: string;
     tint: string;
     icon: typeof Plus;
   }
 > = {
   added: {
-    label: "added",
+    label: "Lines added",
     preposition: "to",
-    expandedTitle: "Publishers this line was added to",
+    expandedTitle: "Publishers that added this line",
     disc: "bg-ok-bg text-ok",
-    chip: "border-ok-border bg-ok-bg text-ok",
     tint: "bg-ok-bg/40",
     icon: Plus,
   },
   removed: {
-    label: "removed",
+    label: "Lines removed",
     preposition: "from",
-    expandedTitle: "Publishers this line was removed from",
+    expandedTitle: "Publishers that dropped this line",
     disc: "bg-critical-bg text-critical",
-    chip: "border-critical-border bg-critical-bg text-critical",
     tint: "bg-critical-bg/40",
     icon: Minus,
   },
   cert_changed: {
-    label: "cert changed",
+    label: "Cert changes",
     preposition: "on",
-    expandedTitle: "Publishers carrying the rotated cert",
+    expandedTitle: "Publishers carrying the new cert",
     disc: "bg-warn-bg text-warn",
-    chip: "border-warn-border bg-warn-bg text-warn",
     tint: "bg-warn-bg/40",
     icon: RefreshCw,
   },
 };
 
-/* ── Bucket tab ────────────────────────────────────────────────────── */
-
-function BucketTab({
-  value,
-  label,
-  count,
-  tone,
-}: {
-  value: Bucket;
-  label: string;
-  count: number;
-  tone?: string;
-}) {
-  return (
-    <TabsTrigger value={value} className="rounded-full px-3.5">
-      {label}
-      <span
-        className={cn("ml-1.5 font-mono tabular-nums", tone ?? "text-slate-500")}
-      >
-        {count.toLocaleString()}
-      </span>
-    </TabsTrigger>
+/**
+ * One line's publisher roster, as a CSV download.
+ *
+ * Built client-side from the rows already on screen rather than round-
+ * tripping the API: the expansion holds the complete roster for that line
+ * (the page fetches every event page up front and groups locally), so there
+ * is nothing the server could add, and this works while the crawl database
+ * is asleep.
+ */
+function exportPublishers(group: ChangeGroup) {
+  const line = [
+    group.ssp_domain,
+    group.publisher_id,
+    group.relationship,
+    group.new_cert_id ?? group.old_cert_id ?? "",
+  ]
+    .filter(Boolean)
+    .join(", ");
+  const header = ["publisher_domain", "publisher_name", "file", "change", "line"];
+  const body = group.publishers.map((p) => [
+    p.developer_domain ?? `#${p.developer_id}`,
+    p.developer_name ?? "",
+    fileLabel(p.file_kind),
+    group.event,
+    line,
+  ]);
+  const csv = [header, ...body]
+    .map((row) =>
+      row.map((cell) => `"${String(cell).replace(/"/g, '""')}"`).join(","),
+    )
+    .join("\r\n");
+  const url = URL.createObjectURL(
+    new Blob([csv], { type: "text/csv;charset=utf-8" }),
   );
-}
-
-/* ── Summary ───────────────────────────────────────────────────────── */
-
-function SummaryRow({
-  lines,
-  placements,
-  filtered,
-}: {
-  lines: number;
-  placements: number;
-  filtered: boolean;
-}) {
-  return (
-    <div className="flex flex-wrap items-baseline gap-x-8 gap-y-3 border-y border-border/70 py-4">
-      <Figure value={lines} label={lines === 1 ? "line moved" : "lines moved"} />
-      <Figure
-        value={placements}
-        label={placements === 1 ? "publisher record" : "publisher records"}
-      />
-      <span className="text-[12px] leading-relaxed text-slate-400">
-        each card is one line, opened to the publishers it moved on
-        {filtered && <span> (this filter)</span>}
-      </span>
-    </div>
-  );
-}
-
-function Figure({ value, label }: { value: number; label: string }) {
-  return (
-    <span className="flex items-baseline gap-2">
-      <span className="font-mono text-xl font-semibold tabular-nums tracking-tight text-slate-900">
-        {value.toLocaleString()}
-      </span>
-      <span className="text-[12px] text-slate-500">{label}</span>
-    </span>
-  );
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = `${group.event}-${group.ssp_domain}-${group.publisher_id}.csv`;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  URL.revokeObjectURL(url);
 }
 
 /* ── Grouping ──────────────────────────────────────────────────────── */

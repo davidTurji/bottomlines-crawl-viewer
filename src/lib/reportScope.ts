@@ -6,7 +6,7 @@ import { createContext, useContext } from "react";
  *
  * Two URL shapes reach the same set of pages:
  *
- *   /crawl-report/{token}[/changes|/results|/discovered]   the share link
+ *   /crawl-report/{token}[/changes|/discovery]   the share link
  *   /{customer-slug}/{crawl-short-id}[/...]                the readable link
  *
  * Pages used to read `token` straight off useParams(), which only exists
