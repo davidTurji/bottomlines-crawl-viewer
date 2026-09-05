@@ -171,12 +171,18 @@ export default function CrawlDiscovered() {
   const noDiscovery = !loading && !error && total === 0 && anyDiscovered === false;
 
   // Last week's figures. Null on a first crawl, where there is no prior week
-  // and inventing a delta would be a lie. Suppressed under a filter too: the
-  // totals then describe a slice while last week's describe the whole week,
-  // and the percentage would be confident and wrong.
+  // and inventing a delta would be a lie.
+  //
+  // These ARE comparable under a filter, unlike the ones on Changes. The
+  // endpoint computes `totals` and `previous_*` over the same filtered set
+  // (see _DISCOVERED_PREV_TOTALS_SQL, which carries the same ssp
+  // predicate), so both sides describe the same slice. Changes has to
+  // suppress its deltas under a filter because there the current count is
+  // filtered client-side while last week's comes unfiltered from the
+  // summary; that asymmetry does not exist here, and suppressing anyway
+  // would hide a true answer to "did carambola grow this week".
   const prevLines = totals?.previous_lines ?? null;
   const prevPlacements = totals?.previous_placements ?? null;
-  const comparable = !filter;
 
   return (
     <PageShell>
@@ -224,7 +230,7 @@ export default function CrawlDiscovered() {
               number={totals.lines}
               label="Distinct lines"
               delta={
-                comparable && prevLines != null
+                prevLines != null
                   ? computeDelta(totals.lines, prevLines)
                   : null
               }
@@ -233,7 +239,7 @@ export default function CrawlDiscovered() {
               number={totals.placements}
               label="Publisher placements"
               delta={
-                comparable && prevPlacements != null
+                prevPlacements != null
                   ? computeDelta(totals.placements, prevPlacements)
                   : null
               }

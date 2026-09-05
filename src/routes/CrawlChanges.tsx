@@ -204,7 +204,15 @@ export default function CrawlChanges() {
   //
   // Suppressed under a filter for the same reason: the counts on screen
   // then describe a slice while last week's describe the whole week.
-  const comparable = !filter && !matchedSeatOnly;
+  //
+  // And suppressed when the fetch was TRUNCATED, which is the same fault
+  // with a worse disguise. This page walks at most FETCH_CAP pages, so a
+  // crawl with more than 6,000 line events is counted only as far as the
+  // cap, while last week's figure is the whole week. That produces a
+  // confident percentage from a partial numerator, and the crawls it
+  // happens on are the large ones, which is to say the real customers'.
+  // The "showing the first N" note below stays either way.
+  const comparable = !filter && !matchedSeatOnly && !truncated;
   const prevCounts = useMemo(
     () => ({
       added: previous?.hero_diff.line_totals.added ?? null,
