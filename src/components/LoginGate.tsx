@@ -6,7 +6,6 @@ import {
   EXPIRED_LINK_MESSAGE,
   ReportNoticeCard,
 } from "@/components/ReportNoticeCard";
-import bottomlineSidebarLogo from "@/assets/bottomline-sidebar-logo.png";
 
 /**
  * Username + password gate in front of the viewer.
@@ -114,18 +113,42 @@ function LoginCard({
   };
 
   return (
-    <div className="flex min-h-screen min-h-[100dvh] w-full items-center justify-center bg-muted/40 px-4">
+    <div className="relative isolate flex min-h-screen min-h-[100dvh] w-full items-center justify-center overflow-hidden bg-background px-4">
+      {/* The console's sign-in bloom, drawn from the primary token rather
+          than a colour of its own, so the canvas still reads as paper. */}
+      <div
+        aria-hidden
+        className="pointer-events-none absolute inset-0 -z-10"
+        style={{
+          background:
+            "radial-gradient(42% 42% at 82% 30%, hsl(var(--primary) / 0.08), transparent 70%)",
+        }}
+      />
       <div className="w-full max-w-sm animate-auth-rise">
-        <div className="rounded-2xl border border-border bg-white p-6 shadow-sm sm:p-8">
-          <img
-            src={bottomlineSidebarLogo}
-            alt="bottomline.ai"
-            draggable={false}
-            className="h-12 w-auto object-contain object-left select-none"
-          />
-          <h1 className="mt-5 font-display text-lg font-semibold tracking-tight text-slate-900">
-            Sign in to your crawl report
+        {/* THE PRODUCT NAME, SET IN TYPE, NOT PRINTED FROM A LOGO.
+            Both logo assets in the brand kit carry a WHITE wordmark, drawn
+            for the dark sidebar rail. On this white card the mark rendered
+            and the word did not, so the screen showed a floating "b" above
+            blank space. The console's own sign-in never had that problem
+            because it never used the lockup: it sets the name as display
+            type and tints one word with the primary token, which is what
+            this now does. */}
+        <div className="mb-6">
+          <h1
+            className="font-display text-[2rem] font-semibold leading-[1.05] tracking-[-0.028em] text-slate-900"
+            style={{ fontFamily: "var(--font-display)" }}
+          >
+            Path <span className="text-primary">Finder</span>
           </h1>
+          <p className="mt-2 text-sm text-slate-500">
+            by bottomlines.ai
+          </p>
+        </div>
+
+        <div className="rounded-2xl border border-border bg-white p-6 shadow-sm sm:p-8">
+          <h2 className="font-display text-lg font-semibold tracking-tight text-slate-900">
+            Sign in to your crawl report
+          </h2>
           <p className="mt-1 text-sm text-slate-500">
             Use the username and password we shared with you.
           </p>
