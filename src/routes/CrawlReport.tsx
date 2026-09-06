@@ -118,6 +118,13 @@ export default function CrawlReport() {
   const scopeChanged = summary.hero_diff.scope_changed === true;
   const matchedComparable = !scopeChanged;
 
+  // THE FIRST CRAWL HAS NO LAST WEEK, and every "relative to last week"
+  // caption on this page is a false statement until there is one. The
+  // deltas were already suppressed (the API sends no previous summary), so
+  // what was left was captions promising a comparison that is not there and
+  // a pair of zeros presented as this week's result.
+  const isFirstCrawl = summary.previous_job_id === null;
+
   return (
     <PageShell className="space-y-5">
       {/* Page header. One line summary of what got scanned, no floating
@@ -146,13 +153,30 @@ export default function CrawlReport() {
                 This week&apos;s changes
               </div>
               <div className="text-[11px] text-slate-500">
-                Relative to last week
+                {isFirstCrawl ? "Your first crawl" : "Relative to last week"}
               </div>
             </div>
             <span className="text-xs text-slate-500">
-              {certChanged.toLocaleString()} cert changes
+              {isFirstCrawl ? "baseline" : `${certChanged.toLocaleString()} cert changes`}
             </span>
           </div>
+          {/* A first crawl has nothing to have changed FROM, so "+0 added,
+              -0 removed" is not a result, it is the absence of one — and as
+              the first thing a new customer reads it looks like the product
+              found nothing. Say what actually happened instead: this week is
+              the baseline, and the comparison starts next week. */}
+          {isFirstCrawl ? (
+            <div className="rounded-xl border border-border bg-muted/30 px-5 py-6 text-center">
+              <div className="text-sm font-medium text-slate-700">
+                This is your first crawl
+              </div>
+              <div className="mx-auto mt-1 max-w-md text-[12px] leading-relaxed text-slate-500">
+                Everything found this week is your starting point. From the next
+                crawl on, this panel shows what publishers added, dropped and
+                re-certified against it.
+              </div>
+            </div>
+          ) : (
           <div className="grid grid-cols-2 divide-x divide-border overflow-hidden rounded-xl border border-border">
             <SplitStat
               tone="ok"
@@ -171,6 +195,7 @@ export default function CrawlReport() {
               }
             />
           </div>
+          )}
         </div>
 
         <div className="rounded-2xl border border-border bg-white p-5 shadow-sm">
@@ -180,9 +205,11 @@ export default function CrawlReport() {
                 Matched inventory
               </div>
               <div className="text-[11px] text-slate-500">
-                {scopeChanged
-                  ? "Your monitored lines changed, so this is not comparable"
-                  : "Relative to last week"}
+                {isFirstCrawl
+                  ? "Your first crawl, so there is nothing to compare yet"
+                  : scopeChanged
+                    ? "Your monitored lines changed, so this is not comparable"
+                    : "Relative to last week"}
               </div>
             </div>
             <span className="text-xs text-slate-500">

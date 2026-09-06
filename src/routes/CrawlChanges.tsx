@@ -256,6 +256,10 @@ export default function CrawlChanges() {
 
   /** Did the watchlist move this week? The API says so directly; the group
    *  counts are the fallback for a summary that predates the flag. */
+  /** No previous crawl at all. Distinct from "no changes": one is a
+   *  starting point, the other is a result. */
+  const isFirstCrawl = summary?.previous_job_id === null;
+
   const scopeChanged =
     summary?.hero_diff.scope_changed === true ||
     scopeTotals.newly_monitored > 0 ||
@@ -322,9 +326,21 @@ export default function CrawlChanges() {
           Changes
         </h1>
         <p className="mt-1 max-w-2xl text-sm leading-relaxed text-slate-500">
-          Your lines that publishers added, dropped, or re-certified since the
-          previous crawl. Open any line to see exactly which publishers moved
-          it.
+          {isFirstCrawl ? (
+            // The standing subtitle promises a comparison "since the previous
+            // crawl", and on a first crawl there is not one to be since.
+            <>
+              Your lines that publishers added, dropped, or re-certified week
+              to week. This is your first crawl, so the comparison begins with
+              the next one.
+            </>
+          ) : (
+            <>
+              Your lines that publishers added, dropped, or re-certified since
+              the previous crawl. Open any line to see exactly which publishers
+              moved it.
+            </>
+          )}
         </p>
         <WeekLine
           week={weekLabel}
@@ -347,19 +363,37 @@ export default function CrawlChanges() {
                     : TONES[bucket].label}
                 </div>
                 <div className="text-[11px] text-slate-500">
-                  {bucket === "all"
-                    ? "Relative to last week"
-                    : isScopeKind(bucket)
-                      ? "First week, nothing to compare against"
-                      : "This tab only"}
+                  {isFirstCrawl
+                    ? "Your first crawl"
+                    : bucket === "all"
+                      ? "Relative to last week"
+                      : isScopeKind(bucket)
+                        ? "First week, nothing to compare against"
+                        : "This tab only"}
                 </div>
               </div>
               <span className="text-xs text-slate-500">
-                {bucket === "all"
-                  ? `${kpi.byEvent.cert_changed.toLocaleString()} cert changes`
-                  : `${kpi.lines.toLocaleString()} distinct lines`}
+                {isFirstCrawl
+                  ? "baseline"
+                  : bucket === "all"
+                    ? `${kpi.byEvent.cert_changed.toLocaleString()} cert changes`
+                    : `${kpi.lines.toLocaleString()} distinct lines`}
               </span>
             </div>
+            {/* Same reason as the overview: on a first crawl "+0 added, -0
+                removed" is the absence of a result, not one, and it is the
+                first thing a new customer reads. */}
+            {isFirstCrawl ? (
+              <div className="rounded-xl border border-border bg-muted/30 px-5 py-6 text-center">
+                <div className="text-sm font-medium text-slate-700">
+                  Nothing to compare yet
+                </div>
+                <div className="mx-auto mt-1 max-w-md text-[12px] leading-relaxed text-slate-500">
+                  This week is your baseline. The next crawl will list what
+                  publishers added, dropped and re-certified against it.
+                </div>
+              </div>
+            ) : (
             <div className="grid grid-cols-2 divide-x divide-border overflow-hidden rounded-xl border border-border">
               {bucket === "all" ? (
                 <>
@@ -401,6 +435,7 @@ export default function CrawlChanges() {
                 </>
               )}
             </div>
+            )}
           </div>
 
           <div className="rounded-2xl border border-border bg-white p-5 shadow-sm">
@@ -511,7 +546,23 @@ export default function CrawlChanges() {
       )}
       {error && <p className="py-4 text-sm text-critical">{error}</p>}
 
-      {!loading && !error && shown.length === 0 && (
+      {/* An empty list has two very different causes and they must not
+          share a sentence. "No changes match this filter" blames a filter
+          the customer never set when the real reason is that this is their
+          first crawl and there is nothing to compare against yet. */}
+      {!loading && !error && shown.length === 0 && isFirstCrawl && (
+        <div className="rounded-2xl border border-dashed border-border bg-muted/20 px-6 py-10 text-center">
+          <div className="text-sm font-medium text-slate-700">
+            This is your first crawl
+          </div>
+          <p className="mx-auto mt-1 max-w-lg text-[13px] leading-relaxed text-slate-500">
+            There is no earlier week to compare against yet, so nothing is
+            listed here. Everything found this week becomes the baseline, and
+            the next crawl will show what moved against it.
+          </p>
+        </div>
+      )}
+      {!loading && !error && shown.length === 0 && !isFirstCrawl && (
         <p className="rounded-2xl border border-dashed border-border bg-muted/20 px-6 py-10 text-center text-sm text-slate-500">
           No line changes match this filter.
         </p>

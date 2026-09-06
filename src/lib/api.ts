@@ -169,7 +169,12 @@ export const api = {
    */
   previousSummary: async (token: string): Promise<Summary | null> => {
     if (MOCK) {
-      const { mockPreviousSummary } = await import("./mockData");
+      const { mockPreviousSummary, mockSummary } = await import("./mockData");
+      // Mirror the real guard below. Returning a previous summary
+      // unconditionally made the mock incapable of showing a FIRST crawl,
+      // which is the one state where every delta on the page is a lie —
+      // so it was the one state nobody could see while developing.
+      if (mockSummary.previous_job_id == null) return null;
       return mockPreviousSummary;
     }
     try {
