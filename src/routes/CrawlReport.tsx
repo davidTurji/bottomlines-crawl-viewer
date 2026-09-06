@@ -622,6 +622,13 @@ function ExpandedLines({
           <LinesGroup rows={rows} kind="added" />
           <LinesGroup rows={rows} kind="removed" />
           <LinesGroup rows={rows} kind="cert_changed" />
+          {/* The endpoint this expansion reads has no event filter, so it
+              returns scope rows too. Without a group for them a publisher
+              whose only rows are scope rendered an EMPTY box: the outer
+              `rows.length > 0` suppressed the "nothing moved" copy, and
+              none of the three groups above matched. */}
+          <LinesGroup rows={rows} kind="newly_monitored" />
+          <LinesGroup rows={rows} kind="monitoring_stopped" />
         </div>
       )}
     </div>
@@ -633,7 +640,7 @@ function LinesGroup({
   kind,
 }: {
   rows: import("../lib/api").LineEvent[];
-  kind: "added" | "removed" | "cert_changed";
+  kind: import("../lib/api").LineEventKind;
 }) {
   const filtered = rows.filter((r) => r.event === kind);
   if (filtered.length === 0) return null;
@@ -642,7 +649,11 @@ function LinesGroup({
       ? "Lines added"
       : kind === "removed"
         ? "Lines removed"
-        : "Cert changes";
+        : kind === "newly_monitored"
+          ? "Newly monitored"
+          : kind === "monitoring_stopped"
+            ? "No longer monitored"
+            : "Cert changes";
   const glyph =
     kind === "added" ? "+" : kind === "removed" ? "-" : "↻"; // curved arrow
   const tone =

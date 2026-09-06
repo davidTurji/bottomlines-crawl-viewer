@@ -587,16 +587,6 @@ export type LineEventKind =
 /** Counts keyed by every event kind, as the API sends them. */
 export type LineEventCounts = Record<LineEventKind, number>;
 
-/** The two kinds that mean "the watchlist moved", not "the world moved". */
-export const SCOPE_EVENTS: readonly LineEventKind[] = [
-  "newly_monitored",
-  "monitoring_stopped",
-];
-
-export function isScopeEvent(event: string): boolean {
-  return (SCOPE_EVENTS as readonly string[]).includes(event);
-}
-
 export type LineEvent = {
   developer_id: number;
   developer_name: string | null;

@@ -153,6 +153,7 @@ export default function CrawlChanges() {
 
   useEffect(() => setPage(1), [bucket, filter, matchedSeatOnly]);
 
+
   const groups = useMemo(() => groupByLine(rows), [rows]);
 
   // In All the three buckets are woven together in proportion, so the first
@@ -205,6 +206,11 @@ export default function CrawlChanges() {
       newly_monitored: 0,
       monitoring_stopped: 0,
     };
+    // These describe "the lines shown below", which is what the card says
+    // and what the tab selects — so on a scope tab they describe the scope
+    // rows, and on All they describe everything on screen. Excluding scope
+    // rows here instead would zero the KPI on the scope tabs, where those
+    // rows are the entire subject.
     for (const g of selected) {
       placements += g.publishers.length;
       byEvent[g.event] += g.publishers.length;
@@ -235,6 +241,18 @@ export default function CrawlChanges() {
     }
     return { newly_monitored, monitoring_stopped };
   }, [groups]);
+
+// Fall back to All when the selected scope tab stops existing. Its
+  // trigger only renders while the week has rows of that kind, and a
+  // filter can take the last one away underneath the selection.
+  useEffect(() => {
+    if (bucket === "newly_monitored" && scopeTotals.newly_monitored === 0) {
+      setBucket("all");
+    }
+    if (bucket === "monitoring_stopped" && scopeTotals.monitoring_stopped === 0) {
+      setBucket("all");
+    }
+  }, [bucket, scopeTotals]);
 
   /** Did the watchlist move this week? The API says so directly; the group
    *  counts are the fallback for a summary that predates the flag. */
@@ -368,7 +386,12 @@ export default function CrawlChanges() {
                         ? "ok"
                         : bucket === "removed"
                           ? "critical"
-                          : "warn"
+                          : isScopeKind(bucket)
+                            // Neutral, matching the cards. Amber here would
+                            // reintroduce at the top of the page the alarm
+                            // the card tones were chosen to avoid.
+                            ? undefined
+                            : "warn"
                     }
                     number={kpi.placements}
                     label={TONES[bucket].label}
@@ -574,9 +597,9 @@ function ChangeCard({
   // gets its own row below rather than a fourth field that cannot show a
   // change.
   const inlineCert =
-    group.event === "added"
+    group.event === "added" || group.event === "newly_monitored"
       ? group.new_cert_id
-      : group.event === "removed"
+      : group.event === "removed" || group.event === "monitoring_stopped"
         ? group.old_cert_id
         : null;
 
@@ -805,7 +828,7 @@ function exportPublishers(group: ChangeGroup) {
     p.developer_domain ?? `#${p.developer_id}`,
     p.developer_name ?? "",
     fileLabel(p.file_kind),
-    group.event,
+    TONES[group.event].label,
     line,
   ]);
   const csv = [header, ...body]
@@ -818,7 +841,7 @@ function exportPublishers(group: ChangeGroup) {
   );
   const a = document.createElement("a");
   a.href = url;
-  a.download = `${group.event}-${group.ssp_domain}-${group.publisher_id}.csv`;
+  a.download = `${group.event.replace(/_/g, "-")}-${group.ssp_domain}-${group.publisher_id}.csv`;
   document.body.appendChild(a);
   a.click();
   a.remove();
