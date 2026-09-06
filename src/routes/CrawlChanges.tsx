@@ -386,11 +386,12 @@ export default function CrawlChanges() {
             {isFirstCrawl ? (
               <div className="rounded-xl border border-border bg-muted/30 px-5 py-6 text-center">
                 <div className="text-sm font-medium text-slate-700">
-                  Nothing to compare yet
+                  This is the first crawl, with no prior week
                 </div>
                 <div className="mx-auto mt-1 max-w-md text-[12px] leading-relaxed text-slate-500">
-                  This week is your baseline. The next crawl will list what
-                  publishers added, dropped and re-certified against it.
+                  There is nothing to compare against yet. This week is your
+                  baseline, and the next crawl will list what publishers added,
+                  dropped and re-certified against it.
                 </div>
               </div>
             ) : (
@@ -445,17 +446,37 @@ export default function CrawlChanges() {
                   Where they landed
                 </div>
                 <div className="text-[11px] text-slate-500">
-                  Across the lines shown below
+                  {isFirstCrawl
+                    ? "No prior week to compare against"
+                    : "Across the lines shown below"}
                 </div>
               </div>
               <span className="text-xs text-slate-500">
-                {kpi.lines.toLocaleString()} lines
+                {isFirstCrawl ? "first crawl" : `${kpi.lines.toLocaleString()} lines`}
               </span>
             </div>
+            {/* "0 publishers affected" is true and useless on a first crawl:
+                nothing was affected because there is no earlier week for
+                anything to have moved against. Two zeros make a new customer
+                read the product as having found nothing, so the card says
+                which of the two it is. */}
+            {isFirstCrawl ? (
+              <div className="rounded-xl border border-border bg-muted/30 px-5 py-6 text-center">
+                <div className="text-sm font-medium text-slate-700">
+                  This is the first crawl, with no prior week
+                </div>
+                <div className="mx-auto mt-1 max-w-md text-[12px] leading-relaxed text-slate-500">
+                  Nothing has moved yet because there is nothing to move
+                  against. Publishers and apps appear here once the next crawl
+                  compares to this one.
+                </div>
+              </div>
+            ) : (
             <div className="grid grid-cols-2 divide-x divide-border overflow-hidden rounded-xl border border-border">
               <SplitStat number={kpi.publishers} label="Publishers affected" />
               <SplitStat number={kpi.apps} label="Apps affected" />
             </div>
+            )}
           </div>
         </div>
       )}
@@ -466,16 +487,36 @@ export default function CrawlChanges() {
           only find out if they read a footnote. The lines themselves are
           listed under their own tab, badged, with this week as their
           baseline and no delta attached. */}
-      {scopeChanged && (
+      {/* Never on a first crawl: nothing can have entered or left monitoring
+          when there is no earlier week for it to have differed from, and the
+          card above already says so.
+
+          The tab clauses are assembled rather than concatenated inline. Two
+          `&&` fragments in a sentence read fine when at least one is true and
+          collapse into "changed this week. and neither is counted" when both
+          are false -- which happens whenever the summary reports a scope
+          change the fetched rows do not contain, as truncation or a filter
+          can both cause. */}
+      {scopeChanged && !isFirstCrawl && (
         <div className="flex items-start gap-2 rounded-xl border border-border bg-muted/50 px-4 py-3 text-[13px] text-slate-600">
           <Eye className="mt-0.5 h-4 w-4 shrink-0" />
           <span>
             Your monitored lines changed this week.{" "}
-            {scopeTotals.newly_monitored > 0 && "Lines being watched for the first time appear under New, "}
-            {scopeTotals.monitoring_stopped > 0 && "lines no longer watched appear under Stopped, "}
-            and neither is counted as added or removed: we were not watching
-            them last week, so there is nothing to compare them against. This
-            week is their starting point.
+            {[
+              scopeTotals.newly_monitored > 0 &&
+                "lines being watched for the first time appear under New",
+              scopeTotals.monitoring_stopped > 0 &&
+                "lines no longer watched appear under Stopped",
+            ]
+              .filter(Boolean)
+              .join(", ")
+              .replace(/^./, (c) => c.toUpperCase())}
+            {scopeTotals.newly_monitored > 0 ||
+            scopeTotals.monitoring_stopped > 0
+              ? ". They are not counted as added or removed: "
+              : "Those lines are not counted as added or removed, because "}
+            we were not watching them last week, so there is nothing to compare
+            them against. This week is their starting point.
           </span>
         </div>
       )}

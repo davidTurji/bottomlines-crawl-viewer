@@ -168,12 +168,13 @@ export default function CrawlReport() {
           {isFirstCrawl ? (
             <div className="rounded-xl border border-border bg-muted/30 px-5 py-6 text-center">
               <div className="text-sm font-medium text-slate-700">
-                This is your first crawl
+                This is the first crawl, with no prior week
               </div>
               <div className="mx-auto mt-1 max-w-md text-[12px] leading-relaxed text-slate-500">
-                Everything found this week is your starting point. From the next
-                crawl on, this panel shows what publishers added, dropped and
-                re-certified against it.
+                There is nothing to compare against yet. Everything found this
+                week is your starting point, and from the next crawl on this
+                panel shows what publishers added, dropped and re-certified
+                against it.
               </div>
             </div>
           ) : (
@@ -206,7 +207,7 @@ export default function CrawlReport() {
               </div>
               <div className="text-[11px] text-slate-500">
                 {isFirstCrawl
-                  ? "Your first crawl, so there is nothing to compare yet"
+                  ? "First crawl, no prior week to compare against"
                   : scopeChanged
                     ? "Your monitored lines changed, so this is not comparable"
                     : "Relative to last week"}
