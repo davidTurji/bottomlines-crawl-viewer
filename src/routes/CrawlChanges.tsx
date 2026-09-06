@@ -7,6 +7,7 @@ import {
   Plus,
   Eye,
   EyeOff,
+  Sparkles,
   RefreshCw,
   RotateCw,
   Search,
@@ -89,7 +90,8 @@ type EventKind =
   | "removed"
   | "cert_changed"
   | "newly_monitored"
-  | "monitoring_stopped";
+  | "monitoring_stopped"
+  | "first_appearance";
 
 /** The kinds that describe the world, and so carry an honest delta. */
 const FOUND_KINDS: EventKind[] = ["added", "removed", "cert_changed"];
@@ -205,6 +207,7 @@ export default function CrawlChanges() {
       cert_changed: 0,
       newly_monitored: 0,
       monitoring_stopped: 0,
+      first_appearance: 0,
     };
     // These describe "the lines shown below", which is what the card says
     // and what the tab selects — so on a scope tab they describe the scope
@@ -235,11 +238,13 @@ export default function CrawlChanges() {
   const scopeTotals = useMemo(() => {
     let newly_monitored = 0;
     let monitoring_stopped = 0;
+    let first_appearance = 0;
     for (const g of groups) {
       if (g.event === "newly_monitored") newly_monitored += 1;
       if (g.event === "monitoring_stopped") monitoring_stopped += 1;
+      if (g.event === "first_appearance") first_appearance += 1;
     }
-    return { newly_monitored, monitoring_stopped };
+    return { newly_monitored, monitoring_stopped, first_appearance };
   }, [groups]);
 
 // Fall back to All when the selected scope tab stops existing. Its
@@ -250,6 +255,9 @@ export default function CrawlChanges() {
       setBucket("all");
     }
     if (bucket === "monitoring_stopped" && scopeTotals.monitoring_stopped === 0) {
+      setBucket("all");
+    }
+    if (bucket === "first_appearance" && scopeTotals.first_appearance === 0) {
       setBucket("all");
     }
   }, [bucket, scopeTotals]);
@@ -263,7 +271,8 @@ export default function CrawlChanges() {
   const scopeChanged =
     summary?.hero_diff.scope_changed === true ||
     scopeTotals.newly_monitored > 0 ||
-    scopeTotals.monitoring_stopped > 0;
+    scopeTotals.monitoring_stopped > 0 ||
+    scopeTotals.first_appearance > 0;
 
   // Last week's own totals for the same three events, so each KPI can say
   // whether this week was busier than the last.
@@ -299,6 +308,7 @@ export default function CrawlChanges() {
       // that week to be a percentage of. Their first week is a baseline.
       newly_monitored: null,
       monitoring_stopped: null,
+      first_appearance: null,
     }),
     [previous],
   );
@@ -367,8 +377,10 @@ export default function CrawlChanges() {
                     ? "Your first crawl"
                     : bucket === "all"
                       ? "Relative to last week"
-                      : isScopeKind(bucket)
-                        ? "First week, nothing to compare against"
+                      : bucket === "first_appearance"
+                        ? "New to your report, nothing to compare against"
+                        : isScopeKind(bucket)
+                          ? "First week, nothing to compare against"
                         : "This tab only"}
                 </div>
               </div>
@@ -507,16 +519,18 @@ export default function CrawlChanges() {
                 "lines being watched for the first time appear under New",
               scopeTotals.monitoring_stopped > 0 &&
                 "lines no longer watched appear under Stopped",
+              scopeTotals.first_appearance > 0 &&
+                "publishers we had not crawled before appear under First seen",
             ]
               .filter(Boolean)
               .join(", ")
               .replace(/^./, (c) => c.toUpperCase())}
             {scopeTotals.newly_monitored > 0 ||
             scopeTotals.monitoring_stopped > 0
-              ? ". They are not counted as added or removed: "
-              : "Those lines are not counted as added or removed, because "}
-            we were not watching them last week, so there is nothing to compare
-            them against. This week is their starting point.
+              ? ". They are not counted as added or removed, "
+              : "Those lines are not counted as added or removed, "}
+            because we have no reading for them last week to compare against.
+            This week is their starting point.
           </span>
         </div>
       )}
@@ -541,6 +555,9 @@ export default function CrawlChanges() {
             )}
             {scopeTotals.monitoring_stopped > 0 && (
               <TabsTrigger value="monitoring_stopped">Stopped</TabsTrigger>
+            )}
+            {scopeTotals.first_appearance > 0 && (
+              <TabsTrigger value="first_appearance">First seen</TabsTrigger>
             )}
           </TabsList>
         </Tabs>
@@ -745,6 +762,14 @@ function ChangeCard({
                 was already out there, say since when: that is the answer
                 to the question the customer actually has, and it is only
                 available because the book is watchlist-independent. */}
+            {group.event === "first_appearance" && (
+              <>
+                {" · "}
+                <span className="text-slate-600">
+                  first appearance in your report
+                </span>
+              </>
+            )}
             {group.event === "newly_monitored" && group.first_seen_at && (
               <>
                 {" · "}
@@ -908,6 +933,17 @@ const TONES: Record<
     tint: "bg-muted/40",
     icon: EyeOff,
   },
+  // Neutral for the same reason as the two above: this is news about our
+  // crawl, not about the market, and colouring it as a gain would put it
+  // back in the column it was carefully kept out of.
+  first_appearance: {
+    label: "First appearance",
+    preposition: "on",
+    expandedTitle: "Publishers appearing in your report for the first time",
+    disc: "bg-muted text-muted-foreground",
+    tint: "bg-muted/40",
+    icon: Sparkles,
+  },
 };
 
 /**
@@ -984,12 +1020,21 @@ function eventKind(raw: string): EventKind {
   if (raw === "removed") return "removed";
   if (raw === "newly_monitored") return "newly_monitored";
   if (raw === "monitoring_stopped") return "monitoring_stopped";
+  if (raw === "first_appearance") return "first_appearance";
   return "cert_changed";
 }
 
 /** True for the kinds that mean the watchlist moved rather than the world. */
+/** Kinds that describe OUR coverage rather than the market: we started or
+ *  stopped watching a line, or met a publisher for the first time. None of
+ *  them carries a week-over-week delta, because in each case there is no
+ *  honest previous number to be a percentage of. */
 function isScopeKind(event: EventKind): boolean {
-  return event === "newly_monitored" || event === "monitoring_stopped";
+  return (
+    event === "newly_monitored" ||
+    event === "monitoring_stopped" ||
+    event === "first_appearance"
+  );
 }
 
 /**
@@ -1059,7 +1104,9 @@ function sortBucket(groups: ChangeGroup[]): ChangeGroup[] {
  */
 function interleave(groups: ChangeGroup[]): ChangeGroup[] {
   // Scope kinds sort last: they are context for the week, not its news.
-  const order: EventKind[] = [...FOUND_KINDS, "newly_monitored", "monitoring_stopped"];
+  const order: EventKind[] = [
+    ...FOUND_KINDS, "newly_monitored", "monitoring_stopped", "first_appearance",
+  ];
   const placed: { g: ChangeGroup; pos: number; rank: number }[] = [];
   order.forEach((event, rank) => {
     const bucket = sortBucket(groups.filter((g) => g.event === event));

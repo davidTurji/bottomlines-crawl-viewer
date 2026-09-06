@@ -657,6 +657,7 @@ function ExpandedLines({
               none of the three groups above matched. */}
           <LinesGroup rows={rows} kind="newly_monitored" />
           <LinesGroup rows={rows} kind="monitoring_stopped" />
+          <LinesGroup rows={rows} kind="first_appearance" />
         </div>
       )}
     </div>
@@ -681,7 +682,9 @@ function LinesGroup({
           ? "Newly monitored"
           : kind === "monitoring_stopped"
             ? "No longer monitored"
-            : "Cert changes";
+            : kind === "first_appearance"
+              ? "First appearance"
+              : "Cert changes";
   const glyph =
     kind === "added" ? "+" : kind === "removed" ? "-" : "↻"; // curved arrow
   const tone =
