@@ -108,6 +108,16 @@ export default function CrawlReport() {
   const prevAdded = previous?.hero_diff.line_totals.added ?? null;
   const prevRemoved = previous?.hero_diff.line_totals.removed ?? null;
 
+  // THE WATCHLIST MOVED between these two crawls. added/removed survive it,
+  // because the API now classifies a line we merely started watching as
+  // newly monitored rather than added. The MATCHED counters do not: they
+  // are finalize-time stamps of how much inventory matched the seats of
+  // their own run, so adding seats raises this week's figure against a
+  // last week that was measured with fewer. That delta would read as
+  // inventory growth and be nothing of the kind, so it is withheld.
+  const scopeChanged = summary.hero_diff.scope_changed === true;
+  const matchedComparable = !scopeChanged;
+
   return (
     <PageShell className="space-y-5">
       {/* Page header. One line summary of what got scanned, no floating
@@ -170,7 +180,9 @@ export default function CrawlReport() {
                 Matched inventory
               </div>
               <div className="text-[11px] text-slate-500">
-                Relative to last week
+                {scopeChanged
+                  ? "Your monitored lines changed, so this is not comparable"
+                  : "Relative to last week"}
               </div>
             </div>
             <span className="text-xs text-slate-500">
@@ -188,7 +200,7 @@ export default function CrawlReport() {
               number={matchedDevs}
               label="Matched developers"
               delta={
-                prevMatchedDevs != null
+                matchedComparable && prevMatchedDevs != null
                   ? computeDelta(matchedDevs, prevMatchedDevs)
                   : null
               }
@@ -197,7 +209,7 @@ export default function CrawlReport() {
               number={matchedApps}
               label="Matched applications"
               delta={
-                prevMatchedApps != null
+                matchedComparable && prevMatchedApps != null
                   ? computeDelta(matchedApps, prevMatchedApps)
                   : null
               }
