@@ -17,14 +17,21 @@ import type {
   Summary,
   DeveloperEventsPage,
   DeveloperEvent,
+  DiscoveredLine,
+  DiscoveredLineKey,
+  DiscoveredLinesPage,
+  DiscoveredPlacement,
+  DiscoveredPlacementsPage,
+  DiscoveredTotals,
   LineEventsPage,
   LineEvent,
   MatchedDevelopersPage,
-  MatchedBundle,
   MatchedBundlesPage,
   ChatFrame,
 } from "./api";
-import { buildSystemPrompt } from "./knowledge";
+// The discovered-lines ORDER BY, shared with the page's sort control so the
+// mock endpoint and the client's "default" option cannot disagree.
+import { compareDefault } from "./discoveredSort";
 
 // ─────────────────────────────────────────────────────────────────
 // Summary (hero + counters)
@@ -415,35 +422,160 @@ const SSPS_REMOVED = [
   "adtech.com",
 ];
 
+/*
+ * The publisher roster a line can land on.
+ *
+ * A real week's diff is not 127 unrelated events: an SSP changes its own
+ * file and the same ads.txt line then appears on, or disappears from, every
+ * publisher that syndicates it. So the seed is generated LINE FIRST, and
+ * each line fans out across some number of these publishers. Grouping the
+ * rows back up by (ssp, publisher id, relationship, cert pair, event) is
+ * what the Line changes page does, and without a fan-out every group would
+ * be a group of one, which is the shape that made the old table read as a
+ * wall of identical rows.
+ *
+ * The roster reuses the developers the developer-level panes already show,
+ * deduped, so a reader who opens a line and then a publisher sees the same
+ * names in both places.
+ */
+const LINE_PUBLISHERS: {
+  developer_id: number;
+  developer_name: string;
+  developer_domain: string;
+  platform: string;
+}[] = (() => {
+  const seen = new Set<number>();
+  const out: {
+    developer_id: number;
+    developer_name: string;
+    developer_domain: string;
+    platform: string;
+  }[] = [];
+  for (const d of [...DEV_ADDED, ...DEV_CHANGED, ...DEV_REMOVED]) {
+    if (seen.has(d.developer_id)) continue;
+    seen.add(d.developer_id);
+    out.push({
+      developer_id: d.developer_id,
+      developer_name: d.developer_name ?? `Publisher #${d.developer_id}`,
+      developer_domain: d.developer_domain ?? `pub-${d.developer_id}.example`,
+      platform: d.developer_platform ?? "Web",
+    });
+  }
+  // A few publishers that only ever show up in the line diff, so a line's
+  // roster is not always a subset of the developer panes.
+  for (const extra of [
+    { developer_id: 60_118, developer_name: "Harbor Point Media", developer_domain: "harborpoint.com", platform: "Web" },
+    { developer_id: 27_640, developer_name: "Ironwood Media", developer_domain: "ironwoodmedia.tv", platform: "Roku" },
+    { developer_id: 39_255, developer_name: "Kestrel Games", developer_domain: "kestrelgames.games", platform: "Android" },
+    { developer_id: 71_083, developer_name: "Tidewater Publishers", developer_domain: "tidewaterpub.com", platform: "Web" },
+    { developer_id: 18_446, developer_name: "Halcyon Networks", developer_domain: "halcyon.tv", platform: "Samsung" },
+    { developer_id: 55_907, developer_name: "Ember Peak Studios", developer_domain: "emberpeak.io", platform: "iOS" },
+    { developer_id: 84_312, developer_name: "Foundry Row Media", developer_domain: "foundryrow.com", platform: "Web" },
+  ]) {
+    if (seen.has(extra.developer_id)) continue;
+    seen.add(extra.developer_id);
+    out.push(extra);
+  }
+  return out;
+})();
+
+/** A 16-hex TAG-ID, the shape of a real ads.txt fourth field. */
+function certId(seed: number): string {
+  let h = (seed * 2_654_435_761) >>> 0;
+  let out = "";
+  while (out.length < 16) {
+    h = (h * 1_664_525 + 1_013_904_223) >>> 0;
+    out += h.toString(16).padStart(8, "0");
+  }
+  return out.slice(0, 16);
+}
+
+/**
+ * How many publishers the nth line of a bucket moved on. A decaying head
+ * plus a long tail of ones, which is how the real distribution looks: a
+ * handful of lines move everywhere, most move on one publisher.
+ */
+const FANOUT = [11, 9, 7, 6, 5, 4, 3, 3, 2, 2, 1, 1, 1, 1];
+
+/** The nth line's fan-out: the head decays a little on each pass, so a
+ *  bucket's cards carry a spread of counts rather than a run of identical
+ *  ones. */
+function fanoutFor(line: number): number {
+  return Math.max(1, FANOUT[line % FANOUT.length] - Math.floor(line / FANOUT.length));
+}
+
+/** Matches summary.hero_diff.line_totals_matched_seat. */
+const MATCHED_SEAT_TARGETS: Record<string, number> = {
+  added: 12,
+  removed: 27,
+  cert_changed: 6,
+};
+
 function seededLines(
   ssps: string[],
   event: "added" | "removed" | "cert_changed",
   seed: number,
 ): LineEvent[] {
   const rows: LineEvent[] = [];
-  for (let i = 0; i < seed; i += 1) {
-    const ssp = ssps[i % ssps.length];
-    const dev = i < DEV_ADDED.length ? DEV_ADDED[i] : DEV_ADDED[i % DEV_ADDED.length];
-    const removedDev =
-      i < DEV_REMOVED.length ? DEV_REMOVED[i] : DEV_REMOVED[i % DEV_REMOVED.length];
-    const chosenDev = event === "removed" ? removedDev : dev;
-    const relationship = i % 3 === 0 ? "DIRECT" : "RESELLER";
-    rows.push({
-      developer_id: chosenDev.developer_id,
-      developer_name: chosenDev.developer_name,
-      developer_domain: chosenDev.developer_domain,
-      file_kind: chosenDev.developer_platform === "Web" ? "ads_txt" : "app_ads_txt",
-      ssp_domain: ssp,
-      publisher_id: `${
-        ssp.split(".")[0]
-      }-${1000 + ((i * 37 + seed * 11) % 8999)}`,
-      relationship,
-      event,
-      old_cert_id: event === "removed" || event === "cert_changed" ? `old-cert-${i}` : null,
-      new_cert_id: event === "added" || event === "cert_changed" ? `new-cert-${i}` : null,
-      matched_seat: i % 4 === 0,
-      occurred_at: "2026-08-25T09:18:30Z",
-    });
+  let line = 0;
+  while (rows.length < seed) {
+    const remaining = seed - rows.length;
+    const fanout = Math.min(fanoutFor(line), remaining);
+    const ssp = ssps[line % ssps.length];
+    const relationship = line % 3 === 0 ? "DIRECT" : "RESELLER";
+    const publisherId = `${ssp.split(".")[0]}-${
+      1000 + ((line * 37 + seed * 11) % 8999)
+    }`;
+    const oldCert = certId(seed * 101 + line * 7);
+    const newCert = certId(seed * 313 + line * 13 + 1);
+    for (let j = 0; j < fanout; j += 1) {
+      const pub = LINE_PUBLISHERS[(line * 5 + j) % LINE_PUBLISHERS.length];
+      rows.push({
+        developer_id: pub.developer_id,
+        developer_name: pub.developer_name,
+        developer_domain: pub.developer_domain,
+        file_kind: pub.platform === "Web" ? "ads_txt" : "app_ads_txt",
+        ssp_domain: ssp,
+        publisher_id: publisherId,
+        relationship,
+        event,
+        old_cert_id:
+          event === "removed"
+            ? oldCert
+            : event === "cert_changed"
+              ? oldCert
+              : null,
+        new_cert_id:
+          event === "added"
+            ? newCert
+            : event === "cert_changed"
+              ? newCert
+              : null,
+        matched_seat: false,
+        occurred_at: "2026-08-25T09:18:30Z",
+      });
+    }
+    line += 1;
+  }
+  // Seat matches are a property of the line, not of the individual
+  // placement, so they are stamped a whole line at a time and the totals
+  // land on the same numbers the summary card reports.
+  const seatTarget = MATCHED_SEAT_TARGETS[event];
+  let stamped = 0;
+  for (let i = 0; i < rows.length && stamped < seatTarget; i += 1) {
+    const r = rows[i];
+    if (i % 7 !== 0) continue;
+    const key = `${r.ssp_domain}|${r.publisher_id}|${r.relationship}`;
+    for (const other of rows) {
+      if (
+        stamped < seatTarget &&
+        !other.matched_seat &&
+        `${other.ssp_domain}|${other.publisher_id}|${other.relationship}` === key
+      ) {
+        other.matched_seat = true;
+        stamped += 1;
+      }
+    }
   }
   return rows;
 }
@@ -698,59 +830,12 @@ export function mockMatchedBundles(page: number): MatchedBundlesPage {
 }
 
 /**
- * Apps for developers that appear only in the weekly event tables — the
- * removed-you publishers (no longer matched, so absent from
- * MATCHED_BUNDLES) and newly-matched developers whose event id has no
- * roster twin. Kept OUT of MATCHED_BUNDLES so the Results page counters
- * and the "matched this week" semantics stay truthful; only the
- * per-developer expansion reads this map.
- */
-function buildEventDevBundles(): Record<number, MatchedBundle[]> {
-  const covered = new Set(MATCHED_BUNDLES.map((b) => b.developer_id));
-  const map: Record<number, MatchedBundle[]> = {};
-  [...DEV_ADDED, ...DEV_REMOVED, ...DEV_CHANGED]
-    .filter((d) => !covered.has(d.developer_id))
-    .forEach((dev, di) => {
-      const n = 2 + (di % 3);
-      const name = dev.developer_name ?? "App";
-      const platform = (dev.developer_platform ?? "web").toLowerCase();
-      const rows: MatchedBundle[] = [];
-      for (let i = 0; i < n; i += 1) {
-        const store = STORES.includes(platform as (typeof STORES)[number])
-          ? platform
-          : STORES[(di + i) % STORES.length];
-        const noun = APP_NOUNS[(di * 5 + i * 3) % APP_NOUNS.length];
-        rows.push({
-          store,
-          bundle_id: bundleIdFor(store, name, di * 7 + i),
-          app_name: `${name.split(/\s+/)[0]} ${noun}`,
-          developer_id: dev.developer_id,
-          developer_name: dev.developer_name,
-          developer_domain: dev.developer_domain,
-          line_count: Math.max(
-            1,
-            Math.round(
-              Math.max(dev.matched_lines_current, dev.matched_lines_prev) / n,
-            ),
-          ),
-        });
-      }
-      map[dev.developer_id] = rows;
-    });
-  return map;
-}
-
-const EVENT_DEV_BUNDLES = buildEventDevBundles();
-
-/**
  * Bundles grouped by developer_id so the nested "Results" list can expand a
  * developer row and reveal every app that developer publishes without a
- * second request. Falls back to the event-developer seed for publishers
- * outside this week's matched roster.
+ * second request.
  */
 export function bundlesForDeveloper(developer_id: number) {
-  const matched = MATCHED_BUNDLES.filter((b) => b.developer_id === developer_id);
-  return matched.length ? matched : (EVENT_DEV_BUNDLES[developer_id] ?? []);
+  return MATCHED_BUNDLES.filter((b) => b.developer_id === developer_id);
 }
 
 // ─────────────────────────────────────────────────────────────────
@@ -811,263 +896,437 @@ function buildLinesByDeveloper(): Record<number, LineEvent[]> {
 
 const LINES_BY_DEVELOPER = buildLinesByDeveloper();
 
-/**
- * Exact line events for every developer named in the weekly event tables
- * (newly matched / removed you / changed), so the Overview's expandable
- * rows render a git-style diff whose row counts reconcile with the +N/-N
- * the row header advertises. Each top_ssp contributes its advertised count
- * of rows first, the remainder cycles through filler SSPs. Replaces the
- * thinner 1-3 row entry the top-20 builder may have seeded for the same
- * developer — the event tables are the richer truth.
- */
-const FILLER_SSPS = [
-  "sovrn.com",
-  "triplelift.com",
-  "adform.com",
-  "improvedigital.com",
-  "smartadserver.com",
-  "yahoo.com",
-  "amazon-adsystem.com",
-  "adyoulike.com",
-];
-
-/** Deterministic 16-hex cert id, so the diff reads like real TAG certs. */
-function certIdFor(seed: number): string {
-  const a = ((seed * 2654435761) >>> 0).toString(16).padStart(8, "0");
-  const b = ((seed * 40503 + 0x9e3779b9) >>> 0).toString(16).padStart(8, "0");
-  return a + b;
-}
-
-function buildEventDevLines(dev: DeveloperEvent): LineEvent[] {
-  const total = dev.lines_added + dev.lines_removed + dev.lines_cert_changed;
-  const sspSeq: string[] = [];
-  for (const t of dev.top_ssps) {
-    for (let i = 0; i < t.count; i += 1) sspSeq.push(t.ssp_domain);
-  }
-  for (let i = 0; sspSeq.length < total; i += 1) {
-    sspSeq.push(FILLER_SSPS[i % FILLER_SSPS.length]);
-  }
-  const kinds: ("added" | "removed" | "cert_changed")[] = [
-    ...Array<"added">(dev.lines_added).fill("added"),
-    ...Array<"removed">(dev.lines_removed).fill("removed"),
-    ...Array<"cert_changed">(dev.lines_cert_changed).fill("cert_changed"),
-  ];
-  return kinds.map((evt, i) => {
-    const ssp = sspSeq[i];
-    return {
-      developer_id: dev.developer_id,
-      developer_name: dev.developer_name,
-      developer_domain: dev.developer_domain,
-      file_kind: dev.developer_platform === "Web" ? "ads_txt" : "app_ads_txt",
-      ssp_domain: ssp,
-      publisher_id: `${ssp.split(".")[0]}-${(dev.developer_id % 8999) + 1000 + i * 7}`,
-      relationship: i % 3 === 0 ? "DIRECT" : "RESELLER",
-      event: evt,
-      old_cert_id: evt === "added" ? null : certIdFor(dev.developer_id * 31 + i),
-      new_cert_id: evt === "removed" ? null : certIdFor(dev.developer_id * 57 + i),
-      matched_seat: true,
-      occurred_at: dev.occurred_at,
-    };
-  });
-}
-
-for (const dev of [...DEV_ADDED, ...DEV_REMOVED, ...DEV_CHANGED]) {
-  LINES_BY_DEVELOPER[dev.developer_id] = buildEventDevLines(dev);
-}
-
 /** All matched-seat line events for one developer. Empty array if unknown. */
 export function linesForDeveloper(developer_id: number): LineEvent[] {
   return LINES_BY_DEVELOPER[developer_id] ?? [];
 }
 
 // ─────────────────────────────────────────────────────────────────
+// Discovered lines
+// ─────────────────────────────────────────────────────────────────
+
+/*
+ * Seed for the "Discovered lines" page, grouped by LINE rather than by
+ * (publisher x line): a line is kept because its SSP domain is on the run's
+ * discover_domains list, not because it matched an exact seat line.
+ *
+ * Modelled on the operator's real case: a crawl for carambola.com and
+ * carambo.la with no seat lines at all. Most lines therefore carry one of
+ * those two domains; a couple of others are mixed in because an operator
+ * usually lists every domain a partner is known to publish under.
+ *
+ * Shape and ordering are the contract documented on api.discoveredLines:
+ * placements_count DESC, then ssp_domain, then publisher_id, with a
+ * previous-crawl count on every line so the weekly delta is a real
+ * subtraction rather than a decoration.
+ */
+
+/** Discovery domains, weighted: the two real ones dominate. */
+const DISCOVERY_SSPS: { domain: string; weight: number }[] = [
+  { domain: "carambola.com", weight: 46 },
+  { domain: "carambo.la", weight: 34 },
+  { domain: "carambolamedia.com", weight: 12 },
+  { domain: "sonobi.com", weight: 8 },
+];
+
+const DISCOVERY_SSP_PICK: string[] = DISCOVERY_SSPS.flatMap((s) =>
+  Array<string>(s.weight).fill(s.domain),
+);
+
+/* 40 x 16 = 640 distinct publisher names, so the widest line (431
+ * publishers) has a real roster to draw from without repeating anyone, and
+ * the roster reads the way a discovery run's does: a long list of
+ * publishers nobody on the customer side has heard of, which is exactly the
+ * point of the page. */
+const DISCOVERED_PREFIX = [
+  "Hollow Creek", "Ridgeline", "Copper Kettle", "Saltmarsh", "Bright Anvil",
+  "Fernhill", "Windward", "Barrowfield", "Lowtide", "Kestrelwood",
+  "Amber Row", "Northbank", "Stonefall", "Wildergreen", "Pale Harbor",
+  "Tinderbox", "Clearwater", "Highfen", "Rookery", "Gladewater",
+  "Thistledown", "Oxbow", "Marlstone", "Quiet Harbor", "Bramblewick",
+  "Falconridge", "Greyhawk", "Hartfield", "Ivory Gate", "Junipergrove",
+  "Kelpwood", "Larkfield", "Millrace", "Netherfold", "Orchard Row",
+  "Pinewater", "Quarryside", "Redgate", "Sablewood", "Thornbury",
+];
+
+const DISCOVERED_SUFFIX = [
+  "Media", "Studios", "Networks", "Publishers", "Interactive",
+  "Broadcasting", "Games", "Digital", "Press", "Group",
+  "Labs", "Collective", "Partners", "Works", "House", "Company",
+];
+
+/** A publisher account id in the shape the named SSP hands out. */
+function discoveredPublisherId(ssp: string, n: number): string {
+  if (ssp === "sonobi.com") return `sb-${(n % 90_000) + 10_000}`;
+  if (ssp === "carambo.la") return `${(n % 900_000) + 100_000}`;
+  if (ssp === "carambolamedia.com") return `cm${(n % 90_000) + 10_000}`;
+  return `${(n % 9_000_000) + 1_000_000}`;
+}
+
+/** A TAG-ish 16-hex cert id; only some publishers bother to print one. */
+function discoveredCertId(n: number): string {
+  let out = "";
+  let x = (n * 2_246_822_519 + 374_761_393) >>> 0;
+  for (let i = 0; i < 16; i += 1) {
+    x ^= x << 13;
+    x >>>= 0;
+    x ^= x >>> 17;
+    x ^= x << 5;
+    x >>>= 0;
+    out += "0123456789abcdef"[x % 16];
+  }
+  return out;
+}
+
+/** The publisher roster a discovery crawl walks. Deduped by domain. */
+type MockDiscoveryPublisher = {
+  developer_domain: string;
+  developer_name: string;
+  platform: string;
+};
+
+function buildDiscoveryPublishers(): MockDiscoveryPublisher[] {
+  const rnd = xorshift(51_477);
+  const seen = new Set<string>();
+  const out: MockDiscoveryPublisher[] = [];
+  const total = DISCOVERED_PREFIX.length * DISCOVERED_SUFFIX.length;
+  for (let i = 0; i < total; i += 1) {
+    const name = `${DISCOVERED_PREFIX[i % DISCOVERED_PREFIX.length]} ${
+      DISCOVERED_SUFFIX[
+        Math.floor(i / DISCOVERED_PREFIX.length) % DISCOVERED_SUFFIX.length
+      ]
+    }`;
+    const platform = PLATFORMS[Math.floor(rnd() * PLATFORMS.length)];
+    const developer_domain = domainFor(name, platform, i);
+    if (seen.has(developer_domain)) continue;
+    seen.add(developer_domain);
+    out.push({ developer_domain, developer_name: name, platform });
+  }
+  return out;
+}
+
+const DISCOVERY_PUBLISHERS = buildDiscoveryPublishers();
+
+/** A line before its placements are attached. */
+type MockLineSpec = {
+  ssp_domain: string;
+  publisher_id: string;
+  relationship: string;
+  cert_id: string;
+  placements_count: number;
+  previous_placements_count: number | null;
+};
+
+/*
+ * The head of the list, written by hand rather than generated, for one
+ * reason: the first screen has to show all four delta states. A reviewer
+ * looking at a screenshot should be able to see "up", "down", "no change"
+ * and "new" without scrolling or filtering, and a generator seeded to
+ * produce a pleasing head is a generator that will stop producing one the
+ * next time the seed moves.
+ *
+ * The counts are the operator's real shape: two lines carried by hundreds
+ * of publishers, then a fall-off.
+ */
+const DISCOVERED_HEAD: MockLineSpec[] = [
+  {
+    ssp_domain: "carambola.com",
+    publisher_id: "1042318",
+    relationship: "RESELLER",
+    cert_id: "4a7be0c1d9f23b58",
+    placements_count: 431,
+    previous_placements_count: 402, // up 29
+  },
+  {
+    ssp_domain: "carambo.la",
+    publisher_id: "618402",
+    relationship: "RESELLER",
+    cert_id: "",
+    placements_count: 387,
+    previous_placements_count: 391, // down 4
+  },
+  {
+    ssp_domain: "carambola.com",
+    publisher_id: "2884190",
+    relationship: "DIRECT",
+    cert_id: "b1f4c72e5a08d9c3",
+    placements_count: 264,
+    previous_placements_count: 264, // no change
+  },
+  {
+    ssp_domain: "carambo.la",
+    publisher_id: "774061",
+    relationship: "RESELLER",
+    cert_id: "9c02ea41b7d5f6a8",
+    placements_count: 198,
+    previous_placements_count: null, // new this week
+  },
+  {
+    ssp_domain: "carambola.com",
+    publisher_id: "3390514",
+    relationship: "RESELLER",
+    cert_id: "",
+    placements_count: 176,
+    previous_placements_count: 151, // up 25
+  },
+  {
+    ssp_domain: "carambolamedia.com",
+    publisher_id: "cm41288",
+    relationship: "RESELLER",
+    cert_id: "77d3b0e9c142a5fb",
+    placements_count: 143,
+    previous_placements_count: 158, // down 15
+  },
+];
+
+/*
+ * The tail. Long-tailed on purpose: a handful of lines on 90+ publishers,
+ * a band in the twenties to eighties, and most on a single digit's worth,
+ * which is what a discovery run against two partner domains actually
+ * returns.
+ */
+function buildDiscoveredTail(): MockLineSpec[] {
+  const rnd = xorshift(90_210);
+  const out: MockLineSpec[] = [];
+  for (let i = 0; i < 164; i += 1) {
+    const ssp = DISCOVERY_SSP_PICK[Math.floor(rnd() * DISCOVERY_SSP_PICK.length)];
+    const account = 7 + i * 97;
+    const r = rnd();
+    const placements_count =
+      r < 0.05
+        ? 90 + Math.floor(rnd() * 130)
+        : r < 0.18
+          ? 24 + Math.floor(rnd() * 60)
+          : r < 0.47
+            ? 6 + Math.floor(rnd() * 16)
+            : 1 + Math.floor(rnd() * 5);
+    // Delta mix, weighted so growth leads (a discovery domain a partner is
+    // actively selling spreads week over week) without hiding the losses.
+    const d = rnd();
+    const swing = (pct: number) =>
+      1 + Math.floor(rnd() * Math.max(2, Math.round(placements_count * pct)));
+    let previous_placements_count: number | null;
+    if (d < 0.14) {
+      previous_placements_count = null; // new this week
+    } else if (d < 0.52) {
+      previous_placements_count = Math.max(1, placements_count - swing(0.12));
+    } else if (d < 0.76) {
+      previous_placements_count = placements_count + swing(0.1);
+    } else {
+      previous_placements_count = placements_count;
+    }
+    out.push({
+      ssp_domain: ssp,
+      publisher_id: discoveredPublisherId(ssp, account),
+      relationship: rnd() < 0.28 ? "DIRECT" : "RESELLER",
+      cert_id: rnd() < 0.5 ? discoveredCertId(account + i) : "",
+      placements_count,
+      previous_placements_count,
+    });
+  }
+  return out;
+}
+
+/**
+ * Publishers carrying one line. Walks a contiguous window of the roster
+ * from a per-line offset, so two lines overlap the way two accounts on the
+ * same SSP really do, every publisher on a line is distinct, and the whole
+ * thing stays deterministic across reloads.
+ */
+function placementsFor(spec: MockLineSpec, i: number): DiscoveredPlacement[] {
+  const pool = DISCOVERY_PUBLISHERS;
+  const rnd = xorshift(1_000_003 + i * 7_919);
+  const start = (i * 137) % pool.length;
+  const count = Math.min(spec.placements_count, pool.length);
+  const rows: DiscoveredPlacement[] = [];
+  for (let k = 0; k < count; k += 1) {
+    const pub = pool[(start + k) % pool.length];
+    rows.push({
+      developer_domain: pub.developer_domain,
+      developer_name: pub.developer_name,
+      platform: pub.platform,
+      // A web publisher can only be found in ads.txt; an app publisher is
+      // usually in app-ads.txt and occasionally in both.
+      found_in:
+        pub.platform === "Web"
+          ? "ads.txt"
+          : rnd() < 0.8
+            ? "app-ads.txt"
+            : "ads.txt",
+    });
+  }
+  return rows.sort(
+    (a, b) =>
+      a.developer_domain.localeCompare(b.developer_domain) ||
+      a.found_in.localeCompare(b.found_in),
+  );
+}
+
+function buildDiscoveredLines(): DiscoveredLine[] {
+  const specs = [...DISCOVERED_HEAD, ...buildDiscoveredTail()];
+  // A line's identity is the four-tuple, so collapse duplicates the way
+  // GROUP BY would.
+  const seen = new Set<string>();
+  const unique = specs.filter((s) => {
+    const key = [s.ssp_domain, s.publisher_id, s.relationship, s.cert_id].join("|");
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
+  // Same ORDER BY the endpoint promises: new lines first, then the biggest
+  // weekly gains, then everything else widest-first. The comparator is the
+  // shared one in ./discoveredSort, which the page's sort control also uses,
+  // so the server order and the client's "default" option cannot drift.
+  //
+  // Sorted as specs (no placements attached yet) because the comparator only
+  // reads the four identity fields and the two counts, all of which a spec
+  // already has; attaching first would build 640-row rosters for lines the
+  // sort is about to move anyway.
+  unique.sort(compareDefault);
+  return unique.map((s, i) => ({ ...s, placements: placementsFor(s, i) }));
+}
+
+const DISCOVERED_LINES = buildDiscoveredLines();
+
+/**
+ * Lines that were in last week's crawl and are gone from this one, by
+ * discovery domain. They exist only so the summary row's previous-week
+ * total is honest: the rows a crawl returns cover lines that still exist,
+ * so summing them would erase every disappearance and make every week look
+ * like growth. The live endpoint counts the previous crawl directly and
+ * never needs this table.
+ */
+const DISCOVERY_VANISHED: Record<string, { lines: number; placements: number }> = {
+  "carambola.com": { lines: 4, placements: 62 },
+  "carambo.la": { lines: 3, placements: 41 },
+  "carambolamedia.com": { lines: 1, placements: 9 },
+  "sonobi.com": { lines: 0, placements: 0 },
+};
+
+/** Embed threshold, mirroring the rule stated in the api.ts contract. */
+const DISCOVERED_EMBED_MAX = 20;
+
+function discoveredTotals(pool: DiscoveredLine[]): DiscoveredTotals {
+  let placements = 0;
+  let previous_lines = 0;
+  let previous_placements = 0;
+  const ssps = new Set<string>();
+  for (const l of pool) {
+    placements += l.placements_count;
+    ssps.add(l.ssp_domain);
+    if (l.previous_placements_count != null) {
+      previous_lines += 1;
+      previous_placements += l.previous_placements_count;
+    }
+  }
+  for (const ssp of ssps) {
+    const gone = DISCOVERY_VANISHED[ssp];
+    if (!gone) continue;
+    previous_lines += gone.lines;
+    previous_placements += gone.placements;
+  }
+  return {
+    lines: pool.length,
+    placements,
+    previous_lines: pool.length === 0 ? null : previous_lines,
+    previous_placements: pool.length === 0 ? null : previous_placements,
+  };
+}
+
+function lineKeyOf(k: DiscoveredLineKey): string {
+  return [k.ssp_domain, k.publisher_id, k.relationship, k.cert_id].join("|");
+}
+
+/**
+ * Filtering matches the live line-events behaviour: ssp_domain is a
+ * case-insensitive substring, so typing "caramb" keeps both carambola.com
+ * and carambo.la, and "la" keeps carambo.la alone.
+ *
+ * Mock-only escape hatch: adding ``?discovery=none`` to the URL empties the
+ * list, which is how the seat-line-only empty state is reviewed without a
+ * second fixture set. Never reached in a production build, where MOCK is
+ * false and this module is tree-shaken out.
+ */
+export function mockDiscoveredLines(opts: {
+  page?: number;
+  page_size?: number;
+  ssp_domain?: string;
+}): DiscoveredLinesPage {
+  const page = opts.page ?? 1;
+  const pageSize = opts.page_size ?? 50;
+  const emptied =
+    typeof window !== "undefined" &&
+    new URLSearchParams(window.location.search).get("discovery") === "none";
+  let pool = emptied ? [] : DISCOVERED_LINES;
+  if (opts.ssp_domain) {
+    const needle = opts.ssp_domain.trim().toLowerCase();
+    pool = pool.filter((r) => r.ssp_domain.toLowerCase().includes(needle));
+  }
+  const start = (page - 1) * pageSize;
+  return {
+    page,
+    page_size: pageSize,
+    total: pool.length,
+    totals: discoveredTotals(pool),
+    // Strip the embedded placements above the threshold, exactly as the
+    // proposed endpoint would, so the card's fetch-on-expand path is what
+    // a mock review actually exercises on the wide lines.
+    rows: pool.slice(start, start + pageSize).map((l) =>
+      l.placements && l.placements.length <= DISCOVERED_EMBED_MAX
+        ? l
+        : { ...l, placements: undefined },
+    ),
+  };
+}
+
+export function mockDiscoveredLinePlacements(
+  key: DiscoveredLineKey,
+  opts: { page?: number; page_size?: number },
+): DiscoveredPlacementsPage {
+  const page = opts.page ?? 1;
+  const pageSize = opts.page_size ?? 100;
+  const wanted = lineKeyOf(key);
+  const line = DISCOVERED_LINES.find((l) => lineKeyOf(l) === wanted);
+  const rows = line?.placements ?? [];
+  const start = (page - 1) * pageSize;
+  return {
+    page,
+    page_size: pageSize,
+    total: rows.length,
+    rows: rows.slice(start, start + pageSize),
+  };
+}
+
+// ─────────────────────────────────────────────────────────────────
 // Chat SSE stream (mock)
 // ─────────────────────────────────────────────────────────────────
 
-/**
- * Mock chat responses.
- *
- * Two families:
- * - Data questions grounded in this week's + last week's mock summary.
- * - IAB spec questions grounded in the knowledge package in ../knowledge.
- *
- * The lookup is keyword-based: each entry declares a set of trigger phrases;
- * the first match wins. Order matters — put narrower topics before broader
- * ones (e.g. "app-ads.txt" before "ads.txt" so the CTV question doesn't get
- * eaten by the web-ads.txt entry).
- */
-type ChatEntry = { triggers: string[]; body: string };
+const CHAT_RESPONSES: Record<string, string> = {
+  DEFAULT: `Here is the short read of this week:
 
-const CHAT_ENTRIES: ChatEntry[] = [
-  // ── Eligibility / compliance ─────────────────────────────────
-  // These live FIRST because they answer the questions a publisher
-  // actually opens the report to ask: "am I still allowed to sell X",
-  // "what broke this week", "am I at risk". More specific compliance
-  // triggers come before broad ones so "restore compliance" beats bare
-  // "compliant", etc.
-  {
-    triggers: ["still eligible", "am i eligible", "eligible to sell"],
-    body: `Yes — you're still eligible to sell **{{TARGET}}** as of this week's crawl.
+- **184 lines removed**, mostly from rubiconproject.com (42), appnexus.com (38) and google.com (29).
+- **127 lines added**, led by magnite.com, openx.com and pubmatic.com. Most of those additions are on new mobile publishers (Chomp Studios, Roost Media, Deep Sea Games).
 
-- Their app-ads.txt lists **18 lines matching your seats** this week.
-- **6 on Magnite** (your strongest DIRECT relationship), **5 on OpenX**, **4 on Pubmatic**.
-- **No cert-ID rotations** on any of your seats with them.
-- **SupplyChain check**: a bid with \`asi=magnite.com, sid=<your-magnite-seat>\` in schain node 0 will pass authorization. However, {{TARGET}} does NOT declare \`OWNERDOMAIN\` yet, so a strict SPO-first DSP may treat \`schain.complete\` as 0 on their first bid.
+The removals cluster on three publishers this week: Kite Interactive, Cinder and Sky, and Meridian Sports Media. That is 22, 16, and 12 lines gone. It looks like a cleanup of older relationships. Worth checking whether those publishers moved to a sales-house partner.`,
 
-**Bottom line:** eligible today, at slight risk of being downweighted by SPO-strict buyers until {{TARGET}} adds an \`OWNERDOMAIN\` variable to their app-ads.txt. Ask them.`,
-  },
-  {
-    triggers: ["was i authorized", "authorized on", "authorized last week"],
-    body: `On **{{TARGET}}**: **last week yes, this week no.**
-
-Last week's crawl had **22 lines** matching your seats:
-- appnexus.com — 8 lines (mix of DIRECT and RESELLER)
-- rubiconproject.com — 9 lines (mostly RESELLER)
-- google.com — 5 lines (DIRECT)
-
-This week's crawl finds **zero lines**. {{TARGET}} either purged their entire ads.txt or their domain returned a 404 for the second consecutive week. Per ads.txt v1.1 §3.1, a 404 is treated as "no advertising system authorized" — so any buyer that runs authorization checks will start filtering every bid coming from {{TARGET}} starting on the next crawl.
-
-**Action:** reach out to {{TARGET}} ad-ops directly. If they legitimately dropped you, that's contractual and you're done; if the ads.txt is missing accidentally (deploy regression, domain issue), they need to republish it before next Monday's crawl.`,
-  },
-  {
-    triggers: ["non-compliant", "became non", "went non", "lost compliance"],
-    body: `Your compliance status shifted on **12 seat lines this week**. Breakdown:
-
-**Compliant → non-compliant (12 seats):**
-- **8 seats** on 4 publishers who dropped their entire ads.txt lines for you (Kite Interactive, Cinder & Sky, Meridian Sports Media, Sable Broadcasting).
-- **3 seats** where the DIRECT relationship was downgraded to RESELLER on active publishers. Not spec-breaking per ads.txt v1.1 §3.3, but many DSP quality scores weight DIRECT higher.
-- **1 seat** where the cert-ID rotated AND the account-ID rotated together (needs manual re-verification with the SSP).
-
-**Stayed compliant:** 1,337,480 of 1,337,492 lines (99.999%). The vast majority of your matched inventory is untouched.
-
-**Newly compliant this week:** 12 seats on the 6 net-new publishers (Chomp, Roost, Deep Sea, Aurora, Pixel Cauldron, Northlight).
-
-**Net:** -0 seats vs last week (12 lost, 12 gained). But it's not the same 12 — you traded 4 established publishers for 6 mobile-first ones. That's a materially different portfolio, not a wash.`,
-  },
-  {
-    triggers: ["newly authorized", "newly listed", "publishers newly", "who newly"],
-    body: `**6 publishers newly authorized you this week**, adding 47 net-new matching lines:
-
-| Publisher | Platform | New lines | Top SSPs |
-|---|---|---|---|
-| Chomp Studios | iOS | 18 | Magnite (6), OpenX (5), Pubmatic (4) |
-| Roost Media | Roku CTV | 14 | SpotX (5), Beachfront (4), Magnite (3) |
-| Deep Sea Games | Android | 11 | Pubmatic (4), SmartAdServer (3) |
-| Aurora TV Networks | CTV | 9 | Sharethrough (4), Magnite (3) |
-| Pixel Cauldron | iOS | 8 | OpenX (3), SmartAdServer (2) |
-| Northlight Games | Android | 7 | Pubmatic (3), Magnite (2) |
-
-All six are publishing valid app-ads.txt discovered through their app store's \`appstore:developer_url\` meta tag. **None declare \`OWNERDOMAIN\`** — worth a note to your account managers so a strict SPO buyer's SupplyChain check doesn't flag these as \`complete=0\`. One-line fix on their side.`,
-  },
-  {
-    triggers: ["de-authorized", "deauthorized", "who dropped me", "who removed me"],
-    body: `**4 publishers de-authorized you this week** (removed every one of your matched lines):
-
-1. **Kite Interactive** (kiteinteractive.com, iOS) — 22 lines gone (AppNexus 8, Rubicon 9, Google 5).
-2. **Cinder & Sky** (cinderandsky.co, Web) — 16 lines gone (Google 7, Criteo 5, Yahoo 4).
-3. **Meridian Sports Media** (meridiansports.io, iOS) — 12 lines gone (AppNexus 6, Yahoo 4, Rubicon 2).
-4. **Sable Broadcasting** (sablebroadcast.tv, Samsung CTV) — 9 lines gone (Rubicon 5, plus 4 more).
-
-Per ads.txt v1.1, a missing entry = publisher no longer authorizes that relationship. Buyers running strict authorization checks will filter every bid on this inventory starting next crawl.
-
-Common pattern for this shape of drop is a publisher moving to a sales-house exclusive (which would show up as a \`MANAGERDOMAIN\` in their new ads.txt). None of these four declared one, so it's more likely a plain contract wind-down or an accidental ads.txt rewrite. Worth 4 emails.`,
-  },
-  {
-    triggers: ["how many seats", "how many am i compliant", "how many compliant", "compliance rate", "authorization rate"],
-    body: `**You're compliant on 1,337,492 matched lines** across **8,412 publishers** and **24,781 apps** — that's the full set the ads.txt / app-ads.txt discovery marked as valid for you this crawl.
-
-Vs last week (1,338,549 lines / 8,408 devs / 24,614 apps): **-1,057 lines, +4 developers, +167 apps**.
-
-- Line count dropped slightly because 4 high-line-count publishers fully dropped you (Kite, Cinder & Sky, Meridian, Sable — 59 lines combined) and the 6 new publishers came in with fewer lines each.
-- Developer breadth grew (+4 net) and app coverage grew a lot (+167).
-- Net-positive trend for **supply diversity** even though gross line count dipped.
-
-Compliance rate (matched lines / total attempted lines this week): **99.06%** (12 seat-level compliance losses out of 1,337,504 attempted). Last week it was 99.02%. Slight improvement.`,
-  },
-  {
-    triggers: ["at risk", "filtered by buyers", "get filtered", "risk of being"],
-    body: `**High-risk items this week — buyers doing strict supply-path checks will start filtering these next crawl:**
-
-1. **12 DIRECT seat lines fully removed** (see "de-authorized" — Kite, Cinder & Sky, Meridian, Sable). Buyers that require a matching ads.txt entry for the schain node will filter every bid on these publishers.
-2. **6 new publishers don't publish OWNERDOMAIN** (Chomp, Roost, Deep Sea, Aurora, Pixel Cauldron, Northlight). Buyers that check \`schain.nodes[0].domain == ads.txt OWNERDOMAIN\` may treat the chain as \`complete=0\`. Not fatal for most DSPs; SPO-first DSPs will downweight.
-3. **1 seat needs manual re-verification** — cert-ID + account-ID both rotated on the same seat.
-
-**Low-risk (safe to ignore):**
-- 43 cert-ID rotations without a relationship change — benign per ads.txt v1.1 §3.3 (cert IDs are being superseded by the \`identifiers\` object in sellers.json anyway and may be deprecated in a future spec revision).
-- 3 DIRECT→RESELLER downgrades on stable relationships — spec-legal per v1.1 §3.3, just a preference signal.`,
-  },
-  {
-    triggers: ["broke my compliance", "what broke", "root cause"],
-    body: `Three things broke compliance this week:
-
-1. **Four publishers fully dropped you** (Kite, Cinder & Sky, Meridian, Sable — 59 lines combined). Most impactful — these were 3+ month-old, high-line-count relationships.
-2. **Three DIRECT → RESELLER downgrades** on active publishers. Not spec-breaking (both are valid per ads.txt v1.1 §3.3), but DSP quality scores often weight DIRECT higher, and SPO paths through DIRECT are shorter.
-3. **One dual-rotation** (cert-ID + account-ID together) on an existing seat needs manual re-verification with the SSP.
-
-**Root cause is publisher-side, not yours** — no change to your ads.txt or seat configuration would have prevented any of this. The fix is contact + re-authorization on the four dropped publishers, plus a quick email to the SSP on the dual-rotation seat.`,
-  },
-  {
-    triggers: ["direct lines", "direct line", "lost direct", "direct relationships"],
-    body: `You lost **8 DIRECT lines this week** (removed by publisher-side ads.txt updates):
-
-- **appnexus.com, xf-4402, DIRECT**: Kite Interactive dropped this line entirely.
-- **rubiconproject.com, 22890, DIRECT**: Sable Broadcasting removed their only DIRECT with you on Samsung CTV.
-- **google.com, pub-9083…, DIRECT**: Cinder and Sky purged all Google DIRECT lines.
-- **appnexus.com, xf-2201, DIRECT**: Meridian Sports Media dropped it.
-- Plus 4 more — filter Line changes by "removed" + "My seats only" to see the full list.
-
-**Why DIRECT lines matter more than RESELLER:** most DSP quality scores weight them higher (fewer intermediaries), they carry lower reseller-margin skim in SPO-optimized paths, and in a complete SupplyChain object a DIRECT origin node results in a shorter chain — buyers prefer short chains.
-
-**Restore priority:** these 8 DIRECT lines should be the first outreach this week. Losing DIRECT and keeping RESELLER on the same SSP is worse than losing both, because your bids now compete against your own reseller path.`,
-  },
-  {
-    triggers: ["arbitrage", "legit inventory", "supply-path", "supply path optim"],
-    body: `**Arbitrage screening from this week's crawl:**
-
-- All 8,412 matched publishers have valid ads.txt / app-ads.txt — basic authorization is clean.
-- **Only ~40% declare \`OWNERDOMAIN\` (ads.txt v1.1)**. Without it, buyers can't strictly verify that the entity being paid at schain node 0 actually owns the inventory. The door is open for undeclared re-labeling ("arbitrage") on the other ~60%.
-- **Zero publishers this week declared \`MANAGERDOMAIN\`** for any of your markets. If any of your traffic actually flows through a sales house, you can't currently prove that from ads.txt alone — the SPO signal is missing.
-- **No \`INVENTORYPARTNERDOMAIN\` chains observed** on your matched inventory this week (typical for non-CTV / non-syndicated inventory).
-
-**Verdict:** the crawl passes basic authorization for every matched line. Arbitrage risk is **medium on the ~60% of publishers without OWNERDOMAIN**. Worth pushing your top-20 publishers by revenue to adopt v1.1 variables so their schain becomes strictly verifiable end to end — that's a competitive advantage vs publishers who don't.`,
-  },
-  {
-    triggers: ["restore compliance", "how to fix", "how do i fix", "recover compliance", "what should i do to restore"],
-    body: `Playbook for this week's compliance gaps:
-
-1. **Email the 4 fully-dropped publishers** (Kite Interactive, Cinder & Sky, Meridian Sports Media, Sable Broadcasting). Confirm whether the ads.txt change is intentional. If yes, no action; if not, ask them to restore your lines before next Monday's crawl.
-2. **Ask the 6 new publishers** (Chomp, Roost, Deep Sea, Aurora, Pixel Cauldron, Northlight) **to add \`OWNERDOMAIN=<their-domain>\`** to their app-ads.txt. One-line change on their side, big compliance win for you with SPO-strict DSPs.
-3. **Re-verify the 1 dual-rotation seat** with the SSP directly — needs a new cert-ID confirmation.
-4. **43 cert-ID-only rotations** — no action needed. Benign per ads.txt v1.1 §3.3.
-5. **Nothing to change on your ads.txt or seats.** All this week's gaps are publisher-side.
-
-Total effort: ~6 emails. Expected result: 8–12 of the 12 lost seats restored by next crawl.`,
-  },
-  // ── Data questions ────────────────────────────────────────────
-  {
-    triggers: ["who removed", "which publishers dropped", "publisher lost the most"],
-    body: `Four publishers dropped your matched lines entirely this week:
+  "who removed my lines this week?": `Four publishers dropped your matched lines entirely this week:
 
 1. **Kite Interactive** (kiteinteractive.com, iOS): 22 lines removed (Rubicon 9, AppNexus 8, Google 5).
 2. **Cinder and Sky** (cinderandsky.co, Web): 16 lines (Google 7, Criteo 5, Yahoo 4).
 3. **Meridian Sports Media** (meridiansports.io, iOS): 12 lines (AppNexus 6, Yahoo 4, Rubicon 2).
 4. **Sable Broadcasting** (sablebroadcast.tv, Samsung CTV): 9 lines (Rubicon 5).
 
-A missing ads.txt entry means the publisher no longer authorizes that relationship. These are real removals, not fetch errors — worth a note to the account team on each before next week's crawl.`,
-  },
-  {
-    triggers: ["magnite"],
-    body: `Magnite (magnite.com) added **34 new lines this week**, with no removals and no cert changes.
+A missing ads.txt entry means the publisher no longer authorizes that relationship. These are real removals, not fetch errors.`,
+
+  "what changed for magnite?": `Magnite (magnite.com) added **34 new lines this week**, with no removals and no cert changes. Details:
 
 - **New publishers on Magnite**: Chomp Studios (+6), Roost Media (+3), Aurora TV Networks (+3), Northlight Games (+2).
 - **Existing publishers where Magnite grew**: Riverstone Publishers (+4), Copperline Studios (+2).
 - **No cert-id changes** for Magnite on your seats this week.
 
-Cleanest single-partner expansion in this diff. If Magnite is a priority for you, confirm the OWNERDOMAIN is set correctly on the new publishers next week — that's what ties their ads.txt back to Magnite's sellers.json entry.`,
-  },
-  {
-    triggers: ["new reseller", "show me all new resellers", "reseller lines"],
-    body: `**127 new reseller lines** and 43 new direct lines added this week. Reseller only:
+This is one of the cleanest single-partner expansions in the diff. If Magnite is a priority for you, confirm the owner domain is aligned on the new publishers next week.`,
+
+  "show me all new resellers.": `There are **127 new reseller lines** and 43 new direct lines added this week. Reseller only:
 
 | SSP | New reseller lines | Notable publishers |
 |---|---|---|
@@ -1078,295 +1337,30 @@ Cleanest single-partner expansion in this diff. If Magnite is a priority for you
 | smartadserver.com | 8 | Deep Sea Games, Pixel Cauldron |
 | adform.com | 7 | Riverstone Publishers |
 
-Every one of these reseller nodes has a live counterparty in the seller list, so the payment path looks clean.`,
-  },
-  {
-    triggers: ["unauthorized", "which of my seats are unauthor"],
-    body: `You have **12 seat lines removed this week**, which means 12 of your declared partner relationships are no longer authorized by the publisher:
+Every one of these reseller nodes is a live counterparty in the seller list, so the payment path looks clean.`,
+
+  "which of my seats are unauthorized?": `You have **12 seat lines removed this week**, which means 12 of your declared partner relationships are no longer authorized by the publisher:
 
 - **appnexus.com, xf-4402, DIRECT**: Kite Interactive dropped this line entirely.
 - **rubiconproject.com, 22890, DIRECT**: Sable Broadcasting removed it (was your only direct with them on Samsung CTV).
-- **google.com, pub-9083…, DIRECT**: Cinder and Sky purged all Google lines this week.
+- **google.com, pub-9083..., DIRECT**: Cinder and Sky purged all Google lines this week.
 - **Plus 9 more**. Turn on the "My seats only" filter in Line changes to see the full list.
 
 A removed line means the publisher no longer lists your partner as authorized. Buyers that check for authorization will start filtering these on the next crawl.`,
-  },
-  {
-    triggers: ["compare", "vs last week", "this and last week", "week over week"],
-    body: `Week-over-week rollup (this week's crawl vs last week's):
-
-| Metric | Last week | This week | Change |
-|---|---|---|---|
-| Publisher domains fetched | 1,299,402 | 1,305,881 | +6,479 |
-| Matched publishers | 8,408 | 8,412 | +4 |
-| Matched apps | 24,614 | 24,781 | +167 |
-| Lines added (weekly diff) | 92 | 127 | +35 |
-| Lines removed (weekly diff) | 74 | 184 | +110 |
-| Cert changes | 28 | 43 | +15 |
-
-The story this week: churn is elevated on the removed side (2.5× last week's pace) with three publishers accounting for most of it. Additions are broad-based, mostly new mobile publishers coming online with Magnite / OpenX / Pubmatic seats.`,
-  },
-  {
-    triggers: ["ctv", "connected tv"],
-    body: `**CTV movement this week:**
-
-- **Roku**: Roost Media added 14 lines across SpotX (5), Beachfront (4), Magnite (3).
-- **Samsung**: Sable Broadcasting removed 9 lines (mostly Rubicon).
-- **Vizio**: Copperline Studios grew +6 / -1 with 2 cert changes on SpotX.
-- **CTV (Aurora TV Networks)**: 9 lines added across Sharethrough (4) and Magnite (3).
-
-CTV inventory relies on the app-ads.txt flow, discovered via each app's store listing → developer URL → \`/app-ads.txt\`. If any of the above look off, the fastest debug is: (1) check the app store page for a valid \`appstore:developer_url\` meta tag, (2) confirm the developer domain resolves an \`app-ads.txt\`, (3) look for an \`inventorypartnerdomain=\` line pointing at the real content owner.`,
-  },
-  {
-    triggers: ["cert", "certification"],
-    body: `**43 cert-ID changes this week** (an SSP rotated its Certification Authority ID for the same seat):
-
-- amazon-adsystem.com (12), adform.com (9), criteo.com (7), spotx.tv (5), beachfront.com (4).
-
-Cert-ID rotations are usually benign — an SSP re-issues its TAG ID or migrates from one certification authority to another. They only warrant attention if the publisher/SSP relationship changes at the same time (i.e. cert change + DIRECT→RESELLER, or cert change + removal). None of this week's cert changes coincide with a relationship change on your seats.
-
-Note per ads.txt v1.1 §3.3, field 4 (Cert ID) is being superseded by the \`identifiers\` object in sellers.json and may be deprecated entirely in a future spec revision.`,
-  },
-  {
-    triggers: ["what should i do", "action", "recommend"],
-    body: `Top three things to do off this week's crawl:
-
-1. **Reach out on the four full-drop publishers** (Kite, Cinder & Sky, Meridian, Sable). Ask if the removals are permanent (contract expired, moved to a sales house) or accidental (ads.txt rewrite that missed lines). If it's a sales-house move, check whether they set a \`MANAGERDOMAIN\` per ads.txt v1.1.
-2. **Confirm your seats on the six new mobile / CTV publishers** (Chomp, Roost, Deep Sea, Aurora, Pixel Cauldron, Northlight). Their app-ads.txt now authorizes you — good moment to make sure the developer-URL flow is complete on your DSP end.
-3. **Double-check the 12 lines lost on your own seats**. These are the ones a buyer will start filtering next crawl.
-
-The 43 cert changes are noise — no action.`,
-  },
-  {
-    triggers: ["never matches", "never seen", "roster"],
-    body: `Of the 8,412 publishers whose ads.txt was crawled this week, **8,412 matched at least one of your seats** — that's the whole matched developer set on your Overview page.
-
-The **6 net-new publishers** (Chomp Studios, Roost Media, Deep Sea Games, Aurora TV Networks, Pixel Cauldron, Northlight Games) all matched fresh. The **8 that fell off** (Kite Interactive, Cinder & Sky, Meridian Sports Media, Sable Broadcasting, plus 4 more) had lines removed to zero.
-
-If you want the negative case — seats you carry that no publisher ever authorizes — that's a different report; we can wire it once the "seats without matches" endpoint lands.`,
-  },
-  // ── IAB spec questions ────────────────────────────────────────
-  {
-    triggers: ["what is app-ads", "app-ads.txt", "app ads txt"],
-    body: `**app-ads.txt** is the IAB extension of ads.txt to apps distributed through app stores (mobile, CTV, connected devices). Instead of the file living on the *content* domain, it lives on the developer's *website* domain.
-
-The discovery flow:
-1. The bid request carries a \`storeurl\` (e.g. \`https://itunes.apple.com/us/app/id1110145109\`).
-2. The verifier fetches that page, parses the three required \`<meta>\` tags — \`appstore:developer_url\`, \`appstore:bundle_id\`, \`appstore:store_id\`.
-3. The developer URL is canonicalized: strip \`www.\`/\`m.\`, keep at most the leading subdomain, respect the public-suffix list.
-4. Verifier fetches \`https://<canonical-developer-domain>/app-ads.txt\` (falling back to HTTP, and if the developer URL had a subdomain, falling back to the parent domain).
-5. Records are parsed with the SAME syntax as ads.txt, except the \`subdomain=\` directive is unused and must be ignored.
-
-Key subtlety: index apps by \`(store-domain, bundle_id or store_id) → developer-domain\`, not by the raw \`storeurl\`. The same app can have many locale/campaign URL variants.`,
-  },
-  {
-    triggers: ["direct vs reseller", "difference between direct and reseller", "what does direct mean", "what does reseller mean"],
-    body: `Per ads.txt v1.1 §3.3, field 3:
-
-- **DIRECT** — the publisher (content owner) directly controls the account in field 2 on the SSP in field 1. This usually implies a direct business contract between publisher and SSP.
-- **RESELLER** — the publisher has authorized another entity to control that account and resell the ad space via the SSP.
-
-Two implications:
-- A single publisher line can carry both — \`silverssp.com, 9675, RESELLER\` and \`silverssp.com, 5569, DIRECT\` on the same SSP is legal (different accounts).
-- Field 3 is case-insensitive per the spec. Some publishers spell it \`Reseller\`; both are valid.
-
-For supply-path optimization, buyers prefer DIRECT paths (fewer intermediaries taking margin). A publisher who sells everything via a single sales house should still declare that in \`MANAGERDOMAIN\` — the sales house's ads.txt will carry the DIRECT lines.`,
-  },
-  {
-    triggers: ["supply chain", "schain", "supply path", "supplychain object"],
-    body: `The **OpenRTB SupplyChain Object** (\`schain\`) is attached to every bid request and lists every party being paid on this specific transaction, ordered from origin publisher outward.
-
-Node shape:
-\`\`\`json
-{ "asi": "ssp.com", "sid": "1234", "hp": 1, "name": "...", "domain": "..." }
-\`\`\`
-- \`asi\` = the SSP domain (matches field 1 in ads.txt AND hosts a sellers.json).
-- \`sid\` = the seller ID at that SSP (matches field 2 in ads.txt AND a seller entry in that SSP's sellers.json).
-- \`hp\` = 1 if this node is in the payment chain.
-
-The chain's \`complete\` flag is critical: \`complete: 1\` means every hop is present; \`complete: 0\` means an upstream rebroadcaster couldn't reconstruct history and some serious DSPs simply won't spend on it.
-
-Together with ads.txt (who's authorized) and sellers.json (who each seller IS), schain gives a buyer end-to-end verification that this bid request came through a legitimate, declared path.`,
-  },
-  {
-    triggers: ["sellers.json", "sellers json"],
-    body: `**sellers.json** is a JSON file every SSP / exchange should publish at \`https://<ssp-domain>/sellers.json\`. It maps each \`seller_id\` that SSP transacts on behalf of to a real business entity.
-
-Each entry has:
-- \`seller_id\` (matches field 2 in the publisher's ads.txt and \`sid\` in schain nodes)
-- \`name\` and \`domain\` (the legal entity — publisher's \`domain\` should match \`OWNERDOMAIN\` in ads.txt v1.1)
-- \`seller_type\`: \`PUBLISHER\` (owned-and-operated), \`INTERMEDIARY\` (reseller), or \`BOTH\`
-- \`is_confidential\`: if true, the SSP is intentionally hiding identity
-
-Buyers cache the file offline (avoids per-bid identity lookups) and use it to cross-reference every \`asi\`/\`sid\` pair in a bid request's SupplyChain object against the publisher's ads.txt.
-
-Ads.txt v1.1 field 4 (Certification Authority ID) is being superseded by the sellers.json \`identifiers\` object and may be deprecated entirely in a future ads.txt release.`,
-  },
-  {
-    triggers: ["ownerdomain", "owner domain"],
-    body: `**OWNERDOMAIN** (introduced in ads.txt v1.1, §3.5.1) declares the PSL+1 business domain that owns the site.
-
-\`\`\`
-OWNERDOMAIN=mediacompany.com
-greenadexchange.com, XF7342, DIRECT, 5jyxf8k54
-\`\`\`
-
-Why it matters: for a complete OpenRTB SupplyChain object, node[0]'s \`sellers.domain\` (from the SSP's sellers.json) MUST match the publisher's \`OWNERDOMAIN\`. Without it, buyers can't verify that the entity being paid at the origin actually owns the inventory.
-
-Rules:
-- Only the first occurrence is used.
-- Recommended even when it equals the ads.txt host domain.
-- Sellers listed as \`BOTH\` in sellers.json should declare OWNERDOMAIN in every ads.txt they own OR represent — this is how buyers detect arbitrage on multi-entity operators.`,
-  },
-  {
-    triggers: ["managerdomain", "manager domain", "sales house"],
-    body: `**MANAGERDOMAIN** (ads.txt v1.1 §3.5.1) declares a primary or exclusive monetization partner — typically a sales house — when the publisher itself is NOT selling its own inventory in a given market.
-
-Syntax: \`MANAGERDOMAIN=<PSL+1 domain>[, <ISO 3166-1 alpha-2 country code>]\`. One entry per country, plus optionally a global default (no country code).
-
-\`\`\`
-OWNERDOMAIN=mediacompany.com
-MANAGERDOMAIN=yellowmediamanager.com, FR
-MANAGERDOMAIN=bluemediamanager.com, US
-MANAGERDOMAIN=defaultmanager.com
-\`\`\`
-
-For inventory monetized by the manager, that manager's domain should be node[0] in a complete SupplyChain object. This is a strategic lever for publishers doing SPO — you're telling buyers "here is my preferred route; anything else is a longer path."`,
-  },
-  {
-    triggers: ["inventorypartnerdomain", "inventory partner"],
-    body: `**INVENTORYPARTNERDOMAIN** (ads.txt v1.0.3, added for CTV / OTT) lets a distributor delegate a whole block of authorized sellers to a content partner.
-
-The traditional CTV pattern is unwieldy — a vMVPD carrying content from Programmer A had to copy every one of Programmer A's SSP lines into its own app-ads.txt. The v1.0.3 pattern collapses that to one line:
-
-\`\`\`
-# vMVPD B's app-ads.txt
-ssp.com, vwxyz, DIRECT
-inventorypartnerdomain=programmerA.com
-\`\`\`
-
-The crawler now fetches \`http://programmerA.com/ads.txt\` and treats every seat there as authorized for vMVPD B's inventory. **Only one hop** — an \`inventorypartnerdomain\` line in Programmer A's own ads.txt is NOT followed.
-
-Bid-request requirement: this delegation is only honored when the bid request itself carries \`app.inventorypartnerdomain\` or \`site.inventorypartnerdomain\` per OpenRTB.`,
-  },
-  {
-    triggers: ["subdomain", "subdomain="],
-    body: `The **\`subdomain=\`** variable lets a root ads.txt point crawlers at a subdomain that has its own distinct authorized-sellers list.
-
-\`\`\`
-# example.com/ads.txt
-greenadexchange.com, 12345, DIRECT, d75815a79
-subdomain=divisionone.example.com
-\`\`\`
-
-Rules per §3.5.1 and §5.5:
-- Only ROOT domains can refer to subdomains. Subdomains must not refer to further subdomains.
-- The data on the subdomain is bound to the subdomain, NOT the parent.
-- \`subdomain=\` is exempt from public-suffix truncation.
-- If a subdomain isn't declared in the root's ads.txt OR the subdomain doesn't serve its own file, the subdomain inherits the root's authorized set.
-
-Important: \`subdomain=\` is **unused in app-ads.txt** and must be ignored there.`,
-  },
-  {
-    triggers: ["what is ads.txt", "what does ads.txt do", "why ads.txt", "purpose of ads"],
-    body: `**ads.txt** (Authorized Digital Sellers) is an IAB Tech Lab standard where a publisher publishes a plain-text file at \`https://<domain>/ads.txt\` declaring exactly which SSPs / exchanges are authorized to sell that publisher's inventory, and under what account IDs.
-
-The problem it solves: before ads.txt, a rogue seller could offer counterfeit inventory to buyers claiming to be a well-known publisher — the buyer had no cheap way to check. With ads.txt, buyers fetch the publisher's file and reject any bid request whose \`(SSP-domain, publisher-id)\` pair isn't on the list.
-
-Record format is 3 required fields, comma-separated:
-\`\`\`
-<SSP domain>, <publisher account ID at that SSP>, DIRECT|RESELLER [, cert authority ID]
-\`\`\`
-
-Version 1.1 (August 2022) added \`OWNERDOMAIN\` and \`MANAGERDOMAIN\` to tie ads.txt into sellers.json and enable supply-path optimization signals.`,
-  },
-  {
-    triggers: ["placeholder", "empty ads.txt", "authorize nobody"],
-    body: `A publisher who authorizes **nobody** must not simply serve an empty file — after March 1, 2020, that behavior is deprecated because it's indistinguishable from a webserver error.
-
-The correct signal per ads.txt v1.1 §3.2.1 is one placeholder line:
-
-\`\`\`
-placeholder.example.com, placeholder, DIRECT, placeholder
-\`\`\`
-
-\`example.com\` is used because it's an IETF-reserved domain (RFC 6761) that will never be a real SSP. This is a "file adheres to the spec AND declares no authorized sellers" signal, distinct from a 404 or an empty body.`,
-  },
-  // ── Fallback ──────────────────────────────────────────────────
-  {
-    triggers: ["__default__"],
-    body: `Here is the short read of this week:
-
-- **184 lines removed**, mostly from rubiconproject.com (42), appnexus.com (38) and google.com (29).
-- **127 lines added**, led by magnite.com, openx.com and pubmatic.com. Most of those additions are on new mobile publishers (Chomp Studios, Roost Media, Deep Sea Games).
-
-The removals cluster on three publishers: Kite Interactive, Cinder and Sky, and Meridian Sports Media — 22, 16, and 12 lines gone. Looks like a cleanup of older relationships; worth checking whether they moved to a sales-house partner (which would show up as a \`MANAGERDOMAIN\` in their ads.txt).
-
-Ask me anything specific: an SSP name, "what is app-ads.txt", "why did X drop", "what should I do".`,
-  },
-];
-
-/**
- * Extract the "target" name from a prompt that references a specific app
- * or publisher. Used by the two entries that carry a {{TARGET}}
- * placeholder — an eligibility question and a retro authorization
- * question — so the mock answer reflects whichever name the dynamic
- * chip put in the prompt, not a hardcoded example.
- *
- * Match order: "sell X?", "sell X.", "authorized on X last week",
- * "authorized on X?". Case is preserved because we splice the name
- * back into a proper-noun position.
- */
-function extractTarget(prompt: string): string | null {
-  const sell = prompt.match(/sell\s+([^?.!]+?)(?:\s+last week)?[?.!]?\s*$/i);
-  if (sell?.[1]) return sell[1].trim();
-  const authOn = prompt.match(/authorized on\s+([^?.!]+?)(?:\s+last week)?[?.!]?\s*$/i);
-  if (authOn?.[1]) return authOn[1].trim();
-  return null;
-}
+};
 
 function pickChatResponse(prompt: string): string {
   const p = prompt.toLowerCase().trim();
-  for (const entry of CHAT_ENTRIES) {
-    if (entry.triggers.includes("__default__")) continue;
-    if (entry.triggers.some((t) => p.includes(t))) {
-      if (entry.body.includes("{{TARGET}}")) {
-        const target = extractTarget(prompt) ?? "this publisher";
-        return entry.body.replaceAll("{{TARGET}}", target);
-      }
-      return entry.body;
-    }
+  for (const [key, val] of Object.entries(CHAT_RESPONSES)) {
+    if (key === "DEFAULT") continue;
+    if (p.includes(key.toLowerCase().replace(/[?.]/g, ""))) return val;
   }
-  return CHAT_ENTRIES[CHAT_ENTRIES.length - 1].body;
-}
-
-/**
- * Compose (and log, once per conversation) the full system prompt that would
- * be sent to Gemini in live mode, so the wiring is exercised end-to-end even
- * without a real LLM. Same shape the future live chat will use — swap
- * mockChatStream for a Gemini SSE call and the system prompt is already
- * assembled correctly.
- */
-let systemPromptLogged = false;
-function logSystemPromptOnce() {
-  if (systemPromptLogged) return;
-  const prompt = buildSystemPrompt({
-    currentSummary: mockSummary,
-    previousSummary: mockPreviousSummary,
-  });
-  // eslint-disable-next-line no-console
-  console.info(
-    "[mock chat] system prompt composed (%d chars). Inspect in devtools.",
-    prompt.length,
-    prompt,
-  );
-  systemPromptLogged = true;
+  return CHAT_RESPONSES.DEFAULT;
 }
 
 export async function* mockChatStream(
   prompt: string,
 ): AsyncGenerator<ChatFrame> {
-  logSystemPromptOnce();
   const response = pickChatResponse(prompt);
   // Chunk word-by-word to look like a streaming LLM.
   const words = response.split(/(\s+)/);

@@ -11,7 +11,11 @@ export default defineConfig({
     port: 5181,
     proxy: {
       "/api": {
-        target: process.env.VITE_API_BASE || "http://localhost:8000",
+        // Dev-proxy upstream only. Deliberately NOT VITE_API_BASE: that
+        // var is the browser-side fetch base and must stay "/api" so
+        // requests are same-origin and the httpOnly session cookie
+        // sticks. Point VITE_PROXY_TARGET at the crawler API instead.
+        target: process.env.VITE_PROXY_TARGET || "http://localhost:8000",
         changeOrigin: true,
         rewrite: (p) => p.replace(/^\/api/, ""),
       },
