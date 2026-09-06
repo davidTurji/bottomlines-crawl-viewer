@@ -648,6 +648,19 @@ function ChangeCard({
               {count.toLocaleString()}
             </span>{" "}
             {count === 1 ? "publisher" : "publishers"}
+            {/* THE FINDING, not the apology. "Newly monitored" alone says
+                only that we started looking. When the book knows the line
+                was already out there, say since when: that is the answer
+                to the question the customer actually has, and it is only
+                available because the book is watchlist-independent. */}
+            {group.event === "newly_monitored" && group.first_seen_at && (
+              <>
+                {" · "}
+                <span className="text-slate-600">
+                  already live since {formatSeen(group.first_seen_at)}
+                </span>
+              </>
+            )}
           </div>
 
           {/* A cert rotation is inherently old to new, so it renders as
@@ -853,6 +866,8 @@ function exportPublishers(group: ChangeGroup) {
 type ChangeGroup = {
   key: string;
   event: EventKind;
+  /** Earliest known sighting of this line, across its publishers. */
+  first_seen_at: string | null;
   ssp_domain: string;
   publisher_id: string;
   relationship: string;
@@ -860,6 +875,16 @@ type ChangeGroup = {
   new_cert_id: string | null;
   publishers: LineEvent[];
 };
+
+/** "12 Jul 2026" — a month and a year, because the useful fact is how
+ *  LONG this has been true, and a precise day implies a precision the
+ *  weekly crawl cadence does not have. */
+function formatSeen(iso: string): string {
+  const d = new Date(iso);
+  return Number.isNaN(d.getTime())
+    ? "an earlier crawl"
+    : d.toLocaleDateString(undefined, { month: "short", year: "numeric" });
+}
 
 /** Anything unrecognised is a cert rotation, the least alarming reading. */
 function eventKind(raw: string): EventKind {
@@ -903,9 +928,17 @@ function groupByLine(rows: LineEvent[]): ChangeGroup[] {
         relationship: r.relationship,
         old_cert_id: r.old_cert_id,
         new_cert_id: r.new_cert_id,
+        first_seen_at: r.first_seen_at ?? null,
         publishers: [],
       };
       byKey.set(key, g);
+    }
+    // The EARLIEST sighting across the line's publishers. The card speaks
+    // for the whole line, so "already live since" has to be the date the
+    // line was first seen anywhere, not on whichever publisher happened to
+    // sort first.
+    if (r.first_seen_at && (!g.first_seen_at || r.first_seen_at < g.first_seen_at)) {
+      g.first_seen_at = r.first_seen_at;
     }
     g.publishers.push(r);
   }

@@ -598,6 +598,13 @@ function seededLines(
               : null,
         matched_seat: false,
         occurred_at: "2026-08-25T09:18:30Z",
+        // Two thirds of newly monitored lines were already out there; the
+        // rest the book has never seen, so they carry no date and the card
+        // says nothing rather than guessing.
+        first_seen_at:
+          event === "newly_monitored" && line % 3 !== 2
+            ? "2026-06-14T00:00:00Z"
+            : null,
       });
     }
     line += 1;

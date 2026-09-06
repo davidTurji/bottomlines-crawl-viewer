@@ -600,6 +600,10 @@ export type LineEvent = {
   new_cert_id: string | null;
   matched_seat: boolean;
   occurred_at: string | null;
+  /** When this line was FIRST seen in the wild, from the watchlist-
+   *  independent book. Set only on `newly_monitored` rows, and only when
+   *  the book knows: null means "we cannot say", never "it is new". */
+  first_seen_at?: string | null;
 };
 
 export type LineEventsPage = {
