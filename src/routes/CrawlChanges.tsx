@@ -5,6 +5,8 @@ import {
   Download,
   Minus,
   Plus,
+  Eye,
+  EyeOff,
   RefreshCw,
   RotateCw,
   Search,
@@ -73,8 +75,24 @@ const PAGE_SIZE = 40;
 const FETCH_CAP = 400;
 const FETCH_PAGE_SIZE = 500;
 
-type Bucket = "all" | "added" | "removed" | "cert_changed";
-type EventKind = "added" | "removed" | "cert_changed";
+type Bucket = "all" | EventKind;
+/** What happened to a line between the two crawls.
+ *
+ *  The first three describe the WILD. The last two describe OUR WATCHLIST
+ *  moving, which means the line was not comparable across the two weeks at
+ *  all: we either started looking at it or stopped. They are separate
+ *  kinds, not a footnote on "added", because a seat that joined the
+ *  watchlist had always been out there and calling that an addition told
+ *  the customer their market moved when only our attention did. */
+type EventKind =
+  | "added"
+  | "removed"
+  | "cert_changed"
+  | "newly_monitored"
+  | "monitoring_stopped";
+
+/** The kinds that describe the world, and so carry an honest delta. */
+const FOUND_KINDS: EventKind[] = ["added", "removed", "cert_changed"];
 
 export default function CrawlChanges() {
   const { token } = useReportScope();
@@ -135,6 +153,7 @@ export default function CrawlChanges() {
 
   useEffect(() => setPage(1), [bucket, filter, matchedSeatOnly]);
 
+
   const groups = useMemo(() => groupByLine(rows), [rows]);
 
   // In All the three buckets are woven together in proportion, so the first
@@ -184,7 +203,14 @@ export default function CrawlChanges() {
       added: 0,
       removed: 0,
       cert_changed: 0,
+      newly_monitored: 0,
+      monitoring_stopped: 0,
     };
+    // These describe "the lines shown below", which is what the card says
+    // and what the tab selects — so on a scope tab they describe the scope
+    // rows, and on All they describe everything on screen. Excluding scope
+    // rows here instead would zero the KPI on the scope tabs, where those
+    // rows are the entire subject.
     for (const g of selected) {
       placements += g.publishers.length;
       byEvent[g.event] += g.publishers.length;
@@ -202,6 +228,38 @@ export default function CrawlChanges() {
       apps: apps.size,
     };
   }, [groups, bucket]);
+
+  // The week's scope movement, counted over EVERY group rather than the
+  // selected tab: the notice and the tabs have to describe the week even
+  // while the reader is looking at one slice of it.
+  const scopeTotals = useMemo(() => {
+    let newly_monitored = 0;
+    let monitoring_stopped = 0;
+    for (const g of groups) {
+      if (g.event === "newly_monitored") newly_monitored += 1;
+      if (g.event === "monitoring_stopped") monitoring_stopped += 1;
+    }
+    return { newly_monitored, monitoring_stopped };
+  }, [groups]);
+
+// Fall back to All when the selected scope tab stops existing. Its
+  // trigger only renders while the week has rows of that kind, and a
+  // filter can take the last one away underneath the selection.
+  useEffect(() => {
+    if (bucket === "newly_monitored" && scopeTotals.newly_monitored === 0) {
+      setBucket("all");
+    }
+    if (bucket === "monitoring_stopped" && scopeTotals.monitoring_stopped === 0) {
+      setBucket("all");
+    }
+  }, [bucket, scopeTotals]);
+
+  /** Did the watchlist move this week? The API says so directly; the group
+   *  counts are the fallback for a summary that predates the flag. */
+  const scopeChanged =
+    summary?.hero_diff.scope_changed === true ||
+    scopeTotals.newly_monitored > 0 ||
+    scopeTotals.monitoring_stopped > 0;
 
   // Last week's own totals for the same three events, so each KPI can say
   // whether this week was busier than the last.
@@ -227,15 +285,23 @@ export default function CrawlChanges() {
   // happens on are the large ones, which is to say the real customers'.
   // The "showing the first N" note below stays either way.
   const comparable = !filter && !matchedSeatOnly && !truncated;
-  const prevCounts = useMemo(
+  const prevCounts = useMemo<Record<EventKind, number | null>>(
     () => ({
       added: previous?.hero_diff.line_totals.added ?? null,
       removed: previous?.hero_diff.line_totals.removed ?? null,
       cert_changed: previous?.hero_diff.line_totals.cert_changed ?? null,
+      // A scope kind has no honest previous value BY CONSTRUCTION: last
+      // week we were not watching these lines, so there is no number from
+      // that week to be a percentage of. Their first week is a baseline.
+      newly_monitored: null,
+      monitoring_stopped: null,
     }),
     [previous],
   );
   const deltaFor = (event: EventKind, current: number) => {
+    // Scope kinds never carry a delta, whatever else is true. Everything
+    // else keeps the existing suppression rules.
+    if (isScopeKind(event)) return null;
     const prev = prevCounts[event];
     return comparable && prev != null ? computeDelta(current, prev) : null;
   };
@@ -283,7 +349,9 @@ export default function CrawlChanges() {
                 <div className="text-[11px] text-slate-500">
                   {bucket === "all"
                     ? "Relative to last week"
-                    : "This tab only"}
+                    : isScopeKind(bucket)
+                      ? "First week, nothing to compare against"
+                      : "This tab only"}
                 </div>
               </div>
               <span className="text-xs text-slate-500">
@@ -318,7 +386,12 @@ export default function CrawlChanges() {
                         ? "ok"
                         : bucket === "removed"
                           ? "critical"
-                          : "warn"
+                          : isScopeKind(bucket)
+                            // Neutral, matching the cards. Amber here would
+                            // reintroduce at the top of the page the alarm
+                            // the card tones were chosen to avoid.
+                            ? undefined
+                            : "warn"
                     }
                     number={kpi.placements}
                     label={TONES[bucket].label}
@@ -352,6 +425,26 @@ export default function CrawlChanges() {
         </div>
       )}
 
+      {/* THE WATCHLIST MOVED, said before the numbers rather than after.
+          A reader who takes "61 newly monitored" for 61 new placements has
+          misread the week in the direction that flatters us, and they will
+          only find out if they read a footnote. The lines themselves are
+          listed under their own tab, badged, with this week as their
+          baseline and no delta attached. */}
+      {scopeChanged && (
+        <div className="flex items-start gap-2 rounded-xl border border-border bg-muted/50 px-4 py-3 text-[13px] text-slate-600">
+          <Eye className="mt-0.5 h-4 w-4 shrink-0" />
+          <span>
+            Your monitored lines changed this week.{" "}
+            {scopeTotals.newly_monitored > 0 && "Lines being watched for the first time appear under New, "}
+            {scopeTotals.monitoring_stopped > 0 && "lines no longer watched appear under Stopped, "}
+            and neither is counted as added or removed: we were not watching
+            them last week, so there is nothing to compare them against. This
+            week is their starting point.
+          </span>
+        </div>
+      )}
+
       {/* Controls: the bucket, the seat toggle, the SSP filter. */}
       <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
         {/* The same plain segmented control the overview's drilldown wears.
@@ -364,6 +457,15 @@ export default function CrawlChanges() {
             <TabsTrigger value="added">Added</TabsTrigger>
             <TabsTrigger value="removed">Removed</TabsTrigger>
             <TabsTrigger value="cert_changed">Cert changes</TabsTrigger>
+            {/* Shown only when the watchlist actually moved. A permanent
+                empty tab would advertise a section the week does not have,
+                and most weeks do not have one. */}
+            {scopeTotals.newly_monitored > 0 && (
+              <TabsTrigger value="newly_monitored">New</TabsTrigger>
+            )}
+            {scopeTotals.monitoring_stopped > 0 && (
+              <TabsTrigger value="monitoring_stopped">Stopped</TabsTrigger>
+            )}
           </TabsList>
         </Tabs>
 
@@ -495,9 +597,9 @@ function ChangeCard({
   // gets its own row below rather than a fourth field that cannot show a
   // change.
   const inlineCert =
-    group.event === "added"
+    group.event === "added" || group.event === "newly_monitored"
       ? group.new_cert_id
-      : group.event === "removed"
+      : group.event === "removed" || group.event === "monitoring_stopped"
         ? group.old_cert_id
         : null;
 
@@ -546,6 +648,19 @@ function ChangeCard({
               {count.toLocaleString()}
             </span>{" "}
             {count === 1 ? "publisher" : "publishers"}
+            {/* THE FINDING, not the apology. "Newly monitored" alone says
+                only that we started looking. When the book knows the line
+                was already out there, say since when: that is the answer
+                to the question the customer actually has, and it is only
+                available because the book is watchlist-independent. */}
+            {group.event === "newly_monitored" && group.first_seen_at && (
+              <>
+                {" · "}
+                <span className="text-slate-600">
+                  already live since {formatSeen(group.first_seen_at)}
+                </span>
+              </>
+            )}
           </div>
 
           {/* A cert rotation is inherently old to new, so it renders as
@@ -681,6 +796,26 @@ const TONES: Record<
     tint: "bg-warn-bg/40",
     icon: RefreshCw,
   },
+  // Toned neutral on purpose. These are not good or bad news about the
+  // market, they are a note about what we were looking at, and giving them
+  // the green of an addition would put them back in the column this whole
+  // distinction exists to keep them out of.
+  newly_monitored: {
+    label: "Newly monitored",
+    preposition: "on",
+    expandedTitle: "Publishers carrying this line in its first week",
+    disc: "bg-muted text-muted-foreground",
+    tint: "bg-muted/40",
+    icon: Eye,
+  },
+  monitoring_stopped: {
+    label: "No longer monitored",
+    preposition: "on",
+    expandedTitle: "Publishers that carried this line when we last looked",
+    disc: "bg-muted text-muted-foreground",
+    tint: "bg-muted/40",
+    icon: EyeOff,
+  },
 };
 
 /**
@@ -706,7 +841,7 @@ function exportPublishers(group: ChangeGroup) {
     p.developer_domain ?? `#${p.developer_id}`,
     p.developer_name ?? "",
     fileLabel(p.file_kind),
-    group.event,
+    TONES[group.event].label,
     line,
   ]);
   const csv = [header, ...body]
@@ -719,7 +854,7 @@ function exportPublishers(group: ChangeGroup) {
   );
   const a = document.createElement("a");
   a.href = url;
-  a.download = `${group.event}-${group.ssp_domain}-${group.publisher_id}.csv`;
+  a.download = `${group.event.replace(/_/g, "-")}-${group.ssp_domain}-${group.publisher_id}.csv`;
   document.body.appendChild(a);
   a.click();
   a.remove();
@@ -731,6 +866,8 @@ function exportPublishers(group: ChangeGroup) {
 type ChangeGroup = {
   key: string;
   event: EventKind;
+  /** Earliest known sighting of this line, across its publishers. */
+  first_seen_at: string | null;
   ssp_domain: string;
   publisher_id: string;
   relationship: string;
@@ -739,11 +876,28 @@ type ChangeGroup = {
   publishers: LineEvent[];
 };
 
-/** Anything that is not an add or a removal is a cert rotation. */
+/** "12 Jul 2026" — a month and a year, because the useful fact is how
+ *  LONG this has been true, and a precise day implies a precision the
+ *  weekly crawl cadence does not have. */
+function formatSeen(iso: string): string {
+  const d = new Date(iso);
+  return Number.isNaN(d.getTime())
+    ? "an earlier crawl"
+    : d.toLocaleDateString(undefined, { month: "short", year: "numeric" });
+}
+
+/** Anything unrecognised is a cert rotation, the least alarming reading. */
 function eventKind(raw: string): EventKind {
   if (raw === "added") return "added";
   if (raw === "removed") return "removed";
+  if (raw === "newly_monitored") return "newly_monitored";
+  if (raw === "monitoring_stopped") return "monitoring_stopped";
   return "cert_changed";
+}
+
+/** True for the kinds that mean the watchlist moved rather than the world. */
+function isScopeKind(event: EventKind): boolean {
+  return event === "newly_monitored" || event === "monitoring_stopped";
 }
 
 /**
@@ -774,9 +928,17 @@ function groupByLine(rows: LineEvent[]): ChangeGroup[] {
         relationship: r.relationship,
         old_cert_id: r.old_cert_id,
         new_cert_id: r.new_cert_id,
+        first_seen_at: r.first_seen_at ?? null,
         publishers: [],
       };
       byKey.set(key, g);
+    }
+    // The EARLIEST sighting across the line's publishers. The card speaks
+    // for the whole line, so "already live since" has to be the date the
+    // line was first seen anywhere, not on whichever publisher happened to
+    // sort first.
+    if (r.first_seen_at && (!g.first_seen_at || r.first_seen_at < g.first_seen_at)) {
+      g.first_seen_at = r.first_seen_at;
     }
     g.publishers.push(r);
   }
@@ -804,7 +966,8 @@ function sortBucket(groups: ChangeGroup[]): ChangeGroup[] {
  * list, so any window of cards holds roughly the week's real mix.
  */
 function interleave(groups: ChangeGroup[]): ChangeGroup[] {
-  const order: EventKind[] = ["added", "removed", "cert_changed"];
+  // Scope kinds sort last: they are context for the week, not its news.
+  const order: EventKind[] = [...FOUND_KINDS, "newly_monitored", "monitoring_stopped"];
   const placed: { g: ChangeGroup; pos: number; rank: number }[] = [];
   order.forEach((event, rank) => {
     const bucket = sortBucket(groups.filter((g) => g.event === event));

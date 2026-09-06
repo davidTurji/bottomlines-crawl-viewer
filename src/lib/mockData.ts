@@ -25,6 +25,7 @@ import type {
   DiscoveredTotals,
   LineEventsPage,
   LineEvent,
+  LineEventKind,
   MatchedDevelopersPage,
   MatchedBundlesPage,
   ChatFrame,
@@ -61,9 +62,18 @@ export const mockPreviousSummary: Summary = {
     },
   },
   hero_diff: {
-    line_totals: { added: 92, removed: 74, cert_changed: 28 },
-    line_totals_matched_seat: { added: 6, removed: 4, cert_changed: 3 },
-    developer_totals: { added: 9, removed: 4, changed: 41 },
+    line_totals: {
+      added: 92, removed: 74, cert_changed: 28,
+      newly_monitored: 0, monitoring_stopped: 0,
+    },
+    line_totals_matched_seat: {
+      added: 6, removed: 4, cert_changed: 3,
+      newly_monitored: 0, monitoring_stopped: 0,
+    },
+    developer_totals: {
+      added: 9, removed: 4, changed: 41,
+      newly_monitored: 0, monitoring_stopped: 0,
+    },
     top_ssps: {
       added: [
         { ssp_domain: "openx.com", count: 22 },
@@ -112,17 +122,24 @@ export const mockSummary: Summary = {
       added: 127,
       removed: 184,
       cert_changed: 43,
+      newly_monitored: 61,
+      monitoring_stopped: 9,
     },
     line_totals_matched_seat: {
       added: 12,
       removed: 27,
       cert_changed: 6,
+      newly_monitored: 61,
+      monitoring_stopped: 9,
     },
     developer_totals: {
       added: 12,
       removed: 8,
       changed: 47,
+      newly_monitored: 12,
+      monitoring_stopped: 2,
     },
+    scope_changed: true,
     top_ssps: {
       added: [
         { ssp_domain: "magnite.com", count: 34 },
@@ -164,6 +181,8 @@ const DEV_ADDED: DeveloperEvent[] = [
     lines_added: 18,
     lines_removed: 0,
     lines_cert_changed: 0,
+    lines_newly_monitored: 0,
+    lines_monitoring_stopped: 0,
     top_ssps: [
       { ssp_domain: "magnite.com", count: 6 },
       { ssp_domain: "openx.com", count: 5 },
@@ -181,6 +200,8 @@ const DEV_ADDED: DeveloperEvent[] = [
     lines_added: 14,
     lines_removed: 0,
     lines_cert_changed: 0,
+    lines_newly_monitored: 0,
+    lines_monitoring_stopped: 0,
     top_ssps: [
       { ssp_domain: "spotx.tv", count: 5 },
       { ssp_domain: "beachfront.com", count: 4 },
@@ -198,6 +219,8 @@ const DEV_ADDED: DeveloperEvent[] = [
     lines_added: 11,
     lines_removed: 0,
     lines_cert_changed: 0,
+    lines_newly_monitored: 0,
+    lines_monitoring_stopped: 0,
     top_ssps: [
       { ssp_domain: "pubmatic.com", count: 4 },
       { ssp_domain: "smartadserver.com", count: 3 },
@@ -215,6 +238,8 @@ const DEV_ADDED: DeveloperEvent[] = [
     lines_added: 9,
     lines_removed: 0,
     lines_cert_changed: 0,
+    lines_newly_monitored: 0,
+    lines_monitoring_stopped: 0,
     top_ssps: [
       { ssp_domain: "sharethrough.com", count: 4 },
       { ssp_domain: "magnite.com", count: 3 },
@@ -231,6 +256,8 @@ const DEV_ADDED: DeveloperEvent[] = [
     lines_added: 8,
     lines_removed: 0,
     lines_cert_changed: 0,
+    lines_newly_monitored: 0,
+    lines_monitoring_stopped: 0,
     top_ssps: [
       { ssp_domain: "openx.com", count: 3 },
       { ssp_domain: "smartadserver.com", count: 2 },
@@ -247,6 +274,8 @@ const DEV_ADDED: DeveloperEvent[] = [
     lines_added: 7,
     lines_removed: 0,
     lines_cert_changed: 0,
+    lines_newly_monitored: 0,
+    lines_monitoring_stopped: 0,
     top_ssps: [
       { ssp_domain: "pubmatic.com", count: 3 },
       { ssp_domain: "magnite.com", count: 2 },
@@ -266,6 +295,8 @@ const DEV_REMOVED: DeveloperEvent[] = [
     lines_added: 0,
     lines_removed: 22,
     lines_cert_changed: 0,
+    lines_newly_monitored: 0,
+    lines_monitoring_stopped: 0,
     top_ssps: [
       { ssp_domain: "rubiconproject.com", count: 9 },
       { ssp_domain: "appnexus.com", count: 8 },
@@ -283,6 +314,8 @@ const DEV_REMOVED: DeveloperEvent[] = [
     lines_added: 0,
     lines_removed: 16,
     lines_cert_changed: 0,
+    lines_newly_monitored: 0,
+    lines_monitoring_stopped: 0,
     top_ssps: [
       { ssp_domain: "google.com", count: 7 },
       { ssp_domain: "criteo.com", count: 5 },
@@ -300,6 +333,8 @@ const DEV_REMOVED: DeveloperEvent[] = [
     lines_added: 0,
     lines_removed: 12,
     lines_cert_changed: 0,
+    lines_newly_monitored: 0,
+    lines_monitoring_stopped: 0,
     top_ssps: [
       { ssp_domain: "appnexus.com", count: 6 },
       { ssp_domain: "yahoo.com", count: 4 },
@@ -317,6 +352,8 @@ const DEV_REMOVED: DeveloperEvent[] = [
     lines_added: 0,
     lines_removed: 9,
     lines_cert_changed: 0,
+    lines_newly_monitored: 0,
+    lines_monitoring_stopped: 0,
     top_ssps: [{ ssp_domain: "rubiconproject.com", count: 5 }],
     occurred_at: "2026-08-25T09:18:43Z",
   },
@@ -333,6 +370,8 @@ const DEV_CHANGED: DeveloperEvent[] = [
     lines_added: 8,
     lines_removed: 3,
     lines_cert_changed: 4,
+    lines_newly_monitored: 0,
+    lines_monitoring_stopped: 0,
     top_ssps: [
       { ssp_domain: "magnite.com", count: 4 },
       { ssp_domain: "criteo.com", count: 3 },
@@ -350,6 +389,8 @@ const DEV_CHANGED: DeveloperEvent[] = [
     lines_added: 6,
     lines_removed: 1,
     lines_cert_changed: 2,
+    lines_newly_monitored: 0,
+    lines_monitoring_stopped: 0,
     top_ssps: [
       { ssp_domain: "spotx.tv", count: 3 },
       { ssp_domain: "magnite.com", count: 2 },
@@ -366,6 +407,8 @@ const DEV_CHANGED: DeveloperEvent[] = [
     lines_added: 4,
     lines_removed: 1,
     lines_cert_changed: 3,
+    lines_newly_monitored: 0,
+    lines_monitoring_stopped: 0,
     top_ssps: [
       { ssp_domain: "pubmatic.com", count: 3 },
       { ssp_domain: "amazon-adsystem.com", count: 2 },
@@ -513,7 +556,7 @@ const MATCHED_SEAT_TARGETS: Record<string, number> = {
 
 function seededLines(
   ssps: string[],
-  event: "added" | "removed" | "cert_changed",
+  event: LineEventKind,
   seed: number,
 ): LineEvent[] {
   const rows: LineEvent[] = [];
@@ -539,20 +582,29 @@ function seededLines(
         publisher_id: publisherId,
         relationship,
         event,
+        // A newly monitored line shows only what it looks like NOW: there
+        // is no honest "before" for a week we were not watching.
         old_cert_id:
-          event === "removed"
+          event === "removed" || event === "monitoring_stopped"
             ? oldCert
             : event === "cert_changed"
               ? oldCert
               : null,
         new_cert_id:
-          event === "added"
+          event === "added" || event === "newly_monitored"
             ? newCert
             : event === "cert_changed"
               ? newCert
               : null,
         matched_seat: false,
         occurred_at: "2026-08-25T09:18:30Z",
+        // Two thirds of newly monitored lines were already out there; the
+        // rest the book has never seen, so they carry no date and the card
+        // says nothing rather than guessing.
+        first_seen_at:
+          event === "newly_monitored" && line % 3 !== 2
+            ? "2026-06-14T00:00:00Z"
+            : null,
       });
     }
     line += 1;
@@ -584,6 +636,10 @@ const LINE_EVENTS_BY_EVENT: Record<string, LineEvent[]> = {
   added: seededLines(SSPS_ADDED, "added", 127),
   removed: seededLines(SSPS_REMOVED, "removed", 184),
   cert_changed: seededLines(SSPS_REMOVED, "cert_changed", 43),
+  // A week where the watchlist moved, so the preview exercises the states
+  // a happy-path mock would hide.
+  newly_monitored: seededLines(SSPS_ADDED, "newly_monitored", 61),
+  monitoring_stopped: seededLines(SSPS_REMOVED, "monitoring_stopped", 9),
 };
 
 export function mockLineEvents(
@@ -606,6 +662,8 @@ export function mockLineEvents(
       ...LINE_EVENTS_BY_EVENT.added,
       ...LINE_EVENTS_BY_EVENT.removed,
       ...LINE_EVENTS_BY_EVENT.cert_changed,
+      ...LINE_EVENTS_BY_EVENT.newly_monitored,
+      ...LINE_EVENTS_BY_EVENT.monitoring_stopped,
     ];
   }
   if (filters.ssp_domain) {

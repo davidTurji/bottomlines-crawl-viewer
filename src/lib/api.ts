@@ -200,7 +200,7 @@ export const api = {
   lineEvents: async (
     token: string,
     filters: {
-      event?: "added" | "removed" | "cert_changed";
+      event?: LineEventKind;
       ssp_domain?: string;
       developer_id?: number;
       matched_seat_only?: boolean;
@@ -528,14 +528,20 @@ export type Summary = {
     matched: { lines: number; developers: number; apps: number };
   };
   hero_diff: {
-    line_totals: { added: number; removed: number; cert_changed: number };
-    line_totals_matched_seat: {
+    line_totals: LineEventCounts;
+    line_totals_matched_seat: LineEventCounts;
+    developer_totals: {
       added: number;
       removed: number;
-      cert_changed: number;
+      changed: number;
+      newly_monitored: number;
+      monitoring_stopped: number;
     };
-    developer_totals: { added: number; removed: number; changed: number };
     top_ssps: Record<string, { ssp_domain: string; count: number }[]>;
+    /** The watchlist moved between the two crawls, so week-over-week
+     *  deltas are not like-for-like. Set by the API from the same rows the
+     *  counts come from, so the flag and the numbers cannot disagree. */
+    scope_changed?: boolean;
   };
 };
 
@@ -549,6 +555,8 @@ export type DeveloperEvent = {
   lines_added: number;
   lines_removed: number;
   lines_cert_changed: number;
+  lines_newly_monitored: number;
+  lines_monitoring_stopped: number;
   top_ssps: { ssp_domain: string; count: number }[];
   occurred_at: string | null;
 };
@@ -560,6 +568,24 @@ export type DeveloperEventsPage = {
   total: number;
   rows: DeveloperEvent[];
 };
+
+/** What a line's row on the Changes page can say.
+ *
+ *  The first three describe the WILD: the line appeared, went, or changed
+ *  its cert while we were watching both weeks. The last two describe our
+ *  own WATCHLIST moving, which means the line was never comparable across
+ *  the two crawls. They are separate kinds rather than a flag because
+ *  adding them to "added" is the arithmetic that turned importing a
+ *  sellers.json into a market-wide adoption event. */
+export type LineEventKind =
+  | "added"
+  | "removed"
+  | "cert_changed"
+  | "newly_monitored"
+  | "monitoring_stopped";
+
+/** Counts keyed by every event kind, as the API sends them. */
+export type LineEventCounts = Record<LineEventKind, number>;
 
 export type LineEvent = {
   developer_id: number;
@@ -574,6 +600,10 @@ export type LineEvent = {
   new_cert_id: string | null;
   matched_seat: boolean;
   occurred_at: string | null;
+  /** When this line was FIRST seen in the wild, from the watchlist-
+   *  independent book. Set only on `newly_monitored` rows, and only when
+   *  the book knows: null means "we cannot say", never "it is new". */
+  first_seen_at?: string | null;
 };
 
 export type LineEventsPage = {
