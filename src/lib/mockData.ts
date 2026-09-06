@@ -64,11 +64,11 @@ export const mockPreviousSummary: Summary = {
   hero_diff: {
     line_totals: {
       added: 92, removed: 74, cert_changed: 28,
-      newly_monitored: 0, monitoring_stopped: 0,
+      newly_monitored: 0, monitoring_stopped: 0, first_appearance: 0,
     },
     line_totals_matched_seat: {
       added: 6, removed: 4, cert_changed: 3,
-      newly_monitored: 0, monitoring_stopped: 0,
+      newly_monitored: 0, monitoring_stopped: 0, first_appearance: 0,
     },
     developer_totals: {
       added: 9, removed: 4, changed: 41,
@@ -124,6 +124,7 @@ export const mockSummary: Summary = {
       cert_changed: 43,
       newly_monitored: 61,
       monitoring_stopped: 9,
+      first_appearance: 7,
     },
     line_totals_matched_seat: {
       added: 12,
@@ -131,6 +132,7 @@ export const mockSummary: Summary = {
       cert_changed: 6,
       newly_monitored: 61,
       monitoring_stopped: 9,
+      first_appearance: 7,
     },
     developer_totals: {
       added: 12,
@@ -636,6 +638,7 @@ const LINE_EVENTS_BY_EVENT: Record<string, LineEvent[]> = {
   added: seededLines(SSPS_ADDED, "added", 127),
   removed: seededLines(SSPS_REMOVED, "removed", 184),
   cert_changed: seededLines(SSPS_REMOVED, "cert_changed", 43),
+  first_appearance: seededLines(SSPS_ADDED, "first_appearance", 7),
   // A week where the watchlist moved, so the preview exercises the states
   // a happy-path mock would hide.
   newly_monitored: seededLines(SSPS_ADDED, "newly_monitored", 61),
@@ -664,6 +667,7 @@ export function mockLineEvents(
       ...LINE_EVENTS_BY_EVENT.cert_changed,
       ...LINE_EVENTS_BY_EVENT.newly_monitored,
       ...LINE_EVENTS_BY_EVENT.monitoring_stopped,
+      ...LINE_EVENTS_BY_EVENT.first_appearance,
     ];
   }
   if (filters.ssp_domain) {

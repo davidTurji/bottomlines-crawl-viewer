@@ -587,7 +587,12 @@ export type LineEventKind =
   | "removed"
   | "cert_changed"
   | "newly_monitored"
-  | "monitoring_stopped";
+  | "monitoring_stopped"
+  /** A publisher we did not crawl last week, carrying the customer's own
+   *  seats. New to the REPORT, which is all we can honestly claim: we were
+   *  not looking at them last week, so we cannot say the line is new to
+   *  the world. */
+  | "first_appearance";
 
 /** Counts keyed by every event kind, as the API sends them. */
 export type LineEventCounts = Record<LineEventKind, number>;
