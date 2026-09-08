@@ -72,7 +72,19 @@ export default function CrawlDeclarations() {
       .declarations(token)
       .then((d) => {
         if (cancelled) return;
-        setData(d);
+        // Normalise to a total shape so every access below is safe even if
+        // a payload arrives partial (an older/degraded endpoint) -- the page
+        // renders empty sections rather than throwing on a missing key.
+        setData({
+          totals: {
+            ipd_partners: d?.totals?.ipd_partners ?? 0,
+            owner_domains: d?.totals?.owner_domains ?? 0,
+            relationship_mismatches: d?.totals?.relationship_mismatches ?? 0,
+          },
+          ipd: d?.ipd ?? [],
+          owner_claims: d?.owner_claims ?? [],
+          relationship_mismatches: d?.relationship_mismatches ?? [],
+        });
         setOpen(new Set());
       })
       .catch((e: Error) => !cancelled && setError(e.message))
