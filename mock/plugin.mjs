@@ -11,6 +11,7 @@ import {
   allLineEvents,
   matchedDevelopers,
   matchedBundles,
+  declarations,
 } from "./seed.mjs";
 
 const json = (res, body, status = 200) => {
@@ -74,6 +75,8 @@ export function mockViewerApi() {
 
         if (token === "auth") return json(res, { ok: true, email: "you@example.com", customer_id: 1 });
         if (tail === "summary") return json(res, summary);
+        // One response, no paging: the caps live in the fixture itself.
+        if (tail === "declarations") return json(res, declarations);
 
         if (tail === "developer-events") {
           const event = q.get("event") ?? "added";

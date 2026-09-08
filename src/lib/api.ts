@@ -472,6 +472,23 @@ export const api = {
       `/v1/viewer/${token}/discovered-lines/placements?${q.toString()}`,
     );
   },
+  /**
+   * What the crawled files DECLARED, as opposed to what they carried:
+   * inventorypartnerdomain lines, ownerdomain claims, and seats found with
+   * a different relationship than the watchlist expects. One call, no
+   * paging: declared_by/claimed_by are capped at 50 per subject server
+   * side, with `declarer_total`/`claimant_total` as the honest counts.
+   *
+   * The sidebar also uses this as its probe: the Declarations entry shows
+   * only when one of the three totals is nonzero.
+   */
+  declarations: async (token: string) => {
+    if (MOCK) {
+      const { mockDeclarations } = await import("./mockData");
+      return mockDeclarations;
+    }
+    return req<Declarations>("GET", `/v1/viewer/${token}/declarations`);
+  },
   chat: async function* (
     token: string,
     prompt: string,
@@ -614,6 +631,14 @@ export type LineEvent = {
    *  independent book. Set only on `newly_monitored` rows, and only when
    *  the book knows: null means "we cannot say", never "it is new". */
   first_seen_at?: string | null;
+  /** How this row was tied to the developer: found in their own file
+   *  ("file"), through an inventorypartnerdomain declaration ("ipd"), or in
+   *  a subdomain's file ("subdomain"). Absent on old data means "file". */
+  matched_via?: "file" | "ipd" | "subdomain";
+  /** Domains whose files declared this row's developer as their inventory
+   *  partner. Can be non-empty even when matched_via is "file": a developer
+   *  can be both crawled directly and vouched for. Capped at 25. */
+  ipd_declared_by?: string[];
 };
 
 export type LineEventsPage = {
@@ -735,6 +760,61 @@ export type DiscoveredPlacementsPage = {
   page_size: number;
   total: number;
   rows: DiscoveredPlacement[];
+};
+
+/**
+ * One file that made a declaration: whose domain, and which of their two
+ * files said it. `file_kind` is the enum ("ads_txt" / "app_ads_txt"), so it
+ * renders through fileLabel like every other file_kind on screen.
+ */
+export type DeclarationSource = {
+  domain: string;
+  file_kind: string;
+};
+
+/** One domain declared as an inventory partner, and by whom. */
+export type IpdPartner = {
+  partner_domain: string;
+  /** Capped at 50; `declarer_total` is the honest count. */
+  declared_by: DeclarationSource[];
+  declarer_total: number;
+};
+
+/** One domain claimed as an owner domain, and by whom. */
+export type OwnerClaim = {
+  owner_domain: string;
+  /** Capped at 50; `claimant_total` is the honest count. */
+  claimed_by: DeclarationSource[];
+  claimant_total: number;
+};
+
+/**
+ * A seat found carrying a different relationship than the watchlist wants:
+ * the file says DIRECT where the seat was sold as RESELLER, or the reverse.
+ * `found_in` arrives display-ready ("ads.txt" / "app-ads.txt" / "both"),
+ * unlike file_kind elsewhere.
+ */
+export type RelationshipMismatch = {
+  developer_domain: string;
+  ssp_domain: string;
+  publisher_id: string;
+  wanted_relationship: string;
+  found_relationship: string;
+  found_in: string;
+  matched_via: string;
+};
+
+export type DeclarationsTotals = {
+  ipd_partners: number;
+  owner_domains: number;
+  relationship_mismatches: number;
+};
+
+export type Declarations = {
+  totals: DeclarationsTotals;
+  ipd: IpdPartner[];
+  owner_claims: OwnerClaim[];
+  relationship_mismatches: RelationshipMismatch[];
 };
 
 export type ChatFrame =

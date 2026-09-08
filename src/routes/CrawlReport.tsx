@@ -710,6 +710,14 @@ function LinesGroup({
             <span className={cn("w-3 flex-shrink-0", tone)}>{glyph}</span>
             <span className="truncate text-slate-800">{r.ssp_domain}</span>
             <span className="text-slate-500">publisher {r.publisher_id}</span>
+            {/* Provenance chip, same violet the Changes cards wear: this
+                line reached the report through an inventory-partner
+                declaration, not the developer's own file. */}
+            {r.matched_via === "ipd" && (
+              <span className="flex-shrink-0 rounded-full border border-special-border bg-special-bg px-1.5 py-px font-sans text-[10px] font-medium text-special">
+                via inventory partner
+              </span>
+            )}
             <span className="ml-auto text-[10px] text-slate-400">
               {r.relationship}
             </span>

@@ -15,6 +15,8 @@
 
 import type {
   Summary,
+  DeclarationSource,
+  Declarations,
   DeveloperEventsPage,
   DeveloperEvent,
   DiscoveredLine,
@@ -524,6 +526,21 @@ const LINE_PUBLISHERS: {
   return out;
 })();
 
+/** Domains whose files vouch for a developer as their inventory partner.
+ *  Drawn from the same publisher roster the line diff walks, so a declarer
+ *  named on a card is a publisher the report knows elsewhere. Seven of
+ *  them, so the widest declared list runs past the card's five-name cut
+ *  and exercises the "and N more" tail. */
+const IPD_DECLARERS = [
+  "riverstone.com",
+  "copperline.tv",
+  "harborpoint.com",
+  "tidewaterpub.com",
+  "halcyon.tv",
+  "ironwoodmedia.tv",
+  "foundryrow.com",
+];
+
 /** A 16-hex TAG-ID, the shape of a real ads.txt fourth field. */
 function certId(seed: number): string {
   let h = (seed * 2_654_435_761) >>> 0;
@@ -573,6 +590,20 @@ function seededLines(
     }`;
     const oldCert = certId(seed * 101 + line * 7);
     const newCert = certId(seed * 313 + line * 13 + 1);
+    // Provenance, stamped per LINE rather than per placement so a group's
+    // rows cannot disagree about how the line reached the report. Mostly
+    // the developer's own file; a handful arrive via an inventory-partner
+    // declaration and a couple via a subdomain's file, so both chips have
+    // something to render. A file-matched line can still carry declarers:
+    // being crawled directly and being vouched for are not exclusive.
+    const matchedVia: LineEvent["matched_via"] =
+      line % 9 === 4 ? "ipd" : line % 9 === 7 ? "subdomain" : "file";
+    const declaredBy =
+      matchedVia === "ipd"
+        ? IPD_DECLARERS.slice(0, 2 + (line % (IPD_DECLARERS.length - 1)))
+        : matchedVia === "file" && line % 13 === 5
+          ? IPD_DECLARERS.slice(0, 1)
+          : [];
     for (let j = 0; j < fanout; j += 1) {
       const pub = LINE_PUBLISHERS[(line * 5 + j) % LINE_PUBLISHERS.length];
       rows.push({
@@ -607,6 +638,8 @@ function seededLines(
           event === "newly_monitored" && line % 3 !== 2
             ? "2026-06-14T00:00:00Z"
             : null,
+        matched_via: matchedVia,
+        ipd_declared_by: declaredBy,
       });
     }
     line += 1;
@@ -949,6 +982,12 @@ function buildLinesByDeveloper(): Record<number, LineEvent[]> {
         new_cert_id: evt === "added" || evt === "cert_changed" ? `new-cert-${dev.developer_id}` : null,
         matched_seat: true,
         occurred_at: "2026-08-25T09:18:30Z",
+        // Every fifth row reached the report through an inventory-partner
+        // declaration, so the overview's expanded mini list exercises its
+        // provenance chip too.
+        matched_via: (idx + i) % 5 === 2 ? "ipd" : "file",
+        ipd_declared_by:
+          (idx + i) % 5 === 2 ? IPD_DECLARERS.slice(0, 2) : [],
       });
     }
     map[dev.developer_id] = rows;
@@ -1358,6 +1397,86 @@ export function mockDiscoveredLinePlacements(
     rows: rows.slice(start, start + pageSize),
   };
 }
+
+// ─────────────────────────────────────────────────────────────────
+// Declarations (inventory partners, owner claims, mismatches)
+// ─────────────────────────────────────────────────────────────────
+
+/**
+ * Declaring files, drawn from the discovery publisher roster so every
+ * domain a card names is one the report knows elsewhere. Deterministic,
+ * like everything else in this file, so screenshots do not shuffle.
+ */
+function declarationSources(count: number, offset: number): DeclarationSource[] {
+  return Array.from({ length: count }, (_, i) => {
+    const pub =
+      DISCOVERY_PUBLISHERS[(offset + i * 3) % DISCOVERY_PUBLISHERS.length];
+    return {
+      domain: pub.developer_domain,
+      file_kind: pub.platform === "Web" ? "ads_txt" : "app_ads_txt",
+    };
+  });
+}
+
+/*
+ * Shaped after the operator's real case: one partner domain most of the
+ * network declares (capped at 50 by the endpoint, so the page's "and N
+ * more" line has something true to say), a couple of small ones, a pair of
+ * owner claims, and two seats whose file relationship disagrees with the
+ * watchlist. Totals match the arrays because nothing here is filtered.
+ */
+export const mockDeclarations: Declarations = {
+  totals: { ipd_partners: 3, owner_domains: 2, relationship_mismatches: 2 },
+  ipd: [
+    {
+      partner_domain: "carambola.com",
+      declared_by: declarationSources(50, 0),
+      declarer_total: 63,
+    },
+    {
+      partner_domain: "carambo.la",
+      declared_by: declarationSources(4, 17),
+      declarer_total: 4,
+    },
+    {
+      partner_domain: "roostmedia.tv",
+      declared_by: declarationSources(1, 41),
+      declarer_total: 1,
+    },
+  ],
+  owner_claims: [
+    {
+      owner_domain: "riverstone.com",
+      claimed_by: declarationSources(3, 8),
+      claimant_total: 3,
+    },
+    {
+      owner_domain: "nomadmediagroup.com",
+      claimed_by: declarationSources(1, 29),
+      claimant_total: 1,
+    },
+  ],
+  relationship_mismatches: [
+    {
+      developer_domain: "chompstudios.com",
+      ssp_domain: "magnite.com",
+      publisher_id: "magnite-2041",
+      wanted_relationship: "RESELLER",
+      found_relationship: "DIRECT",
+      found_in: "app-ads.txt",
+      matched_via: "file",
+    },
+    {
+      developer_domain: "riverstone.com",
+      ssp_domain: "openx.com",
+      publisher_id: "openx-1187",
+      wanted_relationship: "DIRECT",
+      found_relationship: "RESELLER",
+      found_in: "both",
+      matched_via: "ipd",
+    },
+  ],
+};
 
 // ─────────────────────────────────────────────────────────────────
 // Chat SSE stream (mock)
