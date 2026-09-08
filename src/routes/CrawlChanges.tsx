@@ -101,7 +101,6 @@ export default function CrawlChanges() {
   const [summary, setSummary] = useState<Summary | null>(null);
   const [previous, setPrevious] = useState<Summary | null>(null);
   const [bucket, setBucket] = useState<Bucket>("all");
-  const [matchedSeatOnly, setMatchedSeatOnly] = useState(false);
   const [ssp, setSsp] = useState("");
   const [rows, setRows] = useState<LineEvent[]>([]);
   const [truncated, setTruncated] = useState(false);
@@ -138,7 +137,6 @@ export default function CrawlChanges() {
     setError(null);
     fetchAllEvents(token, {
       ssp_domain: filter || undefined,
-      matched_seat_only: matchedSeatOnly || undefined,
     })
       .then((r) => {
         if (cancelled) return;
@@ -151,9 +149,9 @@ export default function CrawlChanges() {
     return () => {
       cancelled = true;
     };
-  }, [token, filter, matchedSeatOnly]);
+  }, [token, filter]);
 
-  useEffect(() => setPage(1), [bucket, filter, matchedSeatOnly]);
+  useEffect(() => setPage(1), [bucket, filter]);
 
 
   const groups = useMemo(() => groupByLine(rows), [rows]);
@@ -232,47 +230,9 @@ export default function CrawlChanges() {
     };
   }, [groups, bucket]);
 
-  // The week's scope movement, counted over EVERY group rather than the
-  // selected tab: the notice and the tabs have to describe the week even
-  // while the reader is looking at one slice of it.
-  const scopeTotals = useMemo(() => {
-    let newly_monitored = 0;
-    let monitoring_stopped = 0;
-    let first_appearance = 0;
-    for (const g of groups) {
-      if (g.event === "newly_monitored") newly_monitored += 1;
-      if (g.event === "monitoring_stopped") monitoring_stopped += 1;
-      if (g.event === "first_appearance") first_appearance += 1;
-    }
-    return { newly_monitored, monitoring_stopped, first_appearance };
-  }, [groups]);
-
-// Fall back to All when the selected scope tab stops existing. Its
-  // trigger only renders while the week has rows of that kind, and a
-  // filter can take the last one away underneath the selection.
-  useEffect(() => {
-    if (bucket === "newly_monitored" && scopeTotals.newly_monitored === 0) {
-      setBucket("all");
-    }
-    if (bucket === "monitoring_stopped" && scopeTotals.monitoring_stopped === 0) {
-      setBucket("all");
-    }
-    if (bucket === "first_appearance" && scopeTotals.first_appearance === 0) {
-      setBucket("all");
-    }
-  }, [bucket, scopeTotals]);
-
-  /** Did the watchlist move this week? The API says so directly; the group
-   *  counts are the fallback for a summary that predates the flag. */
   /** No previous crawl at all. Distinct from "no changes": one is a
    *  starting point, the other is a result. */
   const isFirstCrawl = summary?.previous_job_id === null;
-
-  const scopeChanged =
-    summary?.hero_diff.scope_changed === true ||
-    scopeTotals.newly_monitored > 0 ||
-    scopeTotals.monitoring_stopped > 0 ||
-    scopeTotals.first_appearance > 0;
 
   // Last week's own totals for the same three events, so each KPI can say
   // whether this week was busier than the last.
@@ -297,7 +257,7 @@ export default function CrawlChanges() {
   // confident percentage from a partial numerator, and the crawls it
   // happens on are the large ones, which is to say the real customers'.
   // The "showing the first N" note below stays either way.
-  const comparable = !filter && !matchedSeatOnly && !truncated;
+  const comparable = !filter && !truncated;
   const prevCounts = useMemo<Record<EventKind, number | null>>(
     () => ({
       added: previous?.hero_diff.line_totals.added ?? null,
@@ -320,6 +280,23 @@ export default function CrawlChanges() {
     return comparable && prev != null ? computeDelta(current, prev) : null;
   };
 
+  // Week-over-week growth on the "Where they landed" card's two figures.
+  // Drawn only where the comparison is like for like: the whole week (the All
+  // tab, not a scope tab where the current counts describe only a slice while
+  // last week's affected figure is the whole week), and only when the deltas
+  // are comparable at all (no filter, not truncated) with a previous crawl to
+  // measure against. Same discipline the left card's deltas already follow.
+  const prevAffected = previous?.hero_diff.affected ?? null;
+  const showAffectedDelta = bucket === "all" && comparable;
+  const publishersAffectedDelta =
+    showAffectedDelta && prevAffected
+      ? computeDelta(kpi.publishers, prevAffected.publishers)
+      : null;
+  const appsAffectedDelta =
+    showAffectedDelta && prevAffected
+      ? computeDelta(kpi.apps, prevAffected.apps)
+      : null;
+
   const toggle = (key: string) =>
     setOpen((prev) => {
       const next = new Set(prev);
@@ -335,22 +312,10 @@ export default function CrawlChanges() {
         <h1 className="text-xl font-bold leading-tight tracking-tight text-slate-900 sm:text-2xl">
           Changes
         </h1>
-        <p className="mt-1 max-w-2xl text-sm leading-relaxed text-slate-500">
-          {isFirstCrawl ? (
-            // The standing subtitle promises a comparison "since the previous
-            // crawl", and on a first crawl there is not one to be since.
-            <>
-              Your lines that publishers added, dropped, or re-certified week
-              to week. This is your first crawl, so the comparison begins with
-              the next one.
-            </>
-          ) : (
-            <>
-              Your lines that publishers added, dropped, or re-certified since
-              the previous crawl. Open any line to see exactly which publishers
-              moved it.
-            </>
-          )}
+        <p className="mt-1 text-sm text-slate-500">
+          {isFirstCrawl
+            ? "Lines publishers added, dropped, or re-certified. First crawl, so the comparison begins next week."
+            : "Lines publishers added, dropped, or re-certified this week."}
         </p>
         <WeekLine
           week={weekLabel}
@@ -485,58 +450,30 @@ export default function CrawlChanges() {
               </div>
             ) : (
             <div className="grid grid-cols-2 divide-x divide-border overflow-hidden rounded-xl border border-border">
-              <SplitStat number={kpi.publishers} label="Publishers affected" />
-              <SplitStat number={kpi.apps} label="Apps affected" />
+              {/* Same tones as the overview's matched cards: publishers in the
+                  brand green, apps in pink, so the two pages read as one. */}
+              <SplitStat
+                tone="publisher"
+                number={kpi.publishers}
+                label="Publishers affected"
+                delta={publishersAffectedDelta}
+              />
+              <SplitStat
+                tone="app"
+                number={kpi.apps}
+                label="Apps affected"
+                delta={appsAffectedDelta}
+              />
             </div>
             )}
           </div>
         </div>
       )}
 
-      {/* THE WATCHLIST MOVED, said before the numbers rather than after.
-          A reader who takes "61 newly monitored" for 61 new placements has
-          misread the week in the direction that flatters us, and they will
-          only find out if they read a footnote. The lines themselves are
-          listed under their own tab, badged, with this week as their
-          baseline and no delta attached. */}
-      {/* Never on a first crawl: nothing can have entered or left monitoring
-          when there is no earlier week for it to have differed from, and the
-          card above already says so.
-
-          The tab clauses are assembled rather than concatenated inline. Two
-          `&&` fragments in a sentence read fine when at least one is true and
-          collapse into "changed this week. and neither is counted" when both
-          are false -- which happens whenever the summary reports a scope
-          change the fetched rows do not contain, as truncation or a filter
-          can both cause. */}
-      {scopeChanged && !isFirstCrawl && (
-        <div className="flex items-start gap-2 rounded-xl border border-border bg-muted/50 px-4 py-3 text-[13px] text-slate-600">
-          <Eye className="mt-0.5 h-4 w-4 shrink-0" />
-          <span>
-            Your monitored lines changed this week.{" "}
-            {[
-              scopeTotals.newly_monitored > 0 &&
-                "lines being watched for the first time appear under New",
-              scopeTotals.monitoring_stopped > 0 &&
-                "lines no longer watched appear under Stopped",
-              scopeTotals.first_appearance > 0 &&
-                "publishers we had not crawled before appear under First seen",
-            ]
-              .filter(Boolean)
-              .join(", ")
-              .replace(/^./, (c) => c.toUpperCase())}
-            {scopeTotals.newly_monitored > 0 ||
-            scopeTotals.monitoring_stopped > 0
-              ? ". They are not counted as added or removed, "
-              : "Those lines are not counted as added or removed, "}
-            because we have no reading for them last week to compare against.
-            This week is their starting point.
-          </span>
-        </div>
-      )}
-
-      {/* Controls: the bucket, the seat toggle, the SSP filter. */}
-      <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
+      {/* Controls: the bucket, then a full-width SSP filter on its own row.
+          The search used to be a fixed-width pill floating on the right of the
+          tabs; as a wide bar spanning the row it reads as the search it is. */}
+      <div className="space-y-3">
         {/* The same plain segmented control the overview's drilldown wears.
             The per-tab counts it used to carry now live in the KPI row
             directly above, which re-scopes with the tab, so printing them
@@ -547,52 +484,18 @@ export default function CrawlChanges() {
             <TabsTrigger value="added">Added</TabsTrigger>
             <TabsTrigger value="removed">Removed</TabsTrigger>
             <TabsTrigger value="cert_changed">Cert changes</TabsTrigger>
-            {/* Shown only when the watchlist actually moved. A permanent
-                empty tab would advertise a section the week does not have,
-                and most weeks do not have one. */}
-            {scopeTotals.newly_monitored > 0 && (
-              <TabsTrigger value="newly_monitored">New</TabsTrigger>
-            )}
-            {scopeTotals.monitoring_stopped > 0 && (
-              <TabsTrigger value="monitoring_stopped">Stopped</TabsTrigger>
-            )}
-            {scopeTotals.first_appearance > 0 && (
-              <TabsTrigger value="first_appearance">First seen</TabsTrigger>
-            )}
           </TabsList>
         </Tabs>
 
-        <div className="flex flex-wrap items-center gap-2">
-          <button
-            type="button"
-            onClick={() => setMatchedSeatOnly((v) => !v)}
-            aria-pressed={matchedSeatOnly}
-            className={cn(
-              "inline-flex h-9 items-center gap-2 rounded-full border px-3.5 text-xs font-medium transition-colors",
-              matchedSeatOnly
-                ? "border-info-border bg-info-bg text-info"
-                : "border-border bg-white text-slate-600 hover:border-primary/30 hover:text-primary",
-            )}
-          >
-            <span
-              aria-hidden
-              className={cn(
-                "h-1.5 w-1.5 rounded-full",
-                matchedSeatOnly ? "bg-info" : "bg-slate-300",
-              )}
-            />
-            My seats only
-          </button>
-          <div className="relative">
-            <Search className="pointer-events-none absolute left-3.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-slate-400" />
-            <input
-              value={ssp}
-              onChange={(e) => setSsp(e.target.value)}
-              placeholder="Filter by SSP domain"
-              aria-label="Filter by SSP domain"
-              className="h-9 w-full rounded-full border border-border bg-white pl-9 pr-3 text-sm text-slate-900 outline-none transition-colors placeholder:text-slate-400 focus:border-primary/40 sm:w-[240px]"
-            />
-          </div>
+        <div className="relative w-full">
+          <Search className="pointer-events-none absolute left-3.5 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
+          <input
+            value={ssp}
+            onChange={(e) => setSsp(e.target.value)}
+            placeholder="Filter by SSP domain"
+            aria-label="Filter by SSP domain"
+            className="h-10 w-full rounded-full border border-border bg-white pl-10 pr-4 text-sm text-slate-900 outline-none transition-colors placeholder:text-slate-400 focus:border-primary/40"
+          />
         </div>
       </div>
 
@@ -1192,7 +1095,7 @@ export function fileLabel(kind: string): string {
  */
 async function fetchAllEvents(
   token: string,
-  filters: { ssp_domain?: string; matched_seat_only?: boolean },
+  filters: { ssp_domain?: string },
 ): Promise<{ rows: LineEvent[]; truncated: boolean }> {
   const acc: LineEvent[] = [];
   for (let p = 1; p <= FETCH_CAP; p += 1) {

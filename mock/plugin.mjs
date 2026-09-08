@@ -35,16 +35,16 @@ function answer(prompt) {
   if (p.includes("removed") || p.includes("dropped") || p.includes("lost")) {
     const worst = developerEvents.removed
       .slice(0, 3)
-      .map((r) => `- ${r.developer_name} (${r.developer_domain}) — ${r.matched_lines_prev} lines, all gone`)
+      .map((r) => `- ${r.developer_name} (${r.developer_domain}), ${r.matched_lines_prev} lines, all gone`)
       .join("\n");
-    return `${d.line_totals.removed.toLocaleString()} of your lines came off this week, ${d.line_totals_matched_seat.removed.toLocaleString()} of them on a seat you actually hold.\n\nThe developers that dropped you entirely:\n${worst}\n\nThe SSP taking the biggest cut is ${d.top_ssps.removed[0].ssp_domain} at ${d.top_ssps.removed[0].count} lines.`;
+    return `${d.line_totals.removed.toLocaleString()} of your lines came off this week, ${d.line_totals_matched_seat.removed.toLocaleString()} of them on a seat you actually hold.\n\nThe publishers that dropped you entirely:\n${worst}\n\nThe SSP taking the biggest cut is ${d.top_ssps.removed[0].ssp_domain} at ${d.top_ssps.removed[0].count} lines.`;
   }
   if (p.includes("new") || p.includes("added") || p.includes("gain")) {
     const best = developerEvents.added
       .slice(0, 3)
-      .map((r) => `- ${r.developer_name} (${r.developer_platform}) — ${r.lines_added} new lines`)
+      .map((r) => `- ${r.developer_name} (${r.developer_platform}), ${r.lines_added} new lines`)
       .join("\n");
-    return `${d.line_totals.added.toLocaleString()} lines were added across ${d.developer_totals.added} brand-new developers and ${d.developer_totals.changed} existing ones.\n\nNew this week:\n${best}\n\nMost of the growth is on ${d.top_ssps.added[0].ssp_domain} (${d.top_ssps.added[0].count} lines).`;
+    return `${d.line_totals.added.toLocaleString()} lines were added across ${d.developer_totals.added} brand-new publishers and ${d.developer_totals.changed} existing ones.\n\nNew this week:\n${best}\n\nMost of the growth is on ${d.top_ssps.added[0].ssp_domain} (${d.top_ssps.added[0].count} lines).`;
   }
   if (p.includes("cert") || p.includes("unauthorized") || p.includes("unauthorised")) {
     return `${d.line_totals.cert_changed} certification authority IDs changed on lines carrying your seats. A changed cert ID means the publisher re-declared the same seat under a different TAG ID, which usually follows a reseller migration. ${d.top_ssps.cert_changed[0].ssp_domain} accounts for ${d.top_ssps.cert_changed[0].count} of them.`;
@@ -56,7 +56,7 @@ function answer(prompt) {
       .join("\n");
     return `By SSP, this week's additions break down as:\n${rows}`;
   }
-  return `This crawl covered ${summary.counters.developer_count.toLocaleString()} developer domains and fetched ${summary.counters.fetched_count.toLocaleString()} files in ${Math.round((new Date(summary.finished_at) - new Date(summary.started_at)) / 60000)} minutes. Your seats matched ${summary.counters.matched.lines.toLocaleString()} lines across ${summary.counters.matched.developers} developers and ${summary.counters.matched.apps.toLocaleString()} apps.`;
+  return `This crawl covered ${summary.counters.developer_count.toLocaleString()} publisher domains and fetched ${summary.counters.fetched_count.toLocaleString()} files in ${Math.round((new Date(summary.finished_at) - new Date(summary.started_at)) / 60000)} minutes. Your seats matched ${summary.counters.matched.lines.toLocaleString()} lines across ${summary.counters.matched.developers} publishers and ${summary.counters.matched.apps.toLocaleString()} apps.`;
 }
 
 export function mockViewerApi() {

@@ -18,7 +18,7 @@ import { FilterAction, FilterBar, FilterSearch, FilterSelect } from "@/component
 import { PageShell } from "@/components/PageShell";
 import { formatWeek, WeekLine } from "@/components/WeekLine";
 import { useReportScope } from "@/lib/reportScope";
-import { cn } from "@/lib/utils";
+import { cn, storeLabel } from "@/lib/utils";
 import { computeDelta, MiniStat, SplitStat } from "./CrawlReport";
 
 /**
@@ -191,10 +191,8 @@ export default function CrawlDiscovered() {
         <h1 className="text-xl font-bold leading-tight tracking-tight text-slate-900 sm:text-2xl">
           Discovery
         </h1>
-        <p className="mt-1 max-w-2xl text-sm leading-relaxed text-slate-500">
-          Every line on the open web carrying one of your domains, whether or
-          not it sits on a seat you sold. Open a line to see which publishers
-          carry it.
+        <p className="mt-1 text-sm text-slate-500">
+          Every line on the open web carrying one of your domains.
         </p>
         <WeekLine
           week={weekLabel}
@@ -624,13 +622,33 @@ function LineCard({
               <ul className="divide-y divide-border">
                 {placements.map((p, i) => (
                   <li
-                    key={`${p.developer_domain}|${p.found_in}|${i}`}
-                    className="flex items-baseline gap-3 px-3 py-1.5 font-mono text-[11px] tabular-nums"
+                    key={`${p.developer_domain}|${p.bundle_id ?? ""}|${p.found_in}|${i}`}
+                    className="flex items-baseline gap-2.5 px-3 py-1.5 text-[11px]"
                   >
-                    <span className="truncate text-slate-800">
-                      {p.developer_domain}
-                    </span>
-                    <span className="ml-auto flex-shrink-0 text-[10px] text-slate-400">
+                    {p.app_name ? (
+                      // An app placement: name the APP, tag its store in the
+                      // pink app tone, and keep the bundle id in mono so it
+                      // still reads as a value taken from a file. A website
+                      // placement stays the bare domain row below.
+                      <>
+                        <span className="truncate font-sans text-slate-800">
+                          {p.app_name}
+                        </span>
+                        <span className="flex-shrink-0 rounded-full border border-app-border bg-app-bg px-1.5 py-px text-[10px] font-medium text-app">
+                          {storeLabel(p.store)}
+                        </span>
+                        {p.bundle_id && (
+                          <span className="truncate font-mono text-[10px] tabular-nums text-slate-400">
+                            {p.bundle_id}
+                          </span>
+                        )}
+                      </>
+                    ) : (
+                      <span className="truncate font-mono tabular-nums text-slate-800">
+                        {p.developer_domain}
+                      </span>
+                    )}
+                    <span className="ml-auto flex-shrink-0 font-mono text-[10px] text-slate-400">
                       {p.found_in}
                     </span>
                   </li>

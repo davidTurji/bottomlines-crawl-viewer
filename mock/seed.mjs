@@ -338,6 +338,21 @@ export const matchedDevelopers = developers
     domain: d.developer_domain,
     platform: d.developer_platform,
     line_count: d.matched_lines_current,
+    // The exact seat line(s) this publisher matched, shown verbatim in the
+    // overview's expanded row. Capped at six for display; line_count is the
+    // honest total. Mirrors MatchedDeveloper.matched_lines in src/lib/api.ts.
+    matched_lines: Array.from(
+      { length: Math.max(1, Math.min(d.matched_lines_current, 6)) },
+      (_, i) => {
+        const line = {
+          ssp_domain: d.top_ssps[i % d.top_ssps.length].ssp_domain,
+          publisher_id: pubId(),
+          relationship: i % 3 === 0 ? REL[0] : REL[1],
+        };
+        if (i % 4 === 0) line.cert_id = certId();
+        return line;
+      },
+    ),
   }))
   .sort((a, b) => b.line_count - a.line_count);
 

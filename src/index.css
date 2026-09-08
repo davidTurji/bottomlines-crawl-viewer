@@ -116,6 +116,16 @@ All colors MUST be HSL.
     --tone-special-bg: 278 66% 96%;
     --tone-special-border: 278 42% 87%;
 
+    /* Apps — matched application inventory. Drawn in pink so it sits beside
+       the racing-green publisher tone as its premium sibling: two matched
+       surfaces the eye can tell apart at a glance. Same three-value shape as
+       every tone above (foreground / tint fill / hairline), with the
+       foreground at ~44% lightness so it clears WCAG AA on the ivory ground.
+       Exposed to Tailwind as text-app / bg-app-bg / border-app-border. */
+    --tone-app: 330 72% 44%;
+    --tone-app-bg: 336 84% 96%;
+    --tone-app-border: 334 64% 88%;
+
     --tone-neutral: 150 8% 38%;
     --tone-neutral-bg: 148 12% 94%;
     --tone-neutral-border: 148 12% 84%;
