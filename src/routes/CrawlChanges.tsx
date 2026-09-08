@@ -280,6 +280,23 @@ export default function CrawlChanges() {
     return comparable && prev != null ? computeDelta(current, prev) : null;
   };
 
+  // Week-over-week growth on the "Where they landed" card's two figures.
+  // Drawn only where the comparison is like for like: the whole week (the All
+  // tab, not a scope tab where the current counts describe only a slice while
+  // last week's affected figure is the whole week), and only when the deltas
+  // are comparable at all (no filter, not truncated) with a previous crawl to
+  // measure against. Same discipline the left card's deltas already follow.
+  const prevAffected = previous?.hero_diff.affected ?? null;
+  const showAffectedDelta = bucket === "all" && comparable;
+  const publishersAffectedDelta =
+    showAffectedDelta && prevAffected
+      ? computeDelta(kpi.publishers, prevAffected.publishers)
+      : null;
+  const appsAffectedDelta =
+    showAffectedDelta && prevAffected
+      ? computeDelta(kpi.apps, prevAffected.apps)
+      : null;
+
   const toggle = (key: string) =>
     setOpen((prev) => {
       const next = new Set(prev);
@@ -439,16 +456,24 @@ export default function CrawlChanges() {
                 tone="publisher"
                 number={kpi.publishers}
                 label="Publishers affected"
+                delta={publishersAffectedDelta}
               />
-              <SplitStat tone="app" number={kpi.apps} label="Apps affected" />
+              <SplitStat
+                tone="app"
+                number={kpi.apps}
+                label="Apps affected"
+                delta={appsAffectedDelta}
+              />
             </div>
             )}
           </div>
         </div>
       )}
 
-      {/* Controls: the bucket and the SSP filter. */}
-      <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
+      {/* Controls: the bucket, then a full-width SSP filter on its own row.
+          The search used to be a fixed-width pill floating on the right of the
+          tabs; as a wide bar spanning the row it reads as the search it is. */}
+      <div className="space-y-3">
         {/* The same plain segmented control the overview's drilldown wears.
             The per-tab counts it used to carry now live in the KPI row
             directly above, which re-scopes with the tab, so printing them
@@ -462,17 +487,15 @@ export default function CrawlChanges() {
           </TabsList>
         </Tabs>
 
-        <div className="flex flex-wrap items-center gap-2">
-          <div className="relative">
-            <Search className="pointer-events-none absolute left-3.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-slate-400" />
-            <input
-              value={ssp}
-              onChange={(e) => setSsp(e.target.value)}
-              placeholder="Filter by SSP domain"
-              aria-label="Filter by SSP domain"
-              className="h-9 w-full rounded-full border border-border bg-white pl-9 pr-3 text-sm text-slate-900 outline-none transition-colors placeholder:text-slate-400 focus:border-primary/40 sm:w-[240px]"
-            />
-          </div>
+        <div className="relative w-full">
+          <Search className="pointer-events-none absolute left-3.5 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
+          <input
+            value={ssp}
+            onChange={(e) => setSsp(e.target.value)}
+            placeholder="Filter by SSP domain"
+            aria-label="Filter by SSP domain"
+            className="h-10 w-full rounded-full border border-border bg-white pl-10 pr-4 text-sm text-slate-900 outline-none transition-colors placeholder:text-slate-400 focus:border-primary/40"
+          />
         </div>
       </div>
 

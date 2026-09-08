@@ -147,7 +147,7 @@ export default function CrawlReport() {
             {prevWeekLabel && `, compared with ${prevWeekLabel}`}.
           </p>
         </div>
-        <ExportResultsButton token={token} />
+        <ExportResultsButton token={token} summary={summary} />
       </div>
 
       {/* Two hero cards, side by side. Left = this week's plus/minus
@@ -491,27 +491,55 @@ function MatchedTile({
 }
 
 /**
+ * The rows of the sample workbook the mock Export hands back: a plain-language
+ * snapshot of this crawl, built from the summary already on screen. The live
+ * report downloads the crawler-baked workbook instead, so this exists only to
+ * make the button produce a real, openable file under VITE_MOCK.
+ */
+function sampleWorkbook(summary: Summary): { name: string; rows: (string | number)[][] }[] {
+  const t = summary.hero_diff.line_totals;
+  const finished = summary.finished_at
+    ? new Date(summary.finished_at).toISOString().slice(0, 10)
+    : "";
+  return [
+    {
+      name: "Summary",
+      rows: [
+        ["PathFinder results export (sample)"],
+        ["Crawl", summary.crawl_id],
+        ["Status", summary.status],
+        ["Finished", finished],
+        [],
+        ["Metric", "Count"],
+        ["Matched publishers", summary.counters.matched.developers],
+        ["Matched apps", summary.counters.matched.apps],
+        ["Matched lines", summary.counters.matched.lines],
+        ["Lines added this week", t.added],
+        ["Lines removed this week", t.removed],
+        ["Cert changes this week", t.cert_changed],
+      ],
+    },
+  ];
+}
+
+/**
  * The Overview's one action: download the customer workbook for this run.
  *
  * Live mode navigates to api.exportUrl(token), the xlsx the crawler bakes per
  * crawl, as an ordinary same-origin navigation so the browser saves the file
- * and the session cookie rides along. MOCK mode has no backend, so it hands
- * back a tiny stub instead, which keeps the button exercisable end to end
- * under VITE_MOCK=true.
+ * and the session cookie rides along. MOCK mode has no backend, so it builds a
+ * real, valid xlsx client side from the summary on screen (see lib/xlsx), which
+ * keeps the button exercisable end to end under VITE_MOCK=true: a click
+ * downloads a spreadsheet a customer can actually open, not a stub.
  */
-function ExportResultsButton({ token }: { token: string }) {
-  const onClick = () => {
+function ExportResultsButton({ token, summary }: { token: string; summary: Summary }) {
+  const onClick = async () => {
     if (MOCK) {
-      const stub =
-        "PathFinder results export (sample)\r\n" +
-        "This is a stub produced in mock mode. The live report downloads " +
-        "the crawl's customer workbook as an xlsx.\r\n";
-      const url = URL.createObjectURL(
-        new Blob([stub], { type: "text/plain;charset=utf-8" }),
-      );
+      const { buildXlsxBlob } = await import("../lib/xlsx");
+      const url = URL.createObjectURL(buildXlsxBlob(sampleWorkbook(summary)));
       const a = document.createElement("a");
       a.href = url;
-      a.download = "pathfinder-results-sample.txt";
+      a.download = "pathfinder-results-sample.xlsx";
       document.body.appendChild(a);
       a.click();
       a.remove();
@@ -674,6 +702,52 @@ function DrilldownList({ token }: { token: string }) {
 }
 
 /**
+ * The right-aligned "Change" column shared by the matched publisher and app
+ * rows. Rendered on EVERY row, moved or not, so the emphasised figure to its
+ * left ("This week" / "Matched lines") holds the same horizontal position all
+ * the way down the list. A row that held steady this week keeps the column's
+ * width with a muted placeholder, the one place the house style allows a dash,
+ * rather than dropping the column and letting the figures slide right. The
+ * +added / -removed / ↻cert grammar is the same one the cards have always used.
+ */
+function ChangeCell({
+  added,
+  removed,
+  certChanged,
+}: {
+  added: number;
+  removed: number;
+  certChanged: number;
+}) {
+  const moved = added > 0 || removed > 0 || certChanged > 0;
+  return (
+    <div className="w-[112px]">
+      <div className="text-[10px] font-medium tracking-wide text-slate-500">
+        Change
+      </div>
+      {moved ? (
+        <div className="font-mono text-sm tabular-nums">
+          {added > 0 || removed > 0 ? (
+            <>
+              <span className="text-ok">+{added}</span>
+              <span className="mx-1 text-slate-400">/</span>
+              <span className="text-critical">-{removed}</span>
+              {certChanged > 0 && (
+                <span className="ml-1 text-warn">↻{certChanged}</span>
+              )}
+            </>
+          ) : (
+            <span className="text-warn">↻{certChanged}</span>
+          )}
+        </div>
+      ) : (
+        <div className="font-mono text-sm tabular-nums text-slate-300">—</div>
+      )}
+    </div>
+  );
+}
+
+/**
  * One publisher row, styled the same way as bottomlines-app's
  * HierarchyCard: rounded-3xl white card with generous padding, a
  * colored disc on the left carrying the initial, the identity in the
@@ -729,29 +803,19 @@ function PublisherCard({
           )}
         </div>
         <div className="hidden items-center gap-6 text-right sm:flex">
-          {row.prev != null && <MiniStat label="Last week" value={row.prev} />}
-          <MiniStat label="This week" value={row.current} emphasis />
-          {(row.added > 0 || row.removed > 0 || row.cert_changed > 0) && (
-            <div className="min-w-[92px]">
-              <div className="text-[10px] font-medium text-slate-500">
-                Change
-              </div>
-              <div className="font-mono text-sm tabular-nums">
-                {row.added > 0 || row.removed > 0 ? (
-                  <>
-                    <span className="text-ok">+{row.added}</span>
-                    <span className="mx-1 text-slate-400">/</span>
-                    <span className="text-critical">-{row.removed}</span>
-                    {row.cert_changed > 0 && (
-                      <span className="ml-1 text-warn">↻{row.cert_changed}</span>
-                    )}
-                  </>
-                ) : (
-                  <span className="text-warn">↻{row.cert_changed}</span>
-                )}
-              </div>
+          {row.prev != null && (
+            <div className="w-[84px]">
+              <MiniStat label="Last week" value={row.prev} />
             </div>
           )}
+          <div className="w-[84px]">
+            <MiniStat label="This week" value={row.current} emphasis />
+          </div>
+          <ChangeCell
+            added={row.added}
+            removed={row.removed}
+            certChanged={row.cert_changed}
+          />
         </div>
         <ChevronDown
           className={cn(
@@ -1146,7 +1210,6 @@ function MatchedAppCard({
   const added = app.lines_added ?? 0;
   const removed = app.lines_removed ?? 0;
   const certChanged = app.lines_cert_changed ?? 0;
-  const moved = added > 0 || removed > 0 || certChanged > 0;
   return (
     <div
       className={cn(
@@ -1181,28 +1244,10 @@ function MatchedAppCard({
           </div>
         </div>
         <div className="hidden items-center gap-6 text-right sm:flex">
-          <MiniStat label="Matched lines" value={app.line_count} emphasis />
-          {moved && (
-            <div className="min-w-[92px]">
-              <div className="text-[10px] font-medium text-slate-500">
-                Change
-              </div>
-              <div className="font-mono text-sm tabular-nums">
-                {added > 0 || removed > 0 ? (
-                  <>
-                    <span className="text-ok">+{added}</span>
-                    <span className="mx-1 text-slate-400">/</span>
-                    <span className="text-critical">-{removed}</span>
-                    {certChanged > 0 && (
-                      <span className="ml-1 text-warn">↻{certChanged}</span>
-                    )}
-                  </>
-                ) : (
-                  <span className="text-warn">↻{certChanged}</span>
-                )}
-              </div>
-            </div>
-          )}
+          <div className="w-[84px] whitespace-nowrap">
+            <MiniStat label="Matched lines" value={app.line_count} emphasis />
+          </div>
+          <ChangeCell added={added} removed={removed} certChanged={certChanged} />
         </div>
         <ChevronDown
           aria-hidden

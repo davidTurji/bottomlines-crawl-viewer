@@ -600,6 +600,12 @@ export type Summary = {
      *  deltas are not like-for-like. Set by the API from the same rows the
      *  counts come from, so the flag and the numbers cannot disagree. */
     scope_changed?: boolean;
+    /** Distinct publishers and apps whose lines moved this week. Optional:
+     *  present in mock today, and once the backend supplies it, live. The
+     *  Changes page reads the PREVIOUS crawl's values to draw a week-over-week
+     *  delta on "Publishers affected" / "Apps affected"; absent means no delta,
+     *  which is the honest default before the backend sends it. */
+    affected?: { publishers: number; apps: number };
   };
 };
 

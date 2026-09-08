@@ -123,13 +123,15 @@ export function AppSidebar() {
       collapsible="icon"
     >
       <SidebarContent className="bg-transparent overflow-hidden relative pt-0">
-        {/* Brand slot — h-12 sm:h-14, hairline divider, click-through to
-            Overview. The PathFinder asset is a full horizontal lockup
-            (~2.5:1), so it is shown WHOLE, scaled to the header height, not
-            clipped to a sliver and not doubled with a separate wordmark. */}
+        {/* Brand slot — a tall header (h-20 sm:h-24) so the lockup reads as
+            the brand, not a footnote. The PathFinder asset is a full
+            horizontal lockup (~2.5:1), shown WHOLE and scaled to roughly
+            double its old height (h-14 sm:h-16), object-contain / object-left
+            so it is never clipped and the collapsed icon rail still frames
+            its left edge. The nav list below is offset to match. */}
         <NavLink
           to={basePath}
-          className="flex items-center px-3 h-12 sm:h-14 border-b border-sidebar-border/50 transition-colors duration-150 hover:bg-sidebar-accent/40"
+          className="flex items-center px-3 h-20 sm:h-24 border-b border-sidebar-border/50 transition-colors duration-150 hover:bg-sidebar-accent/40"
           onClick={handleMobileNavClick}
           aria-label="PathFinder, Overview"
         >
@@ -137,7 +139,7 @@ export function AppSidebar() {
             src={pathfinderLogo}
             alt="PathFinder"
             draggable={false}
-            className="h-7 sm:h-8 w-auto max-w-full object-contain object-left select-none"
+            className="h-14 sm:h-16 w-auto max-w-full object-contain object-left select-none"
           />
         </NavLink>
 
@@ -146,7 +148,7 @@ export function AppSidebar() {
             and earns its header. This viewer has exactly three pages and
             nothing to collapse it against, so the header was a row of
             chrome that could only ever hide the whole nav from itself. */}
-        <div className="absolute inset-x-0 bottom-0 top-12 sm:top-14 overflow-y-auto">
+        <div className="absolute inset-x-0 bottom-0 top-20 sm:top-24 overflow-y-auto">
           <SidebarGroup className="px-2.5 py-3">
             <SidebarGroupContent>
               <SidebarMenu className="gap-0.5">

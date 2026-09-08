@@ -82,6 +82,10 @@ export const mockPreviousSummary: Summary = {
       added: 9, removed: 4, changed: 41,
       newly_monitored: 0, monitoring_stopped: 0,
     },
+    // Last week's distinct publishers / apps affected, so the Changes page's
+    // "Where they landed" card can show a real week-over-week delta against
+    // this week's (≈20 publishers, ≈15 apps): +3 on each.
+    affected: { publishers: 17, apps: 12 },
     top_ssps: {
       added: [
         { ssp_domain: "openx.com", count: 22 },
@@ -150,6 +154,10 @@ export const mockSummary: Summary = {
       monitoring_stopped: 2,
     },
     scope_changed: true,
+    // This week's distinct publishers / apps affected. The Changes page
+    // computes the current figure from the loaded line events; this keeps the
+    // fixture coherent and documents the field the delta reads from `previous`.
+    affected: { publishers: 20, apps: 15 },
     top_ssps: {
       added: [
         { ssp_domain: "magnite.com", count: 34 },
