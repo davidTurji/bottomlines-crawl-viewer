@@ -786,6 +786,13 @@ export type MatchedApp = {
   owner_name?: string | null;
   line_count: number;
   /**
+   * The owning developer's id. The app's seat lines ARE that developer's
+   * app-ads.txt lines, so the expanded row lazy-fetches them from the baked
+   * line-events endpoint by this id, exactly as a publisher row does, rather
+   * than embedding them in the list.
+   */
+  developer_id?: number;
+  /**
    * This app's weekly change, so the matched-apps list can offer the same
    * Added / Removed / Changed tabs the publishers list has. All absent or
    * zero means the app matched but did not move this week, and it then sits
