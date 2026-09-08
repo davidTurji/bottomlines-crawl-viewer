@@ -740,12 +740,30 @@ function ChangeCard({
             the unit of this page. It truncates rather than wraps, so a card
             keeps its height whatever the length of a cert id.
           */}
-          <code className="block truncate font-mono text-[13px] font-semibold tracking-tight text-slate-900 sm:text-[15px]">
-            {group.ssp_domain}, {group.publisher_id}, {group.relationship}
-            {inlineCert && (
-              <span className="font-normal text-slate-400">, {inlineCert}</span>
+          <div className="flex min-w-0 items-center gap-2">
+            <code className="min-w-0 truncate font-mono text-[13px] font-semibold tracking-tight text-slate-900 sm:text-[15px]">
+              {group.ssp_domain}, {group.publisher_id}, {group.relationship}
+              {inlineCert && (
+                <span className="font-normal text-slate-400">, {inlineCert}</span>
+              )}
+            </code>
+            {/* PROVENANCE, only when it is not the ordinary kind. A line
+                found in the developer's own file needs no note; one that
+                reached the report through an inventory-partner declaration,
+                or through a subdomain's file, says so in words on the face.
+                Violet is the suite's reserved IPD tone (--tone-special);
+                the subdomain case is neutral, a fact and not a signal. */}
+            {group.matched_via === "ipd" && (
+              <span className="flex-shrink-0 rounded-full border border-special-border bg-special-bg px-2 py-0.5 text-[10px] font-medium text-special">
+                via inventory partner
+              </span>
             )}
-          </code>
+            {group.matched_via === "subdomain" && (
+              <span className="flex-shrink-0 rounded-full border border-neutral-border bg-neutral-bg px-2 py-0.5 text-[10px] font-medium text-neutral">
+                subdomain file
+              </span>
+            )}
+          </div>
 
           {/* One quiet line of reach, nothing else. The toned disc on the
               left already says which of the three things happened, so
@@ -846,6 +864,14 @@ function ChangeCard({
               Export
             </button>
           </div>
+          {/* Who vouched for this line's developer. One quiet sentence, not
+              a list: the declarers are context on the match, not the roster
+              the reader opened the card for. */}
+          {group.ipd_declared_by.length > 0 && (
+            <p className="mb-2 text-[11px] leading-relaxed text-slate-500">
+              declared inventory partner by {declaredBy(group.ipd_declared_by)}
+            </p>
+          )}
           {/* Capped and scrollable: a line that moved on hundreds of
               publishers would otherwise push every other card off screen. */}
           <div className="scroll-y max-h-[320px] overflow-y-auto rounded-md border border-border bg-white">
@@ -1001,8 +1027,25 @@ type ChangeGroup = {
   relationship: string;
   old_cert_id: string | null;
   new_cert_id: string | null;
+  /** How the line was tied to its developer. Absent on old data is "file",
+   *  which is also the case that gets no chip. */
+  matched_via: "file" | "ipd" | "subdomain";
+  /** Domains whose files vouched for this line's developer as their
+   *  inventory partner. Non-empty even on "file" matches sometimes. */
+  ipd_declared_by: string[];
   publishers: LineEvent[];
 };
+
+/** The declarer roster as a sentence fragment. Cut at five: past that the
+ *  useful fact is the count, not the names, and the API itself caps the
+ *  list at 25 so "and N more" is measured against what was sent. */
+function declaredBy(domains: string[]): string {
+  const shown = domains.slice(0, 5);
+  const more = domains.length - shown.length;
+  return more > 0
+    ? `${shown.join(", ")} and ${more.toLocaleString()} more`
+    : shown.join(", ");
+}
 
 /** "12 Jul 2026" — a month and a year, because the useful fact is how
  *  LONG this has been true, and a precise day implies a precision the
@@ -1066,6 +1109,8 @@ function groupByLine(rows: LineEvent[]): ChangeGroup[] {
         old_cert_id: r.old_cert_id,
         new_cert_id: r.new_cert_id,
         first_seen_at: r.first_seen_at ?? null,
+        matched_via: r.matched_via ?? "file",
+        ipd_declared_by: r.ipd_declared_by ?? [],
         publishers: [],
       };
       byKey.set(key, g);
@@ -1076,6 +1121,15 @@ function groupByLine(rows: LineEvent[]): ChangeGroup[] {
     // sort first.
     if (r.first_seen_at && (!g.first_seen_at || r.first_seen_at < g.first_seen_at)) {
       g.first_seen_at = r.first_seen_at;
+    }
+    // Same idea for provenance: the card speaks for the line, so if ANY of
+    // its rows arrived via a declaration, the chip says so, and the first
+    // roster that names declarers wins over an empty one.
+    if (g.matched_via === "file" && r.matched_via && r.matched_via !== "file") {
+      g.matched_via = r.matched_via;
+    }
+    if (g.ipd_declared_by.length === 0 && r.ipd_declared_by?.length) {
+      g.ipd_declared_by = r.ipd_declared_by;
     }
     g.publishers.push(r);
   }

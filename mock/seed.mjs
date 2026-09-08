@@ -83,6 +83,14 @@ const DEVELOPERS = [
 
 const REL = ["DIRECT", "RESELLER"];
 
+// Domains whose files vouch for another developer as their inventory
+// partner. Drawn from the fixture's own web publishers, so every declarer a
+// card names resolves inside the same report.
+const IPD_DECLARERS = [
+  "harbourvane.com", "sablefield.com", "fenwickdigital.com",
+  "marlowebay.com", "hollowmere.com", "perchfable.com", "vesperlane.com",
+];
+
 function certId() {
   const hex = "0123456789abcdef";
   let s = "";
@@ -154,6 +162,12 @@ for (const d of developers) {
   const emit = (event, howMany) => {
     for (let k = 0; k < howMany; k++) {
       const old = event === "cert_changed" ? certId() : null;
+      // Provenance for the viewer's chips: every ninth event reached the
+      // report via an inventory-partner declaration, every eleventh via a
+      // subdomain's file. Keyed off the running counter, not rand(), so
+      // adding the fields does not reshuffle every other draw in the
+      // fixture.
+      const via = n % 9 === 4 ? "ipd" : n % 11 === 7 ? "subdomain" : "file";
       lineEvents.push({
         developer_id: d.developer_id,
         developer_name: d.developer_name,
@@ -166,6 +180,8 @@ for (const d of developers) {
         old_cert_id: old,
         new_cert_id: event === "removed" ? null : certId(),
         matched_seat: rand() < 0.68,
+        matched_via: via,
+        ipd_declared_by: via === "ipd" ? IPD_DECLARERS.slice(0, 2 + (n % 5)) : [],
         occurred_at: occurredAt(n++),
       });
     }
@@ -326,3 +342,43 @@ export const matchedDevelopers = developers
   .sort((a, b) => b.line_count - a.line_count);
 
 export const sspList = SSPS;
+
+// ---- declarations: inventory partners, owner claims, mismatches ------------
+// One response, no paging, mirroring src/lib/mockData.ts's mockDeclarations
+// in shape (the domains differ because this fixture has its own roster).
+const declSources = (count, offset) =>
+  Array.from({ length: count }, (_, i) => {
+    const [, domain, platform] = DEVELOPERS[(offset + i * 5) % DEVELOPERS.length];
+    return { domain, file_kind: platform === "web" ? "ads_txt" : "app_ads_txt" };
+  });
+
+export const declarations = {
+  totals: { ipd_partners: 2, owner_domains: 1, relationship_mismatches: 2 },
+  ipd: [
+    { partner_domain: "northlark.io", declared_by: declSources(6, 0), declarer_total: 6 },
+    { partner_domain: "lumenrow.tv", declared_by: declSources(2, 13), declarer_total: 2 },
+  ],
+  owner_claims: [
+    { owner_domain: "harbourvane.com", claimed_by: declSources(3, 21), claimant_total: 3 },
+  ],
+  relationship_mismatches: [
+    {
+      developer_domain: "sablefield.com",
+      ssp_domain: "magnite.com",
+      publisher_id: "pub-482119",
+      wanted_relationship: "RESELLER",
+      found_relationship: "DIRECT",
+      found_in: "ads.txt",
+      matched_via: "file",
+    },
+    {
+      developer_domain: "tidewell.gg",
+      ssp_domain: "openx.com",
+      publisher_id: "pub-905112",
+      wanted_relationship: "DIRECT",
+      found_relationship: "RESELLER",
+      found_in: "app-ads.txt",
+      matched_via: "ipd",
+    },
+  ],
+};
