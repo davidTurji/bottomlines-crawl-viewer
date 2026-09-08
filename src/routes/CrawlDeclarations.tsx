@@ -117,11 +117,9 @@ export default function CrawlDeclarations() {
         <h1 className="text-xl font-bold leading-tight tracking-tight text-slate-900 sm:text-2xl">
           Declarations
         </h1>
-        <p className="mt-1 max-w-2xl text-sm leading-relaxed text-slate-500">
-          What the publisher files themselves declared this crawl: inventory
-          partner domains, owner domain claims, and seats carrying a
-          different relationship than your watchlist expects. Open a card to
-          see which files said it.
+        <p className="mt-1 text-sm text-slate-500">
+          What the publisher files declared: inventory partners, owner domains,
+          and relationship mismatches.
         </p>
         <WeekLine
           week={weekLabel}
@@ -142,16 +140,21 @@ export default function CrawlDeclarations() {
                 Declared this crawl
               </div>
               <div className="text-[11px] text-slate-500">
-                Read out of the ads.txt and app-ads.txt files we fetched
+                From the files we fetched
               </div>
             </div>
           </div>
+          {/* Toned to match each section's cards below: inventory partners in
+              the reserved violet, owner domains in info blue, mismatches in
+              warn when there are any. */}
           <div className="grid grid-cols-3 divide-x divide-border overflow-hidden rounded-xl border border-border">
             <SplitStat
+              tone="special"
               number={data.totals.ipd_partners}
               label="Inventory partners"
             />
             <SplitStat
+              tone="info"
               number={data.totals.owner_domains}
               label="Owner domains"
             />

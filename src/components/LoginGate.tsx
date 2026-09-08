@@ -66,9 +66,11 @@ export default function LoginGate({ children }: { children: React.ReactNode }) {
 }
 
 /**
- * The centered sign-in card. Same visual language as the app shell:
- * white card on the muted ground, racing-green primary accent, the
- * Bottomlines wordmark on top. Sentence case throughout.
+ * The centered sign-in card. Mirrors the bottomlines admin console's own
+ * sign-in: the radial primary bloom behind, the product name set as display
+ * type with one word tinted and underlined, a single white card on the muted
+ * ground, racing-green primary accent. Branded PathFinder, kept minimal.
+ * Sentence case throughout.
  */
 function LoginCard({
   token,
@@ -125,29 +127,46 @@ function LoginCard({
         }}
       />
       <div className="w-full max-w-sm animate-auth-rise">
+        {/* The underline sweep, mirroring the console sign-in's own
+            "bottomlines" underline. Scoped here so it adds no global CSS,
+            and stilled under reduced-motion. */}
+        <style>{`
+          @keyframes pfUnderline { from { transform: scaleX(0) } to { transform: scaleX(1) } }
+          .pf-underline { animation: pfUnderline 1100ms cubic-bezier(0.22, 0.7, 0.2, 1) 420ms both; }
+          @media (prefers-reduced-motion: reduce) { .pf-underline { animation: none } }
+        `}</style>
+
         {/* THE PRODUCT NAME, SET IN TYPE, NOT PRINTED FROM A LOGO.
             Both logo assets in the brand kit carry a WHITE wordmark, drawn
             for the dark sidebar rail. On this white card the mark rendered
             and the word did not, so the screen showed a floating "b" above
             blank space. The console's own sign-in never had that problem
             because it never used the lockup: it sets the name as display
-            type and tints one word with the primary token, which is what
-            this now does. */}
-        <div className="mb-6">
+            type and tints one word with the primary token, then draws an
+            underline under it, which is what this mirrors. PathFinder is one
+            word, so "Path" and "Finder" meet with no space between them. */}
+        <div className="mb-7">
           <h1
-            className="font-display text-[2rem] font-semibold leading-[1.05] tracking-[-0.028em] text-slate-900"
+            className="font-display text-[2.1rem] font-semibold leading-[1.03] tracking-[-0.028em] text-slate-900"
             style={{ fontFamily: "var(--font-display)" }}
           >
-            Path <span className="text-primary">Finder</span>
+            Path
+            <span className="relative inline-block">
+              <span className="text-primary">Finder</span>
+              <span
+                aria-hidden
+                className="pointer-events-none absolute -bottom-[0.06em] left-0 right-0 block h-[0.08em] overflow-hidden"
+              >
+                <span className="pf-underline block h-full origin-left rounded-full bg-primary/70" />
+              </span>
+            </span>
           </h1>
-          <p className="mt-2 text-sm text-slate-500">
-            by bottomlines.ai
-          </p>
+          <p className="mt-2 text-sm text-slate-500">by bottomlines</p>
         </div>
 
         <div className="rounded-2xl border border-border bg-white p-6 shadow-sm sm:p-8">
           <h2 className="font-display text-lg font-semibold tracking-tight text-slate-900">
-            Sign in to your crawl report
+            Sign in to your report
           </h2>
           <p className="mt-1 text-sm text-slate-500">
             Use the username and password we shared with you.
@@ -164,7 +183,7 @@ function LoginCard({
                 onChange={(e) => setUsername(e.target.value)}
                 autoComplete="username"
                 autoFocus
-                className="h-10 w-full rounded-lg border border-input bg-white px-3 text-sm text-slate-900 outline-none transition-colors placeholder:text-slate-400 focus:border-primary/50 focus:ring-2 focus:ring-ring/30"
+                className="h-11 w-full rounded-lg border border-input bg-white px-3.5 text-sm text-slate-900 outline-none transition-colors placeholder:text-slate-400 focus:border-primary/50 focus:ring-2 focus:ring-ring/30"
               />
             </label>
             <label className="block">
@@ -176,7 +195,7 @@ function LoginCard({
                 value={password}
                 onChange={(e) => setPassword(e.target.value)}
                 autoComplete="current-password"
-                className="h-10 w-full rounded-lg border border-input bg-white px-3 text-sm text-slate-900 outline-none transition-colors placeholder:text-slate-400 focus:border-primary/50 focus:ring-2 focus:ring-ring/30"
+                className="h-11 w-full rounded-lg border border-input bg-white px-3.5 text-sm text-slate-900 outline-none transition-colors placeholder:text-slate-400 focus:border-primary/50 focus:ring-2 focus:ring-ring/30"
               />
             </label>
 
@@ -192,7 +211,7 @@ function LoginCard({
             <button
               type="submit"
               disabled={busy || !username.trim() || !password}
-              className="flex h-10 w-full items-center justify-center gap-2 rounded-lg bg-primary text-sm font-medium text-primary-foreground transition-colors hover:bg-primary/90 disabled:cursor-not-allowed disabled:bg-slate-200 disabled:text-slate-400"
+              className="flex h-11 w-full items-center justify-center gap-2 rounded-lg bg-primary text-sm font-medium text-primary-foreground shadow-sm transition-colors hover:bg-primary/90 disabled:cursor-not-allowed disabled:bg-slate-200 disabled:text-slate-400 disabled:shadow-none"
             >
               <Lock className="h-3.5 w-3.5" />
               {busy ? "Signing in" : "Sign in"}

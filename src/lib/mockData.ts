@@ -29,7 +29,10 @@ import type {
   LineEvent,
   LineEventKind,
   MatchedDevelopersPage,
+  MatchedSeatLine,
   MatchedBundlesPage,
+  MatchedApp,
+  MatchedAppsPage,
   ChatFrame,
 } from "./api";
 // The discovered-lines ORDER BY, shared with the page's sort control so the
@@ -59,8 +62,11 @@ export const mockPreviousSummary: Summary = {
     developers_with_lines: 1_042_117,
     matched: {
       lines: 1_338_549,
-      developers: 8_408,
-      apps: 24_614,
+      // Last week's matched counts, set so the overview's matched publisher
+      // and app cards show a real week-over-week growth delta: publishers
+      // 8,061 -> 8,412 (+351, +4.4%), apps 23,140 -> 24,781 (+1,641, +7.1%).
+      developers: 8_061,
+      apps: 23_140,
     },
   },
   hero_diff: {
@@ -431,7 +437,13 @@ export function mockDeveloperEvents(
   event: "added" | "removed" | "changed",
   page: number,
 ): DeveloperEventsPage {
-  const rows = DEV_TABLES[event] ?? [];
+  // Attach the seat lines behind each row's counts, so its expanded card can
+  // show WHAT moved. Seeded off the developer id (see changeArrays), so a
+  // publisher shown here and under "All matched" carries identical lines.
+  const rows = (DEV_TABLES[event] ?? []).map((d) => ({
+    ...d,
+    ...changeArrays(d.developer_id, d.lines_added, d.lines_removed, d.lines_cert_changed),
+  }));
   return {
     event,
     page,
@@ -812,7 +824,153 @@ function domainFor(name: string, platform: string, i: number): string {
   return `${slug}${tld}`;
 }
 
-function buildMatchedDevs(): { developer_id: number; name: string; domain: string; platform: string; line_count: number }[] {
+/**
+ * The seat line(s) a matched publisher carried, for the overview's expanded
+ * row. Generated deterministically from the developer id so a screenshot is
+ * stable across reloads, and capped at six for display: a real publisher can
+ * match more, but `line_count` carries the honest total. Some lines print a
+ * cert id and most do not, exactly the way real ads.txt files split.
+ */
+const SEAT_LINE_SSPS = [
+  "magnite.com", "openx.com", "pubmatic.com", "sharethrough.com",
+  "rubiconproject.com", "appnexus.com", "google.com", "criteo.com",
+  "smartadserver.com", "adform.com",
+];
+
+function matchedLinesFor(developer_id: number, line_count: number): MatchedSeatLine[] {
+  const n = Math.max(1, Math.min(line_count, 6));
+  const out: MatchedSeatLine[] = [];
+  for (let i = 0; i < n; i += 1) {
+    const ssp = SEAT_LINE_SSPS[(developer_id + i) % SEAT_LINE_SSPS.length];
+    const relationship = (developer_id + i) % 3 === 0 ? "DIRECT" : "RESELLER";
+    const publisher_id = `${ssp.split(".")[0]}-${
+      1000 + ((developer_id * 7 + i * 131) % 8999)
+    }`;
+    const line: MatchedSeatLine = { ssp_domain: ssp, publisher_id, relationship };
+    // Roughly a quarter of lines carry the optional fourth field.
+    if ((developer_id + i) % 4 === 0) line.cert_id = certId(developer_id * 13 + i * 7);
+    out.push(line);
+  }
+  return out;
+}
+
+// ─────────────────────────────────────────────────────────────────
+// Weekly change lines (the seats behind a card's +added / -removed badge)
+// ─────────────────────────────────────────────────────────────────
+
+/** SSPs the synthetic weekly changes draw from. A superset of SEAT_LINE_SSPS
+ *  so an added / removed line reads like the matched ones beside it. */
+const CHANGE_LINE_SSPS = [
+  "magnite.com", "openx.com", "pubmatic.com", "rubiconproject.com",
+  "appnexus.com", "google.com", "sharethrough.com", "criteo.com",
+  "smartadserver.com", "adform.com", "yahoo.com", "spotx.tv",
+];
+
+/**
+ * Synthesize exactly `count` seat lines behind a weekly change, deterministically
+ * from `seed`, in the same shape matchedLinesFor produces. `alwaysCert` forces
+ * the fourth field on: a cert change is ABOUT the cert, so those lines always
+ * print one. Seeding by the subject id (see changeArrays) keeps the same
+ * publisher's lines identical wherever they are shown, so the "All matched" and
+ * "Changed" tabs cannot disagree about the same card.
+ */
+function changeLinesFor(
+  seed: number,
+  count: number,
+  alwaysCert = false,
+): MatchedSeatLine[] {
+  const out: MatchedSeatLine[] = [];
+  for (let i = 0; i < count; i += 1) {
+    const ssp = CHANGE_LINE_SSPS[(seed + i * 3) % CHANGE_LINE_SSPS.length];
+    const relationship = (seed + i) % 3 === 0 ? "DIRECT" : "RESELLER";
+    const publisher_id = `${ssp.split(".")[0]}-${
+      1000 + ((seed * 7 + i * 131) % 8999)
+    }`;
+    const line: MatchedSeatLine = { ssp_domain: ssp, publisher_id, relationship };
+    if (alwaysCert || (seed + i) % 4 === 0) {
+      line.cert_id = certId(seed * 13 + i * 7 + 3);
+    }
+    out.push(line);
+  }
+  return out;
+}
+
+/** The three change-line arrays for one subject, sized to match its counts.
+ *  Seeded off the subject id (with a per-kind offset), so the arrays are stable
+ *  across reloads and identical wherever the same subject appears. */
+function changeArrays(
+  id: number,
+  added: number,
+  removed: number,
+  cert: number,
+): {
+  added_lines: MatchedSeatLine[];
+  removed_lines: MatchedSeatLine[];
+  cert_changed_lines: MatchedSeatLine[];
+} {
+  return {
+    added_lines: changeLinesFor(id * 2 + 1, added),
+    removed_lines: changeLinesFor(id * 2 + 501, removed),
+    cert_changed_lines: changeLinesFor(id * 2 + 907, cert, true),
+  };
+}
+
+/** A publisher's weekly change counts, keyed off its id so the four cases the
+ *  expanded card can show — added only, removed only, both (+ cert), and stable
+ *  — are spread deterministically across the matched roster. Publishers that
+ *  also drive a change tab reuse those exact counts instead (see
+ *  DEV_EVENT_CHANGE), so a card reads the same in every list it appears in. */
+function changeProfileFor(id: number): {
+  added: number;
+  removed: number;
+  cert: number;
+} {
+  switch (id % 5) {
+    case 0:
+      return { added: 0, removed: 0, cert: 0 }; // stable, matched but held steady
+    case 1:
+      return { added: 1 + (id % 6), removed: 0, cert: 0 }; // added only
+    case 2:
+      return { added: 0, removed: 1 + ((id >> 2) % 5), cert: 0 }; // removed only
+    case 3:
+      return { added: 1 + (id % 5), removed: 1 + ((id >> 2) % 4), cert: 0 }; // both
+    default:
+      return {
+        added: 2 + (id % 4),
+        removed: 1 + ((id >> 2) % 3),
+        cert: 1 + ((id >> 3) % 3),
+      }; // both, plus a cert rotation (the three-window case)
+  }
+}
+
+/** Change counts for every publisher that drives a change tab, so the same
+ *  publisher shown under "All matched" reconciles to its Changed-tab numbers. */
+const DEV_EVENT_CHANGE: Record<
+  number,
+  { added: number; removed: number; cert: number }
+> = {};
+for (const d of [...DEV_ADDED, ...DEV_REMOVED, ...DEV_CHANGED]) {
+  DEV_EVENT_CHANGE[d.developer_id] = {
+    added: d.lines_added,
+    removed: d.lines_removed,
+    cert: d.lines_cert_changed,
+  };
+}
+
+function buildMatchedDevs(): {
+  developer_id: number;
+  name: string;
+  domain: string;
+  platform: string;
+  line_count: number;
+  lines_added: number;
+  lines_removed: number;
+  lines_cert_changed: number;
+  matched_lines: MatchedSeatLine[];
+  added_lines: MatchedSeatLine[];
+  removed_lines: MatchedSeatLine[];
+  cert_changed_lines: MatchedSeatLine[];
+}[] {
   const rows: { developer_id: number; name: string; domain: string; platform: string; line_count: number }[] = [
     ...DEV_HEAD,
   ];
@@ -832,8 +990,25 @@ function buildMatchedDevs(): { developer_id: number; name: string; domain: strin
       line_count,
     });
   }
-  // Sort by line_count desc so the head reads as head.
-  return rows.sort((a, b) => b.line_count - a.line_count);
+  // Sort by line_count desc so the head reads as head, then attach the matched
+  // seat lines each row exposes on the overview's expanded card, plus this
+  // week's change (counts + the lines behind them). A publisher that also
+  // drives a change tab reuses those exact counts; everyone else gets a
+  // deterministic profile spread across the four cases the card can show.
+  return rows
+    .sort((a, b) => b.line_count - a.line_count)
+    .map((d) => {
+      const prof =
+        DEV_EVENT_CHANGE[d.developer_id] ?? changeProfileFor(d.developer_id);
+      return {
+        ...d,
+        lines_added: prof.added,
+        lines_removed: prof.removed,
+        lines_cert_changed: prof.cert,
+        matched_lines: matchedLinesFor(d.developer_id, d.line_count),
+        ...changeArrays(d.developer_id, prof.added, prof.removed, prof.cert),
+      };
+    });
 }
 
 const MATCHED_DEVS = buildMatchedDevs();
@@ -931,6 +1106,85 @@ export function mockMatchedBundles(page: number): MatchedBundlesPage {
  */
 export function bundlesForDeveloper(developer_id: number) {
   return MATCHED_BUNDLES.filter((b) => b.developer_id === developer_id);
+}
+
+// ─────────────────────────────────────────────────────────────────
+// Matched apps (the pink list on the overview)
+// ─────────────────────────────────────────────────────────────────
+
+/*
+ * Apps whose app-ads.txt carried the customer's seats, each with the
+ * PUBLISHER that owns it. Owners are drawn from the matched-publisher roster
+ * (web publishers excluded, since they ship no apps) so the two lists
+ * reconcile: an app's owner is a publisher the reader can also find under
+ * Matched publishers. Deterministic, like the rest of this fixture, and a
+ * couple of dozen strong so the list reads as real.
+ */
+function buildMatchedApps(): MatchedApp[] {
+  const rnd = xorshift(9_931);
+  const owners = MATCHED_DEVS.filter((d) => d.platform !== "Web");
+  const rows: MatchedApp[] = [];
+  for (let i = 0; i < 42; i += 1) {
+    const owner = owners[i % owners.length];
+    const store = owner.platform.toLowerCase();
+    const noun = APP_NOUNS[i % APP_NOUNS.length];
+    const r = rnd();
+    // A short head of hero apps, then a long tail of small matches.
+    const line_count =
+      r < 0.16 ? 10 + Math.floor(rnd() * 22) : 1 + Math.floor(rnd() * 9);
+    // Weekly change profile, so the app tabs (Added / Removed / Changed) have
+    // real content and the expanded card exercises all four of its states.
+    // Most apps have no change and sit under All matched only (the stable,
+    // flat-list case). The rest split across added only, removed only, cert
+    // only, added+removed (two windows), and a slice of added+removed+cert
+    // (three windows).
+    const c = rnd();
+    let lines_added = 0;
+    let lines_removed = 0;
+    let lines_cert_changed = 0;
+    if (c < 0.2) {
+      lines_added = 1 + Math.floor(rnd() * 8);
+    } else if (c < 0.38) {
+      lines_removed = 1 + Math.floor(rnd() * 6);
+    } else if (c < 0.5) {
+      lines_cert_changed = 1 + Math.floor(rnd() * 4);
+    } else if (c < 0.58) {
+      lines_added = 1 + Math.floor(rnd() * 5);
+      lines_removed = 1 + Math.floor(rnd() * 4);
+    } else if (c < 0.63) {
+      lines_added = 2 + Math.floor(rnd() * 4);
+      lines_removed = 1 + Math.floor(rnd() * 3);
+      lines_cert_changed = 1 + Math.floor(rnd() * 2);
+    }
+    // One seed drives both the standing match and the change lines for this
+    // app, so a screenshot is stable and the two never contradict each other.
+    const appSeed = owner.developer_id + i * 17;
+    rows.push({
+      store,
+      bundle_id: bundleIdFor(store, owner.name, i),
+      app_name: `${owner.name.split(/\s+/)[0]} ${noun}`,
+      owner_domain: owner.domain,
+      owner_name: owner.name,
+      line_count,
+      lines_added,
+      lines_removed,
+      lines_cert_changed,
+      matched_lines: matchedLinesFor(appSeed, line_count),
+      ...changeArrays(appSeed, lines_added, lines_removed, lines_cert_changed),
+    });
+  }
+  return rows.sort((a, b) => b.line_count - a.line_count);
+}
+
+const MATCHED_APPS = buildMatchedApps();
+
+export function mockMatchedApps(page: number): MatchedAppsPage {
+  return {
+    page,
+    page_size: 100,
+    total: MATCHED_APPS.length,
+    rows: MATCHED_APPS,
+  };
 }
 
 // ─────────────────────────────────────────────────────────────────
@@ -1242,19 +1496,32 @@ function placementsFor(spec: MockLineSpec, i: number): DiscoveredPlacement[] {
   const rows: DiscoveredPlacement[] = [];
   for (let k = 0; k < count; k += 1) {
     const pub = pool[(start + k) % pool.length];
-    rows.push({
+    // A web publisher can only be found in ads.txt; an app publisher is
+    // usually in app-ads.txt and occasionally in both.
+    const found_in =
+      pub.platform === "Web"
+        ? "ads.txt"
+        : rnd() < 0.8
+          ? "app-ads.txt"
+          : "ads.txt";
+    const row: DiscoveredPlacement = {
       developer_domain: pub.developer_domain,
       developer_name: pub.developer_name,
       platform: pub.platform,
-      // A web publisher can only be found in ads.txt; an app publisher is
-      // usually in app-ads.txt and occasionally in both.
-      found_in:
-        pub.platform === "Web"
-          ? "ads.txt"
-          : rnd() < 0.8
-            ? "app-ads.txt"
-            : "ads.txt",
-    });
+      found_in,
+    };
+    // When the line turned up in an app's app-ads.txt, name the APP, not
+    // just the publisher domain: the store, its bundle id, and a display
+    // name. A plain website placement stays a bare domain row.
+    if (pub.platform !== "Web" && found_in === "app-ads.txt") {
+      const store = pub.platform.toLowerCase();
+      row.store = store;
+      row.app_name = `${pub.developer_name.split(/\s+/)[0]} ${
+        APP_NOUNS[(start + k) % APP_NOUNS.length]
+      }`;
+      row.bundle_id = bundleIdFor(store, pub.developer_name, start + k);
+    }
+    rows.push(row);
   }
   return rows.sort(
     (a, b) =>
@@ -1525,7 +1792,7 @@ Every one of these reseller nodes is a live counterparty in the seller list, so 
 - **appnexus.com, xf-4402, DIRECT**: Kite Interactive dropped this line entirely.
 - **rubiconproject.com, 22890, DIRECT**: Sable Broadcasting removed it (was your only direct with them on Samsung CTV).
 - **google.com, pub-9083..., DIRECT**: Cinder and Sky purged all Google lines this week.
-- **Plus 9 more**. Turn on the "My seats only" filter in Line changes to see the full list.
+- **Plus 9 more**. Open the Changes page and filter to Removed to see the full list.
 
 A removed line means the publisher no longer lists your partner as authorized. Buyers that check for authorization will start filtering these on the next crawl.`,
 };

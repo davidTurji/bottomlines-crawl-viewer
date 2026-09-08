@@ -144,6 +144,17 @@ export const api = {
     authEpoch++;
     return out;
   },
+  /**
+   * Same-origin URL of the CUSTOMER workbook for this run: the xlsx the
+   * crawler bakes per crawl, the same file the Overview's "Export results"
+   * button hands the reader. A plain link target, not a fetch, so the
+   * download is an ordinary navigation the browser saves, and the httpOnly
+   * session cookie rides along because BASE is same-origin ("/api").
+   *
+   * MOCK mode has no backend, so the button short-circuits to a small stub
+   * rather than pointing at this (see CrawlReport's ExportResultsButton).
+   */
+  exportUrl: (token: string) => `${BASE}/v1/viewer/${token}/export.xlsx`,
   summary: async (token: string) => {
     if (MOCK) {
       const { mockSummary } = await import("./mockData");
@@ -244,6 +255,31 @@ export const api = {
     return req<MatchedBundlesPage>(
       "GET",
       `/v1/viewer/${token}/matched-bundles?page=${page}&page_size=100`,
+    );
+  },
+  /**
+   * Matched apps: apps whose app-ads.txt carried the customer's seats, each
+   * with the PUBLISHER that owns it. Powers the "Matched apps" list the
+   * overview shows when its pink apps card is selected.
+   *
+   * PROPOSED ENDPOINT (mirror server side):
+   *   GET /v1/viewer/{token}/matched-apps?page=1&page_size=100
+   *   200 → { page, page_size, total, rows: MatchedApp[] }
+   *
+   * This is deliberately distinct from matched-bundles: that list is keyed by
+   * the developer identity for the Results drilldown, while this one's unit is
+   * the APP and it carries the app's owner and its matched seat lines. Could
+   * instead be embedded under matched-developers; a standalone endpoint is
+   * cleaner because the app is the row here, not the publisher.
+   */
+  matchedApps: async (token: string, page = 1) => {
+    if (MOCK) {
+      const { mockMatchedApps } = await import("./mockData");
+      return mockMatchedApps(page);
+    }
+    return req<MatchedAppsPage>(
+      "GET",
+      `/v1/viewer/${token}/matched-apps?page=${page}&page_size=100`,
     );
   },
   /**
@@ -581,6 +617,17 @@ export type DeveloperEvent = {
   lines_monitoring_stopped: number;
   top_ssps: { ssp_domain: string; count: number }[];
   occurred_at: string | null;
+  /**
+   * The exact seat lines behind this publisher's weekly change counts, so the
+   * expanded row can show WHAT moved, not only how much. Each array's length
+   * equals its matching count above (added_lines.length === lines_added, and
+   * so on). Same shape as matched_lines; a cert change prints the new cert.
+   */
+  added_lines?: MatchedSeatLine[];
+  removed_lines?: MatchedSeatLine[];
+  cert_changed_lines?: MatchedSeatLine[];
+  /** The standing matched set, for a publisher shown outside a change bucket. */
+  matched_lines?: MatchedSeatLine[];
 };
 
 export type DeveloperEventsPage = {
@@ -648,12 +695,46 @@ export type LineEventsPage = {
   rows: LineEvent[];
 };
 
+/**
+ * One matched seat line, as it appears in the publisher's file: the same
+ * three fields the Changes and Discovery pages print in mono, plus the
+ * optional cert id. This is the answer to "which of my seats did this
+ * publisher carry", which is a different fact from how many moved this week.
+ */
+export type MatchedSeatLine = {
+  ssp_domain: string;
+  publisher_id: string;
+  relationship: string;
+  /** "" or absent when the file omits the fourth field, the majority case. */
+  cert_id?: string;
+};
+
 export type MatchedDeveloper = {
   developer_id: number;
   name: string | null;
   domain: string | null;
   platform: string | null;
   line_count: number;
+  /**
+   * The exact seat line(s) this publisher matched. Rendered verbatim in the
+   * expanded row on the overview, so a reader sees WHICH seats matched, not
+   * only that some did. Capped server side; `line_count` is the honest total.
+   */
+  matched_lines?: MatchedSeatLine[];
+  /**
+   * This publisher's weekly change, so the expanded row can reflect WHAT moved
+   * on it this week rather than only the standing match. The counts drive the
+   * card's change badge; the arrays carry the lines behind them, one object per
+   * counted line (added_lines.length === lines_added, and so on). All zero /
+   * empty means the publisher matched but held steady, and the expansion falls
+   * back to the flat matched_lines list.
+   */
+  lines_added?: number;
+  lines_removed?: number;
+  lines_cert_changed?: number;
+  added_lines?: MatchedSeatLine[];
+  removed_lines?: MatchedSeatLine[];
+  cert_changed_lines?: MatchedSeatLine[];
 };
 
 export type MatchedDevelopersPage = {
@@ -681,6 +762,52 @@ export type MatchedBundlesPage = {
 };
 
 /**
+ * One matched app: an app whose app-ads.txt carried the customer's seats,
+ * plus the PUBLISHER that owns it. The app-side sibling of MatchedDeveloper,
+ * for the split the overview draws between matched publishers and matched
+ * apps.
+ *
+ * `matched_lines` is the exact seat line(s) the app carried, shown verbatim
+ * in the expanded row; it is capped for display, and `line_count` is the
+ * honest total.
+ */
+export type MatchedApp = {
+  store: string;
+  bundle_id: string;
+  app_name: string;
+  /** The publisher that owns this app: its domain, and optionally a name. */
+  owner_domain: string;
+  owner_name?: string | null;
+  line_count: number;
+  /**
+   * This app's weekly change, so the matched-apps list can offer the same
+   * Added / Removed / Changed tabs the publishers list has. All absent or
+   * zero means the app matched but did not move this week, and it then sits
+   * under "All matched" only.
+   */
+  lines_added?: number;
+  lines_removed?: number;
+  lines_cert_changed?: number;
+  matched_lines?: MatchedSeatLine[];
+  /**
+   * The exact seat lines behind the change counts above, so the expanded row
+   * can show WHAT moved this week. One object per counted line, so
+   * added_lines.length === lines_added (and so on for removed / cert). Same
+   * shape as matched_lines; a cert change prints the line's new cert.
+   */
+  added_lines?: MatchedSeatLine[];
+  removed_lines?: MatchedSeatLine[];
+  cert_changed_lines?: MatchedSeatLine[];
+};
+
+export type MatchedAppsPage = {
+  page: number;
+  page_size: number;
+  total: number;
+  rows: MatchedApp[];
+};
+
+/**
  * One place a discovered line was found: a publisher, and which of their two
  * files carried it. The SQL COALESCEs the text columns to "" rather than
  * NULL, so they are plain strings here.
@@ -691,6 +818,19 @@ export type DiscoveredPlacement = {
   platform: string;
   /** "ads.txt" or "app-ads.txt", pre-rendered, not the file_kind enum. */
   found_in: string;
+  /**
+   * APP PLACEMENTS. When the line was found in an app's app-ads.txt rather
+   * than on a website, these carry the app it was found in: its store name,
+   * its store/bundle id, and a display name. All three are absent on a plain
+   * website placement, which stays a bare developer_domain + found_in row.
+   *
+   * `store` is the store code the crawler already speaks ("ios", "android",
+   * "roku", "samsung", "vizio", "firetv", "ctv"), rendered to a human label
+   * on screen (see storeLabel in CrawlDiscovered).
+   */
+  app_name?: string;
+  store?: string;
+  bundle_id?: string;
 };
 
 /**

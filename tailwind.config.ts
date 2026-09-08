@@ -92,6 +92,14 @@ export default {
           bg: "hsl(var(--tone-special-bg))",
           border: "hsl(var(--tone-special-border))",
         },
+        /* App tone — pink, for matched application inventory. See the
+           --tone-app block in index.css. Sibling of the green publisher
+           tone; exposes text-app / bg-app / bg-app-bg / border-app-border. */
+        app: {
+          DEFAULT: "hsl(var(--tone-app))",
+          bg: "hsl(var(--tone-app-bg))",
+          border: "hsl(var(--tone-app-border))",
+        },
         neutral: {
           DEFAULT: "hsl(var(--tone-neutral))",
           bg: "hsl(var(--tone-neutral-bg))",

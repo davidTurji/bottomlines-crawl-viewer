@@ -11,7 +11,7 @@ import {
   SidebarMenuItem,
   useSidebar,
 } from "@/components/ui/sidebar";
-import bottomlineSidebarLogo from "@/assets/bottomline-sidebar-logo.png";
+import { pathfinderLogo } from "@/lib/brand";
 import { useReportScope } from "@/lib/reportScope";
 
 /**
@@ -123,19 +123,21 @@ export function AppSidebar() {
       collapsible="icon"
     >
       <SidebarContent className="bg-transparent overflow-hidden relative pt-0">
-        {/* Brand slot — matches the app: h-12 sm:h-14, hairline divider, logo
-            object-contain object-left. Click-through to Overview. */}
+        {/* Brand slot — h-12 sm:h-14, hairline divider, click-through to
+            Overview. The PathFinder asset is a full horizontal lockup
+            (~2.5:1), so it is shown WHOLE, scaled to the header height, not
+            clipped to a sliver and not doubled with a separate wordmark. */}
         <NavLink
           to={basePath}
-          className="flex items-center px-2 h-12 sm:h-14 border-b border-sidebar-border/50 transition-colors duration-150 hover:bg-sidebar-accent/40"
+          className="flex items-center px-3 h-12 sm:h-14 border-b border-sidebar-border/50 transition-colors duration-150 hover:bg-sidebar-accent/40"
           onClick={handleMobileNavClick}
-          aria-label="bottomline.ai, Overview"
+          aria-label="PathFinder, Overview"
         >
           <img
-            src={bottomlineSidebarLogo}
-            alt="bottomline.ai"
+            src={pathfinderLogo}
+            alt="PathFinder"
             draggable={false}
-            className="h-10 sm:h-12 w-auto max-w-full object-contain object-left select-none"
+            className="h-7 sm:h-8 w-auto max-w-full object-contain object-left select-none"
           />
         </NavLink>
 
