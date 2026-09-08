@@ -11,6 +11,7 @@ import {
   type MatchedDeveloper,
   type MatchedApp,
   type MatchedSeatLine,
+  type LineEvent,
 } from "../lib/api";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Card } from "@/components/ui/card";
@@ -683,6 +684,7 @@ function DrilldownList({ token }: { token: string }) {
               <PublisherCard
                 key={r.developer_id}
                 row={r}
+                token={token}
                 open={expanded === r.developer_id}
                 onToggle={() =>
                   setExpanded(expanded === r.developer_id ? null : r.developer_id)
@@ -758,10 +760,12 @@ function ChangeCell({
  */
 function PublisherCard({
   row,
+  token,
   open,
   onToggle,
 }: {
   row: Row;
+  token: string;
   open: boolean;
   onToggle: () => void;
 }) {
@@ -770,6 +774,18 @@ function PublisherCard({
       .replace(/^www\./i, "")
       .charAt(0) || "?"
   ).toUpperCase();
+  // Embedded line arrays drive the change-aware windows: mock always embeds
+  // them, and real data will once the backend does. Today the live
+  // matched-developers payload carries only a line_count and none of these
+  // arrays, so an embedded-only expansion goes blank. When nothing is embedded,
+  // fall back to the lazy per-publisher fetch the shipped viewer used, which
+  // restores the flat matched-seat-lines list. The check is on the ARRAYS, not
+  // the change counts: absent arrays are the real-data signal.
+  const hasEmbeddedLines =
+    row.matched_lines.length > 0 ||
+    row.added_lines.length > 0 ||
+    row.removed_lines.length > 0 ||
+    row.cert_changed_lines.length > 0;
   return (
     <div
       className={cn(
@@ -826,12 +842,16 @@ function PublisherCard({
       </button>
       {open && (
         <div className="border-t border-border bg-accent/30 px-4 pb-4 pt-3 sm:px-5">
-          <ChangeExpansion
-            added={row.added_lines}
-            removed={row.removed_lines}
-            certChanged={row.cert_changed_lines}
-            matched={row.matched_lines}
-          />
+          {hasEmbeddedLines ? (
+            <ChangeExpansion
+              added={row.added_lines}
+              removed={row.removed_lines}
+              certChanged={row.cert_changed_lines}
+              matched={row.matched_lines}
+            />
+          ) : (
+            <LazyMatchedSeatLines token={token} developerId={row.developer_id} />
+          )}
         </div>
       )}
     </div>
@@ -1100,6 +1120,81 @@ function MatchedSeatLines({ lines }: { lines: MatchedSeatLine[] }) {
 }
 
 /**
+ * Seat lines for a matched publisher, fetched lazily when the row embeds none.
+ *
+ * The overview's matched-developers payload embeds a publisher's seat lines
+ * under mock (and will on the backend once it embeds them), and PublisherCard
+ * renders those directly through the change-aware ChangeExpansion. The live
+ * backend today sends only a line_count with no embedded arrays, so this
+ * restores the shipped viewer's behaviour: on expand, pull the publisher's seat
+ * lines from the line-events endpoint (api.linesForDeveloper) and render them as
+ * the same flat "matched seat lines" list a steady row shows. Quiet while it
+ * loads, quiet if it returns nothing, quiet if the request fails, never a thrown
+ * error or a blank expansion.
+ */
+function LazyMatchedSeatLines({
+  token,
+  developerId,
+}: {
+  token: string;
+  developerId: number;
+}) {
+  const [lines, setLines] = useState<MatchedSeatLine[] | null>(null);
+  const [failed, setFailed] = useState(false);
+
+  useEffect(() => {
+    let cancelled = false;
+    setLines(null);
+    setFailed(false);
+    api
+      .linesForDeveloper(token, developerId)
+      .then((page) => {
+        if (!cancelled) setLines(page.rows.map(lineEventToSeatLine));
+      })
+      .catch(() => {
+        if (!cancelled) setFailed(true);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [token, developerId]);
+
+  if (failed) {
+    return (
+      <p className="text-xs text-slate-500">
+        Could not load the seat lines for this publisher.
+      </p>
+    );
+  }
+  if (lines === null) {
+    return <p className="text-xs text-slate-500">Loading seat lines...</p>;
+  }
+  if (lines.length === 0) {
+    return (
+      <p className="text-xs text-slate-500">
+        No matched seat lines on record for this row.
+      </p>
+    );
+  }
+  return <MatchedSeatLines lines={lines} />;
+}
+
+/**
+ * Map a lazily fetched line event onto the seat-line shape the flat list
+ * renders. The live line-events endpoint carries the cert in old/new_cert_id;
+ * the current cert (new, else old) is the one a standing seat line shows, and an
+ * empty string collapses to no cert exactly as an embedded line would.
+ */
+function lineEventToSeatLine(e: LineEvent): MatchedSeatLine {
+  return {
+    ssp_domain: e.ssp_domain,
+    publisher_id: e.publisher_id,
+    relationship: e.relationship,
+    cert_id: e.new_cert_id || e.old_cert_id || undefined,
+  };
+}
+
+/**
  * The matched APPS list, shown when the pink "Matched apps" card is selected.
  * A card-per-app list, the pink sibling of the publisher drilldown: same
  * shape, same expansion, same Added / Removed / Changed tabs, a different
@@ -1110,7 +1205,7 @@ function MatchedAppsList({ token }: { token: string }) {
   const [tab, setTab] = useState<DrillTab>("all");
   const [allRows, setAllRows] = useState<MatchedApp[]>([]);
   const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
+  const [failed, setFailed] = useState(false);
   const [expanded, setExpanded] = useState<string | null>(null);
 
   const keyOf = (a: MatchedApp) => `${a.store}:${a.bundle_id}`;
@@ -1118,14 +1213,24 @@ function MatchedAppsList({ token }: { token: string }) {
   useEffect(() => {
     let cancelled = false;
     setLoading(true);
-    setError(null);
+    setFailed(false);
     setExpanded(null);
     api
       .matchedApps(token, 1)
       .then((r) => {
-        if (!cancelled) setAllRows(r.rows);
+        if (!cancelled) setAllRows(r.rows ?? []);
       })
-      .catch((e: Error) => !cancelled && setError(e.message))
+      .catch(() => {
+        // The matched-apps endpoint is not on the backend yet, so a failed
+        // fetch is the expected real-data case, not an error to shout about.
+        // Degrade to an empty list and a quiet empty state below rather than a
+        // red error or a blank card region. The "Matched apps" KPI is unaffected:
+        // its number comes from the summary, not this list.
+        if (!cancelled) {
+          setAllRows([]);
+          setFailed(true);
+        }
+      })
       .finally(() => !cancelled && setLoading(false));
     return () => {
       cancelled = true;
@@ -1161,15 +1266,16 @@ function MatchedAppsList({ token }: { token: string }) {
         </span>
       </div>
       {loading && <p className="text-sm text-slate-500">Loading...</p>}
-      {error && <p className="text-sm text-critical">{error}</p>}
-      {!loading && !error && rows.length === 0 && (
+      {!loading && rows.length === 0 && (
         <p className="rounded-lg border border-dashed border-border bg-muted/20 p-6 text-center text-sm text-slate-500">
-          {tab === "all"
-            ? "No apps matched your seats this week."
-            : "No apps in this bucket."}
+          {failed
+            ? "No matched apps to show yet."
+            : tab === "all"
+              ? "No apps matched your seats this week."
+              : "No apps in this bucket."}
         </p>
       )}
-      {!loading && !error && rows.length > 0 && (
+      {!loading && rows.length > 0 && (
         <div className="space-y-3">
           {rows.map((a) => (
             <MatchedAppCard
