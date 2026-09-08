@@ -1285,6 +1285,7 @@ function MatchedAppsList({ token }: { token: string }) {
               onToggle={() =>
                 setExpanded(expanded === keyOf(a) ? null : keyOf(a))
               }
+              token={token}
             />
           ))}
         </div>
@@ -1307,15 +1308,25 @@ function MatchedAppCard({
   app,
   open,
   onToggle,
+  token,
 }: {
   app: MatchedApp;
   open: boolean;
   onToggle: () => void;
+  token: string;
 }) {
   const lines = app.matched_lines ?? [];
   const added = app.lines_added ?? 0;
   const removed = app.lines_removed ?? 0;
   const certChanged = app.lines_cert_changed ?? 0;
+  // Real-data rows carry no embedded line arrays (the list stays cheap); when
+  // none are present we lazy-fetch the owning developer's seat lines, exactly
+  // as PublisherCard does. Mock rows embed them, so the change windows render.
+  const hasEmbeddedLines =
+    lines.length > 0 ||
+    (app.added_lines ?? []).length > 0 ||
+    (app.removed_lines ?? []).length > 0 ||
+    (app.cert_changed_lines ?? []).length > 0;
   return (
     <div
       className={cn(
@@ -1365,12 +1376,16 @@ function MatchedAppCard({
       </button>
       {open && (
         <div className="border-t border-app-border bg-app-bg/30 px-4 pb-4 pt-3 sm:px-5">
-          <ChangeExpansion
-            added={app.added_lines ?? []}
-            removed={app.removed_lines ?? []}
-            certChanged={app.cert_changed_lines ?? []}
-            matched={lines}
-          />
+          {!hasEmbeddedLines && app.developer_id != null ? (
+            <LazyMatchedSeatLines token={token} developerId={app.developer_id} />
+          ) : (
+            <ChangeExpansion
+              added={app.added_lines ?? []}
+              removed={app.removed_lines ?? []}
+              certChanged={app.cert_changed_lines ?? []}
+              matched={lines}
+            />
+          )}
         </div>
       )}
     </div>
