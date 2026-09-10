@@ -1,3 +1,4 @@
+import { useReportScope } from "@/lib/reportScope";
 import { useLocation } from "react-router-dom";
 import { AppSidebar } from "./AppSidebar";
 import {
@@ -32,7 +33,21 @@ interface LayoutProps {
  * behind a signed URL, so it has one identity (the email on the report) and
  * no dashboards to gate.
  */
-export default function Layout({ children, email = "you@publisherstudios.com" }: LayoutProps) {
+export default function Layout({ children, email }: LayoutProps) {
+  /* THE IDENTITY SHOWN IS THE ONE THAT SIGNED IN, or nothing. The prop
+     used to default to a placeholder address, so every report claimed its
+     reader was you@publisherstudios.com -- a fabricated fact on a screen
+     whose whole job is verified facts. The gate stores the username at
+     sign-in, keyed by token; a cookie-only revisit that never re-typed it
+     simply shows no identity line rather than a fake one. */
+  const { token } = useReportScope();
+  let storedUser: string | null = null;
+  try {
+    storedUser = sessionStorage.getItem(`pf.username.${token}`);
+  } catch {
+    /* storage blocked: no identity line, never a fake one */
+  }
+  const shownIdentity = email ?? storedUser;
   const location = useLocation();
   const [showBackToTop, setShowBackToTop] = useState(false);
   const mainRef = useRef<HTMLElement>(null);
@@ -73,10 +88,12 @@ export default function Layout({ children, email = "you@publisherstudios.com" }:
 
   /** Two-letter monogram from the email local part. */
   const userInitials = (() => {
-    const local = email.split("@")[0] ?? "";
+    const source = shownIdentity ?? "";
+    const local = source.split("@")[0] ?? "";
     const parts = local.split(/[._-]+/).filter(Boolean);
-    const letters = parts.length >= 2 ? parts[0][0] + parts[1][0] : local.slice(0, 2) || "?";
-    return letters.toUpperCase();
+    const letters =
+      parts.length >= 2 ? parts[0][0] + parts[1][0] : local.slice(0, 2);
+    return (letters || "PF").toUpperCase();
   })();
 
   const scrollToTop = () => {
@@ -123,7 +140,9 @@ export default function Layout({ children, email = "you@publisherstudios.com" }:
                     <p className="text-[0.6875rem] uppercase tracking-wide text-slate-400">
                       Signed in as
                     </p>
-                    <p className="mt-0.5 truncate text-sm font-medium text-slate-800">{email}</p>
+                    <p className="mt-0.5 truncate text-sm font-medium text-slate-800">
+                      {shownIdentity ?? "this report's credentials"}
+                    </p>
                   </DropdownMenuLabel>
                   <DropdownMenuSeparator />
                   <DropdownMenuItem
