@@ -1,5 +1,6 @@
+import BLoader from "@/components/BLoader";
 import { useCallback, useEffect, useState, type ReactNode } from "react";
-import { ChevronDown, RotateCw } from "lucide-react";
+import { ChevronDown } from "lucide-react";
 
 import {
   api,
@@ -171,7 +172,7 @@ export default function CrawlDeclarations() {
 
       {loading && (
         <div className="flex items-center gap-2 py-8 text-sm text-slate-500">
-          <RotateCw className="h-4 w-4 animate-spin" />
+          <BLoader label="Loading" size={140} />
           Loading declarations...
         </div>
       )}

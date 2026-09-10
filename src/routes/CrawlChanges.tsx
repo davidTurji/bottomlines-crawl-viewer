@@ -1,3 +1,4 @@
+import BLoader from "@/components/BLoader";
 import { useEffect, useMemo, useState } from "react";
 import {
   ArrowRight,
@@ -9,7 +10,6 @@ import {
   EyeOff,
   Sparkles,
   RefreshCw,
-  RotateCw,
   Search,
 } from "lucide-react";
 
@@ -501,7 +501,7 @@ export default function CrawlChanges() {
 
       {loading && (
         <div className="flex items-center gap-2 py-8 text-sm text-slate-500">
-          <RotateCw className="h-4 w-4 animate-spin" />
+          <BLoader label="Loading" size={140} />
           Loading line changes...
         </div>
       )}
