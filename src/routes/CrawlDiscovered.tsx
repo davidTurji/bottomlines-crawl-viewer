@@ -287,7 +287,7 @@ export default function CrawlDiscovered() {
           {localOnly && (
             <p className="text-[11px] leading-relaxed text-slate-400">
               This sort reorders the {rows.length.toLocaleString()} lines on
-              this page. The full list of {total.toLocaleString()} stays in
+              this page. The full list of {(total ?? 0).toLocaleString()} stays in
               new and biggest gains order.
             </p>
           )}
@@ -330,8 +330,8 @@ export default function CrawlDiscovered() {
       {total > 0 && pageCount > 1 && (
         <div className="flex items-center justify-between border-t border-border/70 pt-4 text-xs text-slate-500">
           <span>
-            Showing {startRow.toLocaleString()} to {endRow.toLocaleString()} of{" "}
-            {total.toLocaleString()}
+            Showing {(startRow ?? 0).toLocaleString()} to{" "}
+            {(endRow ?? 0).toLocaleString()} of {(total ?? 0).toLocaleString()}
           </span>
           <div className="flex items-center gap-2">
             <button
@@ -441,7 +441,13 @@ function LineCard({
   const delta = deltaOf(line);
   const initial = (line.ssp_domain.replace(/^www\./i, "").charAt(0) || "?")
     .toUpperCase();
-  const count = line.placements_count;
+  /* NEVER CRASH ON A NUMBER THAT IS NOT THERE.
+     The artifact is the source of truth and it is now guarded at the
+     freeze and at the probe -- but a page that dies on one undefined
+     field takes the whole report with it, and the customer sees a blank
+     screen instead of the rest of their week. An absent count renders as
+     an absent count. Defence in depth, not a substitute for the fix. */
+  const count = line.placements_count ?? 0;
   const isNew = delta.kind === "new";
 
   /*
@@ -564,7 +570,7 @@ function LineCard({
                   )}
                 >
                   {delta.kind === "up" ? "+" : "-"}
-                  {delta.n.toLocaleString()}
+                  {(delta.n ?? 0).toLocaleString()}
                 </div>
               </>
             )}

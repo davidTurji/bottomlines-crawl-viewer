@@ -1,6 +1,7 @@
 import BLoader from "@/components/BLoader";
+import PageErrorBoundary from "@/components/PageErrorBoundary";
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { Navigate, Outlet, useParams } from "react-router-dom";
+import { useLocation, Navigate, Outlet, useParams } from "react-router-dom";
 
 import Layout from "./Layout";
 import LoginGate from "./LoginGate";
@@ -28,11 +29,16 @@ import {
 
 function ReportShell({ token, basePath }: { token: string; basePath: string }) {
   const scope = useMemo(() => ({ token, basePath }), [token, basePath]);
+  const { pathname } = useLocation();
   return (
     <ReportScopeContext.Provider value={scope}>
       <LoginGate>
         <Layout>
-          <Outlet />
+          {/* One page's throw must not unmount the report. Keyed on the
+              path so walking to a working page clears the failure. */}
+          <PageErrorBoundary resetKey={pathname}>
+            <Outlet />
+          </PageErrorBoundary>
         </Layout>
       </LoginGate>
     </ReportScopeContext.Provider>
