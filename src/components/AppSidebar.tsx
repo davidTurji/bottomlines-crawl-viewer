@@ -129,9 +129,13 @@ export function AppSidebar() {
             double its old height (h-14 sm:h-16), object-contain / object-left
             so it is never clipped and the collapsed icon rail still frames
             its left edge. The nav list below is offset to match. */}
+        {/* SAME HEIGHT AS THE CONTENT HEADER (h-12 sm:h-14), so the
+            brand's baseline and the menu line across the top of the page
+            are one line. The old h-20/h-24 slot floated the lockup above
+            everything else on screen -- David circled it. */}
         <NavLink
           to={basePath}
-          className="flex items-center px-3 h-20 sm:h-24 border-b border-sidebar-border/50 transition-colors duration-150 hover:bg-sidebar-accent/40"
+          className="flex items-center px-3 h-12 sm:h-14 border-b border-sidebar-border/50 transition-colors duration-150 hover:bg-sidebar-accent/40"
           onClick={handleMobileNavClick}
           aria-label="PathFinder, Overview"
         >
@@ -139,7 +143,7 @@ export function AppSidebar() {
             src={pathfinderLogo}
             alt="PathFinder"
             draggable={false}
-            className="h-14 sm:h-16 w-auto max-w-full object-contain object-left select-none"
+            className="h-8 sm:h-9 w-auto max-w-full object-contain object-left select-none"
           />
         </NavLink>
 
