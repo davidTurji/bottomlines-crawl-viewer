@@ -158,16 +158,21 @@ function LoginCard({
       `}</style>
 
       <main className="relative mx-auto flex min-h-[100svh] w-full max-w-[76rem] items-center px-6 py-8 sm:px-10 lg:px-16">
-        <div className="grid w-full items-center gap-10 lg:grid-cols-[1.05fr_1fr] lg:gap-16">
+        {/* The admin's grid, with one correction our longer slogan forces:
+            the b's column is a GUARANTEED minmax(420px,520px), because the
+            fr-pair let the nowrap headline shove the mark down to 190px --
+            measured -- which on screen read as the b simply missing. The
+            words scale; the mark does not shrink. */}
+        <div className="grid w-full items-center gap-10 lg:grid-cols-[1fr_minmax(420px,520px)] lg:gap-16">
           <div className="text-left">
             <h1
               className="pf-up d1 font-semibold leading-[1.02] tracking-[-0.028em] text-slate-900"
               style={{ fontFamily: "var(--font-display)" }}
             >
-              <span className="block text-[clamp(30px,6vw,62px)] sm:whitespace-nowrap">
+              <span className="block text-[clamp(26px,4.2vw,50px)] sm:whitespace-nowrap">
                 Govern your supply path.
               </span>
-              <span className="mt-1 block text-[clamp(30px,6vw,62px)] sm:whitespace-nowrap">
+              <span className="mt-1 block text-[clamp(26px,4.2vw,50px)] sm:whitespace-nowrap">
                 Own your{" "}
                 <span className="relative inline-block">
                   <span className="text-primary">bottomlines</span>
@@ -236,9 +241,15 @@ function LoginCard({
             </form>
           </div>
 
-          {/* RIGHT: the b. Hidden below lg exactly as the console hides
-              its hero, so a phone gets the headline and the form. */}
-          <div className="pf-up d2 hidden items-center justify-center lg:flex">
+          {/* RIGHT — the 3D b mark, in the ADMIN LOGIN'S EXACT BOX,
+              because the box is the fix: AuthHero3D fills its parent, and
+              the previous wrapper had no intrinsic height, so the mark
+              rendered into zero pixels -- present in the DOM, invisible on
+              screen, "it's not there" in the owner's words, and he was
+              right. aspect-square IS the height. Same breakpoint as the
+              admin too (md, not lg): on a phone the headline does the
+              work. */}
+          <div className="relative mx-auto hidden aspect-square w-full max-w-[380px] pf-up d2 sm:max-w-[440px] md:block lg:mx-0 lg:max-w-[520px]">
             <AuthHero3D />
           </div>
         </div>

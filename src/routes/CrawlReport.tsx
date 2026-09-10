@@ -1,3 +1,4 @@
+import BLoader from "@/components/BLoader";
 import { useEffect, useMemo, useState } from "react";
 import { Link } from "react-router-dom";
 import { Building2, ChevronDown, Download, Smartphone } from "lucide-react";
@@ -90,8 +91,8 @@ export default function CrawlReport() {
 
   if (!summary) {
     return (
-      <div className="mx-auto max-w-6xl px-4 py-10 sm:px-6">
-        <p className="text-sm text-muted-foreground">Loading your crawl...</p>
+      <div className="mx-auto flex max-w-6xl items-center justify-center px-4 py-16 sm:px-6">
+        <BLoader label="Loading your crawl" />
       </div>
     );
   }
