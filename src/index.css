@@ -603,6 +603,42 @@ All colors MUST be HSL.
   }
 }
 
+/* Zoom lock — the declarative half. The full reasoning lives in
+   src/lib/viewportLock.ts; in short, three different gestures can zoom a
+   report and each needs its own fix.
+
+   Keyed on POINTER TYPE, not a width breakpoint. The `max-width: 640px`
+   block above misses an iPad in landscape, which is 1024px wide and
+   pinches exactly like a phone.
+
+   The 16px floor is the rule that actually mattered. iOS Safari force-
+   zooms the page whenever a focused field computes below 16px, and it
+   does not zoom back out on blur — so the 14px (`text-sm`) sign-in inputs
+   left every iPhone reader zoomed and panning from the moment they signed
+   in, for the rest of the session. 16px is WebKit's documented threshold,
+   not a round number.
+
+   `!important` is deliberate: the size is set by Tailwind utility classes
+   on each input, which outrank a bare element selector. This is a device
+   floor that must hold no matter what class a future input carries. */
+@media (pointer: coarse) {
+  input,
+  select,
+  textarea {
+    font-size: 16px !important;
+  }
+
+  /* Excludes pinch-zoom and double-tap-zoom while still permitting the
+     one-finger panning the inner scroller needs. Honoured by Chrome and
+     Firefox; Safari honours it for double-tap but not pinch, which is
+     what the gesture listeners in viewportLock.ts are for. */
+  html,
+  body,
+  #root {
+    touch-action: pan-x pan-y;
+  }
+}
+
 /* iOS Safe Area utilities */
 .safe-area-top {
   padding-top: env(safe-area-inset-top);
