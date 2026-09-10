@@ -152,7 +152,12 @@ export function AppSidebar() {
             and earns its header. This viewer has exactly three pages and
             nothing to collapse it against, so the header was a row of
             chrome that could only ever hide the whole nav from itself. */}
-        <div className="absolute inset-x-0 bottom-0 top-20 sm:top-24 overflow-y-auto">
+        {/* Pinned to the BRAND'S height, which is the header's height.
+            This offset still carried the old tall lockup slot (top-20/24)
+            after the brand shrank to h-12/h-14, so the menu floated a
+            full row below where the eye expects it -- the gap David
+            circled. One number, one source of truth: the brand row. */}
+        <div className="absolute inset-x-0 bottom-0 top-12 sm:top-14 overflow-y-auto">
           <SidebarGroup className="px-2.5 py-3">
             <SidebarGroupContent>
               <SidebarMenu className="gap-0.5">

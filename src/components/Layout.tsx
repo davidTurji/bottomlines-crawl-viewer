@@ -100,11 +100,28 @@ export default function Layout({ children, email }: LayoutProps) {
     mainRef.current?.scrollTo({ top: 0, behavior: "smooth" });
   };
 
-  const handleSignOut = () => {
-    // No-op: this is a share-by-link viewer. The button is a visual peer of
-    // the console's Sign out so the chrome matches — closing the tab is the
-    // real exit.
-    window.close();
+  const handleSignOut = async () => {
+    /* A REAL EXIT NOW. This was a window.close() no-op from the
+       share-by-link era; the viewer has had credentialed sessions since,
+       and a Sign out that signs nobody out is a lie in the chrome. The
+       session cookie is HttpOnly, so the server clears it; the stored
+       username goes with it; the reload lands on the gate. Even if the
+       server call fails, the local identity is dropped and the reload
+       forces a fresh 401 path rather than pretending. */
+    try {
+      await fetch(`/api/v1/viewer/${token}/signout`, {
+        method: "POST",
+        credentials: "include",
+      });
+    } catch {
+      /* the reload below still ends the visible session */
+    }
+    try {
+      sessionStorage.removeItem(`pf.username.${token}`);
+    } catch {
+      /* nothing to drop */
+    }
+    window.location.reload();
   };
 
   return (

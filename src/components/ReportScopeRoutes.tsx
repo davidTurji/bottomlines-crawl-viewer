@@ -1,3 +1,4 @@
+import BLoader from "@/components/BLoader";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { Navigate, Outlet, useParams } from "react-router-dom";
 
@@ -173,7 +174,7 @@ function ResolvingScreen() {
       aria-live="polite"
     >
       <div className="flex flex-col items-center gap-4">
-        <div className="h-7 w-7 animate-spin rounded-full border-2 border-slate-200 border-t-primary" />
+        <BLoader />
         <div className="text-center">
           <p className="text-sm font-medium text-slate-700">
             Opening your report...
