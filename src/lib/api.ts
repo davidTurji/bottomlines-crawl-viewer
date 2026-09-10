@@ -713,6 +713,13 @@ export type MatchedSeatLine = {
   relationship: string;
   /** "" or absent when the file omits the fourth field, the majority case. */
   cert_id?: string;
+  /**
+   * Where the line was found: "ads.txt", "app-ads.txt", or "both" when
+   * the same seat sits in the two files (one row, per the dedupe -- the
+   * two sightings are one fact, and this word is what keeps that honest).
+   * Absent on artifacts frozen before 2026-09-10.
+   */
+  found_in?: string;
 };
 
 export type MatchedDeveloper = {
