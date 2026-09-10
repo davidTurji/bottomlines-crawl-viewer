@@ -203,6 +203,7 @@ export const api = {
     token: string,
     event: "added" | "removed" | "changed",
     page = 1,
+    q = "",
   ) => {
     if (MOCK) {
       const { mockDeveloperEvents } = await import("./mockData");
@@ -210,7 +211,7 @@ export const api = {
     }
     return req<DeveloperEventsPage>(
       "GET",
-      `/v1/viewer/${token}/developer-events?event=${event}&page=${page}&page_size=50`,
+      `/v1/viewer/${token}/developer-events?event=${event}&page=${page}&page_size=50${q ? `&q=${encodeURIComponent(q)}` : ""}`,
     );
   },
   lineEvents: async (
@@ -237,24 +238,37 @@ export const api = {
       `/v1/viewer/${token}/line-events?${q.toString()}`,
     );
   },
-  matchedDevelopers: async (token: string, page = 1) => {
+  /**
+   * `q` is a case-insensitive substring filter, applied SERVER-SIDE against
+   * the frozen snapshot.
+   *
+   * Server-side because Boldwin matches 57,582 apps and 18,665 publishers.
+   * Shipping all of those to a phone so it could filter locally would undo
+   * the pooling that made the full list affordable in the first place. It
+   * still opens no database connection: the snapshot is a file, and
+   * filtering it is a list comprehension over what is already in memory.
+   *
+   * `total` on the response is the FILTERED total, so the pager below the
+   * list counts what the search found rather than what the section holds.
+   */
+  matchedDevelopers: async (token: string, page = 1, q = "") => {
     if (MOCK) {
       const { mockMatchedDevelopers } = await import("./mockData");
       return mockMatchedDevelopers(page);
     }
     return req<MatchedDevelopersPage>(
       "GET",
-      `/v1/viewer/${token}/matched-developers?page=${page}&page_size=100`,
+      `/v1/viewer/${token}/matched-developers?page=${page}&page_size=100${q ? `&q=${encodeURIComponent(q)}` : ""}`,
     );
   },
-  matchedBundles: async (token: string, page = 1) => {
+  matchedBundles: async (token: string, page = 1, q = "") => {
     if (MOCK) {
       const { mockMatchedBundles } = await import("./mockData");
       return mockMatchedBundles(page);
     }
     return req<MatchedBundlesPage>(
       "GET",
-      `/v1/viewer/${token}/matched-bundles?page=${page}&page_size=100`,
+      `/v1/viewer/${token}/matched-bundles?page=${page}&page_size=100${q ? `&q=${encodeURIComponent(q)}` : ""}`,
     );
   },
   /**
@@ -272,14 +286,14 @@ export const api = {
    * instead be embedded under matched-developers; a standalone endpoint is
    * cleaner because the app is the row here, not the publisher.
    */
-  matchedApps: async (token: string, page = 1) => {
+  matchedApps: async (token: string, page = 1, q = "") => {
     if (MOCK) {
       const { mockMatchedApps } = await import("./mockData");
       return mockMatchedApps(page);
     }
     return req<MatchedAppsPage>(
       "GET",
-      `/v1/viewer/${token}/matched-apps?page=${page}&page_size=100`,
+      `/v1/viewer/${token}/matched-apps?page=${page}&page_size=100${q ? `&q=${encodeURIComponent(q)}` : ""}`,
     );
   },
   /**
