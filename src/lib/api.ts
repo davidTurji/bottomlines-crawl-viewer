@@ -254,7 +254,7 @@ export const api = {
   matchedDevelopers: async (token: string, page = 1, q = "") => {
     if (MOCK) {
       const { mockMatchedDevelopers } = await import("./mockData");
-      return mockMatchedDevelopers(page);
+      return mockMatchedDevelopers(page, q);
     }
     return req<MatchedDevelopersPage>(
       "GET",
@@ -264,7 +264,7 @@ export const api = {
   matchedBundles: async (token: string, page = 1, q = "") => {
     if (MOCK) {
       const { mockMatchedBundles } = await import("./mockData");
-      return mockMatchedBundles(page);
+      return mockMatchedBundles(page, q);
     }
     return req<MatchedBundlesPage>(
       "GET",
@@ -289,7 +289,7 @@ export const api = {
   matchedApps: async (token: string, page = 1, q = "") => {
     if (MOCK) {
       const { mockMatchedApps } = await import("./mockData");
-      return mockMatchedApps(page);
+      return mockMatchedApps(page, q);
     }
     return req<MatchedAppsPage>(
       "GET",

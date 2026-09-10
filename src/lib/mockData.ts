@@ -1019,15 +1019,44 @@ function buildMatchedDevs(): {
     });
 }
 
-const MATCHED_DEVS = buildMatchedDevs();
-
-export function mockMatchedDevelopers(page: number): MatchedDevelopersPage {
+/**
+ * Search and page a mock list the way the server does.
+ *
+ * Mock mode exists so the shell can be reviewed without a live report, and a
+ * mock that ignored `page` and `q` would mean the search box and the pager
+ * were inert on exactly the screen built to demonstrate them -- reviewed as
+ * working when nothing had been exercised.
+ *
+ * Mirrors `viewer_frozen._search` and `_page`: case-insensitive substring
+ * over the named fields, and a FILTERED total so the pager counts what the
+ * search found.
+ */
+function mockPage<T extends Record<string, unknown>>(
+  all: T[],
+  page: number,
+  q: string,
+  fields: (keyof T)[],
+  pageSize = 100,
+): { page: number; page_size: number; total: number; rows: T[] } {
+  const needle = (q || "").trim().toLowerCase();
+  const matched = needle
+    ? all.filter((r) =>
+        fields.some((f) => String(r[f] ?? "").toLowerCase().includes(needle)),
+      )
+    : all;
+  const start = Math.max(0, (page - 1) * pageSize);
   return {
     page,
-    page_size: 100,
-    total: MATCHED_DEVS.length,
-    rows: MATCHED_DEVS,
+    page_size: pageSize,
+    total: matched.length,
+    rows: matched.slice(start, start + pageSize),
   };
+}
+
+const MATCHED_DEVS = buildMatchedDevs();
+
+export function mockMatchedDevelopers(page: number, q = ""): MatchedDevelopersPage {
+  return mockPage(MATCHED_DEVS, page, q, ["name", "domain"]) as MatchedDevelopersPage;
 }
 
 /* App bundle seed. Long-tail same as developers: a head of hero apps that
@@ -1098,13 +1127,8 @@ function buildMatchedBundles(): {
 
 const MATCHED_BUNDLES = buildMatchedBundles();
 
-export function mockMatchedBundles(page: number): MatchedBundlesPage {
-  return {
-    page,
-    page_size: 100,
-    total: MATCHED_BUNDLES.length,
-    rows: MATCHED_BUNDLES,
-  };
+export function mockMatchedBundles(page: number, q = ""): MatchedBundlesPage {
+  return mockPage(MATCHED_BUNDLES, page, q, ["app_name", "bundle_id", "developer_name", "developer_domain"]) as MatchedBundlesPage;
 }
 
 /**
@@ -1186,13 +1210,8 @@ function buildMatchedApps(): MatchedApp[] {
 
 const MATCHED_APPS = buildMatchedApps();
 
-export function mockMatchedApps(page: number): MatchedAppsPage {
-  return {
-    page,
-    page_size: 100,
-    total: MATCHED_APPS.length,
-    rows: MATCHED_APPS,
-  };
+export function mockMatchedApps(page: number, q = ""): MatchedAppsPage {
+  return mockPage(MATCHED_APPS, page, q, ["app_name", "bundle_id", "owner_domain"]) as MatchedAppsPage;
 }
 
 // ─────────────────────────────────────────────────────────────────
