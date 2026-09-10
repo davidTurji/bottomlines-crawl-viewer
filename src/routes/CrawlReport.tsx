@@ -925,6 +925,14 @@ function SeatLineRow({ line, muted }: { line: MatchedSeatLine; muted?: boolean }
         {line.cert_id && (
           <span className="font-normal text-slate-400">, {line.cert_id}</span>
         )}
+        {/* PROVENANCE, in grey, per the owner: which file carried the
+            line. "both" is the deduped case -- ads.txt and app-ads.txt
+            agreeing is one fact wearing one row. */}
+        {line.found_in && (
+          <span className="ml-2 font-sans text-[10px] font-normal text-slate-400">
+            {line.found_in === "both" ? "ads.txt + app-ads.txt" : line.found_in}
+          </span>
+        )}
       </code>
     </li>
   );
