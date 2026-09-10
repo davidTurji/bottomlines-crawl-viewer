@@ -983,8 +983,16 @@ function buildMatchedDevs(): {
     ...DEV_HEAD,
   ];
   const rnd = xorshift(1_337);
-  for (let i = 0; i < DEV_NAMES.length && rows.length < 100; i += 1) {
-    const name = DEV_NAMES[i];
+  // 260, not 92. The page size is 100, so a list that stops at the name
+  // supply produces exactly one page and the pager never renders -- which
+  // would leave pagination unreviewable in the one mode built for reviewing
+  // the shell. Names cycle with a suffix past the supply; a real report is
+  // far larger still (Boldwin matches 18,665 publishers).
+  const MOCK_DEV_ROWS = 260;
+  for (let i = 0; i < MOCK_DEV_ROWS && rows.length < MOCK_DEV_ROWS; i += 1) {
+    const base = DEV_NAMES[i % DEV_NAMES.length];
+    const name =
+      i < DEV_NAMES.length ? base : `${base} ${Math.floor(i / DEV_NAMES.length) + 1}`;
     const platform = PLATFORMS[Math.floor(rnd() * PLATFORMS.length)];
     // Long-tail: a handful in 8-24, most in 1-8.
     const r = rnd();
