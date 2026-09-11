@@ -15,6 +15,7 @@ import CrawlReport from "./routes/CrawlReport";
 import CrawlChanges from "./routes/CrawlChanges";
 import CrawlDiscovered from "./routes/CrawlDiscovered";
 import CrawlDeclarations from "./routes/CrawlDeclarations";
+import { installViewportLock } from "./lib/viewportLock";
 import "./index.css";
 
 /**
@@ -88,6 +89,10 @@ const tree = (
     </Routes>
   </BrowserRouter>
 );
+
+// Before first paint: a report that can be pinched or force-zoomed by a
+// focused input pans out from under the reader and never recovers.
+installViewportLock();
 
 ReactDOM.createRoot(document.getElementById("root")!).render(
   <React.StrictMode>{tree}</React.StrictMode>,

@@ -2,7 +2,14 @@
 <html lang="en">
   <head>
     <meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <!-- maximum-scale/user-scalable lock the report against zoom on Android.
+         iOS Safari ignores both by design, so src/lib/viewportLock.ts blocks
+         WebKit's gesture events too, and index.css keeps inputs at 16px so
+         Safari never force-zooms a focused field. All three are needed. -->
+    <meta
+      name="viewport"
+      content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no"
+    />
     <link rel="icon" type="image/png" href="/assets/images/favicon.png" />
     <link rel="apple-touch-icon" href="/assets/images/favicon.png" />
     <!-- PathFinder is the product the customer bought. "Crawl"/"crawler"
