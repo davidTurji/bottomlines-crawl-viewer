@@ -203,6 +203,7 @@ export const api = {
     token: string,
     event: "added" | "removed" | "changed",
     page = 1,
+    q = "",
   ) => {
     if (MOCK) {
       const { mockDeveloperEvents } = await import("./mockData");
@@ -210,7 +211,7 @@ export const api = {
     }
     return req<DeveloperEventsPage>(
       "GET",
-      `/v1/viewer/${token}/developer-events?event=${event}&page=${page}&page_size=50`,
+      `/v1/viewer/${token}/developer-events?event=${event}&page=${page}&page_size=50${q ? `&q=${encodeURIComponent(q)}` : ""}`,
     );
   },
   lineEvents: async (
@@ -237,24 +238,37 @@ export const api = {
       `/v1/viewer/${token}/line-events?${q.toString()}`,
     );
   },
-  matchedDevelopers: async (token: string, page = 1) => {
+  /**
+   * `q` is a case-insensitive substring filter, applied SERVER-SIDE against
+   * the frozen snapshot.
+   *
+   * Server-side because Boldwin matches 57,582 apps and 18,665 publishers.
+   * Shipping all of those to a phone so it could filter locally would undo
+   * the pooling that made the full list affordable in the first place. It
+   * still opens no database connection: the snapshot is a file, and
+   * filtering it is a list comprehension over what is already in memory.
+   *
+   * `total` on the response is the FILTERED total, so the pager below the
+   * list counts what the search found rather than what the section holds.
+   */
+  matchedDevelopers: async (token: string, page = 1, q = "") => {
     if (MOCK) {
       const { mockMatchedDevelopers } = await import("./mockData");
-      return mockMatchedDevelopers(page);
+      return mockMatchedDevelopers(page, q);
     }
     return req<MatchedDevelopersPage>(
       "GET",
-      `/v1/viewer/${token}/matched-developers?page=${page}&page_size=100`,
+      `/v1/viewer/${token}/matched-developers?page=${page}&page_size=250${q ? `&q=${encodeURIComponent(q)}` : ""}`,
     );
   },
-  matchedBundles: async (token: string, page = 1) => {
+  matchedBundles: async (token: string, page = 1, q = "") => {
     if (MOCK) {
       const { mockMatchedBundles } = await import("./mockData");
-      return mockMatchedBundles(page);
+      return mockMatchedBundles(page, q);
     }
     return req<MatchedBundlesPage>(
       "GET",
-      `/v1/viewer/${token}/matched-bundles?page=${page}&page_size=100`,
+      `/v1/viewer/${token}/matched-bundles?page=${page}&page_size=250${q ? `&q=${encodeURIComponent(q)}` : ""}`,
     );
   },
   /**
@@ -272,14 +286,14 @@ export const api = {
    * instead be embedded under matched-developers; a standalone endpoint is
    * cleaner because the app is the row here, not the publisher.
    */
-  matchedApps: async (token: string, page = 1) => {
+  matchedApps: async (token: string, page = 1, q = "") => {
     if (MOCK) {
       const { mockMatchedApps } = await import("./mockData");
-      return mockMatchedApps(page);
+      return mockMatchedApps(page, q);
     }
     return req<MatchedAppsPage>(
       "GET",
-      `/v1/viewer/${token}/matched-apps?page=${page}&page_size=100`,
+      `/v1/viewer/${token}/matched-apps?page=${page}&page_size=250${q ? `&q=${encodeURIComponent(q)}` : ""}`,
     );
   },
   /**
@@ -754,6 +768,18 @@ export type MatchedDevelopersPage = {
   page: number;
   page_size: number;
   total: number;
+  /**
+   * True when the artifact holds only a PREFIX of this list.
+   *
+   * A report frozen under an older row cap reports its real headline count
+   * and stores fewer rows. A reader cannot tell rows that ARE the answer
+   * from rows that are the first N, and the difference decides whether they
+   * should ask for the report to be regenerated, so the page says it.
+   *
+   * Optional: artifacts served by a crawler that predates the field omit it,
+   * and absent means "not known to be truncated".
+   */
+  truncated?: boolean;
   rows: MatchedDeveloper[];
 };
 
@@ -771,6 +797,18 @@ export type MatchedBundlesPage = {
   page: number;
   page_size: number;
   total: number;
+  /**
+   * True when the artifact holds only a PREFIX of this list.
+   *
+   * A report frozen under an older row cap reports its real headline count
+   * and stores fewer rows. A reader cannot tell rows that ARE the answer
+   * from rows that are the first N, and the difference decides whether they
+   * should ask for the report to be regenerated, so the page says it.
+   *
+   * Optional: artifacts served by a crawler that predates the field omit it,
+   * and absent means "not known to be truncated".
+   */
+  truncated?: boolean;
   rows: MatchedBundle[];
 };
 
@@ -824,6 +862,18 @@ export type MatchedAppsPage = {
   page: number;
   page_size: number;
   total: number;
+  /**
+   * True when the artifact holds only a PREFIX of this list.
+   *
+   * A report frozen under an older row cap reports its real headline count
+   * and stores fewer rows. A reader cannot tell rows that ARE the answer
+   * from rows that are the first N, and the difference decides whether they
+   * should ask for the report to be regenerated, so the page says it.
+   *
+   * Optional: artifacts served by a crawler that predates the field omit it,
+   * and absent means "not known to be truncated".
+   */
+  truncated?: boolean;
   rows: MatchedApp[];
 };
 

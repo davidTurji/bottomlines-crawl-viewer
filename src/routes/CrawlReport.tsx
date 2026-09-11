@@ -15,6 +15,12 @@ import {
   type LineEvent,
 } from "../lib/api";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import {
+  EmptyResult,
+  Pager,
+  SearchBox,
+  TruncatedNotice,
+} from "@/components/ListControls";
 import { Card } from "@/components/ui/card";
 import InlineAskAI from "@/components/InlineAskAI";
 import { PageShell } from "@/components/PageShell";
@@ -593,6 +599,16 @@ function DrilldownList({ token }: { token: string }) {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [expanded, setExpanded] = useState<number | null>(null);
+  const [page, setPage] = useState(1);
+  const [query, setQuery] = useState("");
+  const [truncated, setTruncated] = useState(false);
+
+  // A new search or a new tab is a new list, so it starts at its first page.
+  // Without this, searching from page 7 asks for page 7 of a result that may
+  // have one page, and the reader gets an empty list for a term that matches.
+  useEffect(() => {
+    setPage(1);
+  }, [tab, query]);
 
   useEffect(() => {
     let cancelled = false;
@@ -601,7 +617,7 @@ function DrilldownList({ token }: { token: string }) {
     setExpanded(null);
     const p =
       tab === "all"
-        ? api.matchedDevelopers(token, 1).then((r) => ({
+        ? api.matchedDevelopers(token, page, query).then((r) => ({
             rows: r.rows.map(
               (d: MatchedDeveloper): Row => ({
                 developer_id: d.developer_id,
@@ -620,8 +636,9 @@ function DrilldownList({ token }: { token: string }) {
               }),
             ),
             total: r.total,
+            truncated: r.truncated ?? false,
           }))
-        : api.developerEvents(token, tab, 1).then((r) => ({
+        : api.developerEvents(token, tab, page, query).then((r) => ({
             rows: r.rows.map(
               (d: DeveloperEvent): Row => ({
                 developer_id: d.developer_id,
@@ -640,18 +657,20 @@ function DrilldownList({ token }: { token: string }) {
               }),
             ),
             total: r.total,
+            truncated: false,
           }));
     p.then((data) => {
       if (cancelled) return;
       setRows(data.rows);
       setTotal(data.total);
+      setTruncated(data.truncated);
     })
       .catch((e: Error) => !cancelled && setError(e.message))
       .finally(() => !cancelled && setLoading(false));
     return () => {
       cancelled = true;
     };
-  }, [token, tab]);
+  }, [token, tab, page, query]);
 
   return (
     <div>
@@ -664,7 +683,13 @@ function DrilldownList({ token }: { token: string }) {
             <TabsTrigger value="changed">Changed</TabsTrigger>
           </TabsList>
         </Tabs>
-        <span className="ml-auto text-xs text-slate-500">
+        <SearchBox
+          value={query}
+          onChange={setQuery}
+          placeholder="Search publishers"
+          label="Search matched publishers"
+        />
+        <span className="text-xs text-slate-500">
           {total.toLocaleString()}{" "}
           {tab === "all" ? "matched" : "with changes"}
         </span>
@@ -673,11 +698,7 @@ function DrilldownList({ token }: { token: string }) {
         {loading && <p className="text-sm text-slate-500">Loading...</p>}
         {error && <p className="text-sm text-critical">{error}</p>}
         {!loading && !error && rows.length === 0 && (
-          <p className="rounded-lg border border-dashed border-border bg-muted/20 p-6 text-center text-sm text-slate-500">
-            {tab === "all"
-              ? "No publishers matched your seats this week."
-              : "No publishers in this bucket."}
-          </p>
+          <EmptyResult query={query} noun="publishers" />
         )}
         {!loading && !error && rows.length > 0 && (
           <div className="space-y-3">
@@ -694,10 +715,17 @@ function DrilldownList({ token }: { token: string }) {
             ))}
           </div>
         )}
-        {total > rows.length && (
-          <p className="mt-3 text-xs text-slate-500">
-            Showing the first {rows.length} of {total.toLocaleString()}.
-          </p>
+        {!loading && !error && rows.length > 0 && (
+          <div className="mt-4">
+            <Pager
+              page={page}
+              pageSize={250}
+              total={total}
+              onPage={setPage}
+              noun={tab === "all" ? "publishers" : "with changes"}
+            />
+            {truncated && <TruncatedNotice shown={total} noun="publishers" />}
+          </div>
         )}
       </div>
     </div>
@@ -1216,8 +1244,17 @@ function MatchedAppsList({ token }: { token: string }) {
   const [loading, setLoading] = useState(true);
   const [failed, setFailed] = useState(false);
   const [expanded, setExpanded] = useState<string | null>(null);
+  const [page, setPage] = useState(1);
+  const [query, setQuery] = useState("");
+  const [total, setTotal] = useState(0);
+  const [truncated, setTruncated] = useState(false);
 
   const keyOf = (a: MatchedApp) => `${a.store}:${a.bundle_id}`;
+
+  // A new search is a new list and starts at its first page.
+  useEffect(() => {
+    setPage(1);
+  }, [query]);
 
   useEffect(() => {
     let cancelled = false;
@@ -1225,9 +1262,13 @@ function MatchedAppsList({ token }: { token: string }) {
     setFailed(false);
     setExpanded(null);
     api
-      .matchedApps(token, 1)
+      .matchedApps(token, page, query)
       .then((r) => {
-        if (!cancelled) setAllRows(r.rows ?? []);
+        if (!cancelled) {
+          setAllRows(r.rows ?? []);
+          setTotal(r.total ?? 0);
+          setTruncated(r.truncated ?? false);
+        }
       })
       .catch(() => {
         // The matched-apps endpoint is not on the backend yet, so a failed
@@ -1237,6 +1278,7 @@ function MatchedAppsList({ token }: { token: string }) {
         // its number comes from the summary, not this list.
         if (!cancelled) {
           setAllRows([]);
+          setTotal(0);
           setFailed(true);
         }
       })
@@ -1244,7 +1286,7 @@ function MatchedAppsList({ token }: { token: string }) {
     return () => {
       cancelled = true;
     };
-  }, [token]);
+  }, [token, page, query]);
 
   // A card held open from one tab must not appear under another.
   useEffect(() => setExpanded(null), [tab]);
@@ -1269,20 +1311,26 @@ function MatchedAppsList({ token }: { token: string }) {
             <TabsTrigger value="changed">Changed</TabsTrigger>
           </TabsList>
         </Tabs>
-        <span className="ml-auto text-xs text-slate-500">
-          {rows.length.toLocaleString()}{" "}
+        <SearchBox
+          value={query}
+          onChange={setQuery}
+          placeholder="Search apps"
+          label="Search matched apps"
+        />
+        <span className="text-xs text-slate-500">
+          {(tab === "all" ? total : rows.length).toLocaleString()}{" "}
           {tab === "all" ? "matched" : "with changes"}
         </span>
       </div>
       {loading && <p className="text-sm text-slate-500">Loading...</p>}
       {!loading && rows.length === 0 && (
-        <p className="rounded-lg border border-dashed border-border bg-muted/20 p-6 text-center text-sm text-slate-500">
-          {failed
-            ? "No matched apps to show yet."
-            : tab === "all"
-              ? "No apps matched your seats this week."
-              : "No apps in this bucket."}
-        </p>
+        failed ? (
+          <p className="rounded-lg border border-dashed border-border bg-muted/20 p-6 text-center text-sm text-slate-500">
+            No matched apps to show yet.
+          </p>
+        ) : (
+          <EmptyResult query={query} noun="apps" />
+        )
       )}
       {!loading && rows.length > 0 && (
         <div className="space-y-3">
@@ -1297,6 +1345,22 @@ function MatchedAppsList({ token }: { token: string }) {
               token={token}
             />
           ))}
+        </div>
+      )}
+      {/* The pager counts the SERVER's total, which is why it only shows on
+          All matched. The change tabs filter the loaded page in the browser,
+          so their count is a count of this page and paging it would be a
+          claim the data cannot support. */}
+      {!loading && !failed && tab === "all" && rows.length > 0 && (
+        <div className="mt-4">
+          <Pager
+            page={page}
+            pageSize={250}
+            total={total}
+            onPage={setPage}
+            noun="apps"
+          />
+          {truncated && <TruncatedNotice shown={total} noun="apps" />}
         </div>
       )}
     </div>
