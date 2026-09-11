@@ -15,7 +15,12 @@ import {
   type LineEvent,
 } from "../lib/api";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { EmptyResult, Pager, SearchBox } from "@/components/ListControls";
+import {
+  EmptyResult,
+  Pager,
+  SearchBox,
+  TruncatedNotice,
+} from "@/components/ListControls";
 import { Card } from "@/components/ui/card";
 import InlineAskAI from "@/components/InlineAskAI";
 import { PageShell } from "@/components/PageShell";
@@ -596,6 +601,7 @@ function DrilldownList({ token }: { token: string }) {
   const [expanded, setExpanded] = useState<number | null>(null);
   const [page, setPage] = useState(1);
   const [query, setQuery] = useState("");
+  const [truncated, setTruncated] = useState(false);
 
   // A new search or a new tab is a new list, so it starts at its first page.
   // Without this, searching from page 7 asks for page 7 of a result that may
@@ -630,6 +636,7 @@ function DrilldownList({ token }: { token: string }) {
               }),
             ),
             total: r.total,
+            truncated: r.truncated ?? false,
           }))
         : api.developerEvents(token, tab, page, query).then((r) => ({
             rows: r.rows.map(
@@ -650,11 +657,13 @@ function DrilldownList({ token }: { token: string }) {
               }),
             ),
             total: r.total,
+            truncated: false,
           }));
     p.then((data) => {
       if (cancelled) return;
       setRows(data.rows);
       setTotal(data.total);
+      setTruncated(data.truncated);
     })
       .catch((e: Error) => !cancelled && setError(e.message))
       .finally(() => !cancelled && setLoading(false));
@@ -710,11 +719,12 @@ function DrilldownList({ token }: { token: string }) {
           <div className="mt-4">
             <Pager
               page={page}
-              pageSize={100}
+              pageSize={250}
               total={total}
               onPage={setPage}
               noun={tab === "all" ? "publishers" : "with changes"}
             />
+            {truncated && <TruncatedNotice shown={total} noun="publishers" />}
           </div>
         )}
       </div>
@@ -1237,6 +1247,7 @@ function MatchedAppsList({ token }: { token: string }) {
   const [page, setPage] = useState(1);
   const [query, setQuery] = useState("");
   const [total, setTotal] = useState(0);
+  const [truncated, setTruncated] = useState(false);
 
   const keyOf = (a: MatchedApp) => `${a.store}:${a.bundle_id}`;
 
@@ -1256,6 +1267,7 @@ function MatchedAppsList({ token }: { token: string }) {
         if (!cancelled) {
           setAllRows(r.rows ?? []);
           setTotal(r.total ?? 0);
+          setTruncated(r.truncated ?? false);
         }
       })
       .catch(() => {
@@ -1343,11 +1355,12 @@ function MatchedAppsList({ token }: { token: string }) {
         <div className="mt-4">
           <Pager
             page={page}
-            pageSize={100}
+            pageSize={250}
             total={total}
             onPage={setPage}
             noun="apps"
           />
+          {truncated && <TruncatedNotice shown={total} noun="apps" />}
         </div>
       )}
     </div>

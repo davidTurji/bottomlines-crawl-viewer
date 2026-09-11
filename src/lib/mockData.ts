@@ -1044,8 +1044,8 @@ function mockPage<T extends Record<string, unknown>>(
   page: number,
   q: string,
   fields: (keyof T)[],
-  pageSize = 100,
-): { page: number; page_size: number; total: number; rows: T[] } {
+  pageSize = 250,
+): { page: number; page_size: number; total: number; truncated: boolean; rows: T[] } {
   const needle = (q || "").trim().toLowerCase();
   const matched = needle
     ? all.filter((r) =>
@@ -1057,6 +1057,9 @@ function mockPage<T extends Record<string, unknown>>(
     page,
     page_size: pageSize,
     total: matched.length,
+    // Mock data is always whole, so this is always false. Present anyway so
+    // the field exists in the shape the real server returns.
+    truncated: false,
     rows: matched.slice(start, start + pageSize),
   };
 }

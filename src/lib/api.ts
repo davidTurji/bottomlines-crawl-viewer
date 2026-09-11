@@ -258,7 +258,7 @@ export const api = {
     }
     return req<MatchedDevelopersPage>(
       "GET",
-      `/v1/viewer/${token}/matched-developers?page=${page}&page_size=100${q ? `&q=${encodeURIComponent(q)}` : ""}`,
+      `/v1/viewer/${token}/matched-developers?page=${page}&page_size=250${q ? `&q=${encodeURIComponent(q)}` : ""}`,
     );
   },
   matchedBundles: async (token: string, page = 1, q = "") => {
@@ -268,7 +268,7 @@ export const api = {
     }
     return req<MatchedBundlesPage>(
       "GET",
-      `/v1/viewer/${token}/matched-bundles?page=${page}&page_size=100${q ? `&q=${encodeURIComponent(q)}` : ""}`,
+      `/v1/viewer/${token}/matched-bundles?page=${page}&page_size=250${q ? `&q=${encodeURIComponent(q)}` : ""}`,
     );
   },
   /**
@@ -293,7 +293,7 @@ export const api = {
     }
     return req<MatchedAppsPage>(
       "GET",
-      `/v1/viewer/${token}/matched-apps?page=${page}&page_size=100${q ? `&q=${encodeURIComponent(q)}` : ""}`,
+      `/v1/viewer/${token}/matched-apps?page=${page}&page_size=250${q ? `&q=${encodeURIComponent(q)}` : ""}`,
     );
   },
   /**
@@ -768,6 +768,18 @@ export type MatchedDevelopersPage = {
   page: number;
   page_size: number;
   total: number;
+  /**
+   * True when the artifact holds only a PREFIX of this list.
+   *
+   * A report frozen under an older row cap reports its real headline count
+   * and stores fewer rows. A reader cannot tell rows that ARE the answer
+   * from rows that are the first N, and the difference decides whether they
+   * should ask for the report to be regenerated, so the page says it.
+   *
+   * Optional: artifacts served by a crawler that predates the field omit it,
+   * and absent means "not known to be truncated".
+   */
+  truncated?: boolean;
   rows: MatchedDeveloper[];
 };
 
@@ -785,6 +797,18 @@ export type MatchedBundlesPage = {
   page: number;
   page_size: number;
   total: number;
+  /**
+   * True when the artifact holds only a PREFIX of this list.
+   *
+   * A report frozen under an older row cap reports its real headline count
+   * and stores fewer rows. A reader cannot tell rows that ARE the answer
+   * from rows that are the first N, and the difference decides whether they
+   * should ask for the report to be regenerated, so the page says it.
+   *
+   * Optional: artifacts served by a crawler that predates the field omit it,
+   * and absent means "not known to be truncated".
+   */
+  truncated?: boolean;
   rows: MatchedBundle[];
 };
 
@@ -838,6 +862,18 @@ export type MatchedAppsPage = {
   page: number;
   page_size: number;
   total: number;
+  /**
+   * True when the artifact holds only a PREFIX of this list.
+   *
+   * A report frozen under an older row cap reports its real headline count
+   * and stores fewer rows. A reader cannot tell rows that ARE the answer
+   * from rows that are the first N, and the difference decides whether they
+   * should ask for the report to be regenerated, so the page says it.
+   *
+   * Optional: artifacts served by a crawler that predates the field omit it,
+   * and absent means "not known to be truncated".
+   */
+  truncated?: boolean;
   rows: MatchedApp[];
 };
 
