@@ -220,8 +220,7 @@ export default function CrawlDeclarations() {
           Declarations
         </h1>
         <p className="mt-1 text-sm text-slate-500">
-          Which publisher files name your domains as their inventory
-          partner, owner domain or manager domain.
+          Publisher files that name your domain.
         </p>
         <WeekLine
           week={weekLabel}
@@ -243,8 +242,7 @@ export default function CrawlDeclarations() {
                 Declared this crawl
               </div>
               <div className="text-[11px] text-slate-500">
-                {data.total.toLocaleString()} declarations read out of the
-                files we fetched
+                {data.total.toLocaleString()} declarations
               </div>
             </div>
           </div>
@@ -310,8 +308,7 @@ export default function CrawlDeclarations() {
 
       {nothingAtAll && !unavailable && (
         <SectionEmpty>
-          None of the files we fetched declared an inventory partner, owner
-          domain or manager domain this crawl.
+          No publisher file named your domain this crawl.
         </SectionEmpty>
       )}
 
@@ -394,28 +391,23 @@ function KindSection({
     <div>
       <div className="mb-3 flex items-end justify-between gap-3">
         <div className="min-w-0">
-          <h2 className="flex items-center gap-2 font-display text-base font-semibold tracking-tight text-slate-900">
+          <h2
+            className="flex items-center gap-2 font-display text-base font-semibold tracking-tight text-slate-900"
+            title={`${copy.variable}: ${copy.blurb}`}
+          >
             <span
               aria-hidden
               className={cn("h-2.5 w-2.5 flex-shrink-0 rounded-full", tone.solid)}
             />
             {copy.title}
-            <code className={cn("font-mono text-[11px] font-normal", tone.text)}>
-              {copy.variable}
-            </code>
           </h2>
-          <p className="text-sm text-slate-500">{copy.blurb}</p>
         </div>
         {total > 0 && (
           <div className="hidden flex-shrink-0 text-right text-xs text-slate-500 sm:block">
             <span className="font-mono tabular-nums text-slate-700">
               {total.toLocaleString()}
             </span>{" "}
-            {total === 1 ? "domain" : "domains"},{" "}
-            <span className="font-mono tabular-nums text-slate-700">
-              {section.subjects.reduce((n, s) => n + s.total, 0).toLocaleString()}
-            </span>{" "}
-            declarations
+            {total === 1 ? "domain" : "domains"}
           </div>
         )}
       </div>
@@ -423,8 +415,8 @@ function KindSection({
       {total === 0 ? (
         <SectionEmpty>
           {filtered
-            ? `No ${copy.noun} matches that filter.`
-            : `No file named a${section.kind === "owner domain" ? "n" : ""} ${copy.noun} this crawl.`}
+            ? "Nothing matches that filter."
+            : "None this crawl."}
         </SectionEmpty>
       ) : (
         <div className="space-y-3">
@@ -531,18 +523,13 @@ function SubjectCard({
           </code>
           <div className="mt-0.5 flex flex-wrap items-center gap-x-2 gap-y-0.5 text-xs text-slate-500">
             <span>
-              named {KIND_COPY[subject.kind].noun} by{" "}
               <span className="font-mono tabular-nums text-slate-700">
                 {files.toLocaleString()}
               </span>{" "}
               {files === 1 ? "publisher" : "publishers"}
             </span>
             <span className="text-slate-400">
-              {both
-                ? "in ads.txt and app-ads.txt"
-                : subject.app_ads_txt > 0
-                  ? "in app-ads.txt"
-                  : "in ads.txt"}
+              {both ? "ads.txt, app-ads.txt" : subject.app_ads_txt > 0 ? "app-ads.txt" : "ads.txt"}
             </span>
             {subject.countries.length > 0 && (
               <span className="flex flex-wrap gap-1">
@@ -590,14 +577,15 @@ function SubjectCard({
       {open && (
         <div className={cn("border-t px-4 pb-4 pt-3 sm:px-5", tone.border)}>
           <div className="mb-1 flex items-baseline justify-between">
-            <span className="text-xs font-medium text-slate-700">
-              Named {KIND_COPY[subject.kind].noun} by
-            </span>
+            <span className="text-xs font-medium text-slate-700">Named by</span>
             <span className="font-mono text-[11px] tabular-nums text-slate-500">
               {subject.total.toLocaleString()}
             </span>
           </div>
-          <div className="scroll-y max-h-[320px] overflow-y-auto rounded-md border border-border bg-white">
+          {/* Three rows tall, the rest by scrolling inside the card (David,
+              2026-09-15), so a domain named by forty files does not push
+              the next section off screen. */}
+          <div className="scroll-y max-h-[6.6rem] overflow-y-auto rounded-md border border-border bg-white">
             <ul className="divide-y divide-border">
               {subject.declarers.map((d, i) => (
                 <li
