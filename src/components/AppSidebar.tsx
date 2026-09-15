@@ -52,33 +52,6 @@ export function AppSidebar() {
     };
   }, [token]);
 
-  // Same probe, same rule, for the Declarations page: the entry shows only
-  // when the crawl read at least one declaration out of a file. The
-  // endpoint's totals block is the cheap answer (the lists ride along, but
-  // they are capped at 50 per subject, so the response stays small).
-  const [hasDeclarations, setHasDeclarations] = useState(false);
-  useEffect(() => {
-    if (!token) return;
-    let alive = true;
-    api
-      .declarations(token)
-      .then((d) => {
-        if (alive) {
-          const t = d?.totals;
-          setHasDeclarations(
-            (t?.ipd_partners ?? 0) > 0 ||
-              (t?.owner_domains ?? 0) > 0 ||
-              (t?.relationship_mismatches ?? 0) > 0,
-          );
-        }
-      })
-      .catch(() => {
-        if (alive) setHasDeclarations(false);
-      });
-    return () => {
-      alive = false;
-    };
-  }, [token]);
 
   /* Active nav state is signalled by a solid accent-tile fill (elevation),
      not by recoloring the text, the teal is reserved for the brand mark. */
@@ -108,13 +81,11 @@ export function AppSidebar() {
     ...(hasDiscovered
       ? [{ to: `${basePath}/discovery`, label: "Discovery" }]
       : []),
-    // Same rule as Discovery: only when the crawl actually read a
-    // declaration. Most crawls read none, and an entry leading to three
-    // empty sections is noise on a customer-facing report. The route stays
-    // registered either way, so a direct link still resolves.
-    ...(hasDeclarations
-      ? [{ to: `${basePath}/declarations`, label: "Declarations" }]
-      : []),
+    // Always listed (David, 2026-09-15: "by default on any crawl"). The
+    // page is scoped to the customer's own domains, so "nobody names you"
+    // is itself the answer a customer came for, and it is said plainly on
+    // the page rather than hidden behind a missing entry.
+    { to: `${basePath}/declarations`, label: "Declarations" },
   ];
 
   return (

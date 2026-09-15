@@ -126,6 +126,26 @@ All colors MUST be HSL.
     --tone-app-bg: 336 84% 96%;
     --tone-app-border: 334 64% 88%;
 
+    /* Declarations -- three shades of yellow, one per ads.txt variable
+       that names another company. Yellow because a declaration is a claim
+       a file makes, not a match we found (green) or a line we discovered
+       (blue): the reader should feel the change of register. Gold for
+       inventory partners (the one that vouches for supply), a paler lemon
+       for owner domains, a deeper mustard for manager domains. Same
+       foreground / tint / hairline shape as every tone above, foregrounds
+       held near 30-36% lightness so they clear AA on the ivory ground. */
+    --tone-decl-ipd: 43 95% 33%;
+    --tone-decl-ipd-bg: 46 96% 89%;
+    --tone-decl-ipd-border: 45 88% 70%;
+
+    --tone-decl-owner: 56 70% 28%;
+    --tone-decl-owner-bg: 57 100% 95%;
+    --tone-decl-owner-border: 56 80% 78%;
+
+    --tone-decl-manager: 30 90% 32%;
+    --tone-decl-manager-bg: 34 95% 87%;
+    --tone-decl-manager-border: 33 85% 66%;
+
     --tone-neutral: 150 8% 38%;
     --tone-neutral-bg: 148 12% 94%;
     --tone-neutral-border: 148 12% 84%;
