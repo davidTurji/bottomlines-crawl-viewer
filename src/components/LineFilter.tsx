@@ -7,10 +7,6 @@
  */
 import { Check, ChevronsUpDown, ListFilter } from "lucide-react";
 
-/** One size for this control and the Export button beside it: the two
- *  read as a pair, and a label that changes must never move the row. */
-export const HEADER_PILL = "h-9 w-[176px]";
-
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -22,6 +18,10 @@ import {
 import type { MatchedSeatLine } from "@/lib/api";
 import { lineKey, lineLabel } from "@/lib/lineFilter";
 import { cn } from "@/lib/utils";
+
+/** One size for this control and the Export button beside it: the two
+ *  read as a pair, and a label that changes must never move the row. */
+export const HEADER_PILL = "h-9 w-[176px]";
 
 export function LineFilter({
   seats,
