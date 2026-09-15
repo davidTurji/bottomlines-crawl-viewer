@@ -622,14 +622,24 @@ function sampleWorkbook(summary: Summary): { name: string; rows: (string | numbe
  * keeps the button exercisable end to end under VITE_MOCK=true: a click
  * downloads a spreadsheet a customer can actually open, not a stub.
  */
+/** The report's date as it appears in a filename, from the crawl's finish. */
+export function reportDate(summary: { finished_at: string | null }): string {
+  return summary.finished_at
+    ? new Date(summary.finished_at).toISOString().slice(0, 10)
+    : new Date().toISOString().slice(0, 10);
+}
+
 function ExportResultsButton({ token, summary }: { token: string; summary: Summary }) {
   const onClick = async () => {
     if (MOCK) {
       const { buildXlsxBlob } = await import("../lib/xlsx");
+      const { MOCK_CUSTOMER_DOMAIN } = await import("../lib/mockData");
       const url = URL.createObjectURL(buildXlsxBlob(sampleWorkbook(summary)));
       const a = document.createElement("a");
       a.href = url;
-      a.download = "pathfinder-results-sample.xlsx";
+      // Same name the crawler puts on the real file: the customer's
+      // domain and the report's date.
+      a.download = `${MOCK_CUSTOMER_DOMAIN}-${reportDate(summary)}.xlsx`;
       document.body.appendChild(a);
       a.click();
       a.remove();

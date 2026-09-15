@@ -1818,6 +1818,9 @@ function declarationSources(count: number, offset: number): DeclarationSource[] 
  * publisher files, in both files where the publisher has both, plus owner
  * domains and a few country-scoped manager domains so every kind renders.
  */
+/** The mock customer's own domain: what its downloads are named after. */
+export const MOCK_CUSTOMER_DOMAIN = "selectmedia.asia";
+
 const DECLARATION_ROWS_SEED: [string, string, string[], string][] = [
   // Only rows that NAME the customer's own domain (selectmedia.asia): the
   // sheet is per customer since 2026-09-15, and discover domains are not
