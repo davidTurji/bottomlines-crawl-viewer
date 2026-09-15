@@ -1739,19 +1739,18 @@ function declarationSources(count: number, offset: number): DeclarationSource[] 
  * domains and a few country-scoped manager domains so every kind renders.
  */
 const DECLARATION_ROWS_SEED: [string, string, string[], string][] = [
-  // Only rows that NAME the customer (selectmedia.asia and its discover
-  // domain carambo.la): the sheet is per customer since 2026-09-15.
+  // Only rows that NAME the customer's own domain (selectmedia.asia): the
+  // sheet is per customer since 2026-09-15, and discover domains are not
+  // the customer's domain.
   ["inventory partner", "selectmedia.asia", [
     "gamezop.com", "playgama.com", "kedoo.com", "afrolandtv.com", "pubbliteam.it",
     "remynetwork.com", "net-com.tv", "metaxads.com", "allhiphop.com", "whatstheword.tv",
     "10news.com", "abc15.com", "denver7.com", "wcpo.com", "wxyz.com", "kgun9.com",
   ], ""],
-  ["inventory partner", "carambo.la", ["adweek.com", "cnet.com", "kotaku.com", "theverge.com"], ""],
   ["owner domain", "selectmedia.asia", ["gamezop.com", "playgama.com"], ""],
   ["manager domain", "selectmedia.asia", ["gamezop.com", "playgama.com", "kedoo.com"], ""],
   ["manager domain", "selectmedia.asia", ["gamezop.com"], "IN"],
   ["manager domain", "selectmedia.asia", ["playgama.com"], "BR"],
-  ["manager domain", "carambo.la", ["theverge.com"], "US"],
 ];
 
 export const mockDeclarationRows: DeclarationRowsPayload = (() => {

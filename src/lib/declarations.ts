@@ -252,3 +252,28 @@ export function countryName(code: string): string {
     return code;
   }
 }
+
+/** One declared domain's roster as a CSV in the Excel sheet's columns. */
+export function subjectCsv(subject: DeclarationSubject): string {
+  const esc = (v: string) => (/[",\n]/.test(v) ? `"${v.replace(/"/g, '""')}"` : v);
+  const lines = ["Declaration,Domain declared,Declared by,Country,Found in"];
+  for (const d of subject.declarers) {
+    lines.push(
+      [subject.kind, subject.domain, d.domain, d.country, d.found_in].map(esc).join(","),
+    );
+  }
+  return lines.join("\n") + "\n";
+}
+
+/** Hand the browser a file. Same columns as the workbook's Declarations sheet. */
+export function downloadCsv(filename: string, csv: string): void {
+  const blob = new Blob([csv], { type: "text/csv;charset=utf-8" });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = filename;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  URL.revokeObjectURL(url);
+}

@@ -1,13 +1,15 @@
 import BLoader from "@/components/BLoader";
 import { useCallback, useEffect, useMemo, useState, type ReactNode } from "react";
-import { ChevronDown } from "lucide-react";
+import { ChevronDown, Download } from "lucide-react";
 
 import { api, type RelationshipMismatch, type Summary } from "../lib/api";
 import {
   DECLARATION_KINDS,
   KIND_COPY,
   countryName,
+  downloadCsv,
   normalizeDeclarations,
+  subjectCsv,
   type DeclarationKind,
   type DeclarationSection,
   type DeclarationSubject,
@@ -576,11 +578,32 @@ function SubjectCard({
 
       {open && (
         <div className={cn("border-t px-4 pb-4 pt-3 sm:px-5", tone.border)}>
-          <div className="mb-1 flex items-baseline justify-between">
-            <span className="text-xs font-medium text-slate-700">Named by</span>
-            <span className="font-mono text-[11px] tabular-nums text-slate-500">
-              {subject.total.toLocaleString()}
+          <div className="mb-1 flex items-center justify-between gap-3">
+            <span className="text-xs font-medium text-slate-700">
+              Named by{" "}
+              <span className="font-mono tabular-nums text-slate-500">
+                {subject.total.toLocaleString()}
+              </span>
             </span>
+            {/* Every publisher that named this domain, which file, and the
+                country: the workbook's Declarations sheet, for this one
+                domain and kind. Built from the frozen payload in the
+                browser, so it costs no request and works while the
+                crawler sleeps. */}
+            <button
+              type="button"
+              onClick={(e) => {
+                e.stopPropagation();
+                downloadCsv(
+                  `declarations-${subject.kind.replace(/ /g, "-")}-${subject.domain}.csv`,
+                  subjectCsv(subject),
+                );
+              }}
+              className="inline-flex items-center gap-1.5 rounded-full border border-border bg-white px-3 py-1 text-[11px] text-slate-700 transition-colors hover:border-primary/30"
+            >
+              <Download className="h-3 w-3" />
+              Export CSV
+            </button>
           </div>
           {/* Three rows tall, the rest by scrolling inside the card (David,
               2026-09-15), so a domain named by forty files does not push
