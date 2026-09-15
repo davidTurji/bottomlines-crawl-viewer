@@ -395,7 +395,7 @@ function KindSection({
         <div className="min-w-0">
           <h2
             className="flex items-center gap-2 font-display text-base font-semibold tracking-tight text-slate-900"
-            title={`${copy.variable}: ${copy.blurb}`}
+            title={copy.variable}
           >
             <span
               aria-hidden
@@ -403,6 +403,7 @@ function KindSection({
             />
             {copy.title}
           </h2>
+          <p className="mt-0.5 text-sm text-slate-500">{copy.blurb}</p>
         </div>
         {total > 0 && (
           <div className="hidden flex-shrink-0 text-right text-xs text-slate-500 sm:block">
