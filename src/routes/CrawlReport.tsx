@@ -174,15 +174,19 @@ export default function CrawlReport() {
           <ExportResultsButton token={token} summary={summary} />
         </div>
       </div>
-      {lines.length > 0 && (
-        <p className="-mt-2 text-[12px] text-slate-500">
-          Showing only publishers and apps carrying{" "}
-          <span className="font-mono text-slate-700">
-            {lines.length === 1 ? "the selected line" : `${lines.length} selected lines`}
-          </span>
-          . Line totals and the week's changes follow the same filter.
-        </p>
-      )}
+      {/* Reserved whether or not a filter is on, so toggling one never
+          pushes the cards below down and back up. */}
+      <p className="-mt-2 min-h-[18px] text-[12px] leading-[18px] text-slate-500">
+        {lines.length > 0 && (
+          <>
+            Showing only publishers and apps carrying{" "}
+            <span className="font-mono text-slate-700">
+              {lines.length === 1 ? "the selected line" : `${lines.length} selected lines`}
+            </span>
+            . Line totals and the week's changes follow the same filter.
+          </>
+        )}
+      </p>
 
       {/* Two hero cards, side by side. Left = this week's plus/minus
           lines. Right = matched inventory, as two premium tone tiles:
@@ -231,6 +235,7 @@ export default function CrawlReport() {
               number={added}
               label="Lines added"
               delta={prevAdded != null ? computeDelta(added, prevAdded) : null}
+              note={filtered ? "under the selected lines" : undefined}
             />
             <SplitStat
               tone="critical"
@@ -240,6 +245,7 @@ export default function CrawlReport() {
               delta={
                 prevRemoved != null ? computeDelta(removed, prevRemoved) : null
               }
+              note={filtered ? "under the selected lines" : undefined}
             />
           </div>
           )}
@@ -275,6 +281,7 @@ export default function CrawlReport() {
               number={matchedDevs}
               label="Matched publishers"
               delta={matchedDevsDelta}
+              note={filtered ? "under the selected lines" : undefined}
               active={matchedView === "publishers"}
               onClick={() => setMatchedView("publishers")}
             />
@@ -284,6 +291,7 @@ export default function CrawlReport() {
               number={matchedApps}
               label="Matched apps"
               delta={matchedAppsDelta}
+              note={filtered ? "under the selected lines" : undefined}
               active={matchedView === "apps"}
               onClick={() => setMatchedView("apps")}
             />
@@ -423,6 +431,7 @@ export function SplitStat({
   tone,
   linkTo,
   delta,
+  note,
 }: {
   number: number;
   label: string;
@@ -431,6 +440,9 @@ export function SplitStat({
   tone?: StatTone;
   linkTo?: string;
   delta?: Delta | null;
+  /** What the delta slot says when there is no delta to say, e.g. under
+   *  a seat-line filter. The slot keeps its height either way. */
+  note?: string;
 }) {
   const numberCls = tone ? STAT_TONE_TEXT[tone] : "text-slate-900";
   const body = (
@@ -456,10 +468,18 @@ export function SplitStat({
         </span>
       </div>
       <div className="mt-2 text-[12px] font-medium text-slate-700">{label}</div>
-      {delta ? <DeltaChip delta={delta} /> : null}
-      {hint && !delta && (
-        <div className="text-[11px] text-slate-500">{hint}</div>
-      )}
+      {/* ONE SLOT, ALWAYS THE SAME HEIGHT. A delta, a hint, a note, or
+          nothing: the tile never grows or shrinks when the filter changes,
+          so the page above the list does not move. */}
+      <div className="min-h-[17px] text-[11px] leading-[17px]">
+        {delta ? (
+          <DeltaChip delta={delta} />
+        ) : hint ? (
+          <span className="text-slate-500">{hint}</span>
+        ) : note ? (
+          <span className="text-slate-400">{note}</span>
+        ) : null}
+      </div>
     </>
   );
   if (linkTo) {
@@ -490,6 +510,7 @@ function MatchedTile({
   number,
   label,
   delta,
+  note,
   active,
   onClick,
 }: {
@@ -498,6 +519,9 @@ function MatchedTile({
   number: number;
   label: string;
   delta?: Delta | null;
+  /** Said in the delta's slot when there is no delta; the slot keeps its
+   *  height either way so the tile never moves. */
+  note?: string;
   active: boolean;
   onClick: () => void;
 }) {
@@ -531,7 +555,9 @@ function MatchedTile({
         <Icon aria-hidden className={cn("h-3.5 w-3.5 flex-shrink-0", iconCls)} />
         {label}
       </span>
-      {delta ? <DeltaChip delta={delta} /> : null}
+      <span className="block min-h-[17px] text-[11px] leading-[17px]">
+        {delta ? <DeltaChip delta={delta} /> : note ? <span className="text-slate-400">{note}</span> : null}
+      </span>
     </button>
   );
 }

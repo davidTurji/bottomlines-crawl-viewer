@@ -343,15 +343,17 @@ export default function CrawlChanges() {
           onChange={setLines}
         />
       </div>
-      {lines.length > 0 && (
-        <p className="-mt-2 text-[12px] text-slate-500">
-          Only changes on{" "}
-          <span className="font-mono text-slate-700">
-            {lines.length === 1 ? "the selected line" : `${lines.length} selected lines`}
-          </span>
-          .
-        </p>
-      )}
+      <p className="-mt-2 min-h-[18px] text-[12px] leading-[18px] text-slate-500">
+        {lines.length > 0 && (
+          <>
+            Only changes on{" "}
+            <span className="font-mono text-slate-700">
+              {lines.length === 1 ? "the selected line" : `${lines.length} selected lines`}
+            </span>
+            .
+          </>
+        )}
+      </p>
 
       {/* The KPI row, scoped to the selected tab. Same two-card shape as the
           overview so a reader who has seen one has seen both. */}
@@ -412,6 +414,7 @@ export default function CrawlChanges() {
                     number={kpi.byEvent.added}
                     label="Lines added"
                     delta={deltaFor("added", kpi.byEvent.added)}
+                    note={lines.length ? "under the selected lines" : undefined}
                   />
                   <SplitStat
                     tone="critical"
@@ -419,6 +422,7 @@ export default function CrawlChanges() {
                     number={kpi.byEvent.removed}
                     label="Lines removed"
                     delta={deltaFor("removed", kpi.byEvent.removed)}
+                    note={lines.length ? "under the selected lines" : undefined}
                   />
                 </>
               ) : (
@@ -439,6 +443,7 @@ export default function CrawlChanges() {
                     number={kpi.placements}
                     label={TONES[bucket].label}
                     delta={deltaFor(bucket, kpi.placements)}
+                    note={lines.length ? "under the selected lines" : undefined}
                   />
                   <SplitStat number={kpi.lines} label="Distinct lines" />
                 </>
@@ -488,12 +493,14 @@ export default function CrawlChanges() {
                 number={kpi.publishers}
                 label="Publishers affected"
                 delta={publishersAffectedDelta}
+                note={lines.length ? "under the selected lines" : undefined}
               />
               <SplitStat
                 tone="app"
                 number={kpi.apps}
                 label="Apps affected"
                 delta={appsAffectedDelta}
+                note={lines.length ? "under the selected lines" : undefined}
               />
             </div>
             )}
