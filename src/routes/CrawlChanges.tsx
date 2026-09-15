@@ -316,35 +316,41 @@ export default function CrawlChanges() {
 
   return (
     <PageShell>
-      {/* Page header */}
-      <div className="min-w-0">
-        <h1 className="text-xl font-bold leading-tight tracking-tight text-slate-900 sm:text-2xl">
-          Changes
-        </h1>
-        <p className="mt-1 text-sm text-slate-500">
-          {isFirstCrawl
-            ? "Lines publishers added, dropped, or re-certified. First crawl, so the comparison begins next week."
-            : "Lines publishers added, dropped, or re-certified this week."}
-        </p>
-        <WeekLine
-          week={weekLabel}
-          previousWeek={prevWeekLabel}
-          isFirstCrawl={summary?.previous_job_id === null}
-          className="mt-1.5"
+      {/* Page header. The seat-line filter sits top right, exactly where the
+          overview keeps it, so it is the same control in the same place on
+          both pages. */}
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+        <div className="min-w-0">
+          <h1 className="text-xl font-bold leading-tight tracking-tight text-slate-900 sm:text-2xl">
+            Changes
+          </h1>
+          <p className="mt-1 text-sm text-slate-500">
+            {isFirstCrawl
+              ? "Lines publishers added, dropped, or re-certified. First crawl, so the comparison begins next week."
+              : "Lines publishers added, dropped, or re-certified this week."}
+          </p>
+          <WeekLine
+            week={weekLabel}
+            previousWeek={prevWeekLabel}
+            isFirstCrawl={summary?.previous_job_id === null}
+            className="mt-1.5"
+          />
+        </div>
+        <LineFilter
+          seats={summary?.watchlist?.seats ?? []}
+          selected={lines}
+          onChange={setLines}
         />
       </div>
-
-      {summary?.watchlist?.seats?.length ? (
-        <div className="flex flex-wrap items-center gap-3">
-          <LineFilter seats={summary.watchlist.seats} selected={lines} onChange={setLines} />
-          {lines.length > 0 && (
-            <span className="text-[12px] text-slate-500">
-              Only changes on{" "}
-              {lines.length === 1 ? "the selected line" : `${lines.length} selected lines`}.
-            </span>
-          )}
-        </div>
-      ) : null}
+      {lines.length > 0 && (
+        <p className="-mt-2 text-[12px] text-slate-500">
+          Only changes on{" "}
+          <span className="font-mono text-slate-700">
+            {lines.length === 1 ? "the selected line" : `${lines.length} selected lines`}
+          </span>
+          .
+        </p>
+      )}
 
       {/* The KPI row, scoped to the selected tab. Same two-card shape as the
           overview so a reader who has seen one has seen both. */}

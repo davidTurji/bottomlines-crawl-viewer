@@ -3,7 +3,7 @@ import { useEffect, useMemo, useState } from "react";
 import { LineFilter } from "@/components/LineFilter";
 import { useLineFilter } from "@/lib/lineFilter";
 import { Link } from "react-router-dom";
-import { Building2, ChevronDown, Download, Smartphone } from "lucide-react";
+import { Building2, ChevronDown, Download, Search, Smartphone } from "lucide-react";
 import {
   api,
   ApiError,
@@ -20,7 +20,6 @@ import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import {
   EmptyResult,
   Pager,
-  SearchBox,
   TruncatedNotice,
 } from "@/components/ListControls";
 import { Card } from "@/components/ui/card";
@@ -713,25 +712,33 @@ function DrilldownList({ token, lines }: { token: string; lines: string[] }) {
 
   return (
     <div>
-      <div className="mb-3 flex flex-wrap items-center gap-2">
-        <Tabs value={tab} onValueChange={(v) => setTab(v as DrillTab)}>
-          <TabsList>
-            <TabsTrigger value="all">All matched</TabsTrigger>
-            <TabsTrigger value="added">Added</TabsTrigger>
-            <TabsTrigger value="removed">Removed</TabsTrigger>
-            <TabsTrigger value="changed">Changed</TabsTrigger>
-          </TabsList>
-        </Tabs>
-        <SearchBox
-          value={query}
-          onChange={setQuery}
-          placeholder="Search publishers"
-          label="Search matched publishers"
-        />
-        <span className="text-xs text-slate-500">
-          {total.toLocaleString()}{" "}
-          {tab === "all" ? "matched" : "with changes"}
-        </span>
+      {/* Tabs, then a full-width search, in the Changes page's grammar,
+          so the two pages read as one product. */}
+      <div className="mb-3 space-y-2">
+        <div className="flex flex-wrap items-center gap-3">
+          <Tabs value={tab} onValueChange={(v) => setTab(v as DrillTab)}>
+            <TabsList>
+              <TabsTrigger value="all">All matched</TabsTrigger>
+              <TabsTrigger value="added">Added</TabsTrigger>
+              <TabsTrigger value="removed">Removed</TabsTrigger>
+              <TabsTrigger value="changed">Changed</TabsTrigger>
+            </TabsList>
+          </Tabs>
+          <span className="text-xs text-slate-500">
+            {total.toLocaleString()}{" "}
+            {tab === "all" ? "matched" : "with changes"}
+          </span>
+        </div>
+        <div className="relative w-full">
+          <Search className="pointer-events-none absolute left-3.5 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
+          <input
+            value={query}
+            onChange={(e) => setQuery(e.target.value)}
+            placeholder="Search publishers"
+            aria-label="Search matched publishers"
+            className="h-10 w-full rounded-full border border-border bg-white pl-10 pr-4 text-sm text-slate-900 outline-none transition-colors placeholder:text-slate-400 focus:border-primary/40"
+          />
+        </div>
       </div>
       <div>
         {loading && <p className="text-sm text-slate-500">Loading...</p>}
@@ -1341,25 +1348,31 @@ function MatchedAppsList({ token, lines }: { token: string; lines: string[] }) {
 
   return (
     <div>
-      <div className="mb-3 flex flex-wrap items-center gap-2">
-        <Tabs value={tab} onValueChange={(v) => setTab(v as DrillTab)}>
-          <TabsList>
-            <TabsTrigger value="all">All matched</TabsTrigger>
-            <TabsTrigger value="added">Added</TabsTrigger>
-            <TabsTrigger value="removed">Removed</TabsTrigger>
-            <TabsTrigger value="changed">Changed</TabsTrigger>
-          </TabsList>
-        </Tabs>
-        <SearchBox
-          value={query}
-          onChange={setQuery}
-          placeholder="Search apps"
-          label="Search matched apps"
-        />
-        <span className="text-xs text-slate-500">
-          {(tab === "all" ? total : rows.length).toLocaleString()}{" "}
-          {tab === "all" ? "matched" : "with changes"}
-        </span>
+      <div className="mb-3 space-y-2">
+        <div className="flex flex-wrap items-center gap-3">
+          <Tabs value={tab} onValueChange={(v) => setTab(v as DrillTab)}>
+            <TabsList>
+              <TabsTrigger value="all">All matched</TabsTrigger>
+              <TabsTrigger value="added">Added</TabsTrigger>
+              <TabsTrigger value="removed">Removed</TabsTrigger>
+              <TabsTrigger value="changed">Changed</TabsTrigger>
+            </TabsList>
+          </Tabs>
+          <span className="text-xs text-slate-500">
+            {(tab === "all" ? total : rows.length).toLocaleString()}{" "}
+            {tab === "all" ? "matched" : "with changes"}
+          </span>
+        </div>
+        <div className="relative w-full">
+          <Search className="pointer-events-none absolute left-3.5 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
+          <input
+            value={query}
+            onChange={(e) => setQuery(e.target.value)}
+            placeholder="Search apps"
+            aria-label="Search matched apps"
+            className="h-10 w-full rounded-full border border-border bg-white pl-10 pr-4 text-sm text-slate-900 outline-none transition-colors placeholder:text-slate-400 focus:border-primary/40"
+          />
+        </div>
       </div>
       {loading && <p className="text-sm text-slate-500">Loading...</p>}
       {!loading && rows.length === 0 && (
