@@ -111,6 +111,8 @@ export default function CrawlChanges() {
   const [error, setError] = useState<string | null>(null);
   const [page, setPage] = useState(1);
   const [open, setOpen] = useState<Set<string>>(new Set());
+  // Bumps each time a list lands, so the new cards ease in as one piece.
+  const [settled, setSettled] = useState(0);
 
   const filter = ssp.trim();
   /* The seat-line filter, shared with the overview through the URL. The
@@ -151,6 +153,7 @@ export default function CrawlChanges() {
         setRows(r.rows);
         setTruncated(r.truncated);
         setOpen(new Set());
+        setSettled((n) => n + 1);
       })
       .catch((e: Error) => !cancelled && setError(e.message))
       .finally(() => !cancelled && setLoading(false));
@@ -361,7 +364,12 @@ export default function CrawlChanges() {
           the dots beside the tabs say new numbers are coming. Only a first
           load with nothing yet shows the loader. */}
       {!error && (!loading || rows.length > 0) && (
-        <div className={cn("grid grid-cols-1 gap-4 transition-opacity lg:grid-cols-2", loading && "opacity-60")}>
+        <div
+          className={cn(
+            "grid grid-cols-1 gap-4 transition-opacity duration-300 ease-out lg:grid-cols-2",
+            loading && "opacity-60",
+          )}
+        >
           <div className="rounded-2xl border border-border bg-white p-5 shadow-sm">
             <div className="mb-3 flex items-baseline justify-between gap-3">
               <div>
@@ -571,7 +579,13 @@ export default function CrawlChanges() {
       )}
 
       {!error && shown.length > 0 && (
-        <div className="space-y-3">
+        <div
+          key={settled}
+          className={cn(
+            "animate-in fade-in space-y-3 transition-opacity duration-300 ease-out",
+            loading && "opacity-60",
+          )}
+        >
           {shown.map((g) => (
             <ChangeCard
               key={g.key}

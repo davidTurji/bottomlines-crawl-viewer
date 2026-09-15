@@ -1,6 +1,7 @@
 import BLoader from "@/components/BLoader";
 import { useEffect, useMemo, useState } from "react";
 import { LineFilter } from "@/components/LineFilter";
+import { Dots } from "@/components/Dots";
 import { useLineFilter } from "@/lib/lineFilter";
 import { Link } from "react-router-dom";
 import { Building2, ChevronDown, Download, Search, Smartphone } from "lucide-react";
@@ -66,13 +67,22 @@ export default function CrawlReport() {
      counters, the publisher list and the app list are all re-read under
      it, so the two headline numbers and the rows beneath agree. */
   const { selected: lines, setSelected: setLines } = useLineFilter();
+  // Which selection the summary on screen was read under. While it lags
+  // the URL the numbers are last selection's and the cards dim a little;
+  // they never blank, so nothing above the list jumps.
+  const linesKey = lines.join(",");
+  const [settledFor, setSettledFor] = useState<string | null>(null);
+  const refreshing = summary != null && settledFor !== linesKey;
 
   useEffect(() => {
     let cancelled = false;
     api
       .summary(token, lines)
       .then((s) => {
-        if (!cancelled) setSummary(s);
+        if (!cancelled) {
+          setSummary(s);
+          setSettledFor(linesKey);
+        }
       })
       .catch((e: ApiError) => {
         if (!cancelled) setError(e.message);
@@ -86,7 +96,7 @@ export default function CrawlReport() {
     return () => {
       cancelled = true;
     };
-  }, [token, lines]);
+  }, [token, lines, linesKey]);
 
   if (error) {
     return (
@@ -191,7 +201,12 @@ export default function CrawlReport() {
       {/* Two hero cards, side by side. Left = this week's plus/minus
           lines. Right = matched inventory, as two premium tone tiles:
           publishers in green, apps in pink. */}
-      <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
+      <div
+        className={cn(
+          "grid grid-cols-1 gap-4 transition-opacity duration-300 ease-out lg:grid-cols-2",
+          refreshing && "opacity-60",
+        )}
+      >
         <div className="rounded-2xl border border-border bg-white p-5 shadow-sm">
           <div className="mb-3 flex items-baseline justify-between gap-3">
             <div>
@@ -459,8 +474,10 @@ export function SplitStat({
           </span>
         )}
         <span
+          // Keyed on the value: a new figure eases in instead of snapping.
+          key={number}
           className={cn(
-            "font-mono text-3xl font-semibold leading-none tabular-nums tracking-tight sm:text-4xl",
+            "animate-in fade-in font-mono text-3xl font-semibold leading-none tabular-nums tracking-tight duration-500 sm:text-4xl",
             numberCls,
           )}
         >
@@ -544,8 +561,9 @@ function MatchedTile({
       )}
     >
       <span
+        key={number}
         className={cn(
-          "font-mono text-3xl font-semibold leading-none tabular-nums tracking-tight sm:text-4xl",
+          "animate-in fade-in font-mono text-3xl font-semibold leading-none tabular-nums tracking-tight duration-500 sm:text-4xl",
           numberCls,
         )}
       >
@@ -666,13 +684,16 @@ function DrilldownList({ token, lines }: { token: string; lines: string[] }) {
   const [page, setPage] = useState(1);
   const [query, setQuery] = useState("");
   const [truncated, setTruncated] = useState(false);
+  // Bumps each time a list lands, so the new rows ease in as one piece.
+  const [settled, setSettled] = useState(0);
 
-  // A new search or a new tab is a new list, so it starts at its first page.
-  // Without this, searching from page 7 asks for page 7 of a result that may
-  // have one page, and the reader gets an empty list for a term that matches.
+  // A new search, a new tab or a new line selection is a new list, so it
+  // starts at its first page. Without this, searching from page 7 asks
+  // for page 7 of a result that may have one page, and the reader gets an
+  // empty list for a term that matches.
   useEffect(() => {
     setPage(1);
-  }, [tab, query]);
+  }, [tab, query, lines]);
 
   useEffect(() => {
     let cancelled = false;
@@ -728,6 +749,7 @@ function DrilldownList({ token, lines }: { token: string; lines: string[] }) {
       setRows(data.rows);
       setTotal(data.total);
       setTruncated(data.truncated);
+      setSettled((n) => n + 1);
     })
       .catch((e: Error) => !cancelled && setError(e.message))
       .finally(() => !cancelled && setLoading(false));
@@ -754,6 +776,7 @@ function DrilldownList({ token, lines }: { token: string; lines: string[] }) {
             {total.toLocaleString()}{" "}
             {tab === "all" ? "matched" : "with changes"}
           </span>
+          {loading && settled > 0 && <Dots />}
         </div>
         <div className="relative w-full">
           <Search className="pointer-events-none absolute left-3.5 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
@@ -766,14 +789,26 @@ function DrilldownList({ token, lines }: { token: string; lines: string[] }) {
           />
         </div>
       </div>
+      {/* The rows stay on screen while a new list is read, dimmed, with
+          the dots above saying so; only the very first read shows the
+          loader. When the new list lands it eases in as one piece, so a
+          filter change never collapses the page and springs it back. */}
       <div>
-        {loading && <p className="text-sm text-slate-500">Loading...</p>}
+        {loading && settled === 0 && <p className="text-sm text-slate-500">Loading...</p>}
         {error && <p className="text-sm text-critical">{error}</p>}
-        {!loading && !error && rows.length === 0 && (
-          <EmptyResult query={query} noun="publishers" />
+        {settled > 0 && !error && rows.length === 0 && (
+          <div className={cn("transition-opacity duration-300", loading && "opacity-60")}>
+            <EmptyResult query={query} noun="publishers" />
+          </div>
         )}
-        {!loading && !error && rows.length > 0 && (
-          <div className="space-y-3">
+        {!error && rows.length > 0 && (
+          <div
+            key={settled}
+            className={cn(
+              "animate-in fade-in space-y-3 transition-opacity duration-300 ease-out",
+              loading && "opacity-60",
+            )}
+          >
             {rows.map((r) => (
               <PublisherCard
                 key={r.developer_id}
@@ -787,7 +822,7 @@ function DrilldownList({ token, lines }: { token: string; lines: string[] }) {
             ))}
           </div>
         )}
-        {!loading && !error && rows.length > 0 && (
+        {!error && rows.length > 0 && (
           <div className="mt-4">
             <Pager
               page={page}
@@ -1322,11 +1357,13 @@ function MatchedAppsList({ token, lines }: { token: string; lines: string[] }) {
   const [truncated, setTruncated] = useState(false);
 
   const keyOf = (a: MatchedApp) => `${a.store}:${a.bundle_id}`;
+  const [settled, setSettled] = useState(0);
 
-  // A new search is a new list and starts at its first page.
+  // A new search or a new line selection is a new list and starts at its
+  // first page.
   useEffect(() => {
     setPage(1);
-  }, [query]);
+  }, [query, lines]);
 
   useEffect(() => {
     let cancelled = false;
@@ -1340,6 +1377,7 @@ function MatchedAppsList({ token, lines }: { token: string; lines: string[] }) {
           setAllRows(r.rows ?? []);
           setTotal(r.total ?? 0);
           setTruncated(r.truncated ?? false);
+          setSettled((n) => n + 1);
         }
       })
       .catch(() => {
@@ -1352,6 +1390,7 @@ function MatchedAppsList({ token, lines }: { token: string; lines: string[] }) {
           setAllRows([]);
           setTotal(0);
           setFailed(true);
+          setSettled((n) => n + 1);
         }
       })
       .finally(() => !cancelled && setLoading(false));
@@ -1388,6 +1427,7 @@ function MatchedAppsList({ token, lines }: { token: string; lines: string[] }) {
             {(tab === "all" ? total : rows.length).toLocaleString()}{" "}
             {tab === "all" ? "matched" : "with changes"}
           </span>
+          {loading && settled > 0 && <Dots />}
         </div>
         <div className="relative w-full">
           <Search className="pointer-events-none absolute left-3.5 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
@@ -1400,18 +1440,26 @@ function MatchedAppsList({ token, lines }: { token: string; lines: string[] }) {
           />
         </div>
       </div>
-      {loading && <p className="text-sm text-slate-500">Loading...</p>}
-      {!loading && rows.length === 0 && (
-        failed ? (
-          <p className="rounded-lg border border-dashed border-border bg-muted/20 p-6 text-center text-sm text-slate-500">
-            No matched apps to show yet.
-          </p>
-        ) : (
-          <EmptyResult query={query} noun="apps" />
-        )
+      {loading && settled === 0 && <p className="text-sm text-slate-500">Loading...</p>}
+      {settled > 0 && rows.length === 0 && (
+        <div className={cn("transition-opacity duration-300", loading && "opacity-60")}>
+          {failed ? (
+            <p className="rounded-lg border border-dashed border-border bg-muted/20 p-6 text-center text-sm text-slate-500">
+              No matched apps to show yet.
+            </p>
+          ) : (
+            <EmptyResult query={query} noun="apps" />
+          )}
+        </div>
       )}
-      {!loading && rows.length > 0 && (
-        <div className="space-y-3">
+      {rows.length > 0 && (
+        <div
+          key={settled}
+          className={cn(
+            "animate-in fade-in space-y-3 transition-opacity duration-300 ease-out",
+            loading && "opacity-60",
+          )}
+        >
           {rows.map((a) => (
             <MatchedAppCard
               key={keyOf(a)}
@@ -1429,7 +1477,7 @@ function MatchedAppsList({ token, lines }: { token: string; lines: string[] }) {
           All matched. The change tabs filter the loaded page in the browser,
           so their count is a count of this page and paging it would be a
           claim the data cannot support. */}
-      {!loading && !failed && tab === "all" && rows.length > 0 && (
+      {!failed && tab === "all" && rows.length > 0 && (
         <div className="mt-4">
           <Pager
             page={page}
