@@ -100,6 +100,24 @@ export default {
           bg: "hsl(var(--tone-app-bg))",
           border: "hsl(var(--tone-app-border))",
         },
+        /* Declaration tones -- three yellows, see the --tone-decl-* block
+           in index.css. Exposed as text-declIpd / bg-declIpd-bg /
+           border-declIpd-border, and the same for declOwner, declManager. */
+        declIpd: {
+          DEFAULT: "hsl(var(--tone-decl-ipd))",
+          bg: "hsl(var(--tone-decl-ipd-bg))",
+          border: "hsl(var(--tone-decl-ipd-border))",
+        },
+        declOwner: {
+          DEFAULT: "hsl(var(--tone-decl-owner))",
+          bg: "hsl(var(--tone-decl-owner-bg))",
+          border: "hsl(var(--tone-decl-owner-border))",
+        },
+        declManager: {
+          DEFAULT: "hsl(var(--tone-decl-manager))",
+          bg: "hsl(var(--tone-decl-manager-bg))",
+          border: "hsl(var(--tone-decl-manager-border))",
+        },
         neutral: {
           DEFAULT: "hsl(var(--tone-neutral))",
           bg: "hsl(var(--tone-neutral-bg))",
