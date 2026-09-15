@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { NavLink } from "react-router-dom";
 import { api } from "@/lib/api";
+import { normalizeDeclarations } from "@/lib/declarations";
 import {
   Sidebar,
   SidebarContent,
@@ -63,14 +64,10 @@ export function AppSidebar() {
     api
       .declarations(token)
       .then((d) => {
-        if (alive) {
-          const t = d?.totals;
-          setHasDeclarations(
-            (t?.ipd_partners ?? 0) > 0 ||
-              (t?.owner_domains ?? 0) > 0 ||
-              (t?.relationship_mismatches ?? 0) > 0,
-          );
-        }
+        // Both payload shapes count through the one normaliser, so a
+        // customer report (flat rows) and an older run-wide report
+        // (grouped, capped) show the entry on the same rule.
+        if (alive) setHasDeclarations(normalizeDeclarations(d).total > 0);
       })
       .catch(() => {
         if (alive) setHasDeclarations(false);

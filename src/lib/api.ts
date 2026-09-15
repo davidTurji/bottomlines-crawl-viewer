@@ -532,12 +532,14 @@ export const api = {
    * The sidebar also uses this as its probe: the Declarations entry shows
    * only when one of the three totals is nonzero.
    */
-  declarations: async (token: string) => {
+  declarations: async (token: string): Promise<DeclarationsPayload> => {
     if (MOCK) {
-      const { mockDeclarations } = await import("./mockData");
-      return mockDeclarations;
+      // `?legacy=1` exercises the grouped shape older links answer with.
+      const legacy = new URLSearchParams(window.location.search).has("legacy");
+      const { mockDeclarations, mockDeclarationRows } = await import("./mockData");
+      return legacy ? mockDeclarations : mockDeclarationRows;
     }
-    return req<Declarations>("GET", `/v1/viewer/${token}/declarations`);
+    return req<DeclarationsPayload>("GET", `/v1/viewer/${token}/declarations`);
   },
   chat: async function* (
     token: string,
@@ -1026,6 +1028,33 @@ export type Declarations = {
   owner_claims: OwnerClaim[];
   relationship_mismatches: RelationshipMismatch[];
 };
+
+/**
+ * One declaration as a customer report freezes it: the Excel sheet's row.
+ * `declaration` is "inventory partner", "owner domain" or "manager domain";
+ * `found_in` arrives display-ready ("ads.txt" / "app-ads.txt"); `country`
+ * is an ISO code for a country-scoped manager domain, else "".
+ */
+export type DeclarationRow = {
+  declaration: string;
+  declared_domain: string;
+  declared_by: string;
+  country?: string | null;
+  found_in: string;
+};
+
+export type DeclarationRowsPayload = {
+  rows: DeclarationRow[];
+  total: number;
+};
+
+/**
+ * Either shape the endpoint has ever answered with. Read it through
+ * `normalizeDeclarations` (lib/declarations.ts), never directly: links
+ * minted before the customer-report era answer the grouped shape and must
+ * keep opening.
+ */
+export type DeclarationsPayload = Declarations | DeclarationRowsPayload;
 
 export type ChatFrame =
   | { type: "text"; delta: string }

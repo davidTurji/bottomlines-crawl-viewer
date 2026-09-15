@@ -365,7 +365,10 @@ export type StatTone =
   | "info"
   | "special"
   | "app"
-  | "publisher";
+  | "publisher"
+  | "declIpd"
+  | "declOwner"
+  | "declManager";
 
 const STAT_TONE_TEXT: Record<StatTone, string> = {
   ok: "text-ok",
@@ -375,6 +378,9 @@ const STAT_TONE_TEXT: Record<StatTone, string> = {
   special: "text-special",
   app: "text-app",
   publisher: "text-primary",
+  declIpd: "text-declIpd",
+  declOwner: "text-declOwner",
+  declManager: "text-declManager",
 };
 
 export function SplitStat({

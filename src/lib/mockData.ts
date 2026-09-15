@@ -34,6 +34,8 @@ import type {
   MatchedApp,
   MatchedAppsPage,
   ChatFrame,
+  DeclarationRow,
+  DeclarationRowsPayload,
 } from "./api";
 // The discovered-lines ORDER BY, shared with the page's sort control so the
 // mock endpoint and the client's "default" option cannot disagree.
@@ -1730,6 +1732,42 @@ function declarationSources(count: number, offset: number): DeclarationSource[] 
  * owner claims, and two seats whose file relationship disagrees with the
  * watchlist. Totals match the arrays because nothing here is filtered.
  */
+/*
+ * The customer-report shape: the Excel sheet's rows, flat. Lifted from a
+ * real run (2026-09-15): a handful of partners each named by many
+ * publisher files, in both files where the publisher has both, plus owner
+ * domains and a few country-scoped manager domains so every kind renders.
+ */
+const DECLARATION_ROWS_SEED: [string, string, string[], string][] = [
+  // Only rows that NAME the customer (selectmedia.asia and its discover
+  // domain carambo.la): the sheet is per customer since 2026-09-15.
+  ["inventory partner", "selectmedia.asia", [
+    "gamezop.com", "playgama.com", "kedoo.com", "afrolandtv.com", "pubbliteam.it",
+    "remynetwork.com", "net-com.tv", "metaxads.com", "allhiphop.com", "whatstheword.tv",
+    "10news.com", "abc15.com", "denver7.com", "wcpo.com", "wxyz.com", "kgun9.com",
+  ], ""],
+  ["inventory partner", "carambo.la", ["adweek.com", "cnet.com", "kotaku.com", "theverge.com"], ""],
+  ["owner domain", "selectmedia.asia", ["gamezop.com", "playgama.com"], ""],
+  ["manager domain", "selectmedia.asia", ["gamezop.com", "playgama.com", "kedoo.com"], ""],
+  ["manager domain", "selectmedia.asia", ["gamezop.com"], "IN"],
+  ["manager domain", "selectmedia.asia", ["playgama.com"], "BR"],
+  ["manager domain", "carambo.la", ["theverge.com"], "US"],
+];
+
+export const mockDeclarationRows: DeclarationRowsPayload = (() => {
+  const rows: DeclarationRow[] = [];
+  DECLARATION_ROWS_SEED.forEach(([declaration, declared_domain, declarers, country]) => {
+    declarers.forEach((declared_by, i) => {
+      rows.push({ declaration, declared_domain, declared_by, country, found_in: "ads.txt" });
+      // Most publishers carry both files; every third one is web-only.
+      if (i % 3 !== 2) {
+        rows.push({ declaration, declared_domain, declared_by, country, found_in: "app-ads.txt" });
+      }
+    });
+  });
+  return { rows, total: rows.length };
+})();
+
 export const mockDeclarations: Declarations = {
   totals: { ipd_partners: 3, owner_domains: 2, relationship_mismatches: 2 },
   ipd: [
