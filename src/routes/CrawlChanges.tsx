@@ -1,5 +1,7 @@
 import BLoader from "@/components/BLoader";
 import { useEffect, useMemo, useState } from "react";
+import { LineFilter } from "@/components/LineFilter";
+import { useLineFilter } from "@/lib/lineFilter";
 import {
   ArrowRight,
   ChevronDown,
@@ -110,11 +112,15 @@ export default function CrawlChanges() {
   const [open, setOpen] = useState<Set<string>>(new Set());
 
   const filter = ssp.trim();
+  /* The seat-line filter, shared with the overview through the URL. The
+     events are re-fetched under it, and every KPI on this page is counted
+     from the rows, so the numbers follow the filter by construction. */
+  const { selected: lines, setSelected: setLines } = useLineFilter();
 
   useEffect(() => {
     let cancelled = false;
     api
-      .summary(token)
+      .summary(token, lines)
       .then((s) => !cancelled && setSummary(s))
       .catch(() => {});
     api
@@ -124,7 +130,7 @@ export default function CrawlChanges() {
     return () => {
       cancelled = true;
     };
-  }, [token]);
+  }, [token, lines]);
 
   // One fetch covers every bucket. The page groups rows into lines, and a
   // line's placements can straddle a server page boundary, so grouping a
@@ -137,6 +143,7 @@ export default function CrawlChanges() {
     setError(null);
     fetchAllEvents(token, {
       ssp_domain: filter || undefined,
+      lines: lines.length ? lines : undefined,
     })
       .then((r) => {
         if (cancelled) return;
@@ -149,9 +156,9 @@ export default function CrawlChanges() {
     return () => {
       cancelled = true;
     };
-  }, [token, filter]);
+  }, [token, filter, lines]);
 
-  useEffect(() => setPage(1), [bucket, filter]);
+  useEffect(() => setPage(1), [bucket, filter, lines]);
 
 
   const groups = useMemo(() => groupByLine(rows), [rows]);
@@ -257,7 +264,9 @@ export default function CrawlChanges() {
   // confident percentage from a partial numerator, and the crawls it
   // happens on are the large ones, which is to say the real customers'.
   // The "showing the first N" note below stays either way.
-  const comparable = !filter && !truncated;
+  // A seat-line filter makes every current count a slice of the week while
+  // last week's figures are the whole week, so nothing is comparable.
+  const comparable = !filter && !truncated && lines.length === 0;
   const prevCounts = useMemo<Record<EventKind, number | null>>(
     () => ({
       added: previous?.hero_diff.line_totals.added ?? null,
@@ -324,6 +333,18 @@ export default function CrawlChanges() {
           className="mt-1.5"
         />
       </div>
+
+      {summary?.watchlist?.seats?.length ? (
+        <div className="flex flex-wrap items-center gap-3">
+          <LineFilter seats={summary.watchlist.seats} selected={lines} onChange={setLines} />
+          {lines.length > 0 && (
+            <span className="text-[12px] text-slate-500">
+              Only changes on{" "}
+              {lines.length === 1 ? "the selected line" : `${lines.length} selected lines`}.
+            </span>
+          )}
+        </div>
+      ) : null}
 
       {/* The KPI row, scoped to the selected tab. Same two-card shape as the
           overview so a reader who has seen one has seen both. */}
@@ -1095,7 +1116,7 @@ export function fileLabel(kind: string): string {
  */
 async function fetchAllEvents(
   token: string,
-  filters: { ssp_domain?: string },
+  filters: { ssp_domain?: string; lines?: string[] },
 ): Promise<{ rows: LineEvent[]; truncated: boolean }> {
   const acc: LineEvent[] = [];
   for (let p = 1; p <= FETCH_CAP; p += 1) {

@@ -1,5 +1,7 @@
 import BLoader from "@/components/BLoader";
 import { useEffect, useMemo, useState } from "react";
+import { LineFilter } from "@/components/LineFilter";
+import { useLineFilter } from "@/lib/lineFilter";
 import { Link } from "react-router-dom";
 import { Building2, ChevronDown, Download, Smartphone } from "lucide-react";
 import {
@@ -60,11 +62,16 @@ export default function CrawlReport() {
   const [matchedView, setMatchedView] = useState<"publishers" | "apps">(
     "publishers",
   );
+  /* THE SEAT-LINE FILTER. In the URL, so it survives a refresh and follows
+     the reader to the Changes page. When set, the summary's matched
+     counters, the publisher list and the app list are all re-read under
+     it, so the two headline numbers and the rows beneath agree. */
+  const { selected: lines, setSelected: setLines } = useLineFilter();
 
   useEffect(() => {
     let cancelled = false;
     api
-      .summary(token)
+      .summary(token, lines)
       .then((s) => {
         if (!cancelled) setSummary(s);
       })
@@ -80,7 +87,7 @@ export default function CrawlReport() {
     return () => {
       cancelled = true;
     };
-  }, [token]);
+  }, [token, lines]);
 
   if (error) {
     return (
@@ -114,15 +121,19 @@ export default function CrawlReport() {
 
   const matchedDevs = summary.counters.matched.developers;
   const matchedApps = summary.counters.matched.apps;
-  const prevMatchedDevs = previous?.counters.matched.developers ?? null;
-  const prevMatchedApps = previous?.counters.matched.apps ?? null;
+  // Under a seat-line filter every current figure is a slice while last
+  // week's summary is the whole week, so a delta would compare unlike
+  // things ("-97%"). No delta is the honest answer there.
+  const filtered = lines.length > 0;
+  const prevMatchedDevs = filtered ? null : (previous?.counters.matched.developers ?? null);
+  const prevMatchedApps = filtered ? null : (previous?.counters.matched.apps ?? null);
 
   // Last week's OWN added/removed totals, so "+32 lines added" can say
   // whether 32 is a busy week or a quiet one. Comparing this week's added
   // against last week's added is like for like; comparing it against last
   // week's matched inventory would not be.
-  const prevAdded = previous?.hero_diff.line_totals.added ?? null;
-  const prevRemoved = previous?.hero_diff.line_totals.removed ?? null;
+  const prevAdded = filtered ? null : (previous?.hero_diff.line_totals.added ?? null);
+  const prevRemoved = filtered ? null : (previous?.hero_diff.line_totals.removed ?? null);
 
   // Matched growth, week over week, shown on the publisher and app cards.
   // Computed straight from this crawl's matched counters against last week's,
@@ -155,8 +166,24 @@ export default function CrawlReport() {
             {prevWeekLabel && `, compared with ${prevWeekLabel}`}.
           </p>
         </div>
-        <ExportResultsButton token={token} summary={summary} />
+        <div className="flex flex-wrap items-center gap-2">
+          <LineFilter
+            seats={summary.watchlist?.seats ?? []}
+            selected={lines}
+            onChange={setLines}
+          />
+          <ExportResultsButton token={token} summary={summary} />
+        </div>
       </div>
+      {lines.length > 0 && (
+        <p className="-mt-2 text-[12px] text-slate-500">
+          Showing only publishers and apps carrying{" "}
+          <span className="font-mono text-slate-700">
+            {lines.length === 1 ? "the selected line" : `${lines.length} selected lines`}
+          </span>
+          . Line totals and the week's changes follow the same filter.
+        </p>
+      )}
 
       {/* Two hero cards, side by side. Left = this week's plus/minus
           lines. Right = matched inventory, as two premium tone tiles:
@@ -169,7 +196,11 @@ export default function CrawlReport() {
                 This week&apos;s changes
               </div>
               <div className="text-[11px] text-slate-500">
-                {isFirstCrawl ? "Your first crawl" : "Relative to last week"}
+                {isFirstCrawl
+                  ? "Your first crawl"
+                  : filtered
+                    ? "Under the selected lines"
+                    : "Relative to last week"}
               </div>
             </div>
             <span className="text-xs text-slate-500">
@@ -224,7 +255,9 @@ export default function CrawlReport() {
               <div className="text-[11px] text-slate-500">
                 {isFirstCrawl
                   ? "First crawl, no prior week to compare against"
-                  : "Relative to last week"}
+                  : filtered
+                    ? "Under the selected lines"
+                    : "Relative to last week"}
               </div>
             </div>
             <span className="text-xs text-slate-500">
@@ -289,7 +322,7 @@ export default function CrawlReport() {
               see the exact seat lines it carried, and what moved this week.
             </p>
           </div>
-          <DrilldownList token={token} />
+          <DrilldownList token={token} lines={lines} />
         </div>
       ) : (
         <div>
@@ -303,7 +336,7 @@ export default function CrawlReport() {
               it carried, and what moved this week.
             </p>
           </div>
-          <MatchedAppsList token={token} />
+          <MatchedAppsList token={token} lines={lines} />
         </div>
       )}
     </PageShell>
@@ -598,7 +631,7 @@ type Row = {
   cert_changed_lines: MatchedSeatLine[];
 };
 
-function DrilldownList({ token }: { token: string }) {
+function DrilldownList({ token, lines }: { token: string; lines: string[] }) {
   const [tab, setTab] = useState<DrillTab>("all");
   const [rows, setRows] = useState<Row[]>([]);
   const [total, setTotal] = useState(0);
@@ -623,7 +656,7 @@ function DrilldownList({ token }: { token: string }) {
     setExpanded(null);
     const p =
       tab === "all"
-        ? api.matchedDevelopers(token, page, query).then((r) => ({
+        ? api.matchedDevelopers(token, page, query, lines).then((r) => ({
             rows: r.rows.map(
               (d: MatchedDeveloper): Row => ({
                 developer_id: d.developer_id,
@@ -644,7 +677,7 @@ function DrilldownList({ token }: { token: string }) {
             total: r.total,
             truncated: r.truncated ?? false,
           }))
-        : api.developerEvents(token, tab, page, query).then((r) => ({
+        : api.developerEvents(token, tab, page, query, lines).then((r) => ({
             rows: r.rows.map(
               (d: DeveloperEvent): Row => ({
                 developer_id: d.developer_id,
@@ -676,7 +709,7 @@ function DrilldownList({ token }: { token: string }) {
     return () => {
       cancelled = true;
     };
-  }, [token, tab, page, query]);
+  }, [token, tab, page, query, lines]);
 
   return (
     <div>
@@ -1244,7 +1277,7 @@ function lineEventToSeatLine(e: LineEvent): MatchedSeatLine {
  * family colour. The tabs filter the loaded apps by their weekly change; an
  * app that did not move this week appears under "All matched" only.
  */
-function MatchedAppsList({ token }: { token: string }) {
+function MatchedAppsList({ token, lines }: { token: string; lines: string[] }) {
   const [tab, setTab] = useState<DrillTab>("all");
   const [allRows, setAllRows] = useState<MatchedApp[]>([]);
   const [loading, setLoading] = useState(true);
@@ -1268,7 +1301,7 @@ function MatchedAppsList({ token }: { token: string }) {
     setFailed(false);
     setExpanded(null);
     api
-      .matchedApps(token, page, query)
+      .matchedApps(token, page, query, lines)
       .then((r) => {
         if (!cancelled) {
           setAllRows(r.rows ?? []);
@@ -1292,7 +1325,7 @@ function MatchedAppsList({ token }: { token: string }) {
     return () => {
       cancelled = true;
     };
-  }, [token, page, query]);
+  }, [token, page, query, lines]);
 
   // A card held open from one tab must not appear under another.
   useEffect(() => setExpanded(null), [tab]);

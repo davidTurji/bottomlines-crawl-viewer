@@ -5,6 +5,8 @@ const BASE = (import.meta.env.VITE_API_BASE as string) ?? "/api";
 // function head short-circuits to a deterministic mock, no backend
 // required, useful for UI-only reviews and screenshots.
 // The mock adapter lives in src/lib/mockData.ts.
+import { LINES_PARAM, linesQuery, serializeLines } from "./lineFilter";
+
 export const MOCK = (import.meta.env.VITE_MOCK as string | undefined) === "true";
 
 // ── AI chat flag ─────────────────────────────────────────────────
@@ -155,12 +157,13 @@ export const api = {
    * rather than pointing at this (see CrawlReport's ExportResultsButton).
    */
   exportUrl: (token: string) => `${BASE}/v1/viewer/${token}/export.xlsx`,
-  summary: async (token: string) => {
+  summary: async (token: string, lines?: string[]) => {
     if (MOCK) {
-      const { mockSummary } = await import("./mockData");
-      return mockSummary;
+      const { mockSummaryFor } = await import("./mockData");
+      return mockSummaryFor(lines ?? []);
     }
-    return req<Summary>("GET", `/v1/viewer/${token}/summary`);
+    const q = linesQuery(lines);
+    return req<Summary>("GET", `/v1/viewer/${token}/summary${q ? `?${q.slice(1)}` : ""}`);
   },
   /**
    * The previous week's summary for the same customer, which is what every
@@ -204,14 +207,15 @@ export const api = {
     event: "added" | "removed" | "changed",
     page = 1,
     q = "",
+    lines?: string[],
   ) => {
     if (MOCK) {
       const { mockDeveloperEvents } = await import("./mockData");
-      return mockDeveloperEvents(event, page);
+      return mockDeveloperEvents(event, page, lines ?? []);
     }
     return req<DeveloperEventsPage>(
       "GET",
-      `/v1/viewer/${token}/developer-events?event=${event}&page=${page}&page_size=50${q ? `&q=${encodeURIComponent(q)}` : ""}`,
+      `/v1/viewer/${token}/developer-events?event=${event}&page=${page}&page_size=50${q ? `&q=${encodeURIComponent(q)}` : ""}${linesQuery(lines)}`,
     );
   },
   lineEvents: async (
@@ -223,16 +227,20 @@ export const api = {
       matched_seat_only?: boolean;
       page?: number;
       page_size?: number;
+      /** Seat-line keys (see lib/lineFilter); empty means every line. */
+      lines?: string[];
     } = {},
   ) => {
     if (MOCK) {
       const { mockLineEvents } = await import("./mockData");
       return mockLineEvents(filters);
     }
+    const { lines, ...rest } = filters;
     const q = new URLSearchParams();
-    for (const [k, v] of Object.entries(filters)) {
+    for (const [k, v] of Object.entries(rest)) {
       if (v !== undefined && v !== null && v !== "") q.set(k, String(v));
     }
+    if (lines && lines.length) q.set(LINES_PARAM, serializeLines(lines));
     return req<LineEventsPage>(
       "GET",
       `/v1/viewer/${token}/line-events?${q.toString()}`,
@@ -251,14 +259,14 @@ export const api = {
    * `total` on the response is the FILTERED total, so the pager below the
    * list counts what the search found rather than what the section holds.
    */
-  matchedDevelopers: async (token: string, page = 1, q = "") => {
+  matchedDevelopers: async (token: string, page = 1, q = "", lines?: string[]) => {
     if (MOCK) {
       const { mockMatchedDevelopers } = await import("./mockData");
-      return mockMatchedDevelopers(page, q);
+      return mockMatchedDevelopers(page, q, lines ?? []);
     }
     return req<MatchedDevelopersPage>(
       "GET",
-      `/v1/viewer/${token}/matched-developers?page=${page}&page_size=250${q ? `&q=${encodeURIComponent(q)}` : ""}`,
+      `/v1/viewer/${token}/matched-developers?page=${page}&page_size=250${q ? `&q=${encodeURIComponent(q)}` : ""}${linesQuery(lines)}`,
     );
   },
   matchedBundles: async (token: string, page = 1, q = "") => {
@@ -286,14 +294,14 @@ export const api = {
    * instead be embedded under matched-developers; a standalone endpoint is
    * cleaner because the app is the row here, not the publisher.
    */
-  matchedApps: async (token: string, page = 1, q = "") => {
+  matchedApps: async (token: string, page = 1, q = "", lines?: string[]) => {
     if (MOCK) {
       const { mockMatchedApps } = await import("./mockData");
-      return mockMatchedApps(page, q);
+      return mockMatchedApps(page, q, lines ?? []);
     }
     return req<MatchedAppsPage>(
       "GET",
-      `/v1/viewer/${token}/matched-apps?page=${page}&page_size=250${q ? `&q=${encodeURIComponent(q)}` : ""}`,
+      `/v1/viewer/${token}/matched-apps?page=${page}&page_size=250${q ? `&q=${encodeURIComponent(q)}` : ""}${linesQuery(lines)}`,
     );
   },
   /**
@@ -586,6 +594,10 @@ export const api = {
 
 export type Summary = {
   crawl_id: number;
+  /** The watchlist this report was built from: what the seat-line filter
+   *  offers. Optional: artifacts frozen before it was exposed omit it, and
+   *  the filter then simply does not show. */
+  watchlist?: { seats: MatchedSeatLine[]; discover: string[] };
   source: string;
   status: string;
   queued_at: string | null;

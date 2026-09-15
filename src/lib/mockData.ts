@@ -41,6 +41,34 @@ import type {
 // mock endpoint and the client's "default" option cannot disagree.
 import { compareDefault } from "./discoveredSort";
 
+/*
+ * THE CUSTOMER'S WATCHLIST. Six seat lines, the shape a real customer's
+ * report is built from. Every matched publisher, app and matched-seat
+ * event carries a subset of THESE, so the seat-line filter has something
+ * true to narrow by. Declared first: the event seed below reads it at
+ * module load.
+ */
+export const CUSTOMER_SEATS: MatchedSeatLine[] = [
+  { ssp_domain: "magnite.com", publisher_id: "14991", relationship: "RESELLER" },
+  { ssp_domain: "magnite.com", publisher_id: "14992", relationship: "RESELLER" },
+  { ssp_domain: "openx.com", publisher_id: "540123456", relationship: "DIRECT" },
+  { ssp_domain: "pubmatic.com", publisher_id: "161234", relationship: "RESELLER" },
+  { ssp_domain: "sharethrough.com", publisher_id: "SZjHEx3f", relationship: "DIRECT" },
+  { ssp_domain: "onetag.com", publisher_id: "8df76ed1d09d55e", relationship: "RESELLER" },
+];
+
+export function seatKey(l: { ssp_domain: string; publisher_id: string; relationship: string }): string {
+  return `${l.ssp_domain.trim().toLowerCase()}|${l.publisher_id.trim()}|${l.relationship.trim().toUpperCase()}`;
+}
+
+function carries(lines: MatchedSeatLine[] | undefined, selected: string[]): boolean {
+  if (selected.length === 0) return true;
+  if (!lines) return false;
+  const want = new Set(selected);
+  return lines.some((l) => want.has(seatKey(l)));
+}
+
+
 // ─────────────────────────────────────────────────────────────────
 // Summary (hero + counters)
 // ─────────────────────────────────────────────────────────────────
@@ -446,14 +474,17 @@ const DEV_TABLES: Record<string, DeveloperEvent[]> = {
 export function mockDeveloperEvents(
   event: "added" | "removed" | "changed",
   page: number,
+  lines: string[] = [],
 ): DeveloperEventsPage {
   // Attach the seat lines behind each row's counts, so its expanded card can
   // show WHAT moved. Seeded off the developer id (see changeArrays), so a
   // publisher shown here and under "All matched" carries identical lines.
-  const rows = (DEV_TABLES[event] ?? []).map((d) => ({
-    ...d,
-    ...changeArrays(d.developer_id, d.lines_added, d.lines_removed, d.lines_cert_changed),
-  }));
+  const rows = (DEV_TABLES[event] ?? [])
+    .map((d) => ({
+      ...d,
+      ...changeArrays(d.developer_id, d.lines_added, d.lines_removed, d.lines_cert_changed),
+    }))
+    .filter((d) => carries(d.matched_lines ?? matchedLinesFor(d.developer_id, 6), lines));
   return {
     event,
     page,
@@ -675,6 +706,10 @@ function seededLines(
     const r = rows[i];
     if (i % 7 !== 0) continue;
     const key = `${r.ssp_domain}|${r.publisher_id}|${r.relationship}`;
+    // A matched-seat event IS one of the customer's lines, so the rows
+    // stamped here take a watchlist line's identity; that is what lets
+    // the seat-line filter narrow the Changes page truthfully.
+    const seat = CUSTOMER_SEATS[(seed + i) % CUSTOMER_SEATS.length];
     for (const other of rows) {
       if (
         stamped < seatTarget &&
@@ -682,6 +717,9 @@ function seededLines(
         `${other.ssp_domain}|${other.publisher_id}|${other.relationship}` === key
       ) {
         other.matched_seat = true;
+        other.ssp_domain = seat.ssp_domain;
+        other.publisher_id = seat.publisher_id;
+        other.relationship = seat.relationship;
         stamped += 1;
       }
     }
@@ -708,6 +746,7 @@ export function mockLineEvents(
     matched_seat_only?: boolean;
     page?: number;
     page_size?: number;
+    lines?: string[];
   },
 ): LineEventsPage {
   const page = filters.page ?? 1;
@@ -734,6 +773,10 @@ export function mockLineEvents(
   }
   if (filters.matched_seat_only) {
     pool = pool.filter((r) => r.matched_seat);
+  }
+  if (filters.lines && filters.lines.length) {
+    const want = new Set(filters.lines);
+    pool = pool.filter((r) => r.matched_seat && want.has(seatKey(r)));
   }
   const start = (page - 1) * pageSize;
   return {
@@ -841,24 +884,21 @@ function domainFor(name: string, platform: string, i: number): string {
  * match more, but `line_count` carries the honest total. Some lines print a
  * cert id and most do not, exactly the way real ads.txt files split.
  */
-const SEAT_LINE_SSPS = [
-  "magnite.com", "openx.com", "pubmatic.com", "sharethrough.com",
-  "rubiconproject.com", "appnexus.com", "google.com", "criteo.com",
-  "smartadserver.com", "adform.com",
-];
 
+/* Every matched publisher and app carries a SUBSET of the customer's
+   watchlist above, chosen by id so the same row always carries the same
+   lines. That is what gives the seat-line filter something true to
+   narrow by. */
 function matchedLinesFor(developer_id: number, line_count: number): MatchedSeatLine[] {
-  const n = Math.max(1, Math.min(line_count, 6));
+  const n = Math.max(1, Math.min(line_count, CUSTOMER_SEATS.length));
   const out: MatchedSeatLine[] = [];
   for (let i = 0; i < n; i += 1) {
-    const ssp = SEAT_LINE_SSPS[(developer_id + i) % SEAT_LINE_SSPS.length];
-    const relationship = (developer_id + i) % 3 === 0 ? "DIRECT" : "RESELLER";
-    const publisher_id = `${ssp.split(".")[0]}-${
-      1000 + ((developer_id * 7 + i * 131) % 8999)
-    }`;
-    const line: MatchedSeatLine = { ssp_domain: ssp, publisher_id, relationship };
+    const seat = CUSTOMER_SEATS[(developer_id + i * 5) % CUSTOMER_SEATS.length];
+    if (out.some((o) => seatKey(o) === seatKey(seat))) continue;
+    const line: MatchedSeatLine = { ...seat };
     // Roughly a quarter of lines carry the optional fourth field.
     if ((developer_id + i) % 4 === 0) line.cert_id = certId(developer_id * 13 + i * 7);
+    line.found_in = (developer_id + i) % 3 === 0 ? "both" : "app-ads.txt";
     out.push(line);
   }
   return out;
@@ -1068,8 +1108,13 @@ function mockPage<T extends Record<string, unknown>>(
 
 const MATCHED_DEVS = buildMatchedDevs();
 
-export function mockMatchedDevelopers(page: number, q = ""): MatchedDevelopersPage {
-  return mockPage(MATCHED_DEVS, page, q, ["name", "domain"]) as MatchedDevelopersPage;
+export function mockMatchedDevelopers(
+  page: number,
+  q = "",
+  lines: string[] = [],
+): MatchedDevelopersPage {
+  const pool = MATCHED_DEVS.filter((d) => carries(d.matched_lines, lines));
+  return mockPage(pool, page, q, ["name", "domain"]) as MatchedDevelopersPage;
 }
 
 /* App bundle seed. Long-tail same as developers: a head of hero apps that
@@ -1223,8 +1268,43 @@ function buildMatchedApps(): MatchedApp[] {
 
 const MATCHED_APPS = buildMatchedApps();
 
-export function mockMatchedApps(page: number, q = ""): MatchedAppsPage {
-  return mockPage(MATCHED_APPS, page, q, ["app_name", "bundle_id", "owner_domain"]) as MatchedAppsPage;
+export function mockMatchedApps(page: number, q = "", lines: string[] = []): MatchedAppsPage {
+  const pool = MATCHED_APPS.filter((a) => carries(a.matched_lines, lines));
+  return mockPage(pool, page, q, ["app_name", "bundle_id", "owner_domain"]) as MatchedAppsPage;
+}
+
+/** The summary under a seat-line filter: the matched counters re-counted
+ *  over what carries the selected lines. Everything else stays crawl-wide. */
+export function mockSummaryFor(lines: string[]): Summary {
+  const base: Summary = { ...mockSummary, watchlist: { seats: CUSTOMER_SEATS, discover: [] } };
+  if (lines.length === 0) return base;
+  const want = new Set(lines);
+  const devs = MATCHED_DEVS.filter((d) => carries(d.matched_lines, lines));
+  const apps = MATCHED_APPS.filter((a) => carries(a.matched_lines, lines));
+  const lineTotal = devs.reduce(
+    (n, d) => n + d.matched_lines.filter((l) => want.has(seatKey(l))).length,
+    0,
+  );
+  // This week's changes, re-counted over the selected lines: matched-seat
+  // events only, since only those carry a watchlist line's identity.
+  const count = (kind: string) =>
+    (LINE_EVENTS_BY_EVENT[kind] ?? []).filter((r) => r.matched_seat && want.has(seatKey(r))).length;
+  return {
+    ...base,
+    counters: {
+      ...base.counters,
+      matched: { lines: lineTotal, developers: devs.length, apps: apps.length },
+    },
+    hero_diff: {
+      ...base.hero_diff,
+      line_totals: {
+        ...base.hero_diff.line_totals,
+        added: count("added"),
+        removed: count("removed"),
+        cert_changed: count("cert_changed"),
+      },
+    },
+  };
 }
 
 // ─────────────────────────────────────────────────────────────────
