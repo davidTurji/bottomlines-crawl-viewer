@@ -7,9 +7,12 @@
  */
 import { Check, ChevronsUpDown, ListFilter } from "lucide-react";
 
+/** One size for this control and the Export button beside it: the two
+ *  read as a pair, and a label that changes must never move the row. */
+export const HEADER_PILL = "h-9 w-[176px]";
+
 import {
   DropdownMenu,
-  DropdownMenuCheckboxItem,
   DropdownMenuContent,
   DropdownMenuItem,
   DropdownMenuLabel,
@@ -35,12 +38,9 @@ export function LineFilter({
   if (seats.length === 0) return null;
   const chosen = new Set(selected);
   const count = selected.length;
-  const label =
-    count === 0
-      ? "All lines"
-      : count === 1
-        ? lineLabel(seats.find((s) => chosen.has(lineKey(s))) ?? seats[0])
-        : `${count} of ${seats.length} lines`;
+  // Never the line itself on the button: a count keeps the control one
+  // size whatever is picked.
+  const label = count === 0 ? "All lines" : `${count} of ${seats.length} lines`;
 
   const toggle = (key: string) => {
     if (chosen.has(key)) onChange(selected.filter((k) => k !== key));
@@ -54,7 +54,8 @@ export function LineFilter({
           type="button"
           aria-label="Filter by seat line"
           className={cn(
-            "flex h-10 max-w-full items-center gap-2 rounded-full border bg-white px-3.5 text-xs font-medium text-slate-900 shadow-sm transition-colors hover:bg-slate-50",
+            HEADER_PILL,
+            "flex flex-shrink-0 items-center gap-2 rounded-full border bg-white px-3.5 text-xs font-medium text-slate-900 shadow-sm transition-colors hover:bg-slate-50",
             count > 0 ? "border-primary/50" : "border-border",
             className,
           )}
@@ -64,12 +65,7 @@ export function LineFilter({
             className={cn("h-3.5 w-3.5 flex-shrink-0", count > 0 ? "text-primary" : "text-slate-400")}
           />
           <span className="flex-shrink-0 font-normal text-slate-400">Lines</span>
-          <span className={cn("truncate", count === 1 && "font-mono")}>{label}</span>
-          {count > 0 && (
-            <span className="flex-shrink-0 rounded-full bg-primary px-1.5 py-px font-mono text-[10px] text-white">
-              {count}
-            </span>
-          )}
+          <span className="min-w-0 flex-1 truncate text-left">{label}</span>
           <ChevronsUpDown aria-hidden className="h-3 w-3 flex-shrink-0 opacity-40" />
         </button>
       </DropdownMenuTrigger>
@@ -79,26 +75,49 @@ export function LineFilter({
         </DropdownMenuLabel>
         {seats.map((s) => {
           const key = lineKey(s);
+          const on = chosen.has(key);
           return (
-            <DropdownMenuCheckboxItem
+            <DropdownMenuItem
               key={key}
-              checked={chosen.has(key)}
               // Keep the menu open: the reader is ticking several.
-              onSelect={(e) => e.preventDefault()}
-              onCheckedChange={() => toggle(key)}
-              className="font-mono text-[12px]"
+              onSelect={(e) => {
+                e.preventDefault();
+                toggle(key);
+              }}
+              role="menuitemcheckbox"
+              aria-checked={on}
+              className="gap-2.5 font-mono text-[12px]"
             >
+              {/* An empty box that fills when picked, always visible, so
+                  the state of every line is readable at a glance. */}
+              <span
+                aria-hidden
+                className={cn(
+                  "flex h-4 w-4 flex-shrink-0 items-center justify-center rounded-[4px] border transition-colors",
+                  on ? "border-primary bg-primary" : "border-slate-300 bg-white",
+                )}
+              >
+                {on && <Check className="h-3 w-3 text-white" strokeWidth={3} />}
+              </span>
               <span className="truncate">{lineLabel(s)}</span>
-            </DropdownMenuCheckboxItem>
+            </DropdownMenuItem>
           );
         })}
         <DropdownMenuSeparator />
         <DropdownMenuItem
           onSelect={() => onChange([])}
           disabled={count === 0}
-          className="text-[12px]"
+          className="gap-2.5 text-[12px]"
         >
-          <Check className={cn("mr-2 h-3.5 w-3.5", count === 0 ? "opacity-100" : "opacity-0")} />
+          <span
+            aria-hidden
+            className={cn(
+              "flex h-4 w-4 flex-shrink-0 items-center justify-center rounded-[4px] border",
+              count === 0 ? "border-primary bg-primary" : "border-slate-300 bg-white",
+            )}
+          >
+            {count === 0 && <Check className="h-3 w-3 text-white" strokeWidth={3} />}
+          </span>
           All lines
         </DropdownMenuItem>
       </DropdownMenuContent>

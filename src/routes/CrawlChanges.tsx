@@ -1,5 +1,6 @@
 import BLoader from "@/components/BLoader";
 import { useEffect, useMemo, useState } from "react";
+import { Dots } from "@/components/Dots";
 import { LineFilter } from "@/components/LineFilter";
 import { useLineFilter } from "@/lib/lineFilter";
 import {
@@ -354,8 +355,11 @@ export default function CrawlChanges() {
 
       {/* The KPI row, scoped to the selected tab. Same two-card shape as the
           overview so a reader who has seen one has seen both. */}
-      {!loading && !error && (
-        <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
+      {/* The KPIs and the list stay on screen while a filter refetches;
+          the dots beside the tabs say new numbers are coming. Only a first
+          load with nothing yet shows the loader. */}
+      {!error && (!loading || rows.length > 0) && (
+        <div className={cn("grid grid-cols-1 gap-4 transition-opacity lg:grid-cols-2", loading && "opacity-60")}>
           <div className="rounded-2xl border border-border bg-white p-5 shadow-sm">
             <div className="mb-3 flex items-baseline justify-between gap-3">
               <div>
@@ -505,14 +509,17 @@ export default function CrawlChanges() {
             The per-tab counts it used to carry now live in the KPI row
             directly above, which re-scopes with the tab, so printing them
             on the control as well was the same number twice. */}
-        <Tabs value={bucket} onValueChange={(v) => setBucket(v as Bucket)}>
-          <TabsList>
-            <TabsTrigger value="all">All</TabsTrigger>
-            <TabsTrigger value="added">Added</TabsTrigger>
-            <TabsTrigger value="removed">Removed</TabsTrigger>
-            <TabsTrigger value="cert_changed">Cert changes</TabsTrigger>
-          </TabsList>
-        </Tabs>
+        <div className="flex items-center gap-3">
+          <Tabs value={bucket} onValueChange={(v) => setBucket(v as Bucket)}>
+            <TabsList>
+              <TabsTrigger value="all">All</TabsTrigger>
+              <TabsTrigger value="added">Added</TabsTrigger>
+              <TabsTrigger value="removed">Removed</TabsTrigger>
+              <TabsTrigger value="cert_changed">Cert changes</TabsTrigger>
+            </TabsList>
+          </Tabs>
+          {loading && rows.length > 0 && <Dots />}
+        </div>
 
         <div className="relative w-full">
           <Search className="pointer-events-none absolute left-3.5 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
@@ -526,7 +533,7 @@ export default function CrawlChanges() {
         </div>
       </div>
 
-      {loading && (
+      {loading && rows.length === 0 && (
         <div className="flex items-center gap-2 py-8 text-sm text-slate-500">
           <BLoader label="Loading" size={140} />
           Loading line changes...
@@ -556,7 +563,7 @@ export default function CrawlChanges() {
         </p>
       )}
 
-      {!loading && !error && shown.length > 0 && (
+      {!error && shown.length > 0 && (
         <div className="space-y-3">
           {shown.map((g) => (
             <ChangeCard
