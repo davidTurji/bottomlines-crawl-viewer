@@ -1,7 +1,10 @@
 import BLoader from "@/components/BLoader";
 import { useEffect, useMemo, useState } from "react";
+import { LineFilter } from "@/components/LineFilter";
+import { Dots } from "@/components/Dots";
+import { useLineFilter } from "@/lib/lineFilter";
 import { Link } from "react-router-dom";
-import { Building2, ChevronDown, Download, Smartphone } from "lucide-react";
+import { Building2, ChevronDown, Download, Search, Smartphone } from "lucide-react";
 import {
   api,
   ApiError,
@@ -18,7 +21,6 @@ import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import {
   EmptyResult,
   Pager,
-  SearchBox,
   TruncatedNotice,
 } from "@/components/ListControls";
 import { Card } from "@/components/ui/card";
@@ -60,13 +62,27 @@ export default function CrawlReport() {
   const [matchedView, setMatchedView] = useState<"publishers" | "apps">(
     "publishers",
   );
+  /* THE SEAT-LINE FILTER. In the URL, so it survives a refresh and follows
+     the reader to the Changes page. When set, the summary's matched
+     counters, the publisher list and the app list are all re-read under
+     it, so the two headline numbers and the rows beneath agree. */
+  const { selected: lines, setSelected: setLines } = useLineFilter();
+  // Which selection the summary on screen was read under. While it lags
+  // the URL the numbers are last selection's and the cards dim a little;
+  // they never blank, so nothing above the list jumps.
+  const linesKey = lines.join(",");
+  const [settledFor, setSettledFor] = useState<string | null>(null);
+  const refreshing = summary != null && settledFor !== linesKey;
 
   useEffect(() => {
     let cancelled = false;
     api
-      .summary(token)
+      .summary(token, lines)
       .then((s) => {
-        if (!cancelled) setSummary(s);
+        if (!cancelled) {
+          setSummary(s);
+          setSettledFor(linesKey);
+        }
       })
       .catch((e: ApiError) => {
         if (!cancelled) setError(e.message);
@@ -80,7 +96,7 @@ export default function CrawlReport() {
     return () => {
       cancelled = true;
     };
-  }, [token]);
+  }, [token, lines, linesKey]);
 
   if (error) {
     return (
@@ -114,15 +130,19 @@ export default function CrawlReport() {
 
   const matchedDevs = summary.counters.matched.developers;
   const matchedApps = summary.counters.matched.apps;
-  const prevMatchedDevs = previous?.counters.matched.developers ?? null;
-  const prevMatchedApps = previous?.counters.matched.apps ?? null;
+  // Under a seat-line filter every current figure is a slice while last
+  // week's summary is the whole week, so a delta would compare unlike
+  // things ("-97%"). No delta is the honest answer there.
+  const filtered = lines.length > 0;
+  const prevMatchedDevs = filtered ? null : (previous?.counters.matched.developers ?? null);
+  const prevMatchedApps = filtered ? null : (previous?.counters.matched.apps ?? null);
 
   // Last week's OWN added/removed totals, so "+32 lines added" can say
   // whether 32 is a busy week or a quiet one. Comparing this week's added
   // against last week's added is like for like; comparing it against last
   // week's matched inventory would not be.
-  const prevAdded = previous?.hero_diff.line_totals.added ?? null;
-  const prevRemoved = previous?.hero_diff.line_totals.removed ?? null;
+  const prevAdded = filtered ? null : (previous?.hero_diff.line_totals.added ?? null);
+  const prevRemoved = filtered ? null : (previous?.hero_diff.line_totals.removed ?? null);
 
   // Matched growth, week over week, shown on the publisher and app cards.
   // Computed straight from this crawl's matched counters against last week's,
@@ -155,13 +175,38 @@ export default function CrawlReport() {
             {prevWeekLabel && `, compared with ${prevWeekLabel}`}.
           </p>
         </div>
-        <ExportResultsButton token={token} summary={summary} />
+        <div className="flex flex-wrap items-center gap-2">
+          <LineFilter
+            seats={summary.watchlist?.seats ?? []}
+            selected={lines}
+            onChange={setLines}
+          />
+          <ExportResultsButton token={token} summary={summary} />
+        </div>
       </div>
+      {/* Reserved whether or not a filter is on, so toggling one never
+          pushes the cards below down and back up. */}
+      <p className="-mt-2 min-h-[18px] text-[12px] leading-[18px] text-slate-500">
+        {lines.length > 0 && (
+          <>
+            Showing only publishers and apps carrying{" "}
+            <span className="font-mono text-slate-700">
+              {lines.length === 1 ? "the selected line" : `${lines.length} selected lines`}
+            </span>
+            . Line totals and the week's changes follow the same filter.
+          </>
+        )}
+      </p>
 
       {/* Two hero cards, side by side. Left = this week's plus/minus
           lines. Right = matched inventory, as two premium tone tiles:
           publishers in green, apps in pink. */}
-      <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
+      <div
+        className={cn(
+          "grid grid-cols-1 gap-4 transition-opacity duration-300 ease-out lg:grid-cols-2",
+          refreshing && "opacity-60",
+        )}
+      >
         <div className="rounded-2xl border border-border bg-white p-5 shadow-sm">
           <div className="mb-3 flex items-baseline justify-between gap-3">
             <div>
@@ -169,7 +214,11 @@ export default function CrawlReport() {
                 This week&apos;s changes
               </div>
               <div className="text-[11px] text-slate-500">
-                {isFirstCrawl ? "Your first crawl" : "Relative to last week"}
+                {isFirstCrawl
+                  ? "Your first crawl"
+                  : filtered
+                    ? "Under the selected lines"
+                    : "Relative to last week"}
               </div>
             </div>
             <span className="text-xs text-slate-500">
@@ -201,6 +250,7 @@ export default function CrawlReport() {
               number={added}
               label="Lines added"
               delta={prevAdded != null ? computeDelta(added, prevAdded) : null}
+              note={filtered ? "under the selected lines" : undefined}
             />
             <SplitStat
               tone="critical"
@@ -210,6 +260,7 @@ export default function CrawlReport() {
               delta={
                 prevRemoved != null ? computeDelta(removed, prevRemoved) : null
               }
+              note={filtered ? "under the selected lines" : undefined}
             />
           </div>
           )}
@@ -224,7 +275,9 @@ export default function CrawlReport() {
               <div className="text-[11px] text-slate-500">
                 {isFirstCrawl
                   ? "First crawl, no prior week to compare against"
-                  : "Relative to last week"}
+                  : filtered
+                    ? "Under the selected lines"
+                    : "Relative to last week"}
               </div>
             </div>
             <span className="text-xs text-slate-500">
@@ -243,6 +296,7 @@ export default function CrawlReport() {
               number={matchedDevs}
               label="Matched publishers"
               delta={matchedDevsDelta}
+              note={filtered ? "under the selected lines" : undefined}
               active={matchedView === "publishers"}
               onClick={() => setMatchedView("publishers")}
             />
@@ -252,6 +306,7 @@ export default function CrawlReport() {
               number={matchedApps}
               label="Matched apps"
               delta={matchedAppsDelta}
+              note={filtered ? "under the selected lines" : undefined}
               active={matchedView === "apps"}
               onClick={() => setMatchedView("apps")}
             />
@@ -289,7 +344,7 @@ export default function CrawlReport() {
               see the exact seat lines it carried, and what moved this week.
             </p>
           </div>
-          <DrilldownList token={token} />
+          <DrilldownList token={token} lines={lines} />
         </div>
       ) : (
         <div>
@@ -303,7 +358,7 @@ export default function CrawlReport() {
               it carried, and what moved this week.
             </p>
           </div>
-          <MatchedAppsList token={token} />
+          <MatchedAppsList token={token} lines={lines} />
         </div>
       )}
     </PageShell>
@@ -391,6 +446,7 @@ export function SplitStat({
   tone,
   linkTo,
   delta,
+  note,
 }: {
   number: number;
   label: string;
@@ -399,6 +455,9 @@ export function SplitStat({
   tone?: StatTone;
   linkTo?: string;
   delta?: Delta | null;
+  /** What the delta slot says when there is no delta to say, e.g. under
+   *  a seat-line filter. The slot keeps its height either way. */
+  note?: string;
 }) {
   const numberCls = tone ? STAT_TONE_TEXT[tone] : "text-slate-900";
   const body = (
@@ -415,8 +474,10 @@ export function SplitStat({
           </span>
         )}
         <span
+          // Keyed on the value: a new figure eases in instead of snapping.
+          key={number}
           className={cn(
-            "font-mono text-3xl font-semibold leading-none tabular-nums tracking-tight sm:text-4xl",
+            "animate-in fade-in font-mono text-3xl font-semibold leading-none tabular-nums tracking-tight duration-500 sm:text-4xl",
             numberCls,
           )}
         >
@@ -424,10 +485,18 @@ export function SplitStat({
         </span>
       </div>
       <div className="mt-2 text-[12px] font-medium text-slate-700">{label}</div>
-      {delta ? <DeltaChip delta={delta} /> : null}
-      {hint && !delta && (
-        <div className="text-[11px] text-slate-500">{hint}</div>
-      )}
+      {/* ONE SLOT, ALWAYS THE SAME HEIGHT. A delta, a hint, a note, or
+          nothing: the tile never grows or shrinks when the filter changes,
+          so the page above the list does not move. */}
+      <div className="min-h-[17px] text-[11px] leading-[17px]">
+        {delta ? (
+          <DeltaChip delta={delta} />
+        ) : hint ? (
+          <span className="text-slate-500">{hint}</span>
+        ) : note ? (
+          <span className="text-slate-400">{note}</span>
+        ) : null}
+      </div>
     </>
   );
   if (linkTo) {
@@ -458,6 +527,7 @@ function MatchedTile({
   number,
   label,
   delta,
+  note,
   active,
   onClick,
 }: {
@@ -466,6 +536,9 @@ function MatchedTile({
   number: number;
   label: string;
   delta?: Delta | null;
+  /** Said in the delta's slot when there is no delta; the slot keeps its
+   *  height either way so the tile never moves. */
+  note?: string;
   active: boolean;
   onClick: () => void;
 }) {
@@ -488,8 +561,9 @@ function MatchedTile({
       )}
     >
       <span
+        key={number}
         className={cn(
-          "font-mono text-3xl font-semibold leading-none tabular-nums tracking-tight sm:text-4xl",
+          "animate-in fade-in font-mono text-3xl font-semibold leading-none tabular-nums tracking-tight duration-500 sm:text-4xl",
           numberCls,
         )}
       >
@@ -499,7 +573,9 @@ function MatchedTile({
         <Icon aria-hidden className={cn("h-3.5 w-3.5 flex-shrink-0", iconCls)} />
         {label}
       </span>
-      {delta ? <DeltaChip delta={delta} /> : null}
+      <span className="block min-h-[17px] text-[11px] leading-[17px]">
+        {delta ? <DeltaChip delta={delta} /> : note ? <span className="text-slate-400">{note}</span> : null}
+      </span>
     </button>
   );
 }
@@ -546,14 +622,24 @@ function sampleWorkbook(summary: Summary): { name: string; rows: (string | numbe
  * keeps the button exercisable end to end under VITE_MOCK=true: a click
  * downloads a spreadsheet a customer can actually open, not a stub.
  */
+/** The report's date as it appears in a filename, from the crawl's finish. */
+export function reportDate(summary: { finished_at: string | null }): string {
+  return summary.finished_at
+    ? new Date(summary.finished_at).toISOString().slice(0, 10)
+    : new Date().toISOString().slice(0, 10);
+}
+
 function ExportResultsButton({ token, summary }: { token: string; summary: Summary }) {
   const onClick = async () => {
     if (MOCK) {
       const { buildXlsxBlob } = await import("../lib/xlsx");
+      const { MOCK_CUSTOMER_DOMAIN } = await import("../lib/mockData");
       const url = URL.createObjectURL(buildXlsxBlob(sampleWorkbook(summary)));
       const a = document.createElement("a");
       a.href = url;
-      a.download = "pathfinder-results-sample.xlsx";
+      // Same name the crawler puts on the real file: the customer's
+      // domain and the report's date.
+      a.download = `${MOCK_CUSTOMER_DOMAIN}-${reportDate(summary)}.xlsx`;
       document.body.appendChild(a);
       a.click();
       a.remove();
@@ -598,7 +684,7 @@ type Row = {
   cert_changed_lines: MatchedSeatLine[];
 };
 
-function DrilldownList({ token }: { token: string }) {
+function DrilldownList({ token, lines }: { token: string; lines: string[] }) {
   const [tab, setTab] = useState<DrillTab>("all");
   const [rows, setRows] = useState<Row[]>([]);
   const [total, setTotal] = useState(0);
@@ -608,13 +694,16 @@ function DrilldownList({ token }: { token: string }) {
   const [page, setPage] = useState(1);
   const [query, setQuery] = useState("");
   const [truncated, setTruncated] = useState(false);
+  // Bumps each time a list lands, so the new rows ease in as one piece.
+  const [settled, setSettled] = useState(0);
 
-  // A new search or a new tab is a new list, so it starts at its first page.
-  // Without this, searching from page 7 asks for page 7 of a result that may
-  // have one page, and the reader gets an empty list for a term that matches.
+  // A new search, a new tab or a new line selection is a new list, so it
+  // starts at its first page. Without this, searching from page 7 asks
+  // for page 7 of a result that may have one page, and the reader gets an
+  // empty list for a term that matches.
   useEffect(() => {
     setPage(1);
-  }, [tab, query]);
+  }, [tab, query, lines]);
 
   useEffect(() => {
     let cancelled = false;
@@ -623,7 +712,7 @@ function DrilldownList({ token }: { token: string }) {
     setExpanded(null);
     const p =
       tab === "all"
-        ? api.matchedDevelopers(token, page, query).then((r) => ({
+        ? api.matchedDevelopers(token, page, query, lines).then((r) => ({
             rows: r.rows.map(
               (d: MatchedDeveloper): Row => ({
                 developer_id: d.developer_id,
@@ -644,7 +733,7 @@ function DrilldownList({ token }: { token: string }) {
             total: r.total,
             truncated: r.truncated ?? false,
           }))
-        : api.developerEvents(token, tab, page, query).then((r) => ({
+        : api.developerEvents(token, tab, page, query, lines).then((r) => ({
             rows: r.rows.map(
               (d: DeveloperEvent): Row => ({
                 developer_id: d.developer_id,
@@ -670,44 +759,66 @@ function DrilldownList({ token }: { token: string }) {
       setRows(data.rows);
       setTotal(data.total);
       setTruncated(data.truncated);
+      setSettled((n) => n + 1);
     })
       .catch((e: Error) => !cancelled && setError(e.message))
       .finally(() => !cancelled && setLoading(false));
     return () => {
       cancelled = true;
     };
-  }, [token, tab, page, query]);
+  }, [token, tab, page, query, lines]);
 
   return (
     <div>
-      <div className="mb-3 flex flex-wrap items-center gap-2">
-        <Tabs value={tab} onValueChange={(v) => setTab(v as DrillTab)}>
-          <TabsList>
-            <TabsTrigger value="all">All matched</TabsTrigger>
-            <TabsTrigger value="added">Added</TabsTrigger>
-            <TabsTrigger value="removed">Removed</TabsTrigger>
-            <TabsTrigger value="changed">Changed</TabsTrigger>
-          </TabsList>
-        </Tabs>
-        <SearchBox
-          value={query}
-          onChange={setQuery}
-          placeholder="Search publishers"
-          label="Search matched publishers"
-        />
-        <span className="text-xs text-slate-500">
-          {total.toLocaleString()}{" "}
-          {tab === "all" ? "matched" : "with changes"}
-        </span>
+      {/* Tabs, then a full-width search, in the Changes page's grammar,
+          so the two pages read as one product. */}
+      <div className="mb-3 space-y-2">
+        <div className="flex flex-wrap items-center gap-3">
+          <Tabs value={tab} onValueChange={(v) => setTab(v as DrillTab)}>
+            <TabsList>
+              <TabsTrigger value="all">All matched</TabsTrigger>
+              <TabsTrigger value="added">Added</TabsTrigger>
+              <TabsTrigger value="removed">Removed</TabsTrigger>
+              <TabsTrigger value="changed">Changed</TabsTrigger>
+            </TabsList>
+          </Tabs>
+          <span className="text-xs text-slate-500">
+            {total.toLocaleString()}{" "}
+            {tab === "all" ? "matched" : "with changes"}
+          </span>
+          {loading && settled > 0 && <Dots />}
+        </div>
+        <div className="relative w-full">
+          <Search className="pointer-events-none absolute left-3.5 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
+          <input
+            value={query}
+            onChange={(e) => setQuery(e.target.value)}
+            placeholder="Search publishers"
+            aria-label="Search matched publishers"
+            className="h-10 w-full rounded-full border border-border bg-white pl-10 pr-4 text-sm text-slate-900 outline-none transition-colors placeholder:text-slate-400 focus:border-primary/40"
+          />
+        </div>
       </div>
+      {/* The rows stay on screen while a new list is read, dimmed, with
+          the dots above saying so; only the very first read shows the
+          loader. When the new list lands it eases in as one piece, so a
+          filter change never collapses the page and springs it back. */}
       <div>
-        {loading && <p className="text-sm text-slate-500">Loading...</p>}
+        {loading && settled === 0 && <p className="text-sm text-slate-500">Loading...</p>}
         {error && <p className="text-sm text-critical">{error}</p>}
-        {!loading && !error && rows.length === 0 && (
-          <EmptyResult query={query} noun="publishers" />
+        {settled > 0 && !error && rows.length === 0 && (
+          <div className={cn("transition-opacity duration-300", loading && "opacity-60")}>
+            <EmptyResult query={query} noun="publishers" />
+          </div>
         )}
-        {!loading && !error && rows.length > 0 && (
-          <div className="space-y-3">
+        {!error && rows.length > 0 && (
+          <div
+            key={settled}
+            className={cn(
+              "animate-in fade-in space-y-3 transition-opacity duration-300 ease-out",
+              loading && "opacity-60",
+            )}
+          >
             {rows.map((r) => (
               <PublisherCard
                 key={r.developer_id}
@@ -721,7 +832,7 @@ function DrilldownList({ token }: { token: string }) {
             ))}
           </div>
         )}
-        {!loading && !error && rows.length > 0 && (
+        {!error && rows.length > 0 && (
           <div className="mt-4">
             <Pager
               page={page}
@@ -1244,7 +1355,7 @@ function lineEventToSeatLine(e: LineEvent): MatchedSeatLine {
  * family colour. The tabs filter the loaded apps by their weekly change; an
  * app that did not move this week appears under "All matched" only.
  */
-function MatchedAppsList({ token }: { token: string }) {
+function MatchedAppsList({ token, lines }: { token: string; lines: string[] }) {
   const [tab, setTab] = useState<DrillTab>("all");
   const [allRows, setAllRows] = useState<MatchedApp[]>([]);
   const [loading, setLoading] = useState(true);
@@ -1256,11 +1367,13 @@ function MatchedAppsList({ token }: { token: string }) {
   const [truncated, setTruncated] = useState(false);
 
   const keyOf = (a: MatchedApp) => `${a.store}:${a.bundle_id}`;
+  const [settled, setSettled] = useState(0);
 
-  // A new search is a new list and starts at its first page.
+  // A new search or a new line selection is a new list and starts at its
+  // first page.
   useEffect(() => {
     setPage(1);
-  }, [query]);
+  }, [query, lines]);
 
   useEffect(() => {
     let cancelled = false;
@@ -1268,12 +1381,13 @@ function MatchedAppsList({ token }: { token: string }) {
     setFailed(false);
     setExpanded(null);
     api
-      .matchedApps(token, page, query)
+      .matchedApps(token, page, query, lines)
       .then((r) => {
         if (!cancelled) {
           setAllRows(r.rows ?? []);
           setTotal(r.total ?? 0);
           setTruncated(r.truncated ?? false);
+          setSettled((n) => n + 1);
         }
       })
       .catch(() => {
@@ -1286,13 +1400,14 @@ function MatchedAppsList({ token }: { token: string }) {
           setAllRows([]);
           setTotal(0);
           setFailed(true);
+          setSettled((n) => n + 1);
         }
       })
       .finally(() => !cancelled && setLoading(false));
     return () => {
       cancelled = true;
     };
-  }, [token, page, query]);
+  }, [token, page, query, lines]);
 
   // A card held open from one tab must not appear under another.
   useEffect(() => setExpanded(null), [tab]);
@@ -1308,38 +1423,53 @@ function MatchedAppsList({ token }: { token: string }) {
 
   return (
     <div>
-      <div className="mb-3 flex flex-wrap items-center gap-2">
-        <Tabs value={tab} onValueChange={(v) => setTab(v as DrillTab)}>
-          <TabsList>
-            <TabsTrigger value="all">All matched</TabsTrigger>
-            <TabsTrigger value="added">Added</TabsTrigger>
-            <TabsTrigger value="removed">Removed</TabsTrigger>
-            <TabsTrigger value="changed">Changed</TabsTrigger>
-          </TabsList>
-        </Tabs>
-        <SearchBox
-          value={query}
-          onChange={setQuery}
-          placeholder="Search apps"
-          label="Search matched apps"
-        />
-        <span className="text-xs text-slate-500">
-          {(tab === "all" ? total : rows.length).toLocaleString()}{" "}
-          {tab === "all" ? "matched" : "with changes"}
-        </span>
+      <div className="mb-3 space-y-2">
+        <div className="flex flex-wrap items-center gap-3">
+          <Tabs value={tab} onValueChange={(v) => setTab(v as DrillTab)}>
+            <TabsList>
+              <TabsTrigger value="all">All matched</TabsTrigger>
+              <TabsTrigger value="added">Added</TabsTrigger>
+              <TabsTrigger value="removed">Removed</TabsTrigger>
+              <TabsTrigger value="changed">Changed</TabsTrigger>
+            </TabsList>
+          </Tabs>
+          <span className="text-xs text-slate-500">
+            {(tab === "all" ? total : rows.length).toLocaleString()}{" "}
+            {tab === "all" ? "matched" : "with changes"}
+          </span>
+          {loading && settled > 0 && <Dots />}
+        </div>
+        <div className="relative w-full">
+          <Search className="pointer-events-none absolute left-3.5 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
+          <input
+            value={query}
+            onChange={(e) => setQuery(e.target.value)}
+            placeholder="Search apps"
+            aria-label="Search matched apps"
+            className="h-10 w-full rounded-full border border-border bg-white pl-10 pr-4 text-sm text-slate-900 outline-none transition-colors placeholder:text-slate-400 focus:border-primary/40"
+          />
+        </div>
       </div>
-      {loading && <p className="text-sm text-slate-500">Loading...</p>}
-      {!loading && rows.length === 0 && (
-        failed ? (
-          <p className="rounded-lg border border-dashed border-border bg-muted/20 p-6 text-center text-sm text-slate-500">
-            No matched apps to show yet.
-          </p>
-        ) : (
-          <EmptyResult query={query} noun="apps" />
-        )
+      {loading && settled === 0 && <p className="text-sm text-slate-500">Loading...</p>}
+      {settled > 0 && rows.length === 0 && (
+        <div className={cn("transition-opacity duration-300", loading && "opacity-60")}>
+          {failed ? (
+            <p className="rounded-lg border border-dashed border-border bg-muted/20 p-6 text-center text-sm text-slate-500">
+              No matched apps to show yet.
+            </p>
+          ) : (
+            <EmptyResult query={query} noun="apps" />
+          )}
+        </div>
       )}
-      {!loading && rows.length > 0 && (
-        <div className="space-y-3">
+      {rows.length > 0 && (
+        <div
+          key={settled}
+          className={cn(
+            "animate-in fade-in space-y-3 transition-opacity duration-300 ease-out",
+            loading && "opacity-60",
+          )}
+        >
           {rows.map((a) => (
             <MatchedAppCard
               key={keyOf(a)}
@@ -1357,7 +1487,7 @@ function MatchedAppsList({ token }: { token: string }) {
           All matched. The change tabs filter the loaded page in the browser,
           so their count is a count of this page and paging it would be a
           claim the data cannot support. */}
-      {!loading && !failed && tab === "all" && rows.length > 0 && (
+      {!failed && tab === "all" && rows.length > 0 && (
         <div className="mt-4">
           <Pager
             page={page}

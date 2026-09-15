@@ -20,7 +20,7 @@ import { PageShell } from "@/components/PageShell";
 import { formatWeek, WeekLine } from "@/components/WeekLine";
 import { useReportScope } from "@/lib/reportScope";
 import { cn } from "@/lib/utils";
-import { MiniStat, SplitStat, type StatTone } from "./CrawlReport";
+import { MiniStat, SplitStat, reportDate, type StatTone } from "./CrawlReport";
 
 /**
  * DECLARATIONS.
@@ -325,6 +325,7 @@ export default function CrawlDeclarations() {
             <KindSection
               key={section.kind}
               section={section}
+              fileDate={reportDate({ finished_at: summary?.finished_at ?? null })}
               filtered={needle.length > 0}
               page={pages[section.kind]}
               onPage={(n) => setPages((p) => ({ ...p, [section.kind]: n }))}
@@ -367,6 +368,7 @@ export default function CrawlDeclarations() {
 
 function KindSection({
   section,
+  fileDate,
   filtered,
   page,
   onPage,
@@ -375,6 +377,8 @@ function KindSection({
   capped,
 }: {
   section: DeclarationSection;
+  /** The report's date, for the CSV filenames. */
+  fileDate: string;
   filtered: boolean;
   page: number;
   onPage: (n: number) => void;
@@ -395,7 +399,7 @@ function KindSection({
         <div className="min-w-0">
           <h2
             className="flex items-center gap-2 font-display text-base font-semibold tracking-tight text-slate-900"
-            title={`${copy.variable}: ${copy.blurb}`}
+            title={copy.variable}
           >
             <span
               aria-hidden
@@ -403,6 +407,7 @@ function KindSection({
             />
             {copy.title}
           </h2>
+          <p className="mt-0.5 text-sm text-slate-500">{copy.blurb}</p>
         </div>
         {total > 0 && (
           <div className="hidden flex-shrink-0 text-right text-xs text-slate-500 sm:block">
@@ -426,6 +431,7 @@ function KindSection({
             <SubjectCard
               key={`${s.kind}|${s.domain}`}
               subject={s}
+              fileDate={fileDate}
               capped={capped}
               open={open.has(`${s.kind}|${s.domain}`)}
               onToggle={() => onToggle(`${s.kind}|${s.domain}`)}
@@ -479,11 +485,13 @@ function KindSection({
  */
 function SubjectCard({
   subject,
+  fileDate,
   capped,
   open,
   onToggle,
 }: {
   subject: DeclarationSubject;
+  fileDate: string;
   /** Legacy payloads cap the roster at 50; the count stays honest. */
   capped: boolean;
   open: boolean;
@@ -594,8 +602,10 @@ function SubjectCard({
               type="button"
               onClick={(e) => {
                 e.stopPropagation();
+                // Named like the workbook: the customer's domain, the
+                // kind, and the report's date.
                 downloadCsv(
-                  `declarations-${subject.kind.replace(/ /g, "-")}-${subject.domain}.csv`,
+                  `${subject.domain.replace(/^www\./i, "")}-${subject.kind.replace(/ /g, "-")}s-${fileDate}.csv`,
                   subjectCsv(subject),
                 );
               }}

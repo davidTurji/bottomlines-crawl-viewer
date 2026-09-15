@@ -1,5 +1,8 @@
 import BLoader from "@/components/BLoader";
 import { useEffect, useMemo, useState } from "react";
+import { Dots } from "@/components/Dots";
+import { LineFilter } from "@/components/LineFilter";
+import { useLineFilter } from "@/lib/lineFilter";
 import {
   ArrowRight,
   ChevronDown,
@@ -108,13 +111,19 @@ export default function CrawlChanges() {
   const [error, setError] = useState<string | null>(null);
   const [page, setPage] = useState(1);
   const [open, setOpen] = useState<Set<string>>(new Set());
+  // Bumps each time a list lands, so the new cards ease in as one piece.
+  const [settled, setSettled] = useState(0);
 
   const filter = ssp.trim();
+  /* The seat-line filter, shared with the overview through the URL. The
+     events are re-fetched under it, and every KPI on this page is counted
+     from the rows, so the numbers follow the filter by construction. */
+  const { selected: lines, setSelected: setLines } = useLineFilter();
 
   useEffect(() => {
     let cancelled = false;
     api
-      .summary(token)
+      .summary(token, lines)
       .then((s) => !cancelled && setSummary(s))
       .catch(() => {});
     api
@@ -124,7 +133,7 @@ export default function CrawlChanges() {
     return () => {
       cancelled = true;
     };
-  }, [token]);
+  }, [token, lines]);
 
   // One fetch covers every bucket. The page groups rows into lines, and a
   // line's placements can straddle a server page boundary, so grouping a
@@ -137,21 +146,23 @@ export default function CrawlChanges() {
     setError(null);
     fetchAllEvents(token, {
       ssp_domain: filter || undefined,
+      lines: lines.length ? lines : undefined,
     })
       .then((r) => {
         if (cancelled) return;
         setRows(r.rows);
         setTruncated(r.truncated);
         setOpen(new Set());
+        setSettled((n) => n + 1);
       })
       .catch((e: Error) => !cancelled && setError(e.message))
       .finally(() => !cancelled && setLoading(false));
     return () => {
       cancelled = true;
     };
-  }, [token, filter]);
+  }, [token, filter, lines]);
 
-  useEffect(() => setPage(1), [bucket, filter]);
+  useEffect(() => setPage(1), [bucket, filter, lines]);
 
 
   const groups = useMemo(() => groupByLine(rows), [rows]);
@@ -257,7 +268,9 @@ export default function CrawlChanges() {
   // confident percentage from a partial numerator, and the crawls it
   // happens on are the large ones, which is to say the real customers'.
   // The "showing the first N" note below stays either way.
-  const comparable = !filter && !truncated;
+  // A seat-line filter makes every current count a slice of the week while
+  // last week's figures are the whole week, so nothing is comparable.
+  const comparable = !filter && !truncated && lines.length === 0;
   const prevCounts = useMemo<Record<EventKind, number | null>>(
     () => ({
       added: previous?.hero_diff.line_totals.added ?? null,
@@ -307,28 +320,56 @@ export default function CrawlChanges() {
 
   return (
     <PageShell>
-      {/* Page header */}
-      <div className="min-w-0">
-        <h1 className="text-xl font-bold leading-tight tracking-tight text-slate-900 sm:text-2xl">
-          Changes
-        </h1>
-        <p className="mt-1 text-sm text-slate-500">
-          {isFirstCrawl
-            ? "Lines publishers added, dropped, or re-certified. First crawl, so the comparison begins next week."
-            : "Lines publishers added, dropped, or re-certified this week."}
-        </p>
-        <WeekLine
-          week={weekLabel}
-          previousWeek={prevWeekLabel}
-          isFirstCrawl={summary?.previous_job_id === null}
-          className="mt-1.5"
+      {/* Page header. The seat-line filter sits top right, exactly where the
+          overview keeps it, so it is the same control in the same place on
+          both pages. */}
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+        <div className="min-w-0">
+          <h1 className="text-xl font-bold leading-tight tracking-tight text-slate-900 sm:text-2xl">
+            Changes
+          </h1>
+          <p className="mt-1 text-sm text-slate-500">
+            {isFirstCrawl
+              ? "Lines publishers added, dropped, or re-certified. First crawl, so the comparison begins next week."
+              : "Lines publishers added, dropped, or re-certified this week."}
+          </p>
+          <WeekLine
+            week={weekLabel}
+            previousWeek={prevWeekLabel}
+            isFirstCrawl={summary?.previous_job_id === null}
+            className="mt-1.5"
+          />
+        </div>
+        <LineFilter
+          seats={summary?.watchlist?.seats ?? []}
+          selected={lines}
+          onChange={setLines}
         />
       </div>
+      <p className="-mt-2 min-h-[18px] text-[12px] leading-[18px] text-slate-500">
+        {lines.length > 0 && (
+          <>
+            Only changes on{" "}
+            <span className="font-mono text-slate-700">
+              {lines.length === 1 ? "the selected line" : `${lines.length} selected lines`}
+            </span>
+            .
+          </>
+        )}
+      </p>
 
       {/* The KPI row, scoped to the selected tab. Same two-card shape as the
           overview so a reader who has seen one has seen both. */}
-      {!loading && !error && (
-        <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
+      {/* The KPIs and the list stay on screen while a filter refetches;
+          the dots beside the tabs say new numbers are coming. Only a first
+          load with nothing yet shows the loader. */}
+      {!error && (!loading || rows.length > 0) && (
+        <div
+          className={cn(
+            "grid grid-cols-1 gap-4 transition-opacity duration-300 ease-out lg:grid-cols-2",
+            loading && "opacity-60",
+          )}
+        >
           <div className="rounded-2xl border border-border bg-white p-5 shadow-sm">
             <div className="mb-3 flex items-baseline justify-between gap-3">
               <div>
@@ -381,6 +422,7 @@ export default function CrawlChanges() {
                     number={kpi.byEvent.added}
                     label="Lines added"
                     delta={deltaFor("added", kpi.byEvent.added)}
+                    note={lines.length ? "under the selected lines" : undefined}
                   />
                   <SplitStat
                     tone="critical"
@@ -388,6 +430,7 @@ export default function CrawlChanges() {
                     number={kpi.byEvent.removed}
                     label="Lines removed"
                     delta={deltaFor("removed", kpi.byEvent.removed)}
+                    note={lines.length ? "under the selected lines" : undefined}
                   />
                 </>
               ) : (
@@ -408,6 +451,7 @@ export default function CrawlChanges() {
                     number={kpi.placements}
                     label={TONES[bucket].label}
                     delta={deltaFor(bucket, kpi.placements)}
+                    note={lines.length ? "under the selected lines" : undefined}
                   />
                   <SplitStat number={kpi.lines} label="Distinct lines" />
                 </>
@@ -457,12 +501,14 @@ export default function CrawlChanges() {
                 number={kpi.publishers}
                 label="Publishers affected"
                 delta={publishersAffectedDelta}
+                note={lines.length ? "under the selected lines" : undefined}
               />
               <SplitStat
                 tone="app"
                 number={kpi.apps}
                 label="Apps affected"
                 delta={appsAffectedDelta}
+                note={lines.length ? "under the selected lines" : undefined}
               />
             </div>
             )}
@@ -478,14 +524,17 @@ export default function CrawlChanges() {
             The per-tab counts it used to carry now live in the KPI row
             directly above, which re-scopes with the tab, so printing them
             on the control as well was the same number twice. */}
-        <Tabs value={bucket} onValueChange={(v) => setBucket(v as Bucket)}>
-          <TabsList>
-            <TabsTrigger value="all">All</TabsTrigger>
-            <TabsTrigger value="added">Added</TabsTrigger>
-            <TabsTrigger value="removed">Removed</TabsTrigger>
-            <TabsTrigger value="cert_changed">Cert changes</TabsTrigger>
-          </TabsList>
-        </Tabs>
+        <div className="flex items-center gap-3">
+          <Tabs value={bucket} onValueChange={(v) => setBucket(v as Bucket)}>
+            <TabsList>
+              <TabsTrigger value="all">All</TabsTrigger>
+              <TabsTrigger value="added">Added</TabsTrigger>
+              <TabsTrigger value="removed">Removed</TabsTrigger>
+              <TabsTrigger value="cert_changed">Cert changes</TabsTrigger>
+            </TabsList>
+          </Tabs>
+          {loading && rows.length > 0 && <Dots />}
+        </div>
 
         <div className="relative w-full">
           <Search className="pointer-events-none absolute left-3.5 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
@@ -499,7 +548,7 @@ export default function CrawlChanges() {
         </div>
       </div>
 
-      {loading && (
+      {loading && rows.length === 0 && (
         <div className="flex items-center gap-2 py-8 text-sm text-slate-500">
           <BLoader label="Loading" size={140} />
           Loading line changes...
@@ -529,8 +578,14 @@ export default function CrawlChanges() {
         </p>
       )}
 
-      {!loading && !error && shown.length > 0 && (
-        <div className="space-y-3">
+      {!error && shown.length > 0 && (
+        <div
+          key={settled}
+          className={cn(
+            "animate-in fade-in space-y-3 transition-opacity duration-300 ease-out",
+            loading && "opacity-60",
+          )}
+        >
           {shown.map((g) => (
             <ChangeCard
               key={g.key}
@@ -1095,7 +1150,7 @@ export function fileLabel(kind: string): string {
  */
 async function fetchAllEvents(
   token: string,
-  filters: { ssp_domain?: string },
+  filters: { ssp_domain?: string; lines?: string[] },
 ): Promise<{ rows: LineEvent[]; truncated: boolean }> {
   const acc: LineEvent[] = [];
   for (let p = 1; p <= FETCH_CAP; p += 1) {
