@@ -1,0 +1,102 @@
+name: Deploy viewer
+
+# Every push to main ships the Path Finder viewer to Cloud Run.
+#
+# The viewer is a Vite SPA served by nginx, which also reverse-proxies
+# /api to the crawler service. The Dockerfile does the npm build, so a
+# plain `gcloud run deploy --source .` is enough: Cloud Build reads the
+# Dockerfile, pushes to Artifact Registry, and swaps the revision.
+#
+# NOTHING ENVIRONMENT-SPECIFIC IS BAKED INTO THE BUNDLE. The API base
+# defaults to the same-origin path /api, mock mode defaults off, chat
+# defaults off. The one runtime setting, CRAWLER_API_URL, lives on the
+# Cloud Run service and is preserved across a --source deploy, which is
+# why this workflow passes no --set-env-vars: passing it here would make
+# this file a second, competing source of truth for that value.
+#
+# Auth is keyless Workload Identity Federation, the same shape the four
+# sibling repos use (bottomlines-app, -backend, -manage-console, -web):
+# the `github` WIF pool allows this repo, and `bottomlines-bootstrap` is
+# the impersonation target. The org policy forbids service-account JSON
+# keys, so there is no key to leak or rotate.
+#
+# Required GitHub secrets:
+#   GCP_PROJECT_ID, GCP_REGION, GCP_WIF_PROVIDER, GCP_SA_EMAIL
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+concurrency:
+  # Cancel a QUEUED deploy when a newer commit arrives, but never
+  # interrupt one already talking to Cloud Run: an aborted deploy
+  # mid-revision-swap is much worse than a queued one waiting its turn.
+  group: deploy-viewer-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  SERVICE: bl-crawl-viewer
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - uses: actions/checkout@v4
+
+      # Typecheck and build before anything is deployed. The Dockerfile
+      # runs `npm run build` too, so a broken build would fail the deploy
+      # anyway — but it would fail it slowly, inside Cloud Build, after
+      # the source upload, with the error buried in build logs. Failing
+      # here costs a minute and says exactly what is wrong.
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: npm
+      - run: npm ci --no-audit --no-fund
+      - run: npm run typecheck
+      - run: npm run build
+
+      - name: Authenticate to GCP
+        uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: ${{ secrets.GCP_WIF_PROVIDER }}
+          service_account: ${{ secrets.GCP_SA_EMAIL }}
+
+      - name: Set up gcloud
+        uses: google-github-actions/setup-gcloud@v2
+        with:
+          project_id: ${{ secrets.GCP_PROJECT_ID }}
+
+      - name: Deploy to Cloud Run
+        run: |
+          gcloud run deploy "$SERVICE" \
+            --source . \
+            --region="${{ secrets.GCP_REGION }}" \
+            --quiet
+
+      # A customer link must keep working across the swap, so prove the
+      # new revision actually serves before calling this a success.
+      # Cloud Run only routes traffic to a revision that came up, but a
+      # container that starts and then 500s on every request would still
+      # count as "deployed" without this.
+      - name: Smoke-test the deployed revision
+        run: |
+          URL=$(gcloud run services describe "$SERVICE" \
+            --region="${{ secrets.GCP_REGION }}" \
+            --format='value(status.url)')
+          echo "-- deployed at $URL"
+          for attempt in 1 2 3 4 5; do
+            code=$(curl -s -o /dev/null -w '%{http_code}' "$URL/")
+            echo "   attempt $attempt: GET $URL/ -> $code"
+            if [ "$code" = "200" ]; then
+              echo "revision is serving"
+              exit 0
+            fi
+            sleep 6
+          done
+          echo "::error::deployed revision did not answer 200 after 5 attempts"
+          exit 1
