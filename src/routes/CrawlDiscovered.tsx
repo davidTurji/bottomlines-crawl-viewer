@@ -1,4 +1,8 @@
-import BLoader from "@/components/BLoader";
+import {
+  SkeletonInlineRows,
+  SkeletonRows,
+  SkeletonStatCards,
+} from "@/components/Skeleton";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { ChevronDown, Download, Radar } from "lucide-react";
 
@@ -199,6 +203,7 @@ export default function CrawlDiscovered() {
           week={weekLabel}
           previousWeek={prevWeekLabel}
           isFirstCrawl={summary?.previous_job_id === null}
+          pending={!summary}
           className="mt-1.5"
         />
       </div>
@@ -207,6 +212,11 @@ export default function CrawlDiscovered() {
           that put last week's placements next to this week's. Once each
           stat here carries its own "vs last week" delta, that second card
           was the same comparison spelled out a second way, so it went. */}
+      {/* The KPI card's own slot, so the real card lands where its
+          outline was rather than arriving above the filter bar and
+          pushing the list down. */}
+      {loading && !totals && <SkeletonStatCards />}
+
       {!noDiscovery && totals && (
         <div className="rounded-2xl border border-border bg-white p-5 shadow-sm">
           <div className="mb-3 flex items-baseline justify-between gap-3">
@@ -294,12 +304,7 @@ export default function CrawlDiscovered() {
         </div>
       )}
 
-      {loading && (
-        <div className="flex items-center gap-2 py-8 text-sm text-slate-500">
-          <BLoader label="Loading" size={140} />
-          Loading discovered lines...
-        </div>
-      )}
+      {loading && <SkeletonRows rows={6} label="Loading discovered lines" />}
       {error && <p className="py-4 text-sm text-critical">{error}</p>}
 
       {noDiscovery && <NoDiscoveryCard />}
@@ -609,7 +614,7 @@ function LineCard({
             )}
           </div>
           {placements === "loading" || placements === null ? (
-            <p className="py-2 text-xs text-slate-500">Loading...</p>
+            <SkeletonInlineRows rows={4} label="Loading publishers for this line" />
           ) : placements === "error" ? (
             <p className="py-2 text-xs text-critical">
               Could not load the publishers for this line.

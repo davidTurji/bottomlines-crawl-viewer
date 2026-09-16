@@ -1,3 +1,4 @@
+import { Skeleton } from "@/components/Skeleton";
 import { cn } from "@/lib/utils";
 
 /**
@@ -20,6 +21,7 @@ export function WeekLine({
   week,
   previousWeek,
   isFirstCrawl,
+  pending,
   className,
 }: {
   week: string | null;
@@ -33,9 +35,28 @@ export function WeekLine({
    * is simply left unmentioned.
    */
   isFirstCrawl?: boolean;
+  /**
+   * True while the summary this line is built from is still in flight.
+   *
+   * Without it the header is a heading and a subtitle during loading and a
+   * heading, a subtitle AND a week line a moment later, so everything below
+   * the header steps down the page as the report arrives. A reserved
+   * skeleton bar of the same height holds the space.
+   *
+   * Deliberately NOT inferred from `week == null`: a week can be genuinely
+   * unknown (the prior summary 404d, an old link), and a skeleton that
+   * never resolves is worse than a line that is simply not there.
+   */
+  pending?: boolean;
   className?: string;
 }) {
-  if (!week) return null;
+  if (!week) {
+    return pending ? (
+      <Skeleton
+        className={cn("h-[13px] w-64 max-w-full rounded-md", className)}
+      />
+    ) : null;
+  }
   return (
     <p className={cn("text-[13px] text-slate-500", className)}>
       Week of <span className="font-medium text-slate-700">{week}</span>

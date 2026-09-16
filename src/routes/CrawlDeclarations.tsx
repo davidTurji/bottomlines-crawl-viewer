@@ -1,4 +1,4 @@
-import BLoader from "@/components/BLoader";
+import { DeclarationsSkeleton } from "@/components/Skeleton";
 import { useCallback, useEffect, useMemo, useState, type ReactNode } from "react";
 import { ChevronDown, Download } from "lucide-react";
 
@@ -228,6 +228,7 @@ export default function CrawlDeclarations() {
           week={weekLabel}
           previousWeek={prevWeekLabel}
           isFirstCrawl={summary?.previous_job_id === null}
+          pending={!summary}
           className="mt-1.5"
         />
       </div>
@@ -295,10 +296,7 @@ export default function CrawlDeclarations() {
       )}
 
       {loading && (
-        <div className="flex items-center gap-2 py-8 text-sm text-slate-500">
-          <BLoader label="Loading" size={140} />
-          Loading declarations...
-        </div>
+        <DeclarationsSkeleton />
       )}
 
       {unavailable && (

@@ -1,4 +1,4 @@
-import BLoader from "@/components/BLoader";
+import { SkeletonRows, SkeletonStatCards } from "@/components/Skeleton";
 import { useEffect, useMemo, useState } from "react";
 import { Dots } from "@/components/Dots";
 import { LineFilter } from "@/components/LineFilter";
@@ -337,6 +337,7 @@ export default function CrawlChanges() {
             week={weekLabel}
             previousWeek={prevWeekLabel}
             isFirstCrawl={summary?.previous_job_id === null}
+            pending={!summary}
             className="mt-1.5"
           />
         </div>
@@ -344,6 +345,11 @@ export default function CrawlChanges() {
           seats={summary?.watchlist?.seats ?? []}
           selected={lines}
           onChange={setLines}
+          // Only a REFILTER, not the page's own first load: on a cold open
+          // the skeleton below already says the page is loading, and a
+          // second "Filtering..." beside it would claim the reader had
+          // set a filter they never touched.
+          busy={loading && rows.length > 0}
         />
       </div>
       <p className="-mt-2 min-h-[18px] text-[12px] leading-[18px] text-slate-500">
@@ -363,6 +369,12 @@ export default function CrawlChanges() {
       {/* The KPIs and the list stay on screen while a filter refetches;
           the dots beside the tabs say new numbers are coming. Only a first
           load with nothing yet shows the loader. */}
+      {/* The KPI row's own slot. The real row sits ABOVE the tabs, so
+          the skeleton has to as well. */}
+      {!error && loading && rows.length === 0 && (
+        <SkeletonStatCards count={2} />
+      )}
+
       {!error && (!loading || rows.length > 0) && (
         <div
           className={cn(
@@ -549,10 +561,7 @@ export default function CrawlChanges() {
       </div>
 
       {loading && rows.length === 0 && (
-        <div className="flex items-center gap-2 py-8 text-sm text-slate-500">
-          <BLoader label="Loading" size={140} />
-          Loading line changes...
-        </div>
+        <SkeletonRows rows={6} label="Loading line changes" />
       )}
       {error && <p className="py-4 text-sm text-critical">{error}</p>}
 

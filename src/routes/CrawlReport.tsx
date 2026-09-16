@@ -1,4 +1,4 @@
-import BLoader from "@/components/BLoader";
+import { OverviewSkeleton, SkeletonRows } from "@/components/Skeleton";
 import { useEffect, useMemo, useState } from "react";
 import { LineFilter } from "@/components/LineFilter";
 import { Dots } from "@/components/Dots";
@@ -87,6 +87,20 @@ export default function CrawlReport() {
       .catch((e: ApiError) => {
         if (!cancelled) setError(e.message);
       });
+    return () => {
+      cancelled = true;
+    };
+  }, [token, lines, linesKey]);
+
+  // LAST WEEK'S SUMMARY DOES NOT TAKE THE LINE FILTER, so it belongs in its
+  // own effect keyed on the token alone. It used to sit in the one above
+  // and be re-read on every change of selection — and it is two round
+  // trips, not one (it reads this crawl's summary to learn the previous
+  // crawl's id, then reads that). Under the filter that was two thirds of
+  // the requests a tick fired, every one of them for an answer already in
+  // state and identical to the last.
+  useEffect(() => {
+    let cancelled = false;
     api
       .previousSummary(token)
       .then((p) => {
@@ -96,7 +110,7 @@ export default function CrawlReport() {
     return () => {
       cancelled = true;
     };
-  }, [token, lines, linesKey]);
+  }, [token]);
 
   if (error) {
     return (
@@ -113,9 +127,9 @@ export default function CrawlReport() {
 
   if (!summary) {
     return (
-      <div className="mx-auto flex max-w-6xl items-center justify-center px-4 py-16 sm:px-6">
-        <BLoader label="Loading your crawl" />
-      </div>
+      <PageShell className="space-y-5">
+        <OverviewSkeleton />
+      </PageShell>
     );
   }
 
@@ -180,6 +194,7 @@ export default function CrawlReport() {
             seats={summary.watchlist?.seats ?? []}
             selected={lines}
             onChange={setLines}
+            busy={refreshing}
           />
           <ExportResultsButton token={token} summary={summary} />
         </div>
@@ -804,7 +819,9 @@ function DrilldownList({ token, lines }: { token: string; lines: string[] }) {
           loader. When the new list lands it eases in as one piece, so a
           filter change never collapses the page and springs it back. */}
       <div>
-        {loading && settled === 0 && <p className="text-sm text-slate-500">Loading...</p>}
+        {loading && settled === 0 && (
+          <SkeletonRows rows={5} label="Loading matched publishers" />
+        )}
         {error && <p className="text-sm text-critical">{error}</p>}
         {settled > 0 && !error && rows.length === 0 && (
           <div className={cn("transition-opacity duration-300", loading && "opacity-60")}>
@@ -1450,7 +1467,9 @@ function MatchedAppsList({ token, lines }: { token: string; lines: string[] }) {
           />
         </div>
       </div>
-      {loading && settled === 0 && <p className="text-sm text-slate-500">Loading...</p>}
+      {loading && settled === 0 && (
+        <SkeletonRows rows={5} label="Loading matched apps" />
+      )}
       {settled > 0 && rows.length === 0 && (
         <div className={cn("transition-opacity duration-300", loading && "opacity-60")}>
           {failed ? (
