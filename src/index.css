@@ -726,3 +726,57 @@ All colors MUST be HSL.
     height: 0;
   }
 }
+
+/* ── Skeleton loading ──────────────────────────────────────────────
+   The report's loading state is a skeleton of the page it is about to
+   become, not a spinner in an empty column. Three rules keep it feeling
+   premium rather than busy:
+
+   1. ONE sweep, not a pulse. A pulsing opacity makes a page of blocks
+      blink in unison, which reads as a fault. A slow highlight travelling
+      left to right across a still block reads as work in progress.
+   2. The sweep is SHARED. `bl-sweep` animates a fixed-width highlight
+      across a 200% background, and every block runs the same duration, so
+      a card full of blocks sweeps as one object.
+   3. Rows CASCADE. A list stamps an increasing --bl-delay on each row, so
+      the sweep runs down the list the way the eye already does. The delay
+      is small (90ms) on purpose: enough to feel alive, not a wave.
+
+   Colours come from the design tokens, so the skeleton sits on the same
+   ivory ground as the real cards and never looks grey-on-grey. */
+@keyframes bl-sweep {
+  from {
+    background-position: 180% 0;
+  }
+  to {
+    background-position: -80% 0;
+  }
+}
+
+.bl-skeleton {
+  position: relative;
+  overflow: hidden;
+  border-radius: 9999px;
+  background-color: hsl(var(--muted));
+  background-image: linear-gradient(
+    90deg,
+    hsl(var(--muted)) 0%,
+    hsl(var(--muted)) 35%,
+    hsl(0 0% 100% / 0.85) 50%,
+    hsl(var(--muted)) 65%,
+    hsl(var(--muted)) 100%
+  );
+  background-size: 200% 100%;
+  background-repeat: no-repeat;
+  animation: bl-sweep 1.9s cubic-bezier(0.4, 0, 0.2, 1) infinite;
+  animation-delay: var(--bl-delay, 0ms);
+}
+
+/* The skeleton must never be the thing that makes the page feel unwell.
+   Under reduced motion it stays, still, as a calm grey plan of the page. */
+@media (prefers-reduced-motion: reduce) {
+  .bl-skeleton {
+    animation: none;
+    background-image: none;
+  }
+}

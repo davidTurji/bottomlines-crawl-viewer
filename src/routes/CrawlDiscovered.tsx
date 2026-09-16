@@ -1,4 +1,8 @@
-import BLoader from "@/components/BLoader";
+import {
+  SkeletonInlineRows,
+  SkeletonRows,
+  SkeletonStatCards,
+} from "@/components/Skeleton";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { ChevronDown, Download, Radar } from "lucide-react";
 
@@ -56,6 +60,14 @@ const PAGE_SIZE = 50;
 export default function CrawlDiscovered() {
   const { token } = useReportScope();
   const [summary, setSummary] = useState<Summary | null>(null);
+  // Whether the summary request has SETTLED, success or failure — which
+  // is not the same question as whether a summary arrived. Every page here
+  // swallows a summary failure (the week line is the only thing that reads
+  // it, and a page whose own numbers are fine should not die for a missing
+  // date), so `summary` stays null forever on an old artifact whose summary
+  // does not load. Reserving the week line's space on `!summary` would then
+  // shimmer a skeleton bar for ever on exactly those older links.
+  const [summarySettled, setSummarySettled] = useState(false);
   const [previous, setPrevious] = useState<Summary | null>(null);
   const [rows, setRows] = useState<DiscoveredLine[]>([]);
   const [total, setTotal] = useState(0);
@@ -81,7 +93,8 @@ export default function CrawlDiscovered() {
     api
       .summary(token)
       .then((s) => !cancelled && setSummary(s))
-      .catch(() => {});
+      .catch(() => {})
+      .finally(() => !cancelled && setSummarySettled(true));
     // Only for the week line's "compared with" date. The comparison figures
     // themselves come from the discovered-lines totals, not from here, so a
     // failure costs the date and nothing else.
@@ -199,6 +212,7 @@ export default function CrawlDiscovered() {
           week={weekLabel}
           previousWeek={prevWeekLabel}
           isFirstCrawl={summary?.previous_job_id === null}
+          pending={!summarySettled}
           className="mt-1.5"
         />
       </div>
@@ -207,6 +221,11 @@ export default function CrawlDiscovered() {
           that put last week's placements next to this week's. Once each
           stat here carries its own "vs last week" delta, that second card
           was the same comparison spelled out a second way, so it went. */}
+      {/* The KPI card's own slot, so the real card lands where its
+          outline was rather than arriving above the filter bar and
+          pushing the list down. */}
+      {loading && !totals && <SkeletonStatCards />}
+
       {!noDiscovery && totals && (
         <div className="rounded-2xl border border-border bg-white p-5 shadow-sm">
           <div className="mb-3 flex items-baseline justify-between gap-3">
@@ -294,12 +313,7 @@ export default function CrawlDiscovered() {
         </div>
       )}
 
-      {loading && (
-        <div className="flex items-center gap-2 py-8 text-sm text-slate-500">
-          <BLoader label="Loading" size={140} />
-          Loading discovered lines...
-        </div>
-      )}
+      {loading && <SkeletonRows rows={6} label="Loading discovered lines" />}
       {error && <p className="py-4 text-sm text-critical">{error}</p>}
 
       {noDiscovery && <NoDiscoveryCard />}
@@ -609,7 +623,7 @@ function LineCard({
             )}
           </div>
           {placements === "loading" || placements === null ? (
-            <p className="py-2 text-xs text-slate-500">Loading...</p>
+            <SkeletonInlineRows rows={4} label="Loading publishers for this line" />
           ) : placements === "error" ? (
             <p className="py-2 text-xs text-critical">
               Could not load the publishers for this line.

@@ -1,4 +1,4 @@
-import BLoader from "@/components/BLoader";
+import { DeclarationsSkeleton } from "@/components/Skeleton";
 import { useCallback, useEffect, useMemo, useState, type ReactNode } from "react";
 import { ChevronDown, Download } from "lucide-react";
 
@@ -99,6 +99,14 @@ const KIND_TONE: Record<
 export default function CrawlDeclarations() {
   const { token } = useReportScope();
   const [summary, setSummary] = useState<Summary | null>(null);
+  // Whether the summary request has SETTLED, success or failure — which
+  // is not the same question as whether a summary arrived. Every page here
+  // swallows a summary failure (the week line is the only thing that reads
+  // it, and a page whose own numbers are fine should not die for a missing
+  // date), so `summary` stays null forever on an old artifact whose summary
+  // does not load. Reserving the week line's space on `!summary` would then
+  // shimmer a skeleton bar for ever on exactly those older links.
+  const [summarySettled, setSummarySettled] = useState(false);
   const [previous, setPrevious] = useState<Summary | null>(null);
   const [data, setData] = useState<NormalizedDeclarations | null>(null);
   const [loading, setLoading] = useState(true);
@@ -118,7 +126,8 @@ export default function CrawlDeclarations() {
     api
       .summary(token)
       .then((s) => !cancelled && setSummary(s))
-      .catch(() => {});
+      .catch(() => {})
+      .finally(() => !cancelled && setSummarySettled(true));
     // Only for the week line's "compared with" date; the page's own numbers
     // never depend on it, so a failure costs the date and nothing else.
     api
@@ -228,6 +237,7 @@ export default function CrawlDeclarations() {
           week={weekLabel}
           previousWeek={prevWeekLabel}
           isFirstCrawl={summary?.previous_job_id === null}
+          pending={!summarySettled}
           className="mt-1.5"
         />
       </div>
@@ -295,10 +305,7 @@ export default function CrawlDeclarations() {
       )}
 
       {loading && (
-        <div className="flex items-center gap-2 py-8 text-sm text-slate-500">
-          <BLoader label="Loading" size={140} />
-          Loading declarations...
-        </div>
+        <DeclarationsSkeleton />
       )}
 
       {unavailable && (

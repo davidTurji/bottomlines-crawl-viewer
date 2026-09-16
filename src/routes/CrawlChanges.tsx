@@ -1,4 +1,4 @@
-import BLoader from "@/components/BLoader";
+import { SkeletonRows, SkeletonStatCards } from "@/components/Skeleton";
 import { useEffect, useMemo, useState } from "react";
 import { Dots } from "@/components/Dots";
 import { LineFilter } from "@/components/LineFilter";
@@ -102,6 +102,14 @@ const FOUND_KINDS: EventKind[] = ["added", "removed", "cert_changed"];
 export default function CrawlChanges() {
   const { token } = useReportScope();
   const [summary, setSummary] = useState<Summary | null>(null);
+  // Whether the summary request has SETTLED, success or failure — which
+  // is not the same question as whether a summary arrived. Every page here
+  // swallows a summary failure (the week line is the only thing that reads
+  // it, and a page whose own numbers are fine should not die for a missing
+  // date), so `summary` stays null forever on an old artifact whose summary
+  // does not load. Reserving the week line's space on `!summary` would then
+  // shimmer a skeleton bar for ever on exactly those older links.
+  const [summarySettled, setSummarySettled] = useState(false);
   const [previous, setPrevious] = useState<Summary | null>(null);
   const [bucket, setBucket] = useState<Bucket>("all");
   const [ssp, setSsp] = useState("");
@@ -115,17 +123,44 @@ export default function CrawlChanges() {
   const [settled, setSettled] = useState(0);
 
   const filter = ssp.trim();
+  // WHICH SELECTION THE ROWS ON SCREEN WERE READ UNDER. While it lags the
+  // applied one, everything on this page describes the previous filter, so
+  // it is sketched rather than dimmed: applying a filter re-reads the whole
+  // page, and a 60% fade over last selection's numbers reads as a page that
+  // is merely faded, not one whose contents are being replaced.
+  //
+  // Kept distinct from `settled` so that typing in the SSP search still
+  // gets the light treatment (dim plus dots). A keystroke is not a new
+  // question about the report; a different set of seat lines is.
+  const [settledFor, setSettledFor] = useState<string | null>(null);
   /* The seat-line filter, shared with the overview through the URL. The
      events are re-fetched under it, and every KPI on this page is counted
      from the rows, so the numbers follow the filter by construction. */
   const { selected: lines, setSelected: setLines } = useLineFilter();
+  const linesKey = lines.join(",");
+  const refiltering = settledFor !== null && settledFor !== linesKey;
+  // The cold open and the refilter share one treatment.
+  const showSkeleton = !error && loading && (settled === 0 || refiltering);
 
   useEffect(() => {
     let cancelled = false;
     api
       .summary(token, lines)
       .then((s) => !cancelled && setSummary(s))
-      .catch(() => {});
+      .catch(() => {})
+      .finally(() => !cancelled && setSummarySettled(true));
+    return () => {
+      cancelled = true;
+    };
+  }, [token, lines]);
+
+  // LAST WEEK'S SUMMARY DOES NOT TAKE THE LINE FILTER, so it is keyed on
+  // the token alone. It used to sit in the effect above and be re-read on
+  // every change of selection, and it is two round trips (it reads this
+  // crawl's summary to learn the previous crawl's id, then reads that),
+  // every one of them returning the answer already in state.
+  useEffect(() => {
+    let cancelled = false;
     api
       .previousSummary(token)
       .then((p) => !cancelled && setPrevious(p))
@@ -133,7 +168,7 @@ export default function CrawlChanges() {
     return () => {
       cancelled = true;
     };
-  }, [token, lines]);
+  }, [token]);
 
   // One fetch covers every bucket. The page groups rows into lines, and a
   // line's placements can straddle a server page boundary, so grouping a
@@ -154,13 +189,14 @@ export default function CrawlChanges() {
         setTruncated(r.truncated);
         setOpen(new Set());
         setSettled((n) => n + 1);
+        setSettledFor(linesKey);
       })
       .catch((e: Error) => !cancelled && setError(e.message))
       .finally(() => !cancelled && setLoading(false));
     return () => {
       cancelled = true;
     };
-  }, [token, filter, lines]);
+  }, [token, filter, lines, linesKey]);
 
   useEffect(() => setPage(1), [bucket, filter, lines]);
 
@@ -337,6 +373,7 @@ export default function CrawlChanges() {
             week={weekLabel}
             previousWeek={prevWeekLabel}
             isFirstCrawl={summary?.previous_job_id === null}
+            pending={!summarySettled}
             className="mt-1.5"
           />
         </div>
@@ -344,6 +381,11 @@ export default function CrawlChanges() {
           seats={summary?.watchlist?.seats ?? []}
           selected={lines}
           onChange={setLines}
+          // Only a REFILTER, not the page's own first load: on a cold open
+          // the skeleton below already says the page is loading, and a
+          // second "Filtering..." beside it would claim the reader had
+          // set a filter they never touched.
+          busy={refiltering}
         />
       </div>
       <p className="-mt-2 min-h-[18px] text-[12px] leading-[18px] text-slate-500">
@@ -360,10 +402,20 @@ export default function CrawlChanges() {
 
       {/* The KPI row, scoped to the selected tab. Same two-card shape as the
           overview so a reader who has seen one has seen both. */}
-      {/* The KPIs and the list stay on screen while a filter refetches;
-          the dots beside the tabs say new numbers are coming. Only a first
-          load with nothing yet shows the loader. */}
-      {!error && (!loading || rows.length > 0) && (
+      {/* The KPI row, scoped to the selected tab.
+
+          A SEAT-LINE REFILTER AND A COLD OPEN GET THE SAME SKELETON: both
+          are a new question about the report, and the numbers here would
+          otherwise sit at 60% opacity still stating the answer to the old
+          one. An SSP search is different, and deliberately keeps the light
+          treatment (the dim, plus the dots beside the tabs).
+
+          This sits in the KPI row's own slot rather than where the loader
+          used to be, because the real row is ABOVE the tabs: put it lower
+          and the cards would arrive under the controls and jump back. */}
+      {showSkeleton && <SkeletonStatCards count={2} />}
+
+      {!error && !showSkeleton && (
         <div
           className={cn(
             "grid grid-cols-1 gap-4 transition-opacity duration-300 ease-out lg:grid-cols-2",
@@ -548,12 +600,7 @@ export default function CrawlChanges() {
         </div>
       </div>
 
-      {loading && rows.length === 0 && (
-        <div className="flex items-center gap-2 py-8 text-sm text-slate-500">
-          <BLoader label="Loading" size={140} />
-          Loading line changes...
-        </div>
-      )}
+      {showSkeleton && <SkeletonRows rows={6} label="Loading line changes" />}
       {error && <p className="py-4 text-sm text-critical">{error}</p>}
 
       {/* An empty list has two very different causes and they must not
@@ -578,7 +625,9 @@ export default function CrawlChanges() {
         </p>
       )}
 
-      {!error && shown.length > 0 && (
+      {/* Not while the skeleton is up: the previous filter's rows are
+          still in state and would render underneath it. */}
+      {!showSkeleton && !error && shown.length > 0 && (
         <div
           key={settled}
           className={cn(
@@ -604,7 +653,9 @@ export default function CrawlChanges() {
         </p>
       )}
 
-      {total > PAGE_SIZE && (
+      {/* Counts the PREVIOUS filter's groups while a new one is in
+          flight, so it stays down with the list it describes. */}
+      {!showSkeleton && total > PAGE_SIZE && (
         <div className="flex items-center justify-between border-t border-border/70 pt-4 text-xs text-slate-500">
           <span>
             Showing {startRow.toLocaleString()} to {endRow.toLocaleString()} of{" "}
