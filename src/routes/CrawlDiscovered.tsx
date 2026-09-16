@@ -60,6 +60,14 @@ const PAGE_SIZE = 50;
 export default function CrawlDiscovered() {
   const { token } = useReportScope();
   const [summary, setSummary] = useState<Summary | null>(null);
+  // Whether the summary request has SETTLED, success or failure — which
+  // is not the same question as whether a summary arrived. Every page here
+  // swallows a summary failure (the week line is the only thing that reads
+  // it, and a page whose own numbers are fine should not die for a missing
+  // date), so `summary` stays null forever on an old artifact whose summary
+  // does not load. Reserving the week line's space on `!summary` would then
+  // shimmer a skeleton bar for ever on exactly those older links.
+  const [summarySettled, setSummarySettled] = useState(false);
   const [previous, setPrevious] = useState<Summary | null>(null);
   const [rows, setRows] = useState<DiscoveredLine[]>([]);
   const [total, setTotal] = useState(0);
@@ -85,7 +93,8 @@ export default function CrawlDiscovered() {
     api
       .summary(token)
       .then((s) => !cancelled && setSummary(s))
-      .catch(() => {});
+      .catch(() => {})
+      .finally(() => !cancelled && setSummarySettled(true));
     // Only for the week line's "compared with" date. The comparison figures
     // themselves come from the discovered-lines totals, not from here, so a
     // failure costs the date and nothing else.
@@ -203,7 +212,7 @@ export default function CrawlDiscovered() {
           week={weekLabel}
           previousWeek={prevWeekLabel}
           isFirstCrawl={summary?.previous_job_id === null}
-          pending={!summary}
+          pending={!summarySettled}
           className="mt-1.5"
         />
       </div>

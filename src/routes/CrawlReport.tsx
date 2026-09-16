@@ -1,4 +1,8 @@
-import { OverviewSkeleton, SkeletonRows } from "@/components/Skeleton";
+import {
+  OverviewSkeleton,
+  SkeletonRows,
+  SkeletonStatCards,
+} from "@/components/Skeleton";
 import { useEffect, useMemo, useState } from "react";
 import { LineFilter } from "@/components/LineFilter";
 import { Dots } from "@/components/Dots";
@@ -216,12 +220,16 @@ export default function CrawlReport() {
       {/* Two hero cards, side by side. Left = this week's plus/minus
           lines. Right = matched inventory, as two premium tone tiles:
           publishers in green, apps in pink. */}
-      <div
-        className={cn(
-          "grid grid-cols-1 gap-4 transition-opacity duration-300 ease-out lg:grid-cols-2",
-          refreshing && "opacity-60",
-        )}
-      >
+      {/* APPLYING A LINE FILTER RE-READS THE WHOLE REPORT, so it gets the
+          same skeleton a cold load gets. These cards used to dim to 60%
+          and keep last selection's figures on screen, which reads as a
+          page that is merely faded, not one whose numbers are being
+          replaced — and the figures under the fade were answers to a
+          question the reader had already changed. */}
+      {refreshing ? (
+        <SkeletonStatCards count={2} />
+      ) : (
+      <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
         <div className="rounded-2xl border border-border bg-white p-5 shadow-sm">
           <div className="mb-3 flex items-baseline justify-between gap-3">
             <div>
@@ -328,6 +336,7 @@ export default function CrawlReport() {
           </div>
         </div>
       </div>
+      )}
 
       {/* Ask AI, inline, between the KPIs and the drilldown. Same shape
           bottomlines-app uses on the "Your Bottom Line" page: pill input
@@ -720,6 +729,20 @@ function DrilldownList({ token, lines }: { token: string; lines: string[] }) {
     setPage(1);
   }, [tab, query, lines]);
 
+  // A NEW TAB OR A NEW LINE SELECTION IS A NEW LIST, and gets the
+  // skeleton. Dropping `settled` to 0 is what says so: it is the same
+  // "nothing has landed yet" state a cold open is in, and it drives the
+  // same treatment, so applying a filter and opening the page cold look
+  // alike instead of one dimming and the other sketching.
+  //
+  // Typing in the search box is deliberately NOT in here. That fires on
+  // every keystroke, and a list that collapsed to a skeleton and back per
+  // character would be unreadable; the dots beside the tabs and the dim
+  // are the right weight for a search.
+  useEffect(() => {
+    setSettled(0);
+  }, [tab, lines]);
+
   useEffect(() => {
     let cancelled = false;
     setLoading(true);
@@ -797,10 +820,16 @@ function DrilldownList({ token, lines }: { token: string; lines: string[] }) {
               <TabsTrigger value="changed">Changed</TabsTrigger>
             </TabsList>
           </Tabs>
-          <span className="text-xs text-slate-500">
-            {total.toLocaleString()}{" "}
-            {tab === "all" ? "matched" : "with changes"}
-          </span>
+          {/* Silent until a list has landed. While a new tab or filter is
+              in flight this still holds the PREVIOUS total, and printing
+              "260 matched" over a skeleton states a number for a question
+              that is still being asked. */}
+          {settled > 0 && (
+            <span className="text-xs text-slate-500">
+              {total.toLocaleString()}{" "}
+              {tab === "all" ? "matched" : "with changes"}
+            </span>
+          )}
           {loading && settled > 0 && <Dots />}
         </div>
         <div className="relative w-full">
@@ -814,10 +843,20 @@ function DrilldownList({ token, lines }: { token: string; lines: string[] }) {
           />
         </div>
       </div>
-      {/* The rows stay on screen while a new list is read, dimmed, with
-          the dots above saying so; only the very first read shows the
-          loader. When the new list lands it eases in as one piece, so a
-          filter change never collapses the page and springs it back. */}
+      {/* TWO WEIGHTS OF RELOAD, and which one a change gets is the whole
+          rule here.
+
+          A SEARCH is the light one: the rows stay on screen, dimmed, with
+          the dots above saying new ones are coming. It fires per keystroke,
+          and a list that collapsed to a skeleton and back on every
+          character would be unreadable.
+
+          A NEW TAB OR A NEW SEAT-LINE SELECTION is the heavy one. That is
+          a different question about the report, not a narrowing of this
+          one, and the rows underneath would otherwise sit dimmed while
+          still answering the question the reader just changed. Those reset
+          `settled` to 0, which is the same "nothing has landed yet" state a
+          cold open is in, and so draws the same skeleton. */}
       <div>
         {loading && settled === 0 && (
           <SkeletonRows rows={5} label="Loading matched publishers" />
@@ -828,7 +867,10 @@ function DrilldownList({ token, lines }: { token: string; lines: string[] }) {
             <EmptyResult query={query} noun="publishers" />
           </div>
         )}
-        {!error && rows.length > 0 && (
+        {/* `settled > 0` as well as rows: while a new tab or filter is
+            in flight the previous list is still in state, and without
+            this guard it would render underneath the skeleton. */}
+        {settled > 0 && !error && rows.length > 0 && (
           <div
             key={settled}
             className={cn(
@@ -849,7 +891,7 @@ function DrilldownList({ token, lines }: { token: string; lines: string[] }) {
             ))}
           </div>
         )}
-        {!error && rows.length > 0 && (
+        {settled > 0 && !error && rows.length > 0 && (
           <div className="mt-4">
             <Pager
               page={page}
@@ -1392,6 +1434,12 @@ function MatchedAppsList({ token, lines }: { token: string; lines: string[] }) {
     setPage(1);
   }, [query, lines]);
 
+  // Same rule as the publishers list above: a new line selection is a new
+  // list and gets the skeleton, a keystroke in the search does not.
+  useEffect(() => {
+    setSettled(0);
+  }, [lines]);
+
   useEffect(() => {
     let cancelled = false;
     setLoading(true);
@@ -1450,10 +1498,13 @@ function MatchedAppsList({ token, lines }: { token: string; lines: string[] }) {
               <TabsTrigger value="changed">Changed</TabsTrigger>
             </TabsList>
           </Tabs>
-          <span className="text-xs text-slate-500">
-            {(tab === "all" ? total : rows.length).toLocaleString()}{" "}
-            {tab === "all" ? "matched" : "with changes"}
-          </span>
+          {/* Same rule as the publishers list: silent until one lands. */}
+          {settled > 0 && (
+            <span className="text-xs text-slate-500">
+              {(tab === "all" ? total : rows.length).toLocaleString()}{" "}
+              {tab === "all" ? "matched" : "with changes"}
+            </span>
+          )}
           {loading && settled > 0 && <Dots />}
         </div>
         <div className="relative w-full">
@@ -1481,7 +1532,9 @@ function MatchedAppsList({ token, lines }: { token: string; lines: string[] }) {
           )}
         </div>
       )}
-      {rows.length > 0 && (
+      {/* `settled > 0` as well: the previous list is still in state while a
+          new filter is in flight, and would render under the skeleton. */}
+      {settled > 0 && rows.length > 0 && (
         <div
           key={settled}
           className={cn(
@@ -1506,7 +1559,7 @@ function MatchedAppsList({ token, lines }: { token: string; lines: string[] }) {
           All matched. The change tabs filter the loaded page in the browser,
           so their count is a count of this page and paging it would be a
           claim the data cannot support. */}
-      {!failed && tab === "all" && rows.length > 0 && (
+      {settled > 0 && !failed && tab === "all" && rows.length > 0 && (
         <div className="mt-4">
           <Pager
             page={page}
