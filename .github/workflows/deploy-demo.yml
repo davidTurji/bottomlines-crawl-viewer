@@ -1,0 +1,133 @@
+name: Deploy demo
+
+# Every push to main also ships the PUBLIC PATH FINDER DEMO to its own
+# Cloud Run service.
+#
+# WHAT THE DEMO IS
+#
+# The same SPA as the customer viewer, built with `--mode demo` so every
+# api.* call short-circuits to the fixture in src/lib/mockData.ts. No API,
+# no database, no sign-in, no customer data: the report is one week in the
+# life of a fictional customer, Arcaneflow. That is what makes it safe to
+# leave publicly reachable forever, and it costs nothing at rest because
+# Cloud Run scales it to zero.
+#
+# WHY IT DEPLOYS ON EVERY PUSH
+#
+# The demo's whole value is that it IS the product, not a mockup of it. A
+# demo that only ships when someone remembers to ship it drifts away from
+# the real viewer, and the first person to notice is a prospect. So it
+# tracks main exactly like the viewer does.
+#
+# WHY IT IS A SEPARATE SERVICE AND NOT A PATH
+#
+# Nothing about the demo can reach a customer's report, because the image
+# serving it has no backend wired to it at all. A /demo path inside the
+# customer service would have put fixture data and real data behind one
+# origin and one deploy, which is a bad trade for a page whose only job is
+# to be looked at by strangers.
+#
+# WHY IT BUILDS BY IMAGE AND THE VIEWER BUILDS BY SOURCE
+#
+# `gcloud run deploy --source` cannot pass a Docker build argument, and
+# BUILD_MODE=demo is the single difference between the two images. So the
+# demo goes through cloudbuild.demo.yaml and deploys the image it produced.
+#
+# Auth is the same keyless Workload Identity Federation the viewer uses.
+#
+# Required GitHub secrets (identical to deploy.yml, nothing new):
+#   GCP_PROJECT_ID, GCP_REGION, GCP_WIF_PROVIDER, GCP_SA_EMAIL
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+concurrency:
+  # Its own group, so a demo build never cancels or queues behind a
+  # customer-viewer deploy. They ship from the same commit but they are
+  # not the same risk.
+  group: deploy-viewer-demo-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  SERVICE: bl-crawl-viewer-demo
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - uses: actions/checkout@v4
+
+      # Fail here, in a minute, rather than inside Cloud Build after a
+      # source upload with the error buried in build logs. Same reasoning
+      # as the viewer's workflow, and it builds in DEMO mode so a fixture
+      # that no longer typechecks against the API types is caught before
+      # anything is published.
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: npm
+      - run: npm ci --no-audit --no-fund
+      - run: npm run build:demo
+
+      - name: Authenticate to GCP
+        uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: ${{ secrets.GCP_WIF_PROVIDER }}
+          service_account: ${{ secrets.GCP_SA_EMAIL }}
+
+      - name: Set up gcloud
+        uses: google-github-actions/setup-gcloud@v2
+        with:
+          project_id: ${{ secrets.GCP_PROJECT_ID }}
+
+      - name: Build the demo image
+        run: |
+          gcloud builds submit \
+            --config cloudbuild.demo.yaml \
+            --region="${{ secrets.GCP_REGION }}" \
+            --substitutions=_TAG="${GITHUB_SHA::12}",_REGION="${{ secrets.GCP_REGION }}" \
+            --quiet
+
+      - name: Deploy to Cloud Run
+        run: |
+          IMAGE="${{ secrets.GCP_REGION }}-docker.pkg.dev/${{ secrets.GCP_PROJECT_ID }}/cloud-run-source-deploy/$SERVICE:${GITHUB_SHA::12}"
+          # --allow-unauthenticated is the feature, not an oversight: the
+          # demo is meant to be opened by anyone with the link, and there
+          # is nothing behind it but the fixture.
+          #
+          # No CRAWLER_API_URL. The demo makes no /api calls at all, so
+          # leaving the upstream unset is the honest configuration: if a
+          # future edit ever reintroduced a live fetch, it would fail
+          # loudly against a dead port instead of quietly reaching a real
+          # backend from a public page.
+          gcloud run deploy "$SERVICE" \
+            --image "$IMAGE" \
+            --region="${{ secrets.GCP_REGION }}" \
+            --allow-unauthenticated \
+            --port=8080 \
+            --cpu=1 --memory=512Mi \
+            --min-instances=0 --max-instances=4 \
+            --quiet
+
+      - name: Smoke-test the deployed revision
+        run: |
+          URL=$(gcloud run services describe "$SERVICE" \
+            --region="${{ secrets.GCP_REGION }}" \
+            --format='value(status.url)')
+          echo "-- demo deployed at $URL"
+          for attempt in 1 2 3 4 5; do
+            code=$(curl -s -o /dev/null -w '%{http_code}' "$URL/")
+            echo "   attempt $attempt: GET $URL/ -> $code"
+            if [ "$code" = "200" ]; then
+              echo "revision is serving"
+              exit 0
+            fi
+            sleep 6
+          done
+          echo "demo did not serve after 5 attempts"
+          exit 1

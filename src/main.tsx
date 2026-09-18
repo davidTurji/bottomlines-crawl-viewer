@@ -15,6 +15,7 @@ import CrawlReport from "./routes/CrawlReport";
 import CrawlChanges from "./routes/CrawlChanges";
 import CrawlDiscovered from "./routes/CrawlDiscovered";
 import CrawlDeclarations from "./routes/CrawlDeclarations";
+import { MOCK } from "./lib/api";
 import { installViewportLock } from "./lib/viewportLock";
 import "./index.css";
 
@@ -71,8 +72,26 @@ const tree = (
   <BrowserRouter>
     <Routes>
       {/* Landing auto-redirects to the demo report so the reviewer sees
-          the shell without clicking anything. */}
-      <Route path="/" element={<Navigate to="/crawl-report/demo-token" replace />} />
+          the shell without clicking anything.
+
+          A MOCK build is the public demo, and its landing URL is the one a
+          prospect is actually sent, so it takes the READABLE shape:
+          /arcaneflow/demo reads as a report, /crawl-report/demo-token reads
+          as plumbing. Mock resolve hands back the demo token for any slug,
+          so both doors open the same pages and an old link still works.
+
+          Deliberately a fixed slug rather than one derived from the crawl
+          date: the fixture's dates move every week (see mockData), and a
+          demo URL somebody bookmarked must not move with them. */}
+      <Route
+        path="/"
+        element={
+          <Navigate
+            to={MOCK ? "/arcaneflow/demo" : "/crawl-report/demo-token"}
+            replace
+          />
+        }
+      />
 
       <Route path="/crawl-report/:token" element={<TokenReportScope />}>
         {reportPages}
