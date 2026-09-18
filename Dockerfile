@@ -13,10 +13,19 @@ COPY package.json package-lock.json ./
 RUN npm ci --no-audit --no-fund
 COPY . .
 
-# No VITE_* build args needed: the API base defaults to the same-origin
-# path /api, mock mode defaults off, chat defaults off. Nothing secret or
-# environment-specific is baked into the bundle.
-RUN npm run build
+# WHICH BUILD THIS IS. Two services come out of this one Dockerfile:
+#
+#   production  the customer viewer. No VITE_* args: the API base defaults
+#               to the same-origin path /api, mock mode off, chat off.
+#               Nothing secret or environment-specific in the bundle.
+#   demo        the public Path Finder demo, built against the fixture in
+#               src/lib/mockData.ts (see .env.demo). No API, no database,
+#               no sign-in, nothing behind it to leak.
+#
+# Defaulting to production is the point: a build that forgets to say which
+# it is ships the real viewer, never the mock one.
+ARG BUILD_MODE=production
+RUN npm run build -- --mode "$BUILD_MODE"
 
 FROM nginx:alpine
 COPY --from=build /app/dist /usr/share/nginx/html

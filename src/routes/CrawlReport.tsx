@@ -34,11 +34,24 @@ import { formatWeek } from "@/components/WeekLine";
 import { cn, storeLabel } from "@/lib/utils";
 import { useReportScope } from "@/lib/reportScope";
 
+/* The rail under the composer, and the grid the chat panel shows before the
+   first question. Eleven rather than four: a rail with four chips in it left
+   most of the width empty and read as the only four things worth asking,
+   which undersells a report with five pages behind it. Each one lands on a
+   different answer -- see CHAT_RULES in mockData -- so a reader working
+   through them is not shown the same paragraph five times. */
 const OVERVIEW_SUGGESTIONS = [
   "What lines were added this week?",
   "Which publisher lost the most?",
   "Which SSP moved the most on my seats?",
   "Are any of my seats unauthorized?",
+  "What changed on my certification ids?",
+  "How many apps carry my lines?",
+  "Which publishers are new this week?",
+  "What did discovery find on my domains?",
+  "Who is declaring my domain?",
+  "Show me the reseller and direct split",
+  "What should I follow up on?",
 ];
 
 /**
@@ -338,17 +351,21 @@ export default function CrawlReport() {
       </div>
       )}
 
-      {/* Ask AI, inline, between the KPIs and the drilldown. Same shape
-          bottomlines-app uses on the "Your Bottom Line" page: pill input
-          with a sparkle glyph + horizontal suggestion rail; answers grow
-          in a thread below the composer. Gated off by default: the MVP
-          backend has no chat endpoint. Set VITE_ENABLE_CHAT=true (e.g.
-          alongside VITE_MOCK=true) to bring it back. */}
+      {/* Ask AI, between the KPIs and the drilldown: a pill composer with a
+          sparkle glyph and a rail of questions. Touching either opens the
+          conversation in its own panel rather than growing a thread down
+          the page, which used to push this very table off the screen.
+          Gated off by default: the MVP backend has no chat endpoint. Set
+          VITE_ENABLE_CHAT=true (e.g. alongside VITE_MOCK=true). */}
       {ENABLE_CHAT && (
         <InlineAskAI
           token={token}
           suggestions={OVERVIEW_SUGGESTIONS}
           placeholder="Ask about your crawl"
+          // The panel covers the page, so it repeats which week it is
+          // answering about; without it the reader loses the one piece of
+          // context every figure in the thread depends on.
+          subtitle={`Week of ${weekLabel}`}
         />
       )}
 
@@ -416,17 +433,37 @@ function DeltaChip({ delta }: { delta: Delta }) {
   const pctDisplay = Math.abs(delta.pct) >= 0.1
     ? `${sign}${delta.pct.toFixed(1)}%`
     : `${sign}${delta.pct.toFixed(2)}%`;
+  /*
+   * WRAPS, AND ITS PARTS NEVER SHRINK.
+   *
+   * This was one nowrap flex line. On a phone the hero cards sit two to a
+   * row, so each half is about 150px, and a chip reading "+1,253 (+35.1%)
+   * vs last week" does not fit in that. Flex items shrink by default, and
+   * mono tabular figures cannot compress, so the parts squeezed past each
+   * other and rendered ON TOP of one another -- the delta on the headline
+   * number of the whole report, unreadable, on the format most people will
+   * open this on.
+   *
+   * Wrapping instead costs a second line and always reads.
+   */
   return (
-    <span className={cn("inline-flex items-center gap-1 text-[11px] font-medium", tone)}>
-      <span className="text-[9px]">{glyph}</span>
-      <span className="font-mono tabular-nums">
+    <span
+      className={cn(
+        "inline-flex flex-wrap items-center gap-x-1 gap-y-0.5 text-[11px] font-medium leading-tight",
+        tone,
+      )}
+    >
+      <span className="flex-shrink-0 text-[9px]">{glyph}</span>
+      <span className="flex-shrink-0 whitespace-nowrap font-mono tabular-nums">
         {sign}
         {delta.abs.toLocaleString()}
       </span>
-      <span className="font-mono tabular-nums text-slate-500">
+      <span className="flex-shrink-0 whitespace-nowrap font-mono tabular-nums text-slate-500">
         ({pctDisplay})
       </span>
-      <span className="text-slate-500">vs last week</span>
+      <span className="flex-shrink-0 whitespace-nowrap text-slate-500">
+        vs last week
+      </span>
     </span>
   );
 }

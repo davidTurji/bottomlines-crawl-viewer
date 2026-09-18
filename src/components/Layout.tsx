@@ -1,3 +1,5 @@
+import ContactUs from "@/components/ContactUs";
+import { MOCK } from "@/lib/api";
 import { useReportScope } from "@/lib/reportScope";
 import { useLocation } from "react-router-dom";
 import { AppSidebar } from "./AppSidebar";
@@ -138,6 +140,12 @@ export default function Layout({ children, email }: LayoutProps) {
             </div>
 
             <div className="flex items-center gap-2">
+              {/* The demo's one call to action, and the only thing in this
+                  header that is selling. Kept to the demo build: a real
+                  customer's weekly report is not a place to put a pitch,
+                  and adding one there is a product decision, not a demo
+                  one. Flip the guard if that ever changes. */}
+              {MOCK && <ContactUs />}
               <DropdownMenu>
                 <DropdownMenuTrigger asChild>
                   <button
@@ -161,14 +169,21 @@ export default function Layout({ children, email }: LayoutProps) {
                       {shownIdentity ?? "this report's credentials"}
                     </p>
                   </DropdownMenuLabel>
-                  <DropdownMenuSeparator />
-                  <DropdownMenuItem
-                    onClick={handleSignOut}
-                    className="cursor-pointer text-red-600 focus:bg-red-50 focus:text-red-600"
-                  >
-                    <LogOut className="mr-2 h-4 w-4" />
-                    Sign out
-                  </DropdownMenuItem>
+                  {/* There is no session on the demo -- nothing ever signed
+                      in, so there is nothing to sign out of, and an item
+                      that cannot do what it says is worse than no item. */}
+                  {!MOCK && (
+                    <>
+                      <DropdownMenuSeparator />
+                      <DropdownMenuItem
+                        onClick={handleSignOut}
+                        className="cursor-pointer text-red-600 focus:bg-red-50 focus:text-red-600"
+                      >
+                        <LogOut className="mr-2 h-4 w-4" />
+                        Sign out
+                      </DropdownMenuItem>
+                    </>
+                  )}
                 </DropdownMenuContent>
               </DropdownMenu>
             </div>
