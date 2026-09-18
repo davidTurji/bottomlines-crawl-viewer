@@ -45,7 +45,14 @@ Cloud Run service `bl-crawl-viewer-demo`, deployed by `.github/workflows/deploy-
 
 It is the **same SPA from the same commit**, built with `--mode demo` (`.env.demo`, `BUILD_MODE=demo`) so `VITE_MOCK=true`: every `api.*` call short-circuits to the fixture in `src/lib/mockData.ts`. There is no API wired to it, no database behind it and no login in front of it, because a mock response never answers 401. That is what makes it safe to leave up permanently, and it scales to zero when nobody is looking at it.
 
-The report is one week in the life of a fictional customer, **Arcaneflow** (`arcaneflow.example`). Nothing in it refers to a real customer or a real publisher: every company in the fixture lives under `.example`, a TLD reserved by RFC 2606 that can never be registered by anyone, and every seat id is stamped `dm-`. The only real domains on the page are the public ad exchanges (magnite.com, openx.com and the rest), which the report is *about* and which no fabricated claim is made against.
+The report is one week in the life of an invented customer, **Made Up Media** (`madeupmedia.com`). Nothing in it refers to a real customer or a real publisher.
+
+How that is kept true, given the domains are meant to look real:
+
+- The customer's own domains (`madeupmedia.com`, `madeup.tv`, `madeupmediagroup.com`) are the handful that appear on nearly every row. All three were checked against DNS and resolve nowhere.
+- The 8,412 publisher domains are composed from word lists (`rosterName` in `mockData.ts`) that no ad-tech company is called, so none of them points at a real business.
+- The customer's six seat ids are stamped `dm-`, so none can be mistaken for a seat a real seller holds.
+- The only real domains on the page are the public ad exchanges (magnite.com, openx.com and the rest). The report is *about* which exchanges carry your inventory, so naming one fabricates nothing about anybody.
 
 ```bash
 npm run dev:demo        # dev server, mock mode

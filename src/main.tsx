@@ -76,7 +76,7 @@ const tree = (
 
           A MOCK build is the public demo, and its landing URL is the one a
           prospect is actually sent, so it takes the READABLE shape:
-          /arcaneflow/demo reads as a report, /crawl-report/demo-token reads
+          /madeupmedia/demo reads as a report, /crawl-report/demo-token reads
           as plumbing. Mock resolve hands back the demo token for any slug,
           so both doors open the same pages and an old link still works.
 
@@ -87,7 +87,7 @@ const tree = (
         path="/"
         element={
           <Navigate
-            to={MOCK ? "/arcaneflow/demo" : "/crawl-report/demo-token"}
+            to={MOCK ? "/madeupmedia/demo" : "/crawl-report/demo-token"}
             replace
           />
         }

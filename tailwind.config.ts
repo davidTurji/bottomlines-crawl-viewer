@@ -164,6 +164,14 @@ export default {
           from: { width: "100%" },
           to: { width: "0%" },
         },
+        "dialog-in": {
+          from: { opacity: "0", transform: "translate3d(-50%, -50%, 0) scale(0.97)" },
+          to: { opacity: "1", transform: "translate3d(-50%, -50%, 0) scale(1)" },
+        },
+        "dialog-out": {
+          from: { opacity: "1", transform: "translate3d(-50%, -50%, 0) scale(1)" },
+          to: { opacity: "0", transform: "translate3d(-50%, -50%, 0) scale(0.98)" },
+        },
         /* Lean sheet keyframes — transform-only for iOS Safari GPU compositing */
         "sheet-in-left": {
           from: { transform: "translate3d(-100%, 0, 0)" },
@@ -248,6 +256,12 @@ export default {
         "sheet-out-top": "sheet-out-top 0.2s cubic-bezier(0.32, 0.72, 0, 1) both",
         "sheet-in-bottom": "sheet-in-bottom 0.28s cubic-bezier(0.32, 0.72, 0, 1) both",
         "sheet-out-bottom": "sheet-out-bottom 0.2s cubic-bezier(0.32, 0.72, 0, 1) both",
+        /* Ask AI panel: a centred dialog, so its keyframes carry the
+           centring translate themselves -- an animation that set transform
+           without it would yank the panel to the corner on the first frame
+           and leave it there, because the fill mode keeps the last value. */
+        "dialog-in": "dialog-in 0.24s cubic-bezier(0.22, 1, 0.36, 1) both",
+        "dialog-out": "dialog-out 0.16s ease-in both",
         "sheet-overlay-in": "sheet-overlay-in 0.28s ease-out both",
         "sheet-overlay-out": "sheet-overlay-out 0.2s ease-in both",
         "dot-bounce": "dot-bounce 0.8s ease-in-out infinite",

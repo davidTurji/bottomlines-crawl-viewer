@@ -25,7 +25,7 @@ import {
  * So mock mode, and only mock mode, supplies the fictional customer whose
  * report this is. A real report is untouched: no credentials, no identity.
  */
-const DEMO_READER = "demo@arcaneflow.com";
+const DEMO_READER = "demo@madeupmedia.com";
 
 /**
  * The two route scopes that front the report pages.
