@@ -29,21 +29,27 @@ map $http_x_forwarded_for $demo_client_ip {
     default                  $remote_addr;
 }
 
-# 100 req/s sustained, per IP, with a 200-request burst.
+# 500 req/s sustained, per IP, with a 1000-request burst.
 #
-# DELIBERATELY FAR ABOVE ANY HUMAN. A measured end-to-end session -- all
-# four pages, the search boxes, expanding rows, three chat answers and the
-# Excel export -- makes 26 requests in total. A whole office behind one NAT
-# address clicking at once is still an order of magnitude under this.
+# THIS IS NOT A COST CONTROL. maxInstances is, and it is the hard ceiling:
+# a flood cannot buy more machine than that no matter what it does. What
+# this rule is for is FAIRNESS -- stopping one address from monopolising
+# the single instance so that everybody else's page stops loading.
 #
-# The point is not to ration browsing, it is to make automated abuse
-# uneconomic, so the threshold sits where no person can reach it and no
-# loop can avoid it: anything sustaining 100 requests a second from one
-# address is a script, not a reader. The instance cap is the real ceiling
-# on cost; this is the layer that stops one address monopolising it.
+# Which is why the threshold is set where it is. A measured end-to-end
+# session -- all four pages, the search boxes, expanding rows, three chat
+# answers and the Excel export -- makes 26 requests. This demo is being
+# sent to people who have never seen the product and will click everything,
+# repeatedly, possibly several of them behind one office address. None of
+# that comes within two orders of magnitude of 500 a second.
+#
+# A REAL VISITOR SEEING A 429 COSTS MORE THAN THE BANDWIDTH IT SAVES.
+# That is the whole trade, and it is why this number is set high and not
+# low. Anything sustaining five hundred requests a second from one address
+# is industrial, not a person who is interested.
 #
 # 10m of shared memory holds roughly 160k addresses.
-limit_req_zone $demo_client_ip zone=demo_flood:10m rate=100r/s;
+limit_req_zone $demo_client_ip zone=demo_flood:10m rate=500r/s;
 
 # 429, not the default 503: this is the client being told to slow down, not
 # the server claiming to be broken.
@@ -74,7 +80,7 @@ server {
     # session cookie set by POST /v1/viewer/auth sticks with no CORS and
     # no SameSite gymnastics.
     location /api/ {
-        limit_req zone=demo_flood burst=200 nodelay;
+        limit_req zone=demo_flood burst=1000 nodelay;
         proxy_pass ${CRAWLER_API_URL}/;
         proxy_set_header Host ${CRAWLER_API_HOST};
         # Forward the viewer's own credentials (session cookie travels in
@@ -95,7 +101,7 @@ server {
         # Higher burst still: one page load pulls several assets at once,
         # and these are immutable and cached for a year, so a repeat
         # visitor asks for none of them.
-        limit_req zone=demo_flood burst=400 nodelay;
+        limit_req zone=demo_flood burst=2000 nodelay;
         add_header Cache-Control "public, max-age=31536000, immutable";
         add_header X-Robots-Tag "noindex, nofollow" always;
         add_header Referrer-Policy "no-referrer" always;
@@ -116,7 +122,7 @@ server {
     # is served with THIS location's headers (not the /index.html
     # location's), so the no-store rule is repeated here.
     location / {
-        limit_req zone=demo_flood burst=200 nodelay;
+        limit_req zone=demo_flood burst=1000 nodelay;
         add_header Cache-Control "no-store" always;
         add_header X-Robots-Tag "noindex, nofollow" always;
         add_header Referrer-Policy "no-referrer" always;
