@@ -25,7 +25,23 @@ COPY . .
 # Defaulting to production is the point: a build that forgets to say which
 # it is ships the real viewer, never the mock one.
 ARG BUILD_MODE=production
-RUN npm run build -- --mode "$BUILD_MODE"
+# The build, then PROOF that it is the build we asked for.
+#
+# A demo image that quietly contains the production bundle is the failure
+# this guard exists for, and it has happened once: .dockerignore ate
+# .env.demo, so --mode demo loaded no flags and Vite produced the real
+# viewer. Nothing failed. The image built, the service deployed, the smoke
+# test got its 200, and the public demo served a login screen.
+#
+# So the demo build now has to show its work: the fixture's customer domain
+# must appear in the bundle, or the build stops here rather than shipping
+# something that looks fine until a person opens it.
+RUN npm run build -- --mode "$BUILD_MODE" \
+    && if [ "$BUILD_MODE" = "demo" ]; then \
+         grep -rq "madeupmedia" dist/assets/*.js \
+           || { echo "FATAL: --mode demo produced a bundle with no fixture in it"; exit 1; }; \
+         echo "demo build verified: fixture present"; \
+       fi
 
 FROM nginx:alpine
 COPY --from=build /app/dist /usr/share/nginx/html

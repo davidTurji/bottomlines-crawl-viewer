@@ -4,3 +4,12 @@ dist
 mock
 *.md
 .env*
+# ...except the demo's build flags, which are not secrets and are the whole
+# reason the demo image differs from the viewer's.
+#
+# THIS LINE IS LOAD-BEARING. Without it `.env*` swallowed .env.demo, so
+# `vite build --mode demo` found no env file, VITE_MOCK was never set, and
+# the demo image shipped the PRODUCTION bundle. Silently: the build
+# succeeded, the deploy succeeded, and the public demo served a viewer that
+# asked for a login it could never satisfy.
+!.env.demo
