@@ -45,7 +45,7 @@ Cloud Run service `bl-crawl-viewer-demo`, deployed by `.github/workflows/deploy-
 
 It is the **same SPA from the same commit**, built with `--mode demo` (`.env.demo`, `BUILD_MODE=demo`) so `VITE_MOCK=true`: every `api.*` call short-circuits to the fixture in `src/lib/mockData.ts`. There is no API wired to it, no database behind it and no login in front of it, because a mock response never answers 401. That is what makes it safe to leave up permanently, and it scales to zero when nobody is looking at it.
 
-The report is one week in the life of a fictional customer, **Arcaneflow** (`arcaneflow.com`). Nothing in it refers to a real customer or a real publisher.
+The report is one week in the life of a fictional customer, **Arcaneflow** (`arcaneflow.example`). Nothing in it refers to a real customer or a real publisher: every company in the fixture lives under `.example`, a TLD reserved by RFC 2606 that can never be registered by anyone, and every seat id is stamped `dm-`. The only real domains on the page are the public ad exchanges (magnite.com, openx.com and the rest), which the report is *about* and which no fabricated claim is made against.
 
 ```bash
 npm run dev:demo        # dev server, mock mode
@@ -55,6 +55,7 @@ npm run build:demo      # the exact bundle the demo service serves
 Two properties of the fixture exist specifically for the demo and are worth not breaking:
 
 - **Its dates are relative.** Every timestamp derives from the most recent Monday, so the demo always reads as this week's crawl compared with last week's, however long it has been deployed.
+- **Its size is one declaration.** `DEMO_SCALE` sets how many publishers, apps, bundles and discovered lines exist (8,412 / 24,781 / 6,240 / 1,460), and the hero counters are counted off the built lists rather than typed, so a headline can never outrun the table beneath it.
 - **Its numbers derive from one declaration.** `WEEK_TOTALS` in `mockData.ts` is the only place a count is written; the hero cards, the line events, the seat-match stamps, the developer tables and the Ask AI answers all read from it. Change a number there and the whole report moves together. Typing a count anywhere else reintroduces exactly the drift this replaced.
 
 The demo builds by image rather than `--source` because `gcloud run deploy --source` cannot pass a Docker build argument, and `BUILD_MODE=demo` is the single difference between the two images. See `cloudbuild.demo.yaml`.

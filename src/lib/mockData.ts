@@ -49,12 +49,12 @@ import { compareDefault } from "./discoveredSort";
  * module load.
  */
 export const CUSTOMER_SEATS: MatchedSeatLine[] = [
-  { ssp_domain: "magnite.com", publisher_id: "14991", relationship: "RESELLER" },
-  { ssp_domain: "magnite.com", publisher_id: "14992", relationship: "RESELLER" },
-  { ssp_domain: "openx.com", publisher_id: "540123456", relationship: "DIRECT" },
-  { ssp_domain: "pubmatic.com", publisher_id: "161234", relationship: "RESELLER" },
-  { ssp_domain: "sharethrough.com", publisher_id: "SZjHEx3f", relationship: "DIRECT" },
-  { ssp_domain: "onetag.com", publisher_id: "8df76ed1d09d55e", relationship: "RESELLER" },
+  { ssp_domain: "magnite.com", publisher_id: "dm-880114", relationship: "RESELLER" },
+  { ssp_domain: "magnite.com", publisher_id: "dm-880115", relationship: "RESELLER" },
+  { ssp_domain: "openx.com", publisher_id: "dm-559000421", relationship: "DIRECT" },
+  { ssp_domain: "pubmatic.com", publisher_id: "dm-170455", relationship: "RESELLER" },
+  { ssp_domain: "sharethrough.com", publisher_id: "dm-4KxQ7v2p", relationship: "DIRECT" },
+  { ssp_domain: "onetag.com", publisher_id: "dm-9c31ab77e2d4f08", relationship: "RESELLER" },
 ];
 
 export function seatKey(l: { ssp_domain: string; publisher_id: string; relationship: string }): string {
@@ -141,27 +141,53 @@ function weekLabel(run: Date): string {
  * ``lines`` counts PLACEMENTS, one per (line x publisher file), which is the
  * unit the real hero_diff uses and the unit the Changes page re-counts in.
  */
+/*
+ * HOW BIG THE DEMO IS.
+ *
+ * The fixture was sized for reviewing a screen: 260 publishers, 42 apps,
+ * 170 discovered lines. That is enough to check a layout and far too little
+ * to show what the product does -- the whole claim is that it walks a
+ * million publisher files and finds your seats wherever they landed, and a
+ * table that runs out after two pages says the opposite.
+ *
+ * Every list is generated, so these are cheap: the cost is CPU at module
+ * load and objects in memory, not bundle bytes. The numbers below are also
+ * the numbers on the hero cards -- see the reconciliation at the bottom of
+ * this file, which reads the counters off the built lists rather than
+ * letting anyone type them a second time.
+ */
+export const DEMO_SCALE = {
+  /** Publishers whose files carried one of the customer's seat lines. */
+  matchedDevelopers: 8_412,
+  /** Apps whose app-ads.txt carried them. */
+  matchedApps: 24_781,
+  /** Distinct app bundles behind those apps. */
+  matchedBundles: 6_240,
+  /** Distinct lines found carrying one of the customer's own domains. */
+  discoveredLines: 1_460,
+} as const;
+
 export const WEEK_TOTALS = {
   lines: {
-    added: 1_284,
-    removed: 968,
-    cert_changed: 331,
-    newly_monitored: 142,
-    monitoring_stopped: 27,
-    first_appearance: 46,
+    added: 4_821,
+    removed: 3_617,
+    cert_changed: 1_244,
+    newly_monitored: 386,
+    monitoring_stopped: 74,
+    first_appearance: 142,
   },
   /* The subset landing on one of the customer's OWN six seat lines. A
    * newly monitored or stopped line is by definition one of theirs, so
    * those two carry straight across rather than being a fraction. */
   matched_seat: {
-    added: 96,
-    removed: 74,
-    cert_changed: 28,
+    added: 362,
+    removed: 271,
+    cert_changed: 93,
   },
   developers: {
-    added: 34,
-    removed: 21,
-    changed: 118,
+    added: 214,
+    removed: 137,
+    changed: 1_106,
   },
 } as const;
 
@@ -330,32 +356,6 @@ export const mockSummary: Summary = {
 
 /* The long-tail publisher roster, hoisted above the developer tables so
  * the tail generator below can draw names at module load. */
-const DEV_NAMES = [
-  "Aurora TV Networks", "Pixel Cauldron", "Northlight Games", "Beacon Broadcasting",
-  "Silver Fern Studios", "Harbor Point Media", "Kestrel Games", "Tidewater Publishers",
-  "Ember Peak Studios", "Meadowlark Media", "Copper Canyon Games", "Lantern House Studios",
-  "Blackfoot Broadcasting", "Wren & Wolf", "Foundry Row Media", "Great Basin Games",
-  "Cloudberry Studios", "Halcyon Networks", "Ironwood Media", "Sable Broadcasting",
-  "Alder Hollow", "Marble Falls Media", "Redwing Studios", "Sunburst Publishing",
-  "Farrow Media", "Compass Rose Games", "Little Loom", "Storm Front Media",
-  "Otter Creek Studios", "Bright Ledger", "Cedarhouse Networks", "Twin Elms Media",
-  "Palisade Games", "Kite & Compass", "Northgate Publishers", "Skyward Studios",
-  "Halyard Broadcasting", "Wildflour Media", "Lampyre Games", "Rockfall Studios",
-  "Fieldnote Media", "Highwater Publishers", "Salt & Steel", "Winterberry Studios",
-  "Broadstone Media", "Camber Games", "Driftwood Broadcasting", "Elmshade Publishers",
-  "Foghorn Studios", "Glasshouse Media", "Hearthside Games", "Ivyhouse Studios",
-  "Juneberry Publishers", "Kernel & Co", "Larkspur Media", "Moonrise Broadcasting",
-  "Nightowl Studios", "Overland Networks", "Pinemark Publishers", "Quartz Ridge Games",
-  "Riverbend Studios", "Sagebrush Media", "Tallow Broadcasting", "Umberton Games",
-  "Voltera Publishers", "Windrose Studios", "Xylo Media", "Yellowstone Publishers",
-  "Zephyrline Games", "Ashford Studios", "Bramble Networks", "Coastwise Media",
-  "Duskfall Publishers", "Everline Games", "Fenwick Studios", "Grovehouse Broadcasting",
-  "Hazel Ridge Media", "Ironbark Publishers", "Junction Row", "Karst Games",
-  "Longspur Broadcasting", "Millbrook Studios", "Nectar Networks", "Oakhaven Publishers",
-  "Portside Games", "Quill & Anvil", "Runeworks Studios", "Southlark Broadcasting",
-  "Thornwood Media", "Underhill Games", "Verdemark Publishers", "Wynder Studios",
-];
-
 const PLATFORMS = ["Web", "iOS", "Android", "Roku", "Samsung", "Vizio", "FireTV", "CTV"] as const;
 
 /** Deterministic pseudo-random, so screenshots do not shuffle between reloads. */
@@ -369,34 +369,34 @@ function xorshift(seed: number): () => number {
   };
 }
 
-function domainFor(name: string, platform: string, i: number): string {
+function domainFor(name: string): string {
   const slug = name
     .toLowerCase()
     .replace(/&/g, "and")
     .replace(/[^a-z0-9]+/g, "")
     .slice(0, 24);
-  const tld =
-    platform === "Android"
-      ? i % 3 === 0
-        ? ".games"
-        : ".io"
-      : platform === "Roku" || platform === "Vizio" || platform === "Samsung" || platform === "FireTV" || platform === "CTV"
-        ? ".tv"
-        : platform === "iOS"
-          ? i % 4 === 0
-            ? ".io"
-            : ".com"
-          : i % 5 === 0
-            ? ".co"
-            : ".com";
-  return `${slug}${tld}`;
+  // EVERY COMPANY IN THIS FIXTURE LIVES UNDER .example.
+  //
+  // The roster used to pick a TLD by platform (.games for Android, .tv for
+  // CTV, .com otherwise) so screenshots read as real publishers. They read
+  // as real publishers because they WERE plausible real publishers: the
+  // demo is public and permanent, and every line on it is a fabricated
+  // claim that some publisher authorises some seller. Making that claim
+  // against a domain a real company could own, today or in five years, is
+  // not a risk worth a nicer-looking TLD.
+  //
+  // .example is reserved by RFC 2606. It cannot be registered by anyone,
+  // ever, so no real company can be implicated by anything on this page.
+  // The platform is shown as its own chip beside the name, so nothing is
+  // lost by dropping it from the domain.
+  return `${slug}.example`;
 }
 
 const DEV_ADDED_HEAD: DeveloperEvent[] = [
   {
     developer_id: 91_204,
     developer_name: "Chomp Studios",
-    developer_domain: "chompstudios.com",
+    developer_domain: "chompstudios.example",
     developer_platform: "iOS",
     matched_lines_prev: 0,
     matched_lines_current: 18,
@@ -415,7 +415,7 @@ const DEV_ADDED_HEAD: DeveloperEvent[] = [
   {
     developer_id: 78_442,
     developer_name: "Roost Media",
-    developer_domain: "roostmedia.tv",
+    developer_domain: "roostmedia.example",
     developer_platform: "Roku",
     matched_lines_prev: 0,
     matched_lines_current: 14,
@@ -434,7 +434,7 @@ const DEV_ADDED_HEAD: DeveloperEvent[] = [
   {
     developer_id: 66_120,
     developer_name: "Deep Sea Games",
-    developer_domain: "deepsea.games",
+    developer_domain: "deepsea.example",
     developer_platform: "Android",
     matched_lines_prev: 0,
     matched_lines_current: 11,
@@ -453,7 +453,7 @@ const DEV_ADDED_HEAD: DeveloperEvent[] = [
   {
     developer_id: 44_881,
     developer_name: "Aurora TV Networks",
-    developer_domain: "auroratv.io",
+    developer_domain: "auroratv.example",
     developer_platform: "CTV",
     matched_lines_prev: 0,
     matched_lines_current: 9,
@@ -471,7 +471,7 @@ const DEV_ADDED_HEAD: DeveloperEvent[] = [
   {
     developer_id: 22_401,
     developer_name: "Pixel Cauldron",
-    developer_domain: "pixelcauldron.com",
+    developer_domain: "pixelcauldron.example",
     developer_platform: "iOS",
     matched_lines_prev: 0,
     matched_lines_current: 8,
@@ -489,7 +489,7 @@ const DEV_ADDED_HEAD: DeveloperEvent[] = [
   {
     developer_id: 51_224,
     developer_name: "Northlight Games",
-    developer_domain: "northlight.games",
+    developer_domain: "northlight.example",
     developer_platform: "Android",
     matched_lines_prev: 0,
     matched_lines_current: 7,
@@ -510,7 +510,7 @@ const DEV_REMOVED_HEAD: DeveloperEvent[] = [
   {
     developer_id: 12_984,
     developer_name: "Kite Interactive",
-    developer_domain: "kiteinteractive.com",
+    developer_domain: "kiteinteractive.example",
     developer_platform: "iOS",
     matched_lines_prev: 22,
     matched_lines_current: 0,
@@ -529,7 +529,7 @@ const DEV_REMOVED_HEAD: DeveloperEvent[] = [
   {
     developer_id: 8_712,
     developer_name: "Cinder & Sky",
-    developer_domain: "cinderandsky.co",
+    developer_domain: "cinderandsky.example",
     developer_platform: "Web",
     matched_lines_prev: 16,
     matched_lines_current: 0,
@@ -548,7 +548,7 @@ const DEV_REMOVED_HEAD: DeveloperEvent[] = [
   {
     developer_id: 6_115,
     developer_name: "Meridian Sports Media",
-    developer_domain: "meridiansports.io",
+    developer_domain: "meridiansports.example",
     developer_platform: "iOS",
     matched_lines_prev: 12,
     matched_lines_current: 0,
@@ -567,7 +567,7 @@ const DEV_REMOVED_HEAD: DeveloperEvent[] = [
   {
     developer_id: 7_302,
     developer_name: "Sable Broadcasting",
-    developer_domain: "sablebroadcast.tv",
+    developer_domain: "sablebroadcast.example",
     developer_platform: "Samsung",
     matched_lines_prev: 9,
     matched_lines_current: 0,
@@ -585,7 +585,7 @@ const DEV_CHANGED_HEAD: DeveloperEvent[] = [
   {
     developer_id: 4_411,
     developer_name: "Riverstone Publishers",
-    developer_domain: "riverstone.com",
+    developer_domain: "riverstone.example",
     developer_platform: "Web",
     matched_lines_prev: 47,
     matched_lines_current: 52,
@@ -604,7 +604,7 @@ const DEV_CHANGED_HEAD: DeveloperEvent[] = [
   {
     developer_id: 15_902,
     developer_name: "Copperline Studios",
-    developer_domain: "copperline.tv",
+    developer_domain: "copperline.example",
     developer_platform: "Vizio",
     matched_lines_prev: 29,
     matched_lines_current: 34,
@@ -622,7 +622,7 @@ const DEV_CHANGED_HEAD: DeveloperEvent[] = [
   {
     developer_id: 33_014,
     developer_name: "Nomad Media Group",
-    developer_domain: "nomadmediagroup.com",
+    developer_domain: "nomadmediagroup.example",
     developer_platform: "iOS",
     matched_lines_prev: 21,
     matched_lines_current: 24,
@@ -680,63 +680,127 @@ const SSPS_REMOVED = [
  * reader who reloads it, and so a screenshot taken today matches one taken
  * next month.
  */
-const TAIL_SUFFIXES = ["Group", "Networks", "Interactive", "Digital", "Partners"];
-
-/** Second pool, for the rare name whose every first-pool spelling is
- *  already claimed by the other roster. */
-const FALLBACK_SUFFIXES = [
-  "Holdings",
-  "Collective",
-  "Works",
-  "Union",
-  "Guild",
-  "Alliance",
-  "Company",
-  "Syndicate",
+/*
+ * THE NAME SPACE.
+ *
+ * This fixture now has to name roughly ten thousand distinct companies: a
+ * matched-publisher roster in the thousands, every publisher whose lines
+ * moved this week, and the app owners behind all of it. The old approach --
+ * a list of 92 hand-written names, cycled with a suffix -- ran out after a
+ * few hundred and started emitting "Larkspur Media 214", which is the exact
+ * moment a demo stops looking like a product and starts looking like a
+ * fixture.
+ *
+ * So names are COMPOSED: an optional qualifier, a distinctive word, and a
+ * company word. Nine by a hundred and sixty by forty is 57,600 combinations,
+ * all of which read like companies, against the ten thousand we need.
+ *
+ * The composition is injective (mixed radix over the three lists), so two
+ * indices can never produce the same name, and it is walked with a coprime
+ * stride so consecutive entries are unrelated rather than forty variations
+ * on one word in a row.
+ */
+const ROSTER_QUALIFIER = [
+  "", "North ", "New ", "Grand ", "Upper ", "West ", "Old ", "Great ", "Port ",
 ];
+
+const ROSTER_WORD = [
+  "Ashgrove", "Alder", "Amberline", "Anvil", "Arbor", "Ashlight", "Aspen",
+  "Bayfield", "Beacon", "Bellwether", "Birchwood", "Blackstone", "Bluewater",
+  "Bramble", "Brightwater", "Broadmoor", "Bromley", "Burnside", "Calder",
+  "Camber", "Canterwood", "Cardinal", "Cascade", "Cedarhill", "Chancery",
+  "Clearfield", "Cliffside", "Cloudbank", "Copperfield", "Cornerstone",
+  "Crestline", "Crowmoor", "Dalewood", "Deepwell", "Dovetail", "Driftline",
+  "Dunmore", "Eastgate", "Edgemont", "Elmbridge", "Ember", "Evermore",
+  "Fairholm", "Falconer", "Fallowfield", "Fernbank", "Fieldstone", "Firelight",
+  "Flintlock", "Foxglove", "Gallowbrook", "Garnet", "Glenmore", "Goldleaf",
+  "Granite", "Graystone", "Greenhollow", "Halfmoon", "Hallowell", "Hammersmith",
+  "Harborview", "Hartwood", "Hawthorne", "Hearthstone", "Hedgerow", "Highmoor",
+  "Hollowbrook", "Hornbeam", "Inglewood", "Ironvale", "Ivywell", "Jasperfield",
+  "Junewood", "Kestrelwood", "Kingsley", "Lakeshore", "Lanternwood", "Larkhill",
+  "Laurelbank", "Leyland", "Lighthouse", "Linden", "Longmeadow", "Lowfield",
+  "Maplecross", "Marlowe", "Merrivale", "Milbourne", "Millstone", "Moorcroft",
+  "Mossbank", "Netherby", "Nightingale", "Norwood", "Oakmont", "Oldbury",
+  "Orchardleigh", "Osprey", "Pembroke", "Pennyfield", "Pinehurst", "Quarrywood",
+  "Quillfield", "Ravenswood", "Redbridge", "Ridgemont", "Rivermeet", "Rookwood",
+  "Rosemoor", "Saltford", "Sandpiper", "Selkirk", "Shearwater", "Silverbeck",
+  "Slatefield", "Smithfield", "Southwell", "Springvale", "Stanmore",
+  "Stillwater", "Stonebridge", "Summerhill", "Swiftcurrent", "Tallowood",
+  "Tanbark", "Thistlewood", "Thornfield", "Tidemark", "Timberline", "Travers",
+  "Trellis", "Underwood", "Ulverston", "Vantage", "Verdigris", "Wainwright",
+  "Walbrook", "Waterstone", "Wellspring", "Westbourne", "Wheatfield",
+  "Whitcombe", "Wildbrook", "Willowmere", "Windmere", "Winterbourne",
+  "Wolvercote", "Woodvale", "Wrenfield", "Wychwood", "Yarrow", "Yewtree",
+  "Ashcombe", "Barrowgate", "Cobbleton", "Dunhollow", "Elderwood", "Fenmarch",
+  "Glasswater", "Havenbrook", "Iversley", "Kelverton",
+];
+
+const ROSTER_SUFFIX = [
+  "Media", "Studios", "Networks", "Publishers", "Interactive", "Broadcasting",
+  "Games", "Digital", "Press", "Group", "Labs", "Collective", "Partners",
+  "Works", "House", "Company", "Holdings", "Union", "Guild", "Alliance",
+  "Syndicate", "Entertainment", "Pictures", "Productions", "Channels",
+  "Stream", "Arcade", "Mobile", "Apps", "Systems", "Ventures", "Agency",
+  "Post", "Review", "Gazette", "Dispatch", "Register", "Journal", "Tribune",
+  "Herald",
+];
+
+const NAME_SPACE =
+  ROSTER_QUALIFIER.length * ROSTER_WORD.length * ROSTER_SUFFIX.length;
+
+/** 7,919 is prime and shares no factor with the name space, so multiplying
+ *  by it permutes the whole space without ever repeating: consecutive
+ *  indices land far apart, and every index still gets its own name. */
+const NAME_STRIDE = 7_919;
+
+/** The i-th distinct company name. Injective for i < NAME_SPACE. */
+function rosterName(i: number): string {
+  const j = (i * NAME_STRIDE) % NAME_SPACE;
+  const suffix = ROSTER_SUFFIX[j % ROSTER_SUFFIX.length];
+  const word = ROSTER_WORD[Math.floor(j / ROSTER_SUFFIX.length) % ROSTER_WORD.length];
+  const qualifier =
+    ROSTER_QUALIFIER[
+      Math.floor(j / (ROSTER_SUFFIX.length * ROSTER_WORD.length)) %
+        ROSTER_QUALIFIER.length
+    ];
+  return `${qualifier}${word} ${suffix}`;
+}
 
 /** Domains already spoken for, so no two rows claim the same publisher.
  *  The Changes page counts "publishers affected" by DOMAIN, so a duplicate
- *  would quietly deflate the figure the hero card is compared against. */
+ *  would quietly deflate the figure the hero card is compared against, and
+ *  two different companies sharing a domain is a thing a reader notices. */
 const TAKEN_DOMAINS = new Set<string>(
   [...DEV_ADDED_HEAD, ...DEV_REMOVED_HEAD, ...DEV_CHANGED_HEAD].map(
     (d) => d.developer_domain ?? "",
   ),
 );
 
-function tailIdentity(i: number, rnd: () => number): {
+/** A cursor into the name space, shared by every roster in the fixture, so
+ *  no two of them can hand out the same company. */
+let nameCursor = 0;
+
+function nextIdentity(rnd: () => number): {
   name: string;
   domain: string;
   platform: string;
 } {
   const platform = PLATFORMS[Math.floor(rnd() * PLATFORMS.length)];
-  for (let attempt = 0; attempt < 8; attempt += 1) {
-    const idx = i + attempt * DEV_NAMES.length;
-    const base = DEV_NAMES[idx % DEV_NAMES.length];
-    const wraps = Math.floor(idx / DEV_NAMES.length);
-    const name =
-      wraps === 0 ? base : `${base} ${TAIL_SUFFIXES[(wraps - 1) % TAIL_SUFFIXES.length]}`;
-    const domain = domainFor(name, platform, idx);
+  while (nameCursor < NAME_SPACE) {
+    const name = rosterName(nameCursor);
+    nameCursor += 1;
+    const domain = domainFor(name);
     if (!TAKEN_DOMAINS.has(domain)) {
       TAKEN_DOMAINS.add(domain);
       return { name, domain, platform };
     }
   }
-  // Every first-choice candidate is taken. Try a second word pool before
-  // giving up: a duplicate domain is the one outcome that miscounts, but
-  // "Larkspur Media 214" is the one that looks generated, and on a page a
-  // prospect is reading both matter.
-  for (const word of FALLBACK_SUFFIXES) {
-    const name = `${DEV_NAMES[i % DEV_NAMES.length]} ${word}`;
-    const domain = domainFor(name, platform, i);
-    if (!TAKEN_DOMAINS.has(domain)) {
-      TAKEN_DOMAINS.add(domain);
-      return { name, domain, platform };
-    }
-  }
-  // Both pools exhausted for this name. Uniqueness wins over prettiness.
-  const name = `${DEV_NAMES[i % DEV_NAMES.length]} ${i}`;
-  const domain = domainFor(name, platform, i);
+  // 57,600 names exhausted. Nothing in this fixture comes close, but a
+  // duplicate domain miscounts the report, so uniqueness wins over
+  // prettiness if it ever does.
+  const name = `${rosterName(nameCursor % NAME_SPACE)} ${nameCursor}`;
+  nameCursor += 1;
+  const domain = domainFor(name);
   TAKEN_DOMAINS.add(domain);
   return { name, domain, platform };
 }
@@ -764,7 +828,7 @@ function devTail(
   const rows: DeveloperEvent[] = [];
   const pool = kind === "removed" ? SSPS_REMOVED : SSPS_ADDED;
   for (let i = 0; rows.length < target - head.length; i += 1) {
-    const { name, domain, platform } = tailIdentity(i, rnd);
+    const { name, domain, platform } = nextIdentity(rnd);
     // Long tail: a few publishers moved a lot, most moved a handful.
     const r = rnd();
     const size = r < 0.12 ? 9 + Math.floor(rnd() * 21) : 1 + Math.floor(rnd() * 8);
@@ -817,12 +881,17 @@ export function mockDeveloperEvents(
       ...changeArrays(d.developer_id, d.lines_added, d.lines_removed, d.lines_cert_changed),
     }))
     .filter((d) => carries(d.matched_lines ?? matchedLinesFor(d.developer_id, 6), lines));
+  // Actually paged. It used to return every row whatever the page, which
+  // was invisible while the tables held six rows and would now hand the
+  // browser eleven hundred publishers per request.
+  const page_size = 50;
+  const start = Math.max(0, (page - 1) * page_size);
   return {
     event,
     page,
-    page_size: 50,
+    page_size,
     total: rows.length,
-    rows,
+    rows: rows.slice(start, start + page_size),
   };
 }
 
@@ -872,13 +941,13 @@ const LINE_PUBLISHERS: {
   // A few publishers that only ever show up in the line diff, so a line's
   // roster is not always a subset of the developer panes.
   for (const extra of [
-    { developer_id: 60_118, developer_name: "Harbor Point Media", developer_domain: "harborpoint.com", platform: "Web" },
-    { developer_id: 27_640, developer_name: "Ironwood Media", developer_domain: "ironwoodmedia.tv", platform: "Roku" },
-    { developer_id: 39_255, developer_name: "Kestrel Games", developer_domain: "kestrelgames.games", platform: "Android" },
-    { developer_id: 71_083, developer_name: "Tidewater Publishers", developer_domain: "tidewaterpub.com", platform: "Web" },
-    { developer_id: 18_446, developer_name: "Halcyon Networks", developer_domain: "halcyon.tv", platform: "Samsung" },
-    { developer_id: 55_907, developer_name: "Ember Peak Studios", developer_domain: "emberpeak.io", platform: "iOS" },
-    { developer_id: 84_312, developer_name: "Foundry Row Media", developer_domain: "foundryrow.com", platform: "Web" },
+    { developer_id: 60_118, developer_name: "Harbor Point Media", developer_domain: "harborpoint.example", platform: "Web" },
+    { developer_id: 27_640, developer_name: "Ironwood Media", developer_domain: "ironwoodmedia.example", platform: "Roku" },
+    { developer_id: 39_255, developer_name: "Kestrel Games", developer_domain: "kestrelgames.example", platform: "Android" },
+    { developer_id: 71_083, developer_name: "Tidewater Publishers", developer_domain: "tidewaterpub.example", platform: "Web" },
+    { developer_id: 18_446, developer_name: "Halcyon Networks", developer_domain: "halcyon.example", platform: "Samsung" },
+    { developer_id: 55_907, developer_name: "Ember Peak Studios", developer_domain: "emberpeak.example", platform: "iOS" },
+    { developer_id: 84_312, developer_name: "Foundry Row Media", developer_domain: "foundryrow.example", platform: "Web" },
   ]) {
     if (seen.has(extra.developer_id)) continue;
     seen.add(extra.developer_id);
@@ -893,13 +962,13 @@ const LINE_PUBLISHERS: {
  *  them, so the widest declared list runs past the card's five-name cut
  *  and exercises the "and N more" tail. */
 const IPD_DECLARERS = [
-  "riverstone.com",
-  "copperline.tv",
-  "harborpoint.com",
-  "tidewaterpub.com",
-  "halcyon.tv",
-  "ironwoodmedia.tv",
-  "foundryrow.com",
+  "riverstone.example",
+  "copperline.example",
+  "harborpoint.example",
+  "tidewaterpub.example",
+  "halcyon.example",
+  "ironwoodmedia.example",
+  "foundryrow.example",
 ];
 
 /** A 16-hex TAG-ID, the shape of a real ads.txt fourth field. */
@@ -1093,6 +1162,16 @@ const LINE_EVENTS_BY_EVENT: Record<string, LineEvent[]> = {
   };
 })();
 
+/** Every bucket, in the order the unfiltered endpoint returns them. */
+const ALL_LINE_EVENTS: LineEvent[] = [
+  ...LINE_EVENTS_BY_EVENT.added,
+  ...LINE_EVENTS_BY_EVENT.removed,
+  ...LINE_EVENTS_BY_EVENT.cert_changed,
+  ...LINE_EVENTS_BY_EVENT.newly_monitored,
+  ...LINE_EVENTS_BY_EVENT.monitoring_stopped,
+  ...LINE_EVENTS_BY_EVENT.first_appearance,
+];
+
 export function mockLineEvents(
   filters: {
     event?: string;
@@ -1110,14 +1189,10 @@ export function mockLineEvents(
   if (filters.event) {
     pool = LINE_EVENTS_BY_EVENT[filters.event] ?? [];
   } else {
-    pool = [
-      ...LINE_EVENTS_BY_EVENT.added,
-      ...LINE_EVENTS_BY_EVENT.removed,
-      ...LINE_EVENTS_BY_EVENT.cert_changed,
-      ...LINE_EVENTS_BY_EVENT.newly_monitored,
-      ...LINE_EVENTS_BY_EVENT.monitoring_stopped,
-      ...LINE_EVENTS_BY_EVENT.first_appearance,
-    ];
+    // Built once, not per call. The Changes page walks this pool 500 rows
+    // at a time, so rebuilding a ten-thousand-row concatenation on every
+    // page turn is twenty copies of the whole week per screen.
+    pool = ALL_LINE_EVENTS;
   }
   if (filters.ssp_domain) {
     const needle = filters.ssp_domain.toLowerCase();
@@ -1160,14 +1235,14 @@ export function mockLineEvents(
  * `.com`/`.io`/`.co` for Web/iOS, etc).
  */
 const DEV_HEAD = [
-  { developer_id: 4_411, name: "Riverstone Publishers", domain: "riverstone.com", platform: "Web", line_count: 58 },
-  { developer_id: 91_204, name: "Chomp Studios", domain: "chompstudios.com", platform: "iOS", line_count: 52 },
-  { developer_id: 15_902, name: "Copperline Studios", domain: "copperline.tv", platform: "Vizio", line_count: 47 },
-  { developer_id: 78_442, name: "Roost Media", domain: "roostmedia.tv", platform: "Roku", line_count: 44 },
-  { developer_id: 82_113, name: "Bluefin Media", domain: "bluefinmedia.com", platform: "Web", line_count: 41 },
-  { developer_id: 33_014, name: "Nomad Media Group", domain: "nomadmediagroup.com", platform: "iOS", line_count: 38 },
-  { developer_id: 45_701, name: "North Star Games", domain: "northstar.games", platform: "Android", line_count: 34 },
-  { developer_id: 66_120, name: "Deep Sea Games", domain: "deepsea.games", platform: "Android", line_count: 31 },
+  { developer_id: 4_411, name: "Riverstone Publishers", domain: "riverstone.example", platform: "Web", line_count: 58 },
+  { developer_id: 91_204, name: "Chomp Studios", domain: "chompstudios.example", platform: "iOS", line_count: 52 },
+  { developer_id: 15_902, name: "Copperline Studios", domain: "copperline.example", platform: "Vizio", line_count: 47 },
+  { developer_id: 78_442, name: "Roost Media", domain: "roostmedia.example", platform: "Roku", line_count: 44 },
+  { developer_id: 82_113, name: "Bluefin Media", domain: "bluefinmedia.example", platform: "Web", line_count: 41 },
+  { developer_id: 33_014, name: "Nomad Media Group", domain: "nomadmediagroup.example", platform: "iOS", line_count: 38 },
+  { developer_id: 45_701, name: "North Star Games", domain: "northstar.example", platform: "Android", line_count: 34 },
+  { developer_id: 66_120, name: "Deep Sea Games", domain: "deepsea.example", platform: "Android", line_count: 31 },
 ];
 
 /**
@@ -1317,14 +1392,37 @@ function buildMatchedDevs(): {
   const rows: { developer_id: number; name: string; domain: string; platform: string; line_count: number }[] = [
     ...DEV_HEAD,
   ];
+  /*
+   * THE CHANGE TABLES SEED THIS LIST.
+   *
+   * A publisher that added or changed one of your lines this week is, by
+   * definition, a publisher you match -- it is how it got into the diff.
+   * The two lists used to be generated independently off disjoint id
+   * ranges, so a reader who clicked "Added" on this very card saw
+   * publishers that were absent from "All matched" one tab over. At 260
+   * rows nobody scrolled far enough to notice; at 8,412 the Added tab is
+   * the first thing anyone opens.
+   *
+   * REMOVED is deliberately NOT seeded here: a removed publisher dropped
+   * to zero matched lines, and being absent from the matched list is what
+   * that means.
+   */
+  const seeded = new Set(rows.map((r) => r.developer_id));
+  for (const d of [...DEV_ADDED, ...DEV_CHANGED]) {
+    if (seeded.has(d.developer_id)) continue;
+    seeded.add(d.developer_id);
+    rows.push({
+      developer_id: d.developer_id,
+      name: d.developer_name ?? `Publisher #${d.developer_id}`,
+      domain: d.developer_domain ?? `pub-${d.developer_id}.example`,
+      platform: d.developer_platform ?? "Web",
+      // What it matches NOW, which is the column this list shows.
+      line_count: Math.max(1, d.matched_lines_current),
+    });
+  }
   const rnd = xorshift(1_337);
-  // 260, not 92. The page size is 100, so a list that stops at the name
-  // supply produces exactly one page and the pager never renders -- which
-  // would leave pagination unreviewable in the one mode built for reviewing
-  // the shell. Names cycle with a suffix past the supply; a real report is
-  // far larger still (Boldwin matches 18,665 publishers).
-  const MOCK_DEV_ROWS = 260;
-  for (let i = 0; i < MOCK_DEV_ROWS && rows.length < MOCK_DEV_ROWS; i += 1) {
+  const MOCK_DEV_ROWS = DEMO_SCALE.matchedDevelopers;
+  for (let i = rows.length; rows.length < MOCK_DEV_ROWS; i += 1) {
     // One allocator for both rosters (see tailIdentity): past the name
     // supply it cycles with a WORD rather than a numeral, because
     // "Yellowstone Publishers 3" reads as a fixture that ran out of ideas
@@ -1332,13 +1430,23 @@ function buildMatchedDevs(): {
     // domain another roster already claimed, so the publisher shown on
     // "Matched publishers" and the one shown on "Changes" are never two
     // different companies wearing one domain.
-    const { name, domain, platform } = tailIdentity(i, rnd);
+    const { name, domain, platform } = nextIdentity(rnd);
     // Long-tail: a handful in 8-24, most in 1-8.
     const r = rnd();
     const line_count =
       r < 0.15 ? 8 + Math.floor(rnd() * 18) : 1 + Math.floor(rnd() * 8);
     rows.push({
-      developer_id: 100_000 + i * 37,
+      /*
+       * ID SPACE, DELIBERATELY FAR FROM EVERY OTHER ROSTER'S.
+       *
+       * This used to start at 100,000 and step by 37, which was fine at 260
+       * rows and collided at 8,412: the developer-event tails start at
+       * 200,000/300,000/400,000 and step by 53, and the two sequences meet
+       * above 400,000. Twelve publishers ended up sharing an id with a
+       * different company, which is the sort of thing that makes an
+       * expanded row show somebody else's lines.
+       */
+      developer_id: 1_000_000 + i * 37,
       name,
       domain,
       platform,
@@ -1421,19 +1529,47 @@ const APP_NOUNS = [
   "Puzzles", "Weekly", "Live", "Arcade", "Reader", "Now", "Daily", "Studio",
   "Radio", "Cast", "Watch", "Play", "Notes", "Tribune", "Journal", "Times",
   "Guide", "Herald", "Report", "Beat", "Signal", "Weather", "Reef", "Trail",
-  "Coop", "Home", "Voice", "Pulse", "Currents",
+  "Coop", "Home", "Voice", "Pulse", "Currents", "Channel", "Stories",
+  "Classics", "Kids", "Sports", "Crossword", "Solitaire", "Bingo", "Match",
+  "Quest", "Racer", "Blocks", "Bubble", "Chef", "Farm", "City", "Empire",
+  "Legends", "Saga", "Rush", "Dash", "Tap", "Merge", "Craft", "Idle",
+  "Tycoon", "Slots", "Poker", "Trivia", "Word", "Sudoku", "Mahjong",
+  "Fitness", "Recipes", "Deals", "Tracker", "Planner", "Wallet", "Music",
+  "Podcasts", "Films", "Series", "Replay", "Highlights", "Scores", "Alerts",
+  "Forecast", "Traffic", "Transit", "Maps", "Parks", "Events", "Tickets",
+  "Market", "Auction", "Garage", "Garden", "Kitchen", "Studio Pro", "Nightly",
 ];
+
+/** The distinctive word in a company name: the token before its company
+ *  word, so "New Yarrow Entertainment" gives "Yarrow" and "Chomp Studios"
+ *  gives "Chomp". Taking the FIRST token instead collapsed every composed
+ *  name onto its qualifier, so a tenth of the catalogue was called "North
+ *  something". */
+function appBrand(companyName: string): string {
+  const parts = companyName.split(/\s+/);
+  return parts.length > 1 ? parts[parts.length - 2] : parts[0];
+}
 const STORES = ["ios", "android", "roku", "vizio", "samsung", "firetv", "ctv"] as const;
 
+/*
+ * A bundle id in the shape the named store hands out.
+ *
+ * EVERY BRANCH FOLDS IN `i`, WHICH IS THE ROW'S OWN INDEX. Three of them
+ * used to wrap it (`i % 12` for Vizio, `i % 8` for Samsung, `i % 5` for
+ * CTV), which capped those stores at a handful of bundles per publisher.
+ * At 42 apps that never bit; at 24,781 it produced 1,266 apps sharing a
+ * bundle id with a different app, and a bundle id is the one field in this
+ * table that is supposed to BE the identity.
+ */
 function bundleIdFor(store: string, name: string, i: number): string {
   const slug = name.toLowerCase().replace(/[^a-z0-9]+/g, "");
   if (store === "ios") return `${1_100_000_000 + i * 137}`;
-  if (store === "android") return `com.${slug}.${APP_NOUNS[i % APP_NOUNS.length].toLowerCase()}`;
+  if (store === "android") return `com.${slug}.${APP_NOUNS[i % APP_NOUNS.length].toLowerCase()}${i}`;
   if (store === "roku") return `${400_000 + i * 91}`;
-  if (store === "vizio") return `vz-${slug}-${(i % 12) + 1}`;
-  if (store === "samsung") return `sm-${slug}-${(i % 8) + 1}`;
-  if (store === "firetv") return `B0${(8 + (i % 2))}${slug.slice(0, 6).toUpperCase()}${i % 10}${(i * 7) % 10}`;
-  return `${slug}.app.v${(i % 5) + 1}`;
+  if (store === "vizio") return `vz-${slug}-${i + 1}`;
+  if (store === "samsung") return `sm-${slug}-${i + 1}`;
+  if (store === "firetv") return `B0${(8 + (i % 2))}${slug.slice(0, 6).toUpperCase()}${i}`;
+  return `${slug}.app.v${i + 1}`;
 }
 
 function buildMatchedBundles(): {
@@ -1455,16 +1591,18 @@ function buildMatchedBundles(): {
     developer_domain: string;
     line_count: number;
   }[] = [];
-  // At least one app per top developer, then extras drawn round-robin.
-  const heads = MATCHED_DEVS.slice(0, 20);
-  for (let i = 0; i < 60; i += 1) {
+  // Drawn from the whole matched roster, not its first twenty: at this
+  // size a twenty-publisher draw would put three hundred apps under each
+  // one, which is not a catalogue, it is a loop.
+  const heads = MATCHED_DEVS;
+  for (let i = 0; i < DEMO_SCALE.matchedBundles; i += 1) {
     const dev = heads[i % heads.length];
     const platform = dev.platform.toLowerCase();
     const store = STORES.includes(platform as (typeof STORES)[number])
       ? (platform as (typeof STORES)[number])
       : STORES[i % STORES.length];
     const noun = APP_NOUNS[i % APP_NOUNS.length];
-    const app_name = `${dev.name.split(/\s+/)[0]} ${noun}`;
+    const app_name = `${appBrand(dev.name)} ${noun}`;
     const r = rnd();
     const line_count = r < 0.12 ? 14 + Math.floor(rnd() * 20) : 1 + Math.floor(rnd() * 10);
     rows.push({
@@ -1511,7 +1649,7 @@ function buildMatchedApps(): MatchedApp[] {
   const rnd = xorshift(9_931);
   const owners = MATCHED_DEVS.filter((d) => d.platform !== "Web");
   const rows: MatchedApp[] = [];
-  for (let i = 0; i < 42; i += 1) {
+  for (let i = 0; i < DEMO_SCALE.matchedApps; i += 1) {
     const owner = owners[i % owners.length];
     const store = owner.platform.toLowerCase();
     const noun = APP_NOUNS[i % APP_NOUNS.length];
@@ -1549,7 +1687,7 @@ function buildMatchedApps(): MatchedApp[] {
     rows.push({
       store,
       bundle_id: bundleIdFor(store, owner.name, i),
-      app_name: `${owner.name.split(/\s+/)[0]} ${noun}`,
+      app_name: `${appBrand(owner.name)} ${noun}`,
       owner_domain: owner.domain,
       owner_name: owner.name,
       line_count,
@@ -1564,6 +1702,33 @@ function buildMatchedApps(): MatchedApp[] {
 }
 
 const MATCHED_APPS = buildMatchedApps();
+
+/*
+ * THE HEADLINE COUNTERS, READ OFF THE LISTS THEY HEAD.
+ *
+ * "8,412 matched publishers" sat on the overview card while the table
+ * underneath it held 260 rows, because the counter was typed and the table
+ * was generated. Nobody noticed while the fixture was a dev aid. On a demo,
+ * paging to the end of a list that stops a long way short of its own
+ * headline is the cheapest possible way to lose a prospect's trust.
+ *
+ * So the three matched counters are now COUNTED, and last week's are a
+ * fraction of them, which is what the overview's growth deltas subtract.
+ * Runs at module load, after every list exists.
+ */
+(() => {
+  const developers = MATCHED_DEVS.length;
+  const apps = MATCHED_APPS.length;
+  // Matched LINES is the sum of what each publisher carries, not a count of
+  // rows: one publisher matching 58 of your lines is 58, not 1.
+  const lines = MATCHED_DEVS.reduce((n, d) => n + d.line_count, 0);
+  mockSummary.counters.matched = { developers, apps, lines };
+  mockPreviousSummary.counters.matched = {
+    developers: lastWeek(developers, 0.958),
+    apps: lastWeek(apps, 0.934),
+    lines: lastWeek(lines, 0.971),
+  };
+})();
 
 export function mockMatchedApps(page: number, q = "", lines: string[] = []): MatchedAppsPage {
   const pool = MATCHED_APPS.filter((a) => carries(a.matched_lines, lines));
@@ -1695,9 +1860,9 @@ export function linesForDeveloper(developer_id: number): LineEvent[] {
 
 /** Discovery domains, weighted: the two real ones dominate. */
 const DISCOVERY_SSPS: { domain: string; weight: number }[] = [
-  { domain: "arcaneflow.com", weight: 46 },
-  { domain: "arcflow.tv", weight: 34 },
-  { domain: "arcaneflowmedia.com", weight: 12 },
+  { domain: "arcaneflow.example", weight: 46 },
+  { domain: "arcflow.example", weight: 34 },
+  { domain: "arcaneflowmedia.example", weight: 12 },
   { domain: "sonobi.com", weight: 8 },
 ];
 
@@ -1730,8 +1895,8 @@ const DISCOVERED_SUFFIX = [
 /** A publisher account id in the shape the named SSP hands out. */
 function discoveredPublisherId(ssp: string, n: number): string {
   if (ssp === "sonobi.com") return `sb-${(n % 90_000) + 10_000}`;
-  if (ssp === "arcflow.tv") return `${(n % 900_000) + 100_000}`;
-  if (ssp === "arcaneflowmedia.com") return `cm${(n % 90_000) + 10_000}`;
+  if (ssp === "arcflow.example") return `${(n % 900_000) + 100_000}`;
+  if (ssp === "arcaneflowmedia.example") return `cm${(n % 90_000) + 10_000}`;
   return `${(n % 9_000_000) + 1_000_000}`;
 }
 
@@ -1769,7 +1934,7 @@ function buildDiscoveryPublishers(): MockDiscoveryPublisher[] {
       ]
     }`;
     const platform = PLATFORMS[Math.floor(rnd() * PLATFORMS.length)];
-    const developer_domain = domainFor(name, platform, i);
+    const developer_domain = domainFor(name);
     if (seen.has(developer_domain)) continue;
     seen.add(developer_domain);
     out.push({ developer_domain, developer_name: name, platform });
@@ -1802,7 +1967,7 @@ type MockLineSpec = {
  */
 const DISCOVERED_HEAD: MockLineSpec[] = [
   {
-    ssp_domain: "arcaneflow.com",
+    ssp_domain: "arcaneflow.example",
     publisher_id: "1042318",
     relationship: "RESELLER",
     cert_id: "4a7be0c1d9f23b58",
@@ -1810,7 +1975,7 @@ const DISCOVERED_HEAD: MockLineSpec[] = [
     previous_placements_count: 402, // up 29
   },
   {
-    ssp_domain: "arcflow.tv",
+    ssp_domain: "arcflow.example",
     publisher_id: "618402",
     relationship: "RESELLER",
     cert_id: "",
@@ -1818,7 +1983,7 @@ const DISCOVERED_HEAD: MockLineSpec[] = [
     previous_placements_count: 391, // down 4
   },
   {
-    ssp_domain: "arcaneflow.com",
+    ssp_domain: "arcaneflow.example",
     publisher_id: "2884190",
     relationship: "DIRECT",
     cert_id: "b1f4c72e5a08d9c3",
@@ -1826,7 +1991,7 @@ const DISCOVERED_HEAD: MockLineSpec[] = [
     previous_placements_count: 264, // no change
   },
   {
-    ssp_domain: "arcflow.tv",
+    ssp_domain: "arcflow.example",
     publisher_id: "774061",
     relationship: "RESELLER",
     cert_id: "9c02ea41b7d5f6a8",
@@ -1834,7 +1999,7 @@ const DISCOVERED_HEAD: MockLineSpec[] = [
     previous_placements_count: null, // new this week
   },
   {
-    ssp_domain: "arcaneflow.com",
+    ssp_domain: "arcaneflow.example",
     publisher_id: "3390514",
     relationship: "RESELLER",
     cert_id: "",
@@ -1842,7 +2007,7 @@ const DISCOVERED_HEAD: MockLineSpec[] = [
     previous_placements_count: 151, // up 25
   },
   {
-    ssp_domain: "arcaneflowmedia.com",
+    ssp_domain: "arcaneflowmedia.example",
     publisher_id: "cm41288",
     relationship: "RESELLER",
     cert_id: "77d3b0e9c142a5fb",
@@ -1860,7 +2025,7 @@ const DISCOVERED_HEAD: MockLineSpec[] = [
 function buildDiscoveredTail(): MockLineSpec[] {
   const rnd = xorshift(90_210);
   const out: MockLineSpec[] = [];
-  for (let i = 0; i < 164; i += 1) {
+  for (let i = 0; i < DEMO_SCALE.discoveredLines - DISCOVERED_HEAD.length; i += 1) {
     const ssp = DISCOVERY_SSP_PICK[Math.floor(rnd() * DISCOVERY_SSP_PICK.length)];
     const account = 7 + i * 97;
     const r = rnd();
@@ -1982,9 +2147,9 @@ const DISCOVERED_LINES = buildDiscoveredLines();
  * never needs this table.
  */
 const DISCOVERY_VANISHED: Record<string, { lines: number; placements: number }> = {
-  "arcaneflow.com": { lines: 4, placements: 62 },
-  "arcflow.tv": { lines: 3, placements: 41 },
-  "arcaneflowmedia.com": { lines: 1, placements: 9 },
+  "arcaneflow.example": { lines: 4, placements: 62 },
+  "arcflow.example": { lines: 3, placements: 41 },
+  "arcaneflowmedia.example": { lines: 1, placements: 9 },
   "sonobi.com": { lines: 0, placements: 0 },
 };
 
@@ -2116,21 +2281,21 @@ function declarationSources(count: number, offset: number): DeclarationSource[] 
  * domains and a few country-scoped manager domains so every kind renders.
  */
 /** The mock customer's own domain: what its downloads are named after. */
-export const MOCK_CUSTOMER_DOMAIN = "arcaneflow.com";
+export const MOCK_CUSTOMER_DOMAIN = "arcaneflow.example";
 
 const DECLARATION_ROWS_SEED: [string, string, string[], string][] = [
   // Only rows that NAME the customer's own domain (arcaneflow.com): the
   // sheet is per customer, and discover domains are not the customer's
   // domain.
-  ["inventory partner", "arcaneflow.com", [
-    "riverstone.com", "chompstudios.com", "copperline.tv", "roostmedia.tv", "bluefinmedia.com",
-    "nomadmediagroup.com", "northstar.games", "deepsea.games", "auroratvnetworks.com", "beaconbroadcasting.tv",
-    "harborpointmedia.com", "kestrelgames.io", "meadowlarkmedia.com", "halcyonnetworks.tv", "sablebroadcasting.tv", "riverbendstudios.com",
+  ["inventory partner", "arcaneflow.example", [
+    "riverstone.example", "chompstudios.example", "copperline.example", "roostmedia.example", "bluefinmedia.example",
+    "nomadmediagroup.example", "northstar.example", "deepsea.example", "auroratvnetworks.example", "beaconbroadcasting.example",
+    "harborpointmedia.example", "larkspurmedia.example", "meadowlarkmedia.example", "halcyonnetworks.example", "sablebroadcasting.example", "riverbendstudios.example",
   ], ""],
-  ["owner domain", "arcaneflow.com", ["riverstone.com", "chompstudios.com"], ""],
-  ["manager domain", "arcaneflow.com", ["riverstone.com", "chompstudios.com", "copperline.tv"], ""],
-  ["manager domain", "arcaneflow.com", ["riverstone.com"], "IN"],
-  ["manager domain", "arcaneflow.com", ["chompstudios.com"], "BR"],
+  ["owner domain", "arcaneflow.example", ["riverstone.example", "chompstudios.example"], ""],
+  ["manager domain", "arcaneflow.example", ["riverstone.example", "chompstudios.example", "copperline.example"], ""],
+  ["manager domain", "arcaneflow.example", ["riverstone.example"], "IN"],
+  ["manager domain", "arcaneflow.example", ["chompstudios.example"], "BR"],
 ];
 
 export const mockDeclarationRows: DeclarationRowsPayload = (() => {
@@ -2151,36 +2316,36 @@ export const mockDeclarations: Declarations = {
   totals: { ipd_partners: 3, owner_domains: 2, relationship_mismatches: 2 },
   ipd: [
     {
-      partner_domain: "arcaneflow.com",
+      partner_domain: "arcaneflow.example",
       declared_by: declarationSources(50, 0),
       declarer_total: 63,
     },
     {
-      partner_domain: "arcflow.tv",
+      partner_domain: "arcflow.example",
       declared_by: declarationSources(4, 17),
       declarer_total: 4,
     },
     {
-      partner_domain: "roostmedia.tv",
+      partner_domain: "roostmedia.example",
       declared_by: declarationSources(1, 41),
       declarer_total: 1,
     },
   ],
   owner_claims: [
     {
-      owner_domain: "riverstone.com",
+      owner_domain: "riverstone.example",
       claimed_by: declarationSources(3, 8),
       claimant_total: 3,
     },
     {
-      owner_domain: "nomadmediagroup.com",
+      owner_domain: "nomadmediagroup.example",
       claimed_by: declarationSources(1, 29),
       claimant_total: 1,
     },
   ],
   relationship_mismatches: [
     {
-      developer_domain: "chompstudios.com",
+      developer_domain: "chompstudios.example",
       ssp_domain: "magnite.com",
       publisher_id: "magnite-2041",
       wanted_relationship: "RESELLER",
@@ -2189,7 +2354,7 @@ export const mockDeclarations: Declarations = {
       matched_via: "file",
     },
     {
-      developer_domain: "riverstone.com",
+      developer_domain: "riverstone.example",
       ssp_domain: "openx.com",
       publisher_id: "openx-1187",
       wanted_relationship: "DIRECT",
