@@ -17,6 +17,9 @@ substitutions:
   _TAG: latest
   _REPO: cloud-run-source-deploy
   _IMAGE: bl-crawl-viewer-demo
+  # Defaulted so `gcloud builds submit --config cloudbuild.demo.yaml` works
+  # by hand; the workflow passes the deployment's real region over the top.
+  _REGION: us-central1
 
 steps:
   - id: build
