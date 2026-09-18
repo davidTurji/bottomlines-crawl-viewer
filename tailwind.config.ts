@@ -164,6 +164,15 @@ export default {
           from: { width: "100%" },
           to: { width: "0%" },
         },
+        /* A light sweep across the Contact button, on a long cycle: the
+           pass itself is quick and most of the timeline is the rest after
+           it, so the eye is caught every few seconds rather than nagged
+           continuously. Transform-only, so it composites on the GPU. */
+        "shine-sweep": {
+          "0%": { transform: "translate3d(-130%, 0, 0)" },
+          "18%": { transform: "translate3d(130%, 0, 0)" },
+          "100%": { transform: "translate3d(130%, 0, 0)" },
+        },
         "dialog-in": {
           from: { opacity: "0", transform: "translate3d(-50%, -50%, 0) scale(0.97)" },
           to: { opacity: "1", transform: "translate3d(-50%, -50%, 0) scale(1)" },
@@ -260,6 +269,7 @@ export default {
            centring translate themselves -- an animation that set transform
            without it would yank the panel to the corner on the first frame
            and leave it there, because the fill mode keeps the last value. */
+        "shine-sweep": "shine-sweep 5s cubic-bezier(0.4, 0, 0.2, 1) infinite",
         "dialog-in": "dialog-in 0.24s cubic-bezier(0.22, 1, 0.36, 1) both",
         "dialog-out": "dialog-out 0.16s ease-in both",
         "sheet-overlay-in": "sheet-overlay-in 0.28s ease-out both",

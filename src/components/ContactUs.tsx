@@ -38,15 +38,23 @@ export default function ContactUs() {
       <Dialog.Trigger asChild>
         <button
           type="button"
-          className="group relative inline-flex h-8 flex-shrink-0 items-center gap-1.5 overflow-hidden rounded-full bg-gradient-to-br from-primary to-[hsl(150_58%_22%)] pl-3 pr-3.5 text-xs font-medium text-primary-foreground shadow-sm transition-all duration-200 hover:-translate-y-px hover:shadow-md focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40 sm:h-9 sm:text-[13px]"
+          /* Slimmer than it was, and lighter. It sits beside the account
+             pill in a 48px header, so a chunky button reads as a banner
+             bolted onto the chrome rather than part of it. The colour is
+             doing the standing out; the size does not need to as well. */
+          className="group relative inline-flex h-7 flex-shrink-0 items-center gap-1.5 overflow-hidden rounded-full bg-gradient-to-br from-primary to-[hsl(150_58%_22%)] pl-2.5 pr-3 text-[11px] font-medium text-primary-foreground shadow-sm transition-all duration-200 hover:-translate-y-px hover:shadow-md focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40 sm:h-8 sm:pl-3 sm:pr-3.5 sm:text-xs"
         >
-          {/* A light sweep on hover. Purely decorative, so it is aria-hidden
-              and pointer-events-none: it must never eat the click. */}
+          {/* The sweep runs on its own, every five seconds, rather than
+              waiting for a hover it may never get: on a phone there is no
+              hover at all, and this is the one control on the page we
+              actually want found. Decorative, so it is aria-hidden and
+              pointer-events-none and must never eat the click, and it
+              stops entirely for a reader who asked for less motion. */}
           <span
             aria-hidden
-            className="pointer-events-none absolute inset-0 -translate-x-full bg-gradient-to-r from-transparent via-white/25 to-transparent transition-transform duration-700 group-hover:translate-x-full"
+            className="pointer-events-none absolute inset-0 animate-shine-sweep bg-gradient-to-r from-transparent via-white/30 to-transparent motion-reduce:hidden"
           />
-          <Mail className="h-3.5 w-3.5" />
+          <Mail className="h-3 w-3 sm:h-3.5 sm:w-3.5" />
           Contact us
         </button>
       </Dialog.Trigger>
@@ -64,12 +72,33 @@ export default function ContactUs() {
             <X className="h-4 w-4" />
           </Dialog.Close>
 
-          <Dialog.Title className="font-display text-lg font-medium tracking-tight text-slate-900">
-            Let&apos;s talk
+          {/* THE PITCH.
+              The hook is the heading, not a line under one: a reader who
+              opens this and reads four words should already know what is on
+              offer. The two paragraphs under it carry the ask (fifty lines)
+              and the reason to bother (what this costs elsewhere), with the
+              price sitting in its own tinted row because it is the sentence
+              that does the work. */}
+          <Dialog.Title className="max-w-[calc(100%-2.5rem)] font-display text-[17px] font-semibold leading-snug tracking-tight text-slate-900">
+            This is just a sample. Want your own FREE crawl?
           </Dialog.Title>
-          <p className="mt-1 max-w-[22rem] text-[13px] leading-relaxed text-slate-500">
-            This report is sample data. We can run the same crawl against your
-            own seats and show you the real one.
+
+          <p className="mt-2.5 text-[13px] leading-relaxed text-slate-600">
+            Send us{" "}
+            <strong className="font-semibold text-slate-900">
+              50 of your ads.txt lines
+            </strong>
+            , and we&apos;ll run the same crawl on your data,{" "}
+            <strong className="font-semibold text-primary">completely FREE</strong>.
+          </p>
+
+          <p className="mt-3 rounded-xl border border-primary/15 bg-primary/[0.05] px-3.5 py-2.5 text-[13px] leading-relaxed text-slate-600">
+            Competitors charge{" "}
+            <strong className="font-semibold text-slate-900">$2,000/month</strong>{" "}
+            for this.{" "}
+            <strong className="font-semibold text-primary">
+              With us, it&apos;s free.
+            </strong>
           </p>
 
           <div className="mt-5 space-y-2">
