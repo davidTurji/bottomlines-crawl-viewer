@@ -1,31 +1,32 @@
 name: Deploy demo
 
-# Every push to main also ships the PUBLIC PATH FINDER DEMO to its own
-# Cloud Run service.
+# Ships the PUBLIC PATH FINDER DEMO from the `demo` branch, and only from
+# the `demo` branch.
 #
-# WHAT THE DEMO IS
+# THE DEMO IS NOT MAIN, AND MUST NOT BE
 #
-# The same SPA as the customer viewer, built with `--mode demo` so every
-# api.* call short-circuits to the fixture in src/lib/mockData.ts. No API,
-# no database, no sign-in, no customer data: the report is one week in the
-# life of a fictional customer, Arcaneflow. That is what makes it safe to
-# leave publicly reachable forever, and it costs nothing at rest because
-# Cloud Run scales it to zero.
+# This branch carries UI the customer viewer has not shipped: the Ask AI
+# panel and its question carousel, a contact button, a fixture rewritten for
+# a fictional customer. None of that belongs in a live customer's weekly
+# report until it is decided on its own merits, and merging the demo into
+# main to deploy it would have redeployed the customer viewer as a side
+# effect of publishing a sales page. So the demo ships from here.
 #
-# WHY IT DEPLOYS ON EVERY PUSH
+# The branch is therefore deliberately AHEAD of main, not a copy of it.
+# Keeping it current means merging main INTO demo, never the other way.
 #
-# The demo's whole value is that it IS the product, not a mockup of it. A
-# demo that only ships when someone remembers to ship it drifts away from
-# the real viewer, and the first person to notice is a prospect. So it
-# tracks main exactly like the viewer does.
+# WHAT IT DEPLOYS
 #
-# WHY IT IS A SEPARATE SERVICE AND NOT A PATH
+# The same SPA, built with `--mode demo` so every api.* call short-circuits
+# to the fixture in src/lib/mockData.ts. No API, no database, no sign-in, no
+# customer data: the report is one week in the life of an invented customer,
+# Made Up Media. That is what makes it safe to leave publicly reachable
+# forever, and it costs nothing at rest because Cloud Run scales it to zero.
 #
-# Nothing about the demo can reach a customer's report, because the image
-# serving it has no backend wired to it at all. A /demo path inside the
-# customer service would have put fixture data and real data behind one
-# origin and one deploy, which is a bad trade for a page whose only job is
-# to be looked at by strangers.
+# Its own Cloud Run service, `bl-crawl-viewer-demo`. Nothing it serves can
+# reach a customer's report, because the image has no backend wired to it at
+# all: CRAWLER_API_URL is deliberately left unset, so the nginx /api/ proxy
+# answers 502 rather than reaching anything real.
 #
 # WHY IT BUILDS BY IMAGE AND THE VIEWER BUILDS BY SOURCE
 #
@@ -40,7 +41,7 @@ name: Deploy demo
 
 on:
   push:
-    branches: [main]
+    branches: [demo]
   workflow_dispatch:
 
 concurrency:
