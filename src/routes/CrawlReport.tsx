@@ -433,17 +433,37 @@ function DeltaChip({ delta }: { delta: Delta }) {
   const pctDisplay = Math.abs(delta.pct) >= 0.1
     ? `${sign}${delta.pct.toFixed(1)}%`
     : `${sign}${delta.pct.toFixed(2)}%`;
+  /*
+   * WRAPS, AND ITS PARTS NEVER SHRINK.
+   *
+   * This was one nowrap flex line. On a phone the hero cards sit two to a
+   * row, so each half is about 150px, and a chip reading "+1,253 (+35.1%)
+   * vs last week" does not fit in that. Flex items shrink by default, and
+   * mono tabular figures cannot compress, so the parts squeezed past each
+   * other and rendered ON TOP of one another -- the delta on the headline
+   * number of the whole report, unreadable, on the format most people will
+   * open this on.
+   *
+   * Wrapping instead costs a second line and always reads.
+   */
   return (
-    <span className={cn("inline-flex items-center gap-1 text-[11px] font-medium", tone)}>
-      <span className="text-[9px]">{glyph}</span>
-      <span className="font-mono tabular-nums">
+    <span
+      className={cn(
+        "inline-flex flex-wrap items-center gap-x-1 gap-y-0.5 text-[11px] font-medium leading-tight",
+        tone,
+      )}
+    >
+      <span className="flex-shrink-0 text-[9px]">{glyph}</span>
+      <span className="flex-shrink-0 whitespace-nowrap font-mono tabular-nums">
         {sign}
         {delta.abs.toLocaleString()}
       </span>
-      <span className="font-mono tabular-nums text-slate-500">
+      <span className="flex-shrink-0 whitespace-nowrap font-mono tabular-nums text-slate-500">
         ({pctDisplay})
       </span>
-      <span className="text-slate-500">vs last week</span>
+      <span className="flex-shrink-0 whitespace-nowrap text-slate-500">
+        vs last week
+      </span>
     </span>
   );
 }

@@ -59,6 +59,21 @@ npm run dev:demo        # dev server, mock mode
 npm run build:demo      # the exact bundle the demo service serves
 ```
 
+What the demo does NOT do, verified rather than assumed (see the audit in the
+commit history): it makes **zero requests to `/api` or `/v1`**, shows no
+sign-in of any kind, and has no text input in the Ask AI panel. Every answer
+is composed from the fixture already on the page, so there is no model behind
+it. The only requests that leave the browser are Google Fonts.
+
+The Ask AI panel takes **no free text**, deliberately. The answers are
+composed from a fixed set of questions; a text box would promise something
+that can answer anything and then fall back to a generic paragraph on
+whatever it did not recognise. The questions are the interface.
+
+The header carries a **Contact us** button (`ContactUs.tsx`), gated to the
+demo build. A real customer's weekly report is not a place to put a pitch,
+so the guard is `MOCK`; flip it if that ever changes.
+
 Two properties of the fixture exist specifically for the demo and are worth not breaking:
 
 - **Its dates are relative.** Every timestamp derives from the most recent Monday, so the demo always reads as this week's crawl compared with last week's, however long it has been deployed.

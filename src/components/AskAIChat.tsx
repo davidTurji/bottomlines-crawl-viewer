@@ -1,6 +1,6 @@
 import * as Dialog from "@radix-ui/react-dialog";
-import { ArrowUp, Sparkles, X } from "lucide-react";
-import { useEffect, useRef, useState } from "react";
+import { Sparkles, X } from "lucide-react";
+import { useEffect, useRef } from "react";
 
 import { Markdown } from "@/components/Markdown";
 import type { ChatMsg } from "@/lib/useChatStream";
@@ -24,6 +24,19 @@ import { cn } from "@/lib/utils";
  * The transcript lives in the PARENT, not here. Closing the panel is not
  * meant to be destructive: a reader who shuts it to check a number on the
  * page and opens it again should find their conversation, not a blank box.
+ *
+ * THERE IS NO TEXT BOX, AND THAT IS THE POINT.
+ *
+ * Every answer here is composed from the fixture this page is already
+ * showing -- there is no model behind it and no request leaves the browser.
+ * That is exactly right for the handful of questions on offer, and exactly
+ * wrong for a free-text box, which promises a thing that can answer
+ * anything and then answers "here is the short read of this week" to
+ * whatever it did not recognise. A demo that invites typing and then
+ * disappoints is worse than one that never invited it.
+ *
+ * So the questions ARE the interface. Ask one, read the answer, pick
+ * another. Nothing on this surface can be typed into.
  */
 export default function AskAIChat({
   open,
@@ -42,9 +55,7 @@ export default function AskAIChat({
   suggestions: string[];
   subtitle?: string;
 }) {
-  const [value, setValue] = useState("");
   const endRef = useRef<HTMLDivElement>(null);
-  const inputRef = useRef<HTMLInputElement>(null);
 
   // Follow the answer as it streams in. Instant rather than smooth while
   // streaming: a smooth scroll restarts on every token and never arrives.
@@ -53,20 +64,18 @@ export default function AskAIChat({
     endRef.current?.scrollIntoView({ block: "end" });
   }, [open, messages, streaming]);
 
-  useEffect(() => {
-    if (!open) return;
-    const t = setTimeout(() => inputRef.current?.focus(), 60);
-    return () => clearTimeout(t);
-  }, [open]);
-
   const ask = (q: string) => {
     const clean = q.trim();
     if (!clean || streaming) return;
     onSend(clean);
-    setValue("");
   };
 
   const empty = messages.length === 0;
+  /* Questions not asked yet. An already-answered question offered again
+     would replay the same paragraph further down the same transcript,
+     which reads as the panel having nothing else to say. */
+  const asked = new Set(messages.filter((m) => m.role === "user").map((m) => m.content));
+  const remaining = suggestions.filter((q) => !asked.has(q));
 
   return (
     <Dialog.Root open={open} onOpenChange={onOpenChange}>
@@ -157,29 +166,30 @@ export default function AskAIChat({
             )}
           </div>
 
-          <form
-            onSubmit={(e) => {
-              e.preventDefault();
-              ask(value);
-            }}
-            className="flex flex-shrink-0 items-center gap-2 border-t border-border px-3 py-3 sm:px-4"
-          >
-            <input
-              ref={inputRef}
-              value={value}
-              onChange={(e) => setValue(e.target.value)}
-              placeholder="Ask a follow-up"
-              className="h-10 min-w-0 flex-1 rounded-full border border-border bg-white px-4 text-sm text-slate-900 outline-none transition-colors placeholder:text-slate-400 focus:border-primary/40"
-            />
-            <button
-              type="submit"
-              disabled={!value.trim() || streaming}
-              aria-label="Send"
-              className="flex h-10 w-10 flex-shrink-0 items-center justify-center rounded-full bg-primary text-primary-foreground transition-colors hover:bg-primary/90 disabled:bg-slate-100 disabled:text-slate-300"
-            >
-              <ArrowUp className="h-4 w-4" />
-            </button>
-          </form>
+          {!empty && remaining.length > 0 && (
+            <div className="flex-shrink-0 border-t border-border px-4 py-3 sm:px-5">
+              <p className="mb-2 text-[11px] font-medium text-slate-400">
+                Ask something else
+              </p>
+              {/* Capped and scrollable. Ten chips stacked one per line is
+                  most of a phone screen, and the answer the reader just
+                  asked for would be pushed off the top of it by the menu
+                  offering to replace it. */}
+              <div className="flex max-h-[7.5rem] flex-wrap gap-2 overflow-y-auto sm:max-h-none sm:overflow-visible">
+                {remaining.map((q) => (
+                  <button
+                    key={q}
+                    type="button"
+                    onClick={() => ask(q)}
+                    disabled={streaming}
+                    className="rounded-full border border-border bg-white px-3 py-1.5 text-xs text-slate-600 transition-colors hover:border-primary/30 hover:text-primary disabled:opacity-50"
+                  >
+                    {q}
+                  </button>
+                ))}
+              </div>
+            </div>
+          )}
         </Dialog.Content>
       </Dialog.Portal>
     </Dialog.Root>
