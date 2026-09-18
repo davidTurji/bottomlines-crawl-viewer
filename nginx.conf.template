@@ -10,6 +10,38 @@
 #
 # Port 8080 is Cloud Run's requirement (its ingress sends traffic there;
 # the default 80 is closed).
+# ── FLOOD GATE ───────────────────────────────────────────────────────
+#
+# This service is public and unauthenticated, so the only thing standing
+# between a stranger with a loop and a bandwidth bill is a limit. Cloud
+# Armor is the "proper" answer and needs a global load balancer in front,
+# which is ~$25-30/month of fixed cost to guard a service whose realistic
+# bill is nothing. So the limit lives here, in the container, for free.
+#
+# THE CLIENT IP IS NOT $remote_addr. Cloud Run terminates TLS and proxies
+# to the container, so $remote_addr is Google's frontend and every visitor
+# would share one bucket -- the first person through the door would spend
+# everyone's budget. The real address is the FIRST entry of
+# X-Forwarded-For; the rest of that header is attacker-suppliable and must
+# not be trusted, which is exactly why the regex takes only the first.
+map $http_x_forwarded_for $demo_client_ip {
+    "~^(?<xff_first>[^,]+)"  $xff_first;
+    default                  $remote_addr;
+}
+
+# 20 req/s sustained, 60 in a burst, per IP. A page load is five or six
+# requests, so a person browsing never sees this; a loop hits it in under a
+# second. 10m of shared memory holds roughly 160k addresses.
+limit_req_zone $demo_client_ip zone=demo_flood:10m rate=20r/s;
+
+# 429, not the default 503: this is the client being told to slow down, not
+# the server claiming to be broken.
+limit_req_status 429;
+
+# Per-instance, and maxInstances is 1, so this IS the ceiling rather than a
+# number to multiply. A distributed flood from many addresses walks around
+# any per-IP rule; that case is bounded by the instance cap instead.
+
 server {
     listen 8080;
     server_name _;
@@ -31,6 +63,7 @@ server {
     # session cookie set by POST /v1/viewer/auth sticks with no CORS and
     # no SameSite gymnastics.
     location /api/ {
+        limit_req zone=demo_flood burst=60 nodelay;
         proxy_pass ${CRAWLER_API_URL}/;
         proxy_set_header Host ${CRAWLER_API_HOST};
         # Forward the viewer's own credentials (session cookie travels in
@@ -48,6 +81,10 @@ server {
 
     # Long-cache immutable Vite chunks (they have hashed filenames).
     location /assets/ {
+        # Higher burst: one page load pulls several assets at once, and
+        # these are immutable and cached for a year, so a repeat visitor
+        # asks for none of them.
+        limit_req zone=demo_flood burst=120 nodelay;
         add_header Cache-Control "public, max-age=31536000, immutable";
         add_header X-Robots-Tag "noindex, nofollow" always;
         add_header Referrer-Policy "no-referrer" always;
@@ -68,6 +105,7 @@ server {
     # is served with THIS location's headers (not the /index.html
     # location's), so the no-store rule is repeated here.
     location / {
+        limit_req zone=demo_flood burst=60 nodelay;
         add_header Cache-Control "no-store" always;
         add_header X-Robots-Tag "noindex, nofollow" always;
         add_header Referrer-Policy "no-referrer" always;

@@ -106,13 +106,32 @@ jobs:
           # future edit ever reintroduced a live fetch, it would fail
           # loudly against a dead port instead of quietly reaching a real
           # backend from a public page.
+          #
+          # EVERY LIMIT BELOW IS SET HERE ON PURPOSE. They were applied by
+          # hand once and a later deploy would have silently reset them,
+          # because a deploy that omits a flag takes the command's default,
+          # not the value someone set in the console. Cost and blast radius
+          # are not things to keep in a human's memory.
+          #
+          #   --service-account   a dedicated identity holding NO roles. The
+          #                       default compute SA carries cloudsql.editor
+          #                       and run.admin, which is not an identity to
+          #                       attach to a public unauthenticated service.
+          #   --max-instances=1   the ceiling on what a flood can ever cost.
+          #                       Static files at 300 concurrency do not need
+          #                       a second instance.
+          #   --min-instances=0   nothing runs, and nothing is billed, when
+          #                       nobody is looking at it.
+          #   --memory=256Mi      nginx serving static files; 512 was double
+          #                       what it uses.
           gcloud run deploy "$SERVICE" \
             --image "$IMAGE" \
             --region="${{ secrets.GCP_REGION }}" \
             --allow-unauthenticated \
             --port=8080 \
-            --cpu=1 --memory=512Mi \
-            --min-instances=0 --max-instances=4 \
+            --service-account="bl-viewer-demo-runtime@${{ secrets.GCP_PROJECT_ID }}.iam.gserviceaccount.com" \
+            --cpu=1 --memory=256Mi --concurrency=300 \
+            --min-instances=0 --max-instances=1 \
             --quiet
 
       - name: Smoke-test the deployed revision
