@@ -9,17 +9,6 @@ import { LINES_PARAM, linesQuery, serializeLines } from "./lineFilter";
 
 export const MOCK = (import.meta.env.VITE_MOCK as string | undefined) === "true";
 
-// Mock fetches resolve in a microtask, so the loading skeletons flash for
-// one frame and cannot be looked at. VITE_MOCK_DELAY (ms) holds them open
-// on the four initial-load endpoints, for reviewing the loading states and
-// for demoing them. Unset by default, including on the public demo, where
-// an artificial wait would be a lie about how fast the product is.
-const MOCK_DELAY = Number(import.meta.env.VITE_MOCK_DELAY ?? 0);
-const mockPause = () =>
-  MOCK_DELAY > 0
-    ? new Promise((r) => setTimeout(r, MOCK_DELAY))
-    : Promise.resolve();
-
 // ── AI chat flag ─────────────────────────────────────────────────
 // The MVP backend ships no chat endpoint, so the Ask AI surface is
 // hidden unless explicitly enabled (VITE_ENABLE_CHAT=true), e.g. for
@@ -170,7 +159,6 @@ export const api = {
   exportUrl: (token: string) => `${BASE}/v1/viewer/${token}/export.xlsx`,
   summary: async (token: string, lines?: string[]) => {
     if (MOCK) {
-      await mockPause();
       const { mockSummaryFor } = await import("./mockData");
       return mockSummaryFor(lines ?? []);
     }
@@ -222,7 +210,6 @@ export const api = {
     lines?: string[],
   ) => {
     if (MOCK) {
-      await mockPause();
       const { mockDeveloperEvents } = await import("./mockData");
       return mockDeveloperEvents(event, page, lines ?? []);
     }
@@ -245,7 +232,6 @@ export const api = {
     } = {},
   ) => {
     if (MOCK) {
-      await mockPause();
       const { mockLineEvents } = await import("./mockData");
       return mockLineEvents(filters);
     }
@@ -275,7 +261,6 @@ export const api = {
    */
   matchedDevelopers: async (token: string, page = 1, q = "", lines?: string[]) => {
     if (MOCK) {
-      await mockPause();
       const { mockMatchedDevelopers } = await import("./mockData");
       return mockMatchedDevelopers(page, q, lines ?? []);
     }
@@ -311,7 +296,6 @@ export const api = {
    */
   matchedApps: async (token: string, page = 1, q = "", lines?: string[]) => {
     if (MOCK) {
-      await mockPause();
       const { mockMatchedApps } = await import("./mockData");
       return mockMatchedApps(page, q, lines ?? []);
     }
@@ -508,7 +492,6 @@ export const api = {
     opts: { page?: number; page_size?: number; ssp_domain?: string } = {},
   ) => {
     if (MOCK) {
-      await mockPause();
       const { mockDiscoveredLines } = await import("./mockData");
       return mockDiscoveredLines(opts);
     }
@@ -559,7 +542,6 @@ export const api = {
    */
   declarations: async (token: string): Promise<DeclarationsPayload> => {
     if (MOCK) {
-      await mockPause();
       // `?legacy=1` exercises the grouped shape older links answer with.
       const legacy = new URLSearchParams(window.location.search).has("legacy");
       const { mockDeclarations, mockDeclarationRows } = await import("./mockData");

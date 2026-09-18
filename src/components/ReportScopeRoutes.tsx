@@ -5,27 +5,13 @@ import { useLocation, Navigate, Outlet, useParams } from "react-router-dom";
 
 import Layout from "./Layout";
 import LoginGate from "./LoginGate";
-import { api, ApiError, MOCK } from "@/lib/api";
+import { api, ApiError } from "@/lib/api";
 import { ReportScopeContext, useReportScope } from "@/lib/reportScope";
 import { isReservedFirstSegment } from "@/lib/reservedPaths";
 import {
   EXPIRED_LINK_MESSAGE,
   ReportNoticeCard,
 } from "@/components/ReportNoticeCard";
-
-/*
- * WHO THE DEMO SAYS IS READING.
- *
- * The header shows the address that signed in, and nothing when nobody did
- * -- a deliberate choice, because a report whose job is verified facts must
- * not invent its own reader. Mock mode has no sign-in at all, so on the
- * public demo that slot would simply be empty, which reads as a broken
- * header rather than as restraint.
- *
- * So mock mode, and only mock mode, supplies the fictional customer whose
- * report this is. A real report is untouched: no credentials, no identity.
- */
-const DEMO_READER = "demo@madeupmedia.com";
 
 /**
  * The two route scopes that front the report pages.
@@ -40,13 +26,14 @@ const DEMO_READER = "demo@madeupmedia.com";
  * Keeping the shell in one place is what guarantees "renders exactly the
  * same pages": there is no second copy of the gate or the layout to drift.
  */
+
 function ReportShell({ token, basePath }: { token: string; basePath: string }) {
   const scope = useMemo(() => ({ token, basePath }), [token, basePath]);
   const { pathname } = useLocation();
   return (
     <ReportScopeContext.Provider value={scope}>
       <LoginGate>
-        <Layout email={MOCK ? DEMO_READER : undefined}>
+        <Layout>
           {/* One page's throw must not unmount the report. Keyed on the
               path so walking to a working page clears the failure. */}
           <PageErrorBoundary resetKey={pathname}>

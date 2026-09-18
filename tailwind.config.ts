@@ -164,32 +164,6 @@ export default {
           from: { width: "100%" },
           to: { width: "0%" },
         },
-        /* A light sweep across the Contact button, on a long cycle: the
-           pass itself is quick and most of the timeline is the rest after
-           it, so the eye is caught every few seconds rather than nagged
-           continuously. Transform-only, so it composites on the GPU. */
-        /* The same idea as shine-sweep, for TEXT. A white overlay is
-           invisible on a light card, so the shimmer has to travel through
-           the glyphs themselves: the span paints an over-wide gradient,
-           clips it to the text, and this slides it across. */
-        "shine-text": {
-          "0%": { backgroundPosition: "170% 0" },
-          "20%": { backgroundPosition: "-70% 0" },
-          "100%": { backgroundPosition: "-70% 0" },
-        },
-        "shine-sweep": {
-          "0%": { transform: "translate3d(-130%, 0, 0)" },
-          "18%": { transform: "translate3d(130%, 0, 0)" },
-          "100%": { transform: "translate3d(130%, 0, 0)" },
-        },
-        "dialog-in": {
-          from: { opacity: "0", transform: "translate3d(-50%, -50%, 0) scale(0.97)" },
-          to: { opacity: "1", transform: "translate3d(-50%, -50%, 0) scale(1)" },
-        },
-        "dialog-out": {
-          from: { opacity: "1", transform: "translate3d(-50%, -50%, 0) scale(1)" },
-          to: { opacity: "0", transform: "translate3d(-50%, -50%, 0) scale(0.98)" },
-        },
         /* Lean sheet keyframes — transform-only for iOS Safari GPU compositing */
         "sheet-in-left": {
           from: { transform: "translate3d(-100%, 0, 0)" },
@@ -274,14 +248,6 @@ export default {
         "sheet-out-top": "sheet-out-top 0.2s cubic-bezier(0.32, 0.72, 0, 1) both",
         "sheet-in-bottom": "sheet-in-bottom 0.28s cubic-bezier(0.32, 0.72, 0, 1) both",
         "sheet-out-bottom": "sheet-out-bottom 0.2s cubic-bezier(0.32, 0.72, 0, 1) both",
-        /* Ask AI panel: a centred dialog, so its keyframes carry the
-           centring translate themselves -- an animation that set transform
-           without it would yank the panel to the corner on the first frame
-           and leave it there, because the fill mode keeps the last value. */
-        "shine-text": "shine-text 5s cubic-bezier(0.4, 0, 0.2, 1) infinite",
-        "shine-sweep": "shine-sweep 5s cubic-bezier(0.4, 0, 0.2, 1) infinite",
-        "dialog-in": "dialog-in 0.24s cubic-bezier(0.22, 1, 0.36, 1) both",
-        "dialog-out": "dialog-out 0.16s ease-in both",
         "sheet-overlay-in": "sheet-overlay-in 0.28s ease-out both",
         "sheet-overlay-out": "sheet-overlay-out 0.2s ease-in both",
         "dot-bounce": "dot-bounce 0.8s ease-in-out infinite",
