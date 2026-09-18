@@ -1,5 +1,5 @@
 import * as Dialog from "@radix-ui/react-dialog";
-import { Sparkles, X } from "lucide-react";
+import { ArrowUp, Sparkles, X } from "lucide-react";
 import { useEffect, useRef } from "react";
 
 import { Markdown } from "@/components/Markdown";
@@ -166,10 +166,38 @@ export default function AskAIChat({
             )}
           </div>
 
-          {!empty && remaining.length > 0 && (
+          {!empty && (
             <div className="flex-shrink-0 border-t border-border px-4 py-3 sm:px-5">
+              {/*
+               * A COMPOSER THAT CANNOT BE TYPED INTO.
+               *
+               * Present because a chat without one looks unfinished, inert
+               * because there is nothing behind it: every answer here is
+               * composed from the fixture on the page, so a working box
+               * would take any sentence and reply with whichever canned
+               * paragraph it half-matched.
+               *
+               * Disabled rather than hidden on click, and it says so in its
+               * own placeholder, so a reader learns the rule by looking
+               * instead of by typing a question and watching nothing
+               * happen. The questions below it are the way through.
+               */}
+              <div
+                aria-hidden
+                className="mb-3 flex h-10 cursor-not-allowed items-center gap-2 rounded-full border border-border bg-muted/40 pl-4 pr-2 opacity-70"
+              >
+                <span className="min-w-0 flex-1 truncate text-sm text-slate-400">
+                  Ask a follow-up question
+                </span>
+                <span className="flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-full bg-slate-100 text-slate-300">
+                  <ArrowUp className="h-4 w-4" />
+                </span>
+              </div>
+
+              {remaining.length > 0 && (
+                <>
               <p className="mb-2 text-[11px] font-medium text-slate-400">
-                Ask something else
+                Pick one of these instead
               </p>
               {/* Capped and scrollable. Ten chips stacked one per line is
                   most of a phone screen, and the answer the reader just
@@ -188,6 +216,8 @@ export default function AskAIChat({
                   </button>
                 ))}
               </div>
+                </>
+              )}
             </div>
           )}
         </Dialog.Content>

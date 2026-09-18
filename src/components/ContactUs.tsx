@@ -89,7 +89,15 @@ export default function ContactUs() {
               50 of your ads.txt lines
             </strong>
             , and we&apos;ll run the same crawl on your data,{" "}
-            <strong className="font-semibold text-primary">completely FREE</strong>.
+            {/* The two words the whole panel is built around, so they get
+                the same slow shimmer as the button that opened it. Falls
+                back to flat primary green wherever background-clip: text is
+                unavailable or motion is turned down: the phrase still
+                reads, it just stops moving. */}
+            <strong className="animate-shine-text bg-[linear-gradient(100deg,hsl(150_58%_22%)_44%,hsl(150_70%_48%)_50%,hsl(150_58%_22%)_56%)] bg-[length:250%_100%] bg-clip-text font-semibold text-primary [-webkit-text-fill-color:transparent] motion-reduce:animate-none motion-reduce:bg-none motion-reduce:[-webkit-text-fill-color:currentColor]">
+              completely FREE
+            </strong>
+            .
           </p>
 
           <p className="mt-3 rounded-xl border border-primary/15 bg-primary/[0.05] px-3.5 py-2.5 text-[13px] leading-relaxed text-slate-600">

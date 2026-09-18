@@ -85,17 +85,21 @@ function carries(lines: MatchedSeatLine[] | undefined, selected: string[]): bool
  * Computed once at module load, not per call: a report whose dates drifted
  * between two fetches on the same page would contradict itself.
  */
-function mostRecentMonday(now: Date): Date {
-  const d = new Date(
-    Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate()),
-  );
-  // getUTCDay() is 0 Sun .. 6 Sat, so Monday is 1 and Sunday is SIX days
-  // past the Monday we want, not one day short of the next one.
-  d.setUTCDate(d.getUTCDate() - ((d.getUTCDay() + 6) % 7));
-  return d;
+function crawlDay(now: Date): Date {
+  // Midnight UTC on the day the reader is looking at this. The run's own
+  // clock times are layered on top by `stamp`.
+  return new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate()));
 }
 
-const THIS_RUN = mostRecentMonday(new Date());
+/*
+ * TODAY. Not the most recent Monday, which is what this was.
+ *
+ * Anchoring to Monday meant that by Sunday the demo was presenting a
+ * six-day-old crawl, and "Week of Sep 8" on the fourteenth is the kind of
+ * small wrongness a prospect notices without being able to say why. The
+ * crawl ran today, every day, and last week's ran a week before that.
+ */
+const THIS_RUN = crawlDay(new Date());
 const PREV_RUN = new Date(THIS_RUN.getTime() - 7 * 86_400_000);
 
 /** A timestamp on `run`'s calendar day, UTC, in the fixture's own format. */
