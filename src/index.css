@@ -780,3 +780,17 @@ All colors MUST be HSL.
     background-image: none;
   }
 }
+
+/* Hide the native scrollbar where a control draws its own rail. macOS hides
+   overlay scrollbars until something moves, so a long list inside a menu
+   looked like a short one (the Lines filter, 2026-09-21); a rail the
+   component draws itself is on show on every platform, and one bar is
+   drawn, not two. */
+@layer utilities {
+  .scrollbar-none {
+    scrollbar-width: none;
+  }
+  .scrollbar-none::-webkit-scrollbar {
+    display: none;
+  }
+}
