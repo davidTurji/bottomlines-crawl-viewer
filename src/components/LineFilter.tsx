@@ -40,7 +40,7 @@
  *   - Membership is compared ignoring order, so re-ticking the same lines
  *     in a different order is correctly seen as no change.
  */
-import { useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 
 import { Check, ChevronsUpDown, ListFilter, Loader2 } from "lucide-react";
 
@@ -63,6 +63,114 @@ export const HEADER_PILL = "h-9 w-[176px]";
 /** Same members, order ignored. */
 const sameSelection = (a: string[], b: string[]) =>
   a.length === b.length && a.every((k) => b.includes(k));
+
+/**
+ * A scroll rail the list draws for itself, always on show.
+ *
+ * The native bar is an overlay on macOS: invisible until something moves,
+ * so a list of 126 lines cut off at the ninth looked like a list of nine
+ * (David, 2026-09-21: "have a bar so people will know it's scrollable").
+ * Styling the native bar is platform lottery (Chromium drops the WebKit
+ * rules the moment the standard properties are set; Firefox never had
+ * them), so the native one is hidden and this rail stands in on every
+ * platform: a track the full height of the list, a thumb sized to the
+ * visible share and placed by scrollTop, draggable, and a click on the
+ * track jumps there. Wheel, trackpad and arrow keys scroll the list as
+ * before; the rail only mirrors them.
+ */
+function ScrollRail({
+  target,
+  deps,
+}: {
+  target: React.RefObject<HTMLDivElement | null>;
+  /** Anything whose change should re-measure (the list length). */
+  deps: unknown[];
+}) {
+  const [rail, setRail] = useState<{ top: number; height: number; track: number } | null>(null);
+  const drag = useRef<{ startY: number; startTop: number } | null>(null);
+
+  const measure = useCallback(() => {
+    const el = target.current;
+    if (!el) return;
+    const { scrollHeight, clientHeight, scrollTop } = el;
+    if (scrollHeight <= clientHeight + 1) {
+      setRail(null);
+      return;
+    }
+    const track = clientHeight;
+    const height = Math.max(24, Math.round((clientHeight / scrollHeight) * track));
+    const top = Math.round((scrollTop / (scrollHeight - clientHeight)) * (track - height));
+    setRail({ top, height, track });
+  }, [target]);
+
+  // Measured on mount, on every scroll, and whenever the box changes size
+  // (the menu is capped at the room below the pill, which follows the
+  // window).
+  useLayoutEffect(() => {
+    measure();
+    const el = target.current;
+    if (!el) return;
+    el.addEventListener("scroll", measure, { passive: true });
+    const ro = typeof ResizeObserver !== "undefined" ? new ResizeObserver(measure) : null;
+    ro?.observe(el);
+    return () => {
+      el.removeEventListener("scroll", measure);
+      ro?.disconnect();
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [measure, ...deps]);
+
+  useEffect(() => {
+    if (!rail) return;
+    const move = (e: PointerEvent) => {
+      const el = target.current;
+      if (!drag.current || !el) return;
+      const { scrollHeight, clientHeight } = el;
+      const span = rail.track - rail.height;
+      if (span <= 0) return;
+      const nextTop = Math.min(span, Math.max(0, drag.current.startTop + (e.clientY - drag.current.startY)));
+      el.scrollTop = (nextTop / span) * (scrollHeight - clientHeight);
+    };
+    const up = () => {
+      drag.current = null;
+    };
+    window.addEventListener("pointermove", move);
+    window.addEventListener("pointerup", up);
+    return () => {
+      window.removeEventListener("pointermove", move);
+      window.removeEventListener("pointerup", up);
+    };
+  }, [rail, target]);
+
+  if (!rail) return null;
+
+  return (
+    <div
+      data-testid="scroll-rail"
+      aria-hidden
+      onPointerDown={(e) => {
+        // A click on the track (not the thumb) jumps the list there.
+        const el = target.current;
+        if (!el || e.target !== e.currentTarget) return;
+        const y = e.clientY - e.currentTarget.getBoundingClientRect().top - rail.height / 2;
+        const span = rail.track - rail.height;
+        el.scrollTop = (Math.min(span, Math.max(0, y)) / span) * (el.scrollHeight - el.clientHeight);
+      }}
+      className="absolute bottom-0 right-1 top-0 w-2 cursor-pointer rounded-full bg-slate-200"
+    >
+      <div
+        data-testid="scroll-thumb"
+        onPointerDown={(e) => {
+          e.preventDefault();
+          e.stopPropagation();
+          drag.current = { startY: e.clientY, startTop: rail.top };
+        }}
+        style={{ top: rail.top, height: rail.height }}
+        className="absolute left-0 w-full rounded-full bg-slate-400 transition-colors hover:bg-slate-500"
+      />
+    </div>
+  );
+}
 
 export function LineFilter({
   seats,
@@ -87,6 +195,7 @@ export function LineFilter({
   const [open, setOpen] = useState(false);
   // The ticks in progress. Only ever read inside the open menu.
   const [draft, setDraft] = useState<string[]>(selected);
+  const listRef = useRef<HTMLDivElement | null>(null);
 
   // Seeded from the URL on every open, so it cannot carry a stale draft
   // across a back button, a link arriving with ?lines=, or the other
@@ -154,10 +263,40 @@ export function LineFilter({
           <ChevronsUpDown aria-hidden className="h-3 w-3 flex-shrink-0 opacity-40" />
         </button>
       </DropdownMenuTrigger>
-      <DropdownMenuContent align="end" className="w-[340px] max-w-[calc(100vw-2rem)]">
-        <DropdownMenuLabel className="text-[11px] font-medium text-slate-500">
+      {/* ── A LONG WATCHLIST SCROLLS INSIDE THE MENU ──────────────────
+          A customer with a hundred and more lines (eskimi, 2026-09-21)
+          pushed the menu past the bottom of the window: the last lines,
+          "All lines" and Apply were off screen with no way to reach them,
+          and the page behind the menu does not scroll while it is open.
+          Radix measures the room left below the pill and hands it over as
+          a CSS variable; the menu is capped at that height and laid out
+          as a column, so the list is the only part that scrolls and the
+          label above it and the commit below it are always in view. */}
+      <DropdownMenuContent
+        align="end"
+        collisionPadding={16}
+        className="flex w-[340px] max-w-[calc(100vw-2rem)] flex-col"
+        style={{ maxHeight: "var(--radix-dropdown-menu-content-available-height)" }}
+      >
+        <DropdownMenuLabel className="flex-shrink-0 text-[11px] font-medium text-slate-500">
           Show only publishers and apps carrying
+          {seats.length > 8 && (
+            <span className="ml-1 font-normal text-slate-400">
+              ({seats.length} lines, scroll for more)
+            </span>
+          )}
         </DropdownMenuLabel>
+        {/* The wrapper is a flex column too, so the list is a flex item
+            with a definite height (a percentage height would not resolve
+            against a max-height-capped menu) and the rail can sit beside
+            it at the full height of the visible list. */}
+        <div className="relative flex min-h-0 flex-1 flex-col">
+        <div
+          ref={listRef}
+          role="group"
+          aria-label="Seat lines"
+          className="scrollbar-none min-h-0 flex-1 overflow-y-auto overscroll-contain pr-4"
+        >
         {seats.map((s) => {
           const key = lineKey(s);
           const on = chosen.has(key);
@@ -188,14 +327,17 @@ export function LineFilter({
             </DropdownMenuItem>
           );
         })}
-        <DropdownMenuSeparator />
+        </div>
+        <ScrollRail target={listRef} deps={[seats.length]} />
+        </div>
+        <DropdownMenuSeparator className="flex-shrink-0" />
         <DropdownMenuItem
           onSelect={(e) => {
             e.preventDefault();
             setDraft([]);
           }}
           disabled={draft.length === 0}
-          className="gap-2.5 text-[12px]"
+          className="flex-shrink-0 gap-2.5 text-[12px]"
         >
           <span
             aria-hidden
@@ -227,7 +369,7 @@ export function LineFilter({
             takes Enter and Space, and still closes the menu on select.
             `asChild` keeps the real <button> element underneath, so it is
             announced as a button and not as a menu row. */}
-        <div className="mt-1 flex items-center justify-between gap-3 border-t border-border px-2 pb-1 pt-2">
+        <div className="mt-1 flex flex-shrink-0 items-center justify-between gap-3 border-t border-border px-2 pb-1 pt-2">
           <span className="min-w-0 truncate text-[11px] text-slate-500">
             {dirty
               ? draft.length === 0
@@ -244,7 +386,12 @@ export function LineFilter({
               e.preventDefault();
               apply();
             }}
-            className="flex-shrink-0 p-0 focus:bg-transparent data-[disabled]:opacity-100"
+            // `rounded-full` is said HERE, on the item, and not only on the
+            // button below: the item's own `rounded-sm` wins the cascade
+            // over a class merged in through `asChild`, and Apply came out
+            // with the corners of a menu row instead of the pill every
+            // other button on these screens has (David, 2026-09-21).
+            className="flex-shrink-0 rounded-full p-0 focus:bg-transparent data-[disabled]:opacity-100"
           >
             <button
               type="button"

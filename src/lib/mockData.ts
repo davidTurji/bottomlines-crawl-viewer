@@ -55,6 +55,14 @@ export const CUSTOMER_SEATS: MatchedSeatLine[] = [
   { ssp_domain: "pubmatic.com", publisher_id: "161234", relationship: "RESELLER" },
   { ssp_domain: "sharethrough.com", publisher_id: "SZjHEx3f", relationship: "DIRECT" },
   { ssp_domain: "onetag.com", publisher_id: "8df76ed1d09d55e", relationship: "RESELLER" },
+  // A customer the size of eskimi (2026-09-21): well over a hundred seat
+  // lines on one SSP, so the line filter has to scroll and the Apply
+  // button has to stay in reach. Made-up names, as every example here.
+  ...Array.from({ length: 120 }, (_, i) => ({
+    ssp_domain: "madeupmedia.com",
+    publisher_id: String(2020000100 + i * 3),
+    relationship: i % 7 === 0 ? "RESELLER" : "DIRECT",
+  })),
 ];
 
 export function seatKey(l: { ssp_domain: string; publisher_id: string; relationship: string }): string {
