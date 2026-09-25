@@ -53,7 +53,7 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import type { MatchedSeatLine } from "@/lib/api";
-import { lineKey, lineLabel } from "@/lib/lineFilter";
+import { isDiscovered, lineKey, lineLabel, sourceHint } from "@/lib/lineFilter";
 import { cn } from "@/lib/utils";
 
 /** One size for this control and the Export button beside it: the two
@@ -300,6 +300,13 @@ export function LineFilter({
         {seats.map((s) => {
           const key = lineKey(s);
           const on = chosen.has(key);
+          // Every line hints where it came from and the day it was added,
+          // here and nowhere else: this menu is the one surface that lists
+          // them all (David, 2026-09-25). A line we found for the customer
+          // reads blue, because it is the one worth picking out of a long
+          // list; the lines they gave read plain. Same row, same checkbox.
+          const hint = sourceHint(s);
+          const discovered = isDiscovered(s);
           return (
             <DropdownMenuItem
               key={key}
@@ -310,8 +317,12 @@ export function LineFilter({
               }}
               role="menuitemcheckbox"
               aria-checked={on}
-              className="gap-2.5 font-mono text-[12px]"
+              className={cn(
+                "flex-col items-start gap-0.5 py-1.5 font-mono text-[12px]",
+                discovered && "bg-sky-50/60 text-sky-800 focus:bg-sky-50",
+              )}
             >
+              <span className="flex w-full min-w-0 items-center gap-2.5">
               {/* An empty box that fills when picked, always visible, so
                   the state of every line is readable at a glance. */}
               <span
@@ -323,7 +334,18 @@ export function LineFilter({
               >
                 {on && <Check className="h-3 w-3 text-white" strokeWidth={3} />}
               </span>
-              <span className="truncate">{lineLabel(s)}</span>
+              <span className="min-w-0 flex-1 truncate">{lineLabel(s)}</span>
+              </span>
+              {hint && (
+                <span
+                  className={cn(
+                    "w-full truncate pl-[26px] font-sans text-[10.5px]",
+                    discovered ? "text-sky-700" : "text-slate-400",
+                  )}
+                >
+                  {hint}
+                </span>
+              )}
             </DropdownMenuItem>
           );
         })}

@@ -742,6 +742,16 @@ export type MatchedSeatLine = {
   /** "" or absent when the file omits the fourth field, the majority case. */
   cert_id?: string;
   /**
+   * Where the line came from and the day it was added to this customer's
+   * list (2026-09-25). Four values, two of which are one idea reached by
+   * two buttons: `sellers_json` imported in bulk, `manual` put there by a
+   * person, `signal` and `discovered` both found on a discovery domain.
+   * Absent on artifacts frozen before this, where the honest answer is
+   * that we do not know, and the line carries no hint at all.
+   */
+  source?: "sellers_json" | "manual" | "signal" | "discovered" | "";
+  added_at?: string | null;
+  /**
    * Where the line was found: "ads.txt", "app-ads.txt", or "both" when
    * the same seat sits in the two files (one row, per the dedupe -- the
    * two sightings are one fact, and this word is what keeps that honest).

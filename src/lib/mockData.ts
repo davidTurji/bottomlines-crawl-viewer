@@ -48,13 +48,35 @@ import { compareDefault } from "./discoveredSort";
  * true to narrow by. Declared first: the event seed below reads it at
  * module load.
  */
+// PROVENANCE, EXERCISED (2026-09-25). Every line says where it came from
+// and the day it was added, hinted under the line in the filter and
+// nowhere else. The mix here is deliberate, so a preview shows every
+// state rather than the happy one:
+//
+//   * a bulk sellers.json import, the majority in a real customer;
+//   * lines a person typed, on later dates;
+//   * both discovery buttons, which read the same to a customer;
+//   * one line with no provenance at all, which is what every line on an
+//     artifact frozen before this looks like. It must hint NOTHING rather
+//     than guess "added manually".
 export const CUSTOMER_SEATS: MatchedSeatLine[] = [
-  { ssp_domain: "magnite.com", publisher_id: "14991", relationship: "RESELLER" },
-  { ssp_domain: "magnite.com", publisher_id: "14992", relationship: "RESELLER" },
-  { ssp_domain: "openx.com", publisher_id: "540123456", relationship: "DIRECT" },
-  { ssp_domain: "pubmatic.com", publisher_id: "161234", relationship: "RESELLER" },
-  { ssp_domain: "sharethrough.com", publisher_id: "SZjHEx3f", relationship: "DIRECT" },
-  { ssp_domain: "onetag.com", publisher_id: "8df76ed1d09d55e", relationship: "RESELLER" },
+  { ssp_domain: "magnite.com", publisher_id: "14991", relationship: "RESELLER",
+    source: "sellers_json", added_at: "2026-08-30" },
+  { ssp_domain: "magnite.com", publisher_id: "14992", relationship: "RESELLER",
+    source: "sellers_json", added_at: "2026-08-30" },
+  { ssp_domain: "openx.com", publisher_id: "540123456", relationship: "DIRECT",
+    source: "manual", added_at: "2026-09-02" },
+  { ssp_domain: "pubmatic.com", publisher_id: "161234", relationship: "RESELLER",
+    source: "sellers_json", added_at: "2026-08-30" },
+  // Promoted from a one-off crawl's discovery matches. Reads the same as
+  // the fold below, because a customer has no use for which button it was.
+  { ssp_domain: "sharethrough.com", publisher_id: "SZjHEx3f", relationship: "DIRECT",
+    source: "signal", added_at: "2026-09-11" },
+  // Folded in by a generation that treated discovered lines as seat lines.
+  { ssp_domain: "onetag.com", publisher_id: "8df76ed1d09d55e", relationship: "RESELLER",
+    source: "discovered", added_at: "2026-09-16" },
+  // The honest blank: an artifact frozen before provenance existed.
+  { ssp_domain: "improvedigital.com", publisher_id: "1532", relationship: "DIRECT" },
   // A customer the size of eskimi (2026-09-21): well over a hundred seat
   // lines on one SSP, so the line filter has to scroll and the Apply
   // button has to stay in reach. Made-up names, as every example here.
@@ -62,6 +84,13 @@ export const CUSTOMER_SEATS: MatchedSeatLine[] = [
     ssp_domain: "madeupmedia.com",
     publisher_id: String(2020000100 + i * 3),
     relationship: i % 7 === 0 ? "RESELLER" : "DIRECT",
+    // Mostly the bulk import they sent on day one; a handful found for
+    // them since, so the blue lines are findable in a long list.
+    ...(i % 17 === 5
+      ? { source: "discovered" as const, added_at: "2026-09-16" }
+      : i % 23 === 9
+        ? { source: "manual" as const, added_at: "2026-09-09" }
+        : { source: "sellers_json" as const, added_at: "2026-08-30" }),
   })),
 ];
 

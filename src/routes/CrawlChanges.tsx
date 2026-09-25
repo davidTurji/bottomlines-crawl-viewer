@@ -112,6 +112,14 @@ export default function CrawlChanges() {
   const [summarySettled, setSummarySettled] = useState(false);
   const [previous, setPrevious] = useState<Summary | null>(null);
   const [bucket, setBucket] = useState<Bucket>("all");
+  // Which scope tabs this week earns, from the crawl-wide totals.
+  const scopeTabs = useMemo<[EventKind, string][]>(() => {
+    const t = summary?.hero_diff?.line_totals;
+    if (!t) return [];
+    return (["newly_monitored", "monitoring_stopped"] as const)
+      .filter((k) => (t[k] ?? 0) > 0)
+      .map((k) => [k, TONES[k].label]);
+  }, [summary]);
   const [ssp, setSsp] = useState("");
   const [rows, setRows] = useState<LineEvent[]>([]);
   const [truncated, setTruncated] = useState(false);
@@ -437,9 +445,14 @@ export default function CrawlChanges() {
                       ? "Relative to last week"
                       : bucket === "first_appearance"
                         ? "New to your report, nothing to compare against"
-                        : isScopeKind(bucket)
-                          ? "First week, nothing to compare against"
-                        : "This tab only"}
+                        : bucket === "newly_monitored"
+                          ? "Their first week on your seat lines"
+                          // Not "first week": these lines came OFF the list,
+                          // so the week they are having is their last. The
+                          // publishers still carry them.
+                          : bucket === "monitoring_stopped"
+                            ? "Came off your seat lines, still carried"
+                            : "This tab only"}
                 </div>
               </div>
               <span className="text-xs text-slate-500">
@@ -450,6 +463,19 @@ export default function CrawlChanges() {
                     : `${kpi.lines.toLocaleString()} distinct lines`}
               </span>
             </div>
+            {/* The watchlist moved between the two weeks (a seat added or
+                trimmed, a discovered line left in or out), so the delta
+                is not like-for-like and the page says so once, here, and
+                points at the two tabs that hold those lines. Never counted
+                as added or removed: the publishers did nothing. */}
+            {!isFirstCrawl && summary?.hero_diff?.scope_changed && (
+              <p className="rounded-xl border border-sky-200 bg-sky-50/60 px-4 py-3 text-[12px] leading-relaxed text-sky-900">
+                Your seat lines changed since last week. Lines you started
+                or stopped watching are listed on their own tabs below, and
+                are not counted as added or removed: the publishers carrying
+                them did nothing.
+              </p>
+            )}
             {/* Same reason as the overview: on a first crawl "+0 added, -0
                 removed" is the absence of a result, not one, and it is the
                 first thing a new customer reads. */}
@@ -583,6 +609,22 @@ export default function CrawlChanges() {
               <TabsTrigger value="added">Added</TabsTrigger>
               <TabsTrigger value="removed">Removed</TabsTrigger>
               <TabsTrigger value="cert_changed">Cert changes</TabsTrigger>
+              {/* THE WATCHLIST MOVED, so the lines it moved get somewhere to
+                  be. Shown only on a week that has them -- the ordinary week
+                  keeps four tabs -- and counted from the summary rather than
+                  from the rows on screen, which are already scoped to the
+                  open tab and would make the tab that reveals them vanish
+                  the moment it was used.
+
+                  Without these, a customer who trimmed fifty lines could
+                  see the note above and then have no way to find which
+                  fifty: the rows sit in All, mixed into a week of real
+                  market movement. */}
+              {scopeTabs.map(([kind, label]) => (
+                <TabsTrigger key={kind} value={kind}>
+                  {label}
+                </TabsTrigger>
+              ))}
             </TabsList>
           </Tabs>
           {loading && rows.length > 0 && <Dots />}
