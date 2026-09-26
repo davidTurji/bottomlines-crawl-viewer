@@ -285,6 +285,11 @@ export function LineFilter({
               ({seats.length} lines, scroll for more)
             </span>
           )}
+          {/* Said once, at the top, so the small grey line under each seat
+              reads as an answer to a question rather than as stray text. */}
+          <span className="mt-0.5 block font-normal normal-case text-slate-400">
+            Under each line, where it came from and when it was added.
+          </span>
         </DropdownMenuLabel>
         {/* The wrapper is a flex column too, so the list is a flex item
             with a definite height (a percentage height would not resolve
@@ -318,34 +323,52 @@ export function LineFilter({
               role="menuitemcheckbox"
               aria-checked={on}
               className={cn(
-                "flex-col items-start gap-0.5 py-1.5 font-mono text-[12px]",
-                discovered && "bg-sky-50/60 text-sky-800 focus:bg-sky-50",
+                // A ROW, NOT A STACK. The box belongs beside the line it
+                // ticks, so it is laid out as one flex row with the box in
+                // its own column and the line plus its hint in the other.
+                // Stacked, the box centred itself against a two-line row
+                // and floated between the line and its hint, belonging to
+                // neither.
+                "items-start gap-2.5 py-1.5",
+                discovered && "bg-sky-50/60 focus:bg-sky-50",
               )}
             >
-              <span className="flex w-full min-w-0 items-center gap-2.5">
               {/* An empty box that fills when picked, always visible, so
-                  the state of every line is readable at a glance. */}
+                  the state of every line is readable at a glance. Nudged
+                  down by a hair to sit on the line's baseline rather than
+                  its box. */}
               <span
                 aria-hidden
                 className={cn(
-                  "flex h-4 w-4 flex-shrink-0 items-center justify-center rounded-[4px] border transition-colors",
+                  "mt-[2px] flex h-4 w-4 flex-shrink-0 items-center justify-center rounded-[4px] border transition-colors",
                   on ? "border-primary bg-primary" : "border-slate-300 bg-white",
                 )}
               >
                 {on && <Check className="h-3 w-3 text-white" strokeWidth={3} />}
               </span>
-              <span className="min-w-0 flex-1 truncate">{lineLabel(s)}</span>
-              </span>
-              {hint && (
+              <span className="flex min-w-0 flex-1 flex-col gap-[1px]">
                 <span
                   className={cn(
-                    "w-full truncate pl-[26px] font-sans text-[10.5px]",
-                    discovered ? "text-sky-700" : "text-slate-400",
+                    "truncate font-mono text-[12px] leading-[18px]",
+                    discovered ? "text-sky-900" : "text-slate-900",
                   )}
                 >
-                  {hint}
+                  {lineLabel(s)}
                 </span>
-              )}
+                {hint && (
+                  // Quieter and smaller than the line, so it reads as a
+                  // note ABOUT the line rather than more of the line. The
+                  // line is the data; this is provenance.
+                  <span
+                    className={cn(
+                      "truncate text-[10.5px] leading-[14px]",
+                      discovered ? "text-sky-600" : "text-slate-400",
+                    )}
+                  >
+                    {hint}
+                  </span>
+                )}
+              </span>
             </DropdownMenuItem>
           );
         })}

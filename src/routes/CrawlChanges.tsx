@@ -463,19 +463,6 @@ export default function CrawlChanges() {
                     : `${kpi.lines.toLocaleString()} distinct lines`}
               </span>
             </div>
-            {/* The watchlist moved between the two weeks (a seat added or
-                trimmed, a discovered line left in or out), so the delta
-                is not like-for-like and the page says so once, here, and
-                points at the two tabs that hold those lines. Never counted
-                as added or removed: the publishers did nothing. */}
-            {!isFirstCrawl && summary?.hero_diff?.scope_changed && (
-              <p className="rounded-xl border border-sky-200 bg-sky-50/60 px-4 py-3 text-[12px] leading-relaxed text-sky-900">
-                Your seat lines changed since last week. Lines you started
-                or stopped watching are listed on their own tabs below, and
-                are not counted as added or removed: the publishers carrying
-                them did nothing.
-              </p>
-            )}
             {/* Same reason as the overview: on a first crawl "+0 added, -0
                 removed" is the absence of a result, not one, and it is the
                 first thing a new customer reads. */}
@@ -602,6 +589,22 @@ export default function CrawlChanges() {
             The per-tab counts it used to carry now live in the KPI row
             directly above, which re-scopes with the tab, so printing them
             on the control as well was the same number twice. */}
+        {/* THE NOTE SITS WITH THE TABS IT IS ABOUT, not inside the KPI
+            card. Inside the card it pushed the two headline numbers down
+            and left the pair of cards uneven, which is a layout cost paid
+            on the one week a customer most needs the numbers to read
+            normally. Here it explains the two extra tabs, an arm's length
+            from them, and disturbs nothing above it. */}
+        {!isFirstCrawl && scopeTabs.length > 0 && (
+          <p className="mb-2 flex items-start gap-1.5 text-[12px] leading-relaxed text-slate-500">
+            <Eye aria-hidden className="mt-[3px] h-3.5 w-3.5 flex-shrink-0 text-slate-400" />
+            <span>
+              Your seat lines changed since last week. Lines you started or
+              stopped watching are on their own tabs, and are not counted as
+              added or removed: the publishers carrying them did nothing.
+            </span>
+          </p>
+        )}
         <div className="flex items-center gap-3">
           <Tabs value={bucket} onValueChange={(v) => setBucket(v as Bucket)}>
             <TabsList>
