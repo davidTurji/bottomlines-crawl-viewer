@@ -601,7 +601,7 @@ export default function CrawlChanges() {
             <span>
               Your seat lines changed since last week. Lines you started or
               stopped watching are on their own tabs, and are not counted as
-              added or removed: the publishers carrying them did nothing.
+              added or removed: the publishers carrying them did not change.
             </span>
           </p>
         )}
@@ -998,7 +998,10 @@ const TONES: Record<
   // the green of an addition would put them back in the column this whole
   // distinction exists to keep them out of.
   newly_monitored: {
-    label: "Newly monitored",
+    // Plain verbs, not system vocabulary. "Monitored" is how the operator
+    // view talks about its own machinery; a customer reading their own
+    // report is being told what THEY did to their list (David, 2026-09-26).
+    label: "Started watching",
     preposition: "on",
     expandedTitle: "Publishers carrying this line in its first week",
     disc: "bg-muted text-muted-foreground",
@@ -1006,7 +1009,7 @@ const TONES: Record<
     icon: Eye,
   },
   monitoring_stopped: {
-    label: "No longer monitored",
+    label: "Stopped watching",
     preposition: "on",
     expandedTitle: "Publishers that carried this line when we last looked",
     disc: "bg-muted text-muted-foreground",

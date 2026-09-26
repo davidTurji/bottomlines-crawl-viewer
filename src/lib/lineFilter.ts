@@ -69,6 +69,18 @@ export function isDiscovered(l: { source?: string | null }): boolean {
 
 /** "30 Aug 2026", or null when the artifact carries no date. */
 export function addedDay(l: { added_at?: string | null }): string | null {
+  return formatAdded(l, "numeric");
+}
+
+/** "30 Aug 26". The short year buys back the width the seat line wants,
+ *  and a report only ever spans a year or two, so the century is noise. */
+export function addedDayShort(l: { added_at?: string | null }): string | null {
+  return formatAdded(l, "2-digit");
+}
+
+function formatAdded(
+  l: { added_at?: string | null }, year: "numeric" | "2-digit",
+): string | null {
   const raw = l.added_at;
   if (!raw) return null;
   const d = new Date(raw.length === 10 ? `${raw}T00:00:00Z` : raw);
@@ -76,7 +88,7 @@ export function addedDay(l: { added_at?: string | null }): string | null {
   return d.toLocaleDateString("en-GB", {
     day: "numeric",
     month: "short",
-    year: "numeric",
+    year,
     timeZone: "UTC",
   });
 }

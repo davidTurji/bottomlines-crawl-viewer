@@ -53,12 +53,23 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import type { MatchedSeatLine } from "@/lib/api";
-import { isDiscovered, lineKey, lineLabel, sourceHint } from "@/lib/lineFilter";
+import { addedDayShort, isDiscovered, lineKey, lineLabel, sourceHint } from "@/lib/lineFilter";
 import { cn } from "@/lib/utils";
 
 /** One size for this control and the Export button beside it: the two
  *  read as a pair, and a label that changes must never move the row. */
 export const HEADER_PILL = "h-9 w-[176px]";
+
+/** The source, as a dot. Explained once in the menu header rather than
+ *  spelled out on all 127 rows, which is what made the list unreadable. */
+function sourceDot(l: { source?: string | null }): string {
+  if (l.source === "discovered" || l.source === "signal") return "bg-sky-500";
+  if (l.source === "sellers_json") return "bg-slate-400";
+  if (l.source === "manual") return "bg-slate-300";
+  // No provenance at all, which is every line on an older report. An empty
+  // ring says "we do not know" without claiming one of the three.
+  return "border border-slate-300 bg-transparent";
+}
 
 /** Same members, order ignored. */
 const sameSelection = (a: string[], b: string[]) =>
@@ -275,7 +286,7 @@ export function LineFilter({
       <DropdownMenuContent
         align="end"
         collisionPadding={16}
-        className="flex w-[340px] max-w-[calc(100vw-2rem)] flex-col"
+        className="flex w-[452px] max-w-[calc(100vw-2rem)] flex-col"
         style={{ maxHeight: "var(--radix-dropdown-menu-content-available-height)" }}
       >
         <DropdownMenuLabel className="flex-shrink-0 text-[11px] font-medium text-slate-500">
@@ -285,10 +296,22 @@ export function LineFilter({
               ({seats.length} lines, scroll for more)
             </span>
           )}
-          {/* Said once, at the top, so the small grey line under each seat
-              reads as an answer to a question rather than as stray text. */}
-          <span className="mt-0.5 block font-normal normal-case text-slate-400">
-            Under each line, where it came from and when it was added.
+          {/* The legend for the dots and the dates, said once here instead
+              of on every row. */}
+          <span className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-1 font-normal normal-case text-[10.5px] text-slate-400">
+            <span className="flex items-center gap-1.5">
+              <span aria-hidden className="h-1.5 w-1.5 rounded-full bg-slate-400" />
+              sellers.json
+            </span>
+            <span className="flex items-center gap-1.5">
+              <span aria-hidden className="h-1.5 w-1.5 rounded-full bg-slate-300" />
+              added by hand
+            </span>
+            <span className="flex items-center gap-1.5">
+              <span aria-hidden className="h-1.5 w-1.5 rounded-full bg-sky-500" />
+              found for you
+            </span>
+            <span>dates are when the line was added</span>
           </span>
         </DropdownMenuLabel>
         {/* The wrapper is a flex column too, so the list is a flex item
@@ -311,6 +334,7 @@ export function LineFilter({
           // reads blue, because it is the one worth picking out of a long
           // list; the lines they gave read plain. Same row, same checkbox.
           const hint = sourceHint(s);
+          const day = addedDayShort(s);
           const discovered = isDiscovered(s);
           return (
             <DropdownMenuItem
@@ -346,29 +370,36 @@ export function LineFilter({
               >
                 {on && <Check className="h-3 w-3 text-white" strokeWidth={3} />}
               </span>
-              <span className="flex min-w-0 flex-1 flex-col gap-[1px]">
+              {/* ONE LINE PER SEAT. Two lines doubled the height of a list
+                  that is already 127 rows on a real customer, and put a
+                  second typeface under every row for a fact that is a note,
+                  not data. The line keeps the row; the date sits at the
+                  right margin where the eye can run down it; the source is
+                  the dot, explained once in the header. */}
+              <span
+                aria-hidden
+                title={hint ?? undefined}
+                className={cn("mt-[6px] h-1.5 w-1.5 flex-shrink-0 rounded-full", sourceDot(s))}
+              />
+              <span
+                className={cn(
+                  "min-w-0 flex-1 truncate font-mono text-[12px] leading-[18px]",
+                  discovered ? "text-sky-900" : "text-slate-900",
+                )}
+              >
+                {lineLabel(s)}
+              </span>
+              {day && (
                 <span
+                  title={hint ?? undefined}
                   className={cn(
-                    "truncate font-mono text-[12px] leading-[18px]",
-                    discovered ? "text-sky-900" : "text-slate-900",
+                    "flex-shrink-0 text-[10.5px] leading-[18px] tabular-nums",
+                    discovered ? "text-sky-600" : "text-slate-400",
                   )}
                 >
-                  {lineLabel(s)}
+                  {day}
                 </span>
-                {hint && (
-                  // Quieter and smaller than the line, so it reads as a
-                  // note ABOUT the line rather than more of the line. The
-                  // line is the data; this is provenance.
-                  <span
-                    className={cn(
-                      "truncate text-[10.5px] leading-[14px]",
-                      discovered ? "text-sky-600" : "text-slate-400",
-                    )}
-                  >
-                    {hint}
-                  </span>
-                )}
-              </span>
+              )}
             </DropdownMenuItem>
           );
         })}
