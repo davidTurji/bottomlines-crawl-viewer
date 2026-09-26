@@ -31,7 +31,7 @@ import { Card } from "@/components/ui/card";
 import InlineAskAI from "@/components/InlineAskAI";
 import { PageShell } from "@/components/PageShell";
 import { formatWeek } from "@/components/WeekLine";
-import { cn, storeLabel } from "@/lib/utils";
+import { cn, foundInLabel, storeLabel } from "@/lib/utils";
 import { useReportScope } from "@/lib/reportScope";
 
 const OVERVIEW_SUGGESTIONS = [
@@ -1118,10 +1118,15 @@ const CHANGE_WINDOW: Record<
  */
 function SeatLineRow({ line, muted }: { line: MatchedSeatLine; muted?: boolean }) {
   return (
-    <li className="px-3 py-1.5">
+    // THE FILE GOES TO THE RIGHT MARGIN (David, 2026-09-26). Trailing the
+    // line, it read as a fourth field of the ads.txt record, which it is
+    // not, and it moved with the length of the cert so no two rows agreed
+    // on where it sat. At the margin it forms a column the eye can run
+    // down. The cert stays inline, because that one IS part of the line.
+    <li className="flex items-baseline gap-3 px-3 py-1.5">
       <code
         className={cn(
-          "block truncate font-mono text-[11px] tabular-nums",
+          "min-w-0 flex-1 truncate font-mono text-[11px] tabular-nums",
           muted ? "text-slate-500" : "text-slate-800",
         )}
       >
@@ -1129,15 +1134,12 @@ function SeatLineRow({ line, muted }: { line: MatchedSeatLine; muted?: boolean }
         {line.cert_id && (
           <span className="font-normal text-slate-400">, {line.cert_id}</span>
         )}
-        {/* PROVENANCE, in grey, per the owner: which file carried the
-            line. "both" is the deduped case -- ads.txt and app-ads.txt
-            agreeing is one fact wearing one row. */}
-        {line.found_in && (
-          <span className="ml-2 font-sans text-[10px] font-normal text-slate-400">
-            {line.found_in === "both" ? "ads.txt + app-ads.txt" : line.found_in}
-          </span>
-        )}
       </code>
+      {foundInLabel(line.found_in) && (
+        <span className="flex-shrink-0 text-[10px] text-slate-400">
+          {foundInLabel(line.found_in)}
+        </span>
+      )}
     </li>
   );
 }

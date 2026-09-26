@@ -21,7 +21,7 @@ import { formatWeek, WeekLine } from "@/components/WeekLine";
 import { useReportScope } from "@/lib/reportScope";
 import { PageShell } from "@/components/PageShell";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { cn } from "@/lib/utils";
+import { cn, foundInLabel } from "@/lib/utils";
 import { computeDelta, MiniStat, SplitStat } from "./CrawlReport";
 
 /**
@@ -942,9 +942,11 @@ function ChangeCard({
                     {p.developer_name ?? ""}
                   </span>
                   {/* Rendered, never the raw enum: this is a customer's
-                      screen, and "APP_ADS_TXT" is not a file name. */}
+                      screen, and "APP_ADS_TXT" is not a file name. Said as
+                      a sentence, the same one every other surface uses, so
+                      a bare filename is never left to explain itself. */}
                   <span className="ml-auto flex-shrink-0 text-[10px] text-slate-400">
-                    {fileLabel(p.file_kind)}
+                    {foundInLabel(fileLabel(p.file_kind))}
                   </span>
                 </li>
               ))}
