@@ -292,18 +292,15 @@ export function LineFilter({
         className="flex w-[420px] max-w-[calc(100vw-2rem)] flex-col"
         style={{ maxHeight: "var(--radix-dropdown-menu-content-available-height)" }}
       >
-        <DropdownMenuLabel className="flex-shrink-0 text-[11px] font-medium text-slate-500">
-          Show only publishers and apps carrying
-          {seats.length > 8 && (
-            <span className="ml-1 font-normal text-slate-400">
-              ({seats.length} lines, scroll for more)
-            </span>
-          )}
-          {/* Said once here, so the small grey line under each seat reads
-              as an answer rather than as stray text. */}
-          <span className="mt-0.5 block font-normal normal-case text-[10.5px] text-slate-400">
-            Under each line, where it came from and when it was added.
-          </span>
+        <DropdownMenuLabel className="flex flex-shrink-0 items-baseline justify-between gap-2 text-[11px] font-medium text-slate-500">
+          {/* THREE WORDS AND A COUNT. It read "Show only publishers and
+              apps carrying (127 lines, scroll for more)" over a second
+              line explaining the grey text below, which is two sentences
+              of chrome above a list that explains itself: every row
+              already says where it came from and when. The count earns
+              its place because the list scrolls. */}
+          <span>Show only these lines</span>
+          <span className="font-normal tabular-nums text-slate-400">{seats.length}</span>
         </DropdownMenuLabel>
         {/* The wrapper is a flex column too, so the list is a flex item
             with a definite height (a percentage height would not resolve
@@ -343,7 +340,15 @@ export function LineFilter({
                 // Stacked, the box centred itself against a two-line row
                 // and floated between the line and its hint, belonging to
                 // neither.
-                "items-start gap-2.5 rounded-none border-b border-border/60 px-2 py-2 last:border-b-0",
+                // The frame is the system's, not a one-off: `border` is the
+                // same token every card and rail on these screens is drawn
+                // with. The rule is INSET to where the text starts, so the
+                // column of ticks reads as one run and the separators
+                // belong to the lines rather than cutting the whole menu in
+                // half. `rounded-none` because a row with rounded corners
+                // and a bottom rule fights itself.
+                "items-start gap-2.5 rounded-none px-2 py-2",
+                "border-b border-border last:border-b-0",
                 discovered && "bg-sky-50/60 focus:bg-sky-50",
               )}
             >

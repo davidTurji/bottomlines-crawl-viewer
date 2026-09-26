@@ -8,7 +8,7 @@ import { LineFilter } from "@/components/LineFilter";
 import { Dots } from "@/components/Dots";
 import { useLineFilter } from "@/lib/lineFilter";
 import { Link } from "react-router-dom";
-import { Building2, ChevronDown, Download, Search, Smartphone } from "lucide-react";
+import { ChevronDown, Download, Globe, Search, Smartphone } from "lucide-react";
 import {
   api,
   ApiError,
@@ -315,7 +315,7 @@ export default function CrawlReport() {
           <div className="grid grid-cols-2 gap-3">
             <MatchedTile
               tone="publisher"
-              icon={Building2}
+              icon={Globe}
               number={matchedDevs}
               label="Matched publishers"
               delta={matchedDevsDelta}
@@ -556,7 +556,7 @@ function MatchedTile({
   onClick,
 }: {
   tone: "publisher" | "app";
-  icon: typeof Building2;
+  icon: typeof Globe;
   number: number;
   label: string;
   delta?: Delta | null;
