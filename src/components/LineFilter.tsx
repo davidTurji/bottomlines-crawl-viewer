@@ -200,8 +200,14 @@ export function LineFilter({
   // Seeded from the URL on every open, so it cannot carry a stale draft
   // across a back button, a link arriving with ?lines=, or the other
   // page's filter.
+  // EVERY LINE IS A TICK, including when nothing is filtered (David,
+  // 2026-09-26). An empty selection means "all lines", and the menu used
+  // to show that as 127 EMPTY boxes under a ticked "All lines" row, which
+  // says the opposite of what is happening. Seeding the draft with every
+  // key makes the state explicit: what is ticked is what you get.
+  const allKeys = seats.map(lineKey);
   const handleOpenChange = (next: boolean) => {
-    if (next) setDraft(selected);
+    if (next) setDraft(selected.length === 0 ? allKeys : selected);
     setOpen(next);
   };
 
@@ -209,11 +215,18 @@ export function LineFilter({
 
   const chosen = new Set(draft);
   const applied = selected.length;
+  // Ticking every line IS no filter, so it commits as an empty selection:
+  // the page shows everything and the URL stays short.
+  const asSelection = draft.length === seats.length ? [] : draft;
   // Never the line itself on the button: a count keeps the control one
   // size whatever is picked.
   const label =
     applied === 0 ? "All lines" : `${applied} of ${seats.length} lines`;
-  const dirty = !sameSelection(draft, selected);
+  const dirty = !sameSelection(asSelection, selected);
+  // Nothing ticked is not a question anyone can answer, and it would
+  // commit as "all", which is the opposite of what the reader just did.
+  const emptyPick = draft.length === 0;
+  const allTicked = draft.length === seats.length;
 
   const toggle = (key: string) => {
     setDraft((prev) =>
@@ -222,8 +235,9 @@ export function LineFilter({
   };
 
   const apply = () => {
+    if (emptyPick) return;
     setOpen(false);
-    if (dirty) onChange(draft);
+    if (dirty) onChange(asSelection);
   };
 
   return (
@@ -383,25 +397,26 @@ export function LineFilter({
         <DropdownMenuItem
           onSelect={(e) => {
             e.preventDefault();
-            setDraft([]);
+            // A real select-all now, not a clear. Ticked, it fills every
+            // box below; unticked, it empties them, and the reader picks
+            // the few they want from a clean sheet.
+            setDraft(allTicked ? [] : allKeys);
           }}
-          disabled={draft.length === 0}
-          className="flex-shrink-0 gap-2.5 text-[12px]"
+          className="flex-shrink-0 gap-2.5 border-b border-border/60 text-[12px]"
         >
           <span
             aria-hidden
             className={cn(
               "flex h-4 w-4 flex-shrink-0 items-center justify-center rounded-[4px] border",
-              draft.length === 0
-                ? "border-primary bg-primary"
-                : "border-slate-300 bg-white",
+              allTicked ? "border-primary bg-primary" : "border-slate-300 bg-white",
             )}
           >
-            {draft.length === 0 && (
-              <Check className="h-3 w-3 text-white" strokeWidth={3} />
-            )}
+            {allTicked && <Check className="h-3 w-3 text-white" strokeWidth={3} />}
           </span>
           All lines
+          <span className="ml-auto text-[11px] tabular-nums text-slate-400">
+            {draft.length} of {seats.length}
+          </span>
         </DropdownMenuItem>
 
         {/* THE COMMIT. Nothing above this line has touched the page.
@@ -420,15 +435,17 @@ export function LineFilter({
             announced as a button and not as a menu row. */}
         <div className="mt-1 flex flex-shrink-0 items-center justify-between gap-3 border-t border-border px-2 pb-1 pt-2">
           <span className="min-w-0 truncate text-[11px] text-slate-500">
-            {dirty
-              ? draft.length === 0
-                ? "All lines"
-                : `${draft.length} of ${seats.length} selected`
-              : "No changes to apply"}
+            {emptyPick
+              ? "Pick at least one line"
+              : dirty
+                ? allTicked
+                  ? "All lines"
+                  : `${draft.length} of ${seats.length} selected`
+                : "No changes to apply"}
           </span>
           <DropdownMenuItem
             asChild
-            disabled={!dirty}
+            disabled={!dirty || emptyPick}
             onSelect={(e) => {
               // Radix closes the menu on select by default; `apply` needs
               // to own that so the commit and the close happen together.
@@ -446,7 +463,7 @@ export function LineFilter({
               type="button"
               className={cn(
                 "rounded-full px-3.5 py-1.5 text-[12px] font-medium transition-colors",
-                dirty
+                dirty && !emptyPick
                   ? "bg-primary text-white hover:bg-primary/90 focus-visible:ring-2 focus-visible:ring-primary/40"
                   : "cursor-not-allowed bg-muted text-slate-400",
               )}
