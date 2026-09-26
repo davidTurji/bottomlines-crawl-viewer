@@ -41,6 +41,61 @@ export function lineLabel(l: {
   return `${l.ssp_domain}, ${l.publisher_id}, ${l.relationship.toUpperCase()}`;
 }
 
+/**
+ * WHERE A LINE CAME FROM, AND WHEN — SAID IN ONE PLACE.
+ *
+ * Every watched line carries a source and the day it was added. It is
+ * hinted in the line filter, which is the one surface that lists every
+ * line the report watched, and deliberately nowhere else: the publisher
+ * and app lists repeat a line once per row, and restating its provenance
+ * on each would be the same fact tens of thousands of times over.
+ *
+ * Two of the four sources are one idea reached by two buttons in the
+ * console, so both read "Found by discovery". A line we found for the
+ * customer is the one worth picking out of the list, so it reads blue;
+ * the lines they gave us read plain.
+ */
+const SOURCE_LABELS: Record<string, string> = {
+  sellers_json: "From sellers.json",
+  manual: "Added manually",
+  signal: "Found by discovery",
+  discovered: "Found by discovery",
+};
+
+/** True for a line we found for the customer rather than one they gave. */
+export function isDiscovered(l: { source?: string | null }): boolean {
+  return l.source === "discovered" || l.source === "signal";
+}
+
+/** "30 Aug 2026", or null when the artifact carries no date. */
+export function addedDay(l: { added_at?: string | null }): string | null {
+  const raw = l.added_at;
+  if (!raw) return null;
+  const d = new Date(raw.length === 10 ? `${raw}T00:00:00Z` : raw);
+  if (Number.isNaN(d.getTime())) return null;
+  return d.toLocaleDateString("en-GB", {
+    day: "numeric",
+    month: "short",
+    year: "numeric",
+    timeZone: "UTC",
+  });
+}
+
+/**
+ * "From sellers.json, 30 Aug 2026". Null when the line says nothing about
+ * itself, which is every line on an artifact frozen before provenance
+ * existed: no hint at all beats a guess.
+ */
+export function sourceHint(l: {
+  source?: string | null;
+  added_at?: string | null;
+}): string | null {
+  const label = SOURCE_LABELS[l.source ?? ""] ?? null;
+  const day = addedDay(l);
+  if (!label) return day && `Added ${day}`;
+  return day ? `${label}, ${day}` : label;
+}
+
 export function parseLinesParam(raw: string | null): string[] {
   if (!raw) return [];
   return raw
