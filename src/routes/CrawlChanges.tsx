@@ -21,7 +21,7 @@ import { formatWeek, WeekLine } from "@/components/WeekLine";
 import { useReportScope } from "@/lib/reportScope";
 import { PageShell } from "@/components/PageShell";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { cn } from "@/lib/utils";
+import { cn, foundInLabel } from "@/lib/utils";
 import { computeDelta, MiniStat, SplitStat } from "./CrawlReport";
 
 /**
@@ -463,19 +463,6 @@ export default function CrawlChanges() {
                     : `${kpi.lines.toLocaleString()} distinct lines`}
               </span>
             </div>
-            {/* The watchlist moved between the two weeks (a seat added or
-                trimmed, a discovered line left in or out), so the delta
-                is not like-for-like and the page says so once, here, and
-                points at the two tabs that hold those lines. Never counted
-                as added or removed: the publishers did nothing. */}
-            {!isFirstCrawl && summary?.hero_diff?.scope_changed && (
-              <p className="rounded-xl border border-sky-200 bg-sky-50/60 px-4 py-3 text-[12px] leading-relaxed text-sky-900">
-                Your seat lines changed since last week. Lines you started
-                or stopped watching are listed on their own tabs below, and
-                are not counted as added or removed: the publishers carrying
-                them did nothing.
-              </p>
-            )}
             {/* Same reason as the overview: on a first crawl "+0 added, -0
                 removed" is the absence of a result, not one, and it is the
                 first thing a new customer reads. */}
@@ -602,6 +589,22 @@ export default function CrawlChanges() {
             The per-tab counts it used to carry now live in the KPI row
             directly above, which re-scopes with the tab, so printing them
             on the control as well was the same number twice. */}
+        {/* THE NOTE SITS WITH THE TABS IT IS ABOUT, not inside the KPI
+            card. Inside the card it pushed the two headline numbers down
+            and left the pair of cards uneven, which is a layout cost paid
+            on the one week a customer most needs the numbers to read
+            normally. Here it explains the two extra tabs, an arm's length
+            from them, and disturbs nothing above it. */}
+        {!isFirstCrawl && scopeTabs.length > 0 && (
+          <p className="mb-2 flex items-start gap-1.5 text-[12px] leading-relaxed text-slate-500">
+            <Eye aria-hidden className="mt-[3px] h-3.5 w-3.5 flex-shrink-0 text-slate-400" />
+            <span>
+              Your seat lines changed since last week. Lines you started or
+              stopped watching are on their own tabs, and are not counted as
+              added or removed: the publishers carrying them did not change.
+            </span>
+          </p>
+        )}
         <div className="flex items-center gap-3">
           <Tabs value={bucket} onValueChange={(v) => setBucket(v as Bucket)}>
             <TabsList>
@@ -939,9 +942,11 @@ function ChangeCard({
                     {p.developer_name ?? ""}
                   </span>
                   {/* Rendered, never the raw enum: this is a customer's
-                      screen, and "APP_ADS_TXT" is not a file name. */}
+                      screen, and "APP_ADS_TXT" is not a file name. Said as
+                      a sentence, the same one every other surface uses, so
+                      a bare filename is never left to explain itself. */}
                   <span className="ml-auto flex-shrink-0 text-[10px] text-slate-400">
-                    {fileLabel(p.file_kind)}
+                    {foundInLabel(fileLabel(p.file_kind))}
                   </span>
                 </li>
               ))}
@@ -995,7 +1000,10 @@ const TONES: Record<
   // the green of an addition would put them back in the column this whole
   // distinction exists to keep them out of.
   newly_monitored: {
-    label: "Newly monitored",
+    // Plain verbs, not system vocabulary. "Monitored" is how the operator
+    // view talks about its own machinery; a customer reading their own
+    // report is being told what THEY did to their list (David, 2026-09-26).
+    label: "Started watching",
     preposition: "on",
     expandedTitle: "Publishers carrying this line in its first week",
     disc: "bg-muted text-muted-foreground",
@@ -1003,7 +1011,7 @@ const TONES: Record<
     icon: Eye,
   },
   monitoring_stopped: {
-    label: "No longer monitored",
+    label: "Stopped watching",
     preposition: "on",
     expandedTitle: "Publishers that carried this line when we last looked",
     disc: "bg-muted text-muted-foreground",

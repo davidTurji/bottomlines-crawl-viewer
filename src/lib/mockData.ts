@@ -977,6 +977,11 @@ function changeLinesFor(
     if (alwaysCert || (seed + i) % 4 === 0) {
       line.cert_id = certId(seed * 13 + i * 7 + 3);
     }
+    // WHERE IT MOVED. The crawler started writing this onto the change
+    // windows on 2026-09-26; before that the artifact carried no lines at
+    // all behind those counts, and this mock invented them WITHOUT the
+    // file, which is exactly how the gap stayed invisible in preview.
+    line.found_in = (seed + i) % 5 === 0 ? "both" : (seed + i) % 2 === 0 ? "ads.txt" : "app-ads.txt";
     out.push(line);
   }
   return out;

@@ -23,7 +23,7 @@ import { FilterAction, FilterBar, FilterSearch, FilterSelect } from "@/component
 import { PageShell } from "@/components/PageShell";
 import { formatWeek, WeekLine } from "@/components/WeekLine";
 import { useReportScope } from "@/lib/reportScope";
-import { cn, storeLabel } from "@/lib/utils";
+import { cn, foundInLabel, storeLabel } from "@/lib/utils";
 import { computeDelta, MiniStat, SplitStat } from "./CrawlReport";
 
 /**
@@ -669,8 +669,8 @@ function LineCard({
                         {p.developer_domain}
                       </span>
                     )}
-                    <span className="ml-auto flex-shrink-0 font-mono text-[10px] text-slate-400">
-                      {p.found_in}
+                    <span className="ml-auto flex-shrink-0 text-[10px] text-slate-400">
+                      {foundInLabel(p.found_in)}
                     </span>
                   </li>
                 ))}

@@ -200,8 +200,14 @@ export function LineFilter({
   // Seeded from the URL on every open, so it cannot carry a stale draft
   // across a back button, a link arriving with ?lines=, or the other
   // page's filter.
+  // EVERY LINE IS A TICK, including when nothing is filtered (David,
+  // 2026-09-26). An empty selection means "all lines", and the menu used
+  // to show that as 127 EMPTY boxes under a ticked "All lines" row, which
+  // says the opposite of what is happening. Seeding the draft with every
+  // key makes the state explicit: what is ticked is what you get.
+  const allKeys = seats.map(lineKey);
   const handleOpenChange = (next: boolean) => {
-    if (next) setDraft(selected);
+    if (next) setDraft(selected.length === 0 ? allKeys : selected);
     setOpen(next);
   };
 
@@ -209,11 +215,18 @@ export function LineFilter({
 
   const chosen = new Set(draft);
   const applied = selected.length;
+  // Ticking every line IS no filter, so it commits as an empty selection:
+  // the page shows everything and the URL stays short.
+  const asSelection = draft.length === seats.length ? [] : draft;
   // Never the line itself on the button: a count keeps the control one
   // size whatever is picked.
   const label =
     applied === 0 ? "All lines" : `${applied} of ${seats.length} lines`;
-  const dirty = !sameSelection(draft, selected);
+  const dirty = !sameSelection(asSelection, selected);
+  // Nothing ticked is not a question anyone can answer, and it would
+  // commit as "all", which is the opposite of what the reader just did.
+  const emptyPick = draft.length === 0;
+  const allTicked = draft.length === seats.length;
 
   const toggle = (key: string) => {
     setDraft((prev) =>
@@ -222,8 +235,9 @@ export function LineFilter({
   };
 
   const apply = () => {
+    if (emptyPick) return;
     setOpen(false);
-    if (dirty) onChange(draft);
+    if (dirty) onChange(asSelection);
   };
 
   return (
@@ -275,16 +289,18 @@ export function LineFilter({
       <DropdownMenuContent
         align="end"
         collisionPadding={16}
-        className="flex w-[340px] max-w-[calc(100vw-2rem)] flex-col"
+        className="flex w-[420px] max-w-[calc(100vw-2rem)] flex-col"
         style={{ maxHeight: "var(--radix-dropdown-menu-content-available-height)" }}
       >
-        <DropdownMenuLabel className="flex-shrink-0 text-[11px] font-medium text-slate-500">
-          Show only publishers and apps carrying
-          {seats.length > 8 && (
-            <span className="ml-1 font-normal text-slate-400">
-              ({seats.length} lines, scroll for more)
-            </span>
-          )}
+        <DropdownMenuLabel className="flex flex-shrink-0 items-baseline justify-between gap-2 text-[11px] font-medium text-slate-500">
+          {/* THREE WORDS AND A COUNT. It read "Show only publishers and
+              apps carrying (127 lines, scroll for more)" over a second
+              line explaining the grey text below, which is two sentences
+              of chrome above a list that explains itself: every row
+              already says where it came from and when. The count earns
+              its place because the list scrolls. */}
+          <span>Show only these lines</span>
+          <span className="font-normal tabular-nums text-slate-400">{seats.length}</span>
         </DropdownMenuLabel>
         {/* The wrapper is a flex column too, so the list is a flex item
             with a definite height (a percentage height would not resolve
@@ -318,34 +334,64 @@ export function LineFilter({
               role="menuitemcheckbox"
               aria-checked={on}
               className={cn(
-                "flex-col items-start gap-0.5 py-1.5 font-mono text-[12px]",
-                discovered && "bg-sky-50/60 text-sky-800 focus:bg-sky-50",
+                // A ROW, NOT A STACK. The box belongs beside the line it
+                // ticks, so it is laid out as one flex row with the box in
+                // its own column and the line plus its hint in the other.
+                // Stacked, the box centred itself against a two-line row
+                // and floated between the line and its hint, belonging to
+                // neither.
+                // The frame is the system's, not a one-off: `border` is the
+                // same token every card and rail on these screens is drawn
+                // with. The rule is INSET to where the text starts, so the
+                // column of ticks reads as one run and the separators
+                // belong to the lines rather than cutting the whole menu in
+                // half. `rounded-none` because a row with rounded corners
+                // and a bottom rule fights itself.
+                "items-start gap-2.5 rounded-none px-2 py-2",
+                "border-b border-border last:border-b-0",
+                discovered && "bg-sky-50/60 focus:bg-sky-50",
               )}
             >
-              <span className="flex w-full min-w-0 items-center gap-2.5">
               {/* An empty box that fills when picked, always visible, so
-                  the state of every line is readable at a glance. */}
+                  the state of every line is readable at a glance. Nudged
+                  down by a hair to sit on the line's baseline rather than
+                  its box. */}
               <span
                 aria-hidden
                 className={cn(
-                  "flex h-4 w-4 flex-shrink-0 items-center justify-center rounded-[4px] border transition-colors",
+                  "mt-[2px] flex h-4 w-4 flex-shrink-0 items-center justify-center rounded-[4px] border transition-colors",
                   on ? "border-primary bg-primary" : "border-slate-300 bg-white",
                 )}
               >
                 {on && <Check className="h-3 w-3 text-white" strokeWidth={3} />}
               </span>
-              <span className="min-w-0 flex-1 truncate">{lineLabel(s)}</span>
-              </span>
-              {hint && (
+              {/* THE HINT IN WORDS, under its line, with a hairline between
+                  one seat and the next (David, 2026-09-26). A bare date at
+                  the right margin was compact, but it made the reader carry
+                  a legend in their head; spelled out, each seat answers for
+                  itself. The rule is what the first two-line attempt was
+                  missing: without it 127 rows ran together into a wall and
+                  the eye could not tell where one seat ended. */}
+              <span className="flex min-w-0 flex-1 flex-col gap-[2px]">
                 <span
                   className={cn(
-                    "w-full truncate pl-[26px] font-sans text-[10.5px]",
-                    discovered ? "text-sky-700" : "text-slate-400",
+                    "truncate font-mono text-[12px] leading-[18px]",
+                    discovered ? "text-sky-900" : "text-slate-900",
                   )}
                 >
-                  {hint}
+                  {lineLabel(s)}
                 </span>
-              )}
+                {hint && (
+                  <span
+                    className={cn(
+                      "truncate text-[10.5px] leading-[14px]",
+                      discovered ? "text-sky-600" : "text-slate-400",
+                    )}
+                  >
+                    {hint}
+                  </span>
+                )}
+              </span>
             </DropdownMenuItem>
           );
         })}
@@ -356,25 +402,26 @@ export function LineFilter({
         <DropdownMenuItem
           onSelect={(e) => {
             e.preventDefault();
-            setDraft([]);
+            // A real select-all now, not a clear. Ticked, it fills every
+            // box below; unticked, it empties them, and the reader picks
+            // the few they want from a clean sheet.
+            setDraft(allTicked ? [] : allKeys);
           }}
-          disabled={draft.length === 0}
-          className="flex-shrink-0 gap-2.5 text-[12px]"
+          className="flex-shrink-0 gap-2.5 border-b border-border/60 text-[12px]"
         >
           <span
             aria-hidden
             className={cn(
               "flex h-4 w-4 flex-shrink-0 items-center justify-center rounded-[4px] border",
-              draft.length === 0
-                ? "border-primary bg-primary"
-                : "border-slate-300 bg-white",
+              allTicked ? "border-primary bg-primary" : "border-slate-300 bg-white",
             )}
           >
-            {draft.length === 0 && (
-              <Check className="h-3 w-3 text-white" strokeWidth={3} />
-            )}
+            {allTicked && <Check className="h-3 w-3 text-white" strokeWidth={3} />}
           </span>
           All lines
+          <span className="ml-auto text-[11px] tabular-nums text-slate-400">
+            {draft.length} of {seats.length}
+          </span>
         </DropdownMenuItem>
 
         {/* THE COMMIT. Nothing above this line has touched the page.
@@ -393,15 +440,17 @@ export function LineFilter({
             announced as a button and not as a menu row. */}
         <div className="mt-1 flex flex-shrink-0 items-center justify-between gap-3 border-t border-border px-2 pb-1 pt-2">
           <span className="min-w-0 truncate text-[11px] text-slate-500">
-            {dirty
-              ? draft.length === 0
-                ? "All lines"
-                : `${draft.length} of ${seats.length} selected`
-              : "No changes to apply"}
+            {emptyPick
+              ? "Pick at least one line"
+              : dirty
+                ? allTicked
+                  ? "All lines"
+                  : `${draft.length} of ${seats.length} selected`
+                : "No changes to apply"}
           </span>
           <DropdownMenuItem
             asChild
-            disabled={!dirty}
+            disabled={!dirty || emptyPick}
             onSelect={(e) => {
               // Radix closes the menu on select by default; `apply` needs
               // to own that so the commit and the close happen together.
@@ -419,7 +468,7 @@ export function LineFilter({
               type="button"
               className={cn(
                 "rounded-full px-3.5 py-1.5 text-[12px] font-medium transition-colors",
-                dirty
+                dirty && !emptyPick
                   ? "bg-primary text-white hover:bg-primary/90 focus-visible:ring-2 focus-visible:ring-primary/40"
                   : "cursor-not-allowed bg-muted text-slate-400",
               )}

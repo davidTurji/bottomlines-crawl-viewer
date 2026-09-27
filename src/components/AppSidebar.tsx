@@ -106,15 +106,21 @@ export function AppSidebar() {
             everything else on screen -- David circled it. */}
         <NavLink
           to={basePath}
-          className="flex items-center px-3 h-12 sm:h-14 border-b border-sidebar-border/50 transition-colors duration-150 hover:bg-sidebar-accent/40"
+          className="flex items-center px-3 h-14 sm:h-16 border-b border-sidebar-border/50 transition-colors duration-150 hover:bg-sidebar-accent/40"
           onClick={handleMobileNavClick}
           aria-label="PathFinder, Overview"
         >
+          {/* Sized to the RAIL, not to a comfortable minimum. At h-8 the
+              mark was ~90px in a 232px rail, so the lockup sat in the corner
+              as a stamp and the wordmark was unreadable: David could not see
+              the logo. The header grew just enough to hold a bigger one,
+              which is the opposite failure from the old h-20 slot that
+              floated it above everything else. */}
           <img
             src={pathfinderLogo}
             alt="PathFinder"
             draggable={false}
-            className="h-8 sm:h-9 w-auto max-w-full object-contain object-left select-none"
+            className="h-11 sm:h-12 w-auto max-w-full object-contain object-left select-none"
           />
         </NavLink>
 
@@ -125,10 +131,10 @@ export function AppSidebar() {
             chrome that could only ever hide the whole nav from itself. */}
         {/* Pinned to the BRAND'S height, which is the header's height.
             This offset still carried the old tall lockup slot (top-20/24)
-            after the brand shrank to h-12/h-14, so the menu floated a
+            after the brand shrank, so the menu floated a
             full row below where the eye expects it -- the gap David
             circled. One number, one source of truth: the brand row. */}
-        <div className="absolute inset-x-0 bottom-0 top-12 sm:top-14 overflow-y-auto">
+        <div className="absolute inset-x-0 bottom-0 top-14 sm:top-16 overflow-y-auto">
           <SidebarGroup className="px-2.5 py-3">
             <SidebarGroupContent>
               <SidebarMenu className="gap-0.5">
