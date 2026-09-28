@@ -200,7 +200,7 @@ export default function CrawlReport() {
             onChange={setLines}
             busy={refreshing}
           />
-          <ExportResultsButton token={token} summary={summary} />
+          <ExportResultsButton token={token} summary={summary} lines={lines} />
         </div>
       </div>
       {/* Reserved whether or not a filter is on, so toggling one never
@@ -212,7 +212,8 @@ export default function CrawlReport() {
             <span className="font-mono text-slate-700">
               {lines.length === 1 ? "the selected line" : `${lines.length} selected lines`}
             </span>
-            . Line totals and the week's changes follow the same filter.
+            . Line totals and the week&apos;s changes follow the same filter
+            {summary.line_export ? ", and so does Export." : "."}
           </>
         )}
       </p>
@@ -653,7 +654,25 @@ export function reportDate(summary: { finished_at: string | null }): string {
     : new Date().toISOString().slice(0, 10);
 }
 
-function ExportResultsButton({ token, summary }: { token: string; summary: Summary }) {
+function ExportResultsButton({
+  token,
+  summary,
+  lines,
+}: {
+  token: string;
+  summary: Summary;
+  lines: string[];
+}) {
+  // Under a line filter the download carries only those lines, when the
+  // report can be cut that way (every report built from 2026-09-28 on).
+  // An older report exports whole, and the button says so rather than hand
+  // over a file that looks filtered and is not.
+  const narrowed = lines.length > 0 && summary.line_export === true;
+  const title = narrowed
+    ? "Downloads only the selected lines"
+    : lines.length > 0
+      ? "This report downloads in full"
+      : undefined;
   const onClick = async () => {
     if (MOCK) {
       const { buildXlsxBlob } = await import("../lib/xlsx");
@@ -670,12 +689,13 @@ function ExportResultsButton({ token, summary }: { token: string; summary: Summa
       URL.revokeObjectURL(url);
       return;
     }
-    window.location.href = api.exportUrl(token);
+    window.location.href = api.exportUrl(token, narrowed ? lines : []);
   };
   return (
     <button
       type="button"
       onClick={onClick}
+      title={title}
       className="inline-flex h-9 flex-shrink-0 items-center gap-2 self-start rounded-full border border-border bg-white px-4 text-xs font-medium text-slate-700 shadow-sm transition-colors hover:border-primary/30 hover:text-primary"
     >
       <Download aria-hidden className="h-3.5 w-3.5" />

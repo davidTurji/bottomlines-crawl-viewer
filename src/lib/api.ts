@@ -156,7 +156,10 @@ export const api = {
    * MOCK mode has no backend, so the button short-circuits to a small stub
    * rather than pointing at this (see CrawlReport's ExportResultsButton).
    */
-  exportUrl: (token: string) => `${BASE}/v1/viewer/${token}/export.xlsx`,
+  exportUrl: (token: string, lines: string[] = []) =>
+    `${BASE}/v1/viewer/${token}/export.xlsx${
+      lines.length ? `?${LINES_PARAM}=${serializeLines(lines)}` : ""
+    }`,
   summary: async (token: string, lines?: string[]) => {
     if (MOCK) {
       const { mockSummaryFor } = await import("./mockData");
@@ -598,6 +601,10 @@ export type Summary = {
    *  offers. Optional: artifacts frozen before it was exposed omit it, and
    *  the filter then simply does not show. */
   watchlist?: { seats: MatchedSeatLine[]; discover: string[] };
+  /** True when this report's Export can hand over only the selected lines
+   *  (reports built from 2026-09-28 on). Absent or false: Export is the full
+   *  report whatever the filter, and the page says so. */
+  line_export?: boolean;
   source: string;
   status: string;
   queued_at: string | null;
