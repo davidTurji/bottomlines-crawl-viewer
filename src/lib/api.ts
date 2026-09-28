@@ -147,16 +147,6 @@ export const api = {
     return out;
   },
   /**
-   * Same-origin URL of the CUSTOMER workbook for this run: the xlsx the
-   * crawler bakes per crawl, the same file the Overview's "Export results"
-   * button hands the reader. A plain link target, not a fetch, so the
-   * download is an ordinary navigation the browser saves, and the httpOnly
-   * session cookie rides along because BASE is same-origin ("/api").
-   *
-   * MOCK mode has no backend, so the button short-circuits to a small stub
-   * rather than pointing at this (see CrawlReport's ExportResultsButton).
-   */
-  /**
    * What "Export results" hands over, so the page can say it in words:
    * the report's Excel, or, when its Matched apps list has more rows than
    * Excel allows, a zip of the Excel plus that list as a CSV (2026-09-28).
@@ -173,12 +163,39 @@ export const api = {
         ? { format: "zip", line_export: true, excel_row_limit: 1_048_576, apps_rows: 3_682_524 }
         : { format: "xlsx", line_export: true, excel_row_limit: 1_048_576 };
     }
+    const fallback: ExportInfo = { format: "xlsx", line_export: false };
+    // A plain fetch, never req(): an API from before this endpoint answers
+    // 404, and req() reads a 404 on a token path as "this link is dead" and
+    // swaps the whole page for the expired-link card. Nothing that goes
+    // wrong here may touch the sign-in gate; the summary's own calls do that.
     try {
-      return await req<ExportInfo>("GET", `/v1/viewer/${token}/export-info`);
+      const res = await fetch(`${BASE}/v1/viewer/${token}/export-info`, {
+        credentials: "include",
+      });
+      if (!res.ok) return fallback;
+      const info = (await res.json()) as Partial<ExportInfo> | null;
+      if (
+        !info ||
+        !["xlsx", "zip", "none"].includes(info.format as string) ||
+        typeof info.line_export !== "boolean"
+      ) {
+        return fallback;
+      }
+      return info as ExportInfo;
     } catch {
-      return { format: "xlsx", line_export: false };
+      return fallback;
     }
   },
+  /**
+   * Same-origin URL of the CUSTOMER workbook for this run: the xlsx the
+   * crawler bakes per crawl, the same file the Overview's "Export results"
+   * button hands the reader. A plain link target, not a fetch, so the
+   * download is an ordinary navigation the browser saves, and the httpOnly
+   * session cookie rides along because BASE is same-origin ("/api").
+   *
+   * MOCK mode has no backend, so the button short-circuits to a small stub
+   * rather than pointing at this (see CrawlReport's ExportResultsButton).
+   */
   exportUrl: (token: string, lines: string[] = []) =>
     `${BASE}/v1/viewer/${token}/export.xlsx${
       lines.length ? `?${LINES_PARAM}=${serializeLines(lines)}` : ""

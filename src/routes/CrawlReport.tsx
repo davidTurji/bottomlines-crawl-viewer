@@ -102,13 +102,7 @@ export default function CrawlReport() {
     };
   }, [token, lines, linesKey]);
 
-  // LAST WEEK'S SUMMARY DOES NOT TAKE THE LINE FILTER, so it belongs in its
-  // own effect keyed on the token alone. It used to sit in the one above
-  // and be re-read on every change of selection — and it is two round
-  // trips, not one (it reads this crawl's summary to learn the previous
-  // crawl's id, then reads that). Under the filter that was two thirds of
-  // the requests a tick fired, every one of them for an answer already in
-  // state and identical to the last.
+  // What Export hands over does not take the line filter either.
   useEffect(() => {
     let cancelled = false;
     api.exportInfo(token).then((info) => {
@@ -119,6 +113,13 @@ export default function CrawlReport() {
     };
   }, [token]);
 
+  // LAST WEEK'S SUMMARY DOES NOT TAKE THE LINE FILTER, so it belongs in its
+  // own effect keyed on the token alone. It used to sit in the one above
+  // and be re-read on every change of selection — and it is two round
+  // trips, not one (it reads this crawl's summary to learn the previous
+  // crawl's id, then reads that). Under the filter that was two thirds of
+  // the requests a tick fired, every one of them for an answer already in
+  // state and identical to the last.
   useEffect(() => {
     let cancelled = false;
     api
