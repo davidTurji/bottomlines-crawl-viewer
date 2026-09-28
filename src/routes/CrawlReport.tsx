@@ -14,6 +14,7 @@ import {
   ApiError,
   ENABLE_CHAT,
   MOCK,
+  type ExportInfo,
   type Summary,
   type DeveloperEvent,
   type MatchedDeveloper,
@@ -60,6 +61,11 @@ export default function CrawlReport() {
   const { token } = useReportScope();
   const [summary, setSummary] = useState<Summary | null>(null);
   const [previous, setPrevious] = useState<Summary | null>(null);
+  // What Export hands over; the safe default until it answers.
+  const [exportInfo, setExportInfo] = useState<ExportInfo>({
+    format: "xlsx",
+    line_export: false,
+  });
   const [error, setError] = useState<string | null>(null);
   // Which matched list the section below shows. The two matched-inventory
   // cards act as its selector; publishers is the default.
@@ -103,6 +109,16 @@ export default function CrawlReport() {
   // crawl's id, then reads that). Under the filter that was two thirds of
   // the requests a tick fired, every one of them for an answer already in
   // state and identical to the last.
+  useEffect(() => {
+    let cancelled = false;
+    api.exportInfo(token).then((info) => {
+      if (!cancelled) setExportInfo(info);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [token]);
+
   useEffect(() => {
     let cancelled = false;
     api
@@ -200,7 +216,12 @@ export default function CrawlReport() {
             onChange={setLines}
             busy={refreshing}
           />
-          <ExportResultsButton token={token} summary={summary} lines={lines} />
+          <ExportResultsButton
+            token={token}
+            summary={summary}
+            lines={lines}
+            info={exportInfo}
+          />
         </div>
       </div>
       {/* Reserved whether or not a filter is on, so toggling one never
@@ -213,8 +234,15 @@ export default function CrawlReport() {
               {lines.length === 1 ? "the selected line" : `${lines.length} selected lines`}
             </span>
             . Line totals and the week&apos;s changes follow the same filter
-            {summary.line_export ? ", and so does Export." : "."}
+            {exportInfo.line_export ? ", and so does Export." : ". Export gives the full report."}
           </>
+        )}
+        {/* The one exception to "Export is an Excel", said before the click
+            (David, 2026-09-28: it must not be confusing at all). */}
+        {lines.length === 0 && exportInfo.format === "zip" && (
+          <span className="text-critical">
+            {zipExplanation(exportInfo)}
+          </span>
         )}
       </p>
 
@@ -654,25 +682,39 @@ export function reportDate(summary: { finished_at: string | null }): string {
     : new Date().toISOString().slice(0, 10);
 }
 
+/** Why Export is a zip, in the same words the Excel's Summary uses. */
+export function zipExplanation(info: ExportInfo): string {
+  const limit = (info.excel_row_limit ?? 1_048_576).toLocaleString();
+  const rows = info.apps_rows ? `${info.apps_rows.toLocaleString()} rows, ` : "";
+  return (
+    `Export gives a zip: the app list has ${rows}more than Excel allows ` +
+    `(${limit} rows in one tab), so it comes as a CSV file next to the Excel.`
+  );
+}
+
 function ExportResultsButton({
   token,
   summary,
   lines,
+  info,
 }: {
   token: string;
   summary: Summary;
   lines: string[];
+  info: ExportInfo;
 }) {
   // Under a line filter the download carries only those lines, when the
-  // report can be cut that way (every report built from 2026-09-28 on).
-  // An older report exports whole, and the button says so rather than hand
+  // report can be cut that way (the crawler says so in export-info). An
+  // older report exports whole, and the button says so rather than hand
   // over a file that looks filtered and is not.
-  const narrowed = lines.length > 0 && summary.line_export === true;
+  const narrowed = lines.length > 0 && info.line_export;
   const title = narrowed
     ? "Downloads only the selected lines"
     : lines.length > 0
       ? "This report downloads in full"
-      : undefined;
+      : info.format === "zip"
+        ? zipExplanation(info)
+        : undefined;
   const onClick = async () => {
     if (MOCK) {
       const { buildXlsxBlob } = await import("../lib/xlsx");

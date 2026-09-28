@@ -156,6 +156,29 @@ export const api = {
    * MOCK mode has no backend, so the button short-circuits to a small stub
    * rather than pointing at this (see CrawlReport's ExportResultsButton).
    */
+  /**
+   * What "Export results" hands over, so the page can say it in words:
+   * the report's Excel, or, when its Matched apps list has more rows than
+   * Excel allows, a zip of the Excel plus that list as a CSV (2026-09-28).
+   * Also whether a download of only the selected lines exists. Never
+   * throws: an answer that cannot be read is the safe default (the full
+   * report, as an Excel, no per-line download).
+   *
+   * In MOCK mode `?bigapps=1` answers with the zip case, for review.
+   */
+  exportInfo: async (token: string): Promise<ExportInfo> => {
+    if (MOCK) {
+      const big = new URLSearchParams(window.location.search).has("bigapps");
+      return big
+        ? { format: "zip", line_export: true, excel_row_limit: 1_048_576, apps_rows: 3_682_524 }
+        : { format: "xlsx", line_export: true, excel_row_limit: 1_048_576 };
+    }
+    try {
+      return await req<ExportInfo>("GET", `/v1/viewer/${token}/export-info`);
+    } catch {
+      return { format: "xlsx", line_export: false };
+    }
+  },
   exportUrl: (token: string, lines: string[] = []) =>
     `${BASE}/v1/viewer/${token}/export.xlsx${
       lines.length ? `?${LINES_PARAM}=${serializeLines(lines)}` : ""
@@ -595,16 +618,23 @@ export const api = {
 
 // ---- types ----
 
+/** What Export hands over (GET /v1/viewer/{token}/export-info). */
+export type ExportInfo = {
+  /** "zip" = the Excel plus the Matched apps list as CSV (too big for Excel). */
+  format: "xlsx" | "zip" | "none";
+  /** A download of only the selected lines exists for this report. */
+  line_export: boolean;
+  excel_row_limit?: number;
+  /** Rows in the Matched apps CSV, when format is "zip". */
+  apps_rows?: number | null;
+};
+
 export type Summary = {
   crawl_id: number;
   /** The watchlist this report was built from: what the seat-line filter
    *  offers. Optional: artifacts frozen before it was exposed omit it, and
    *  the filter then simply does not show. */
   watchlist?: { seats: MatchedSeatLine[]; discover: string[] };
-  /** True when this report's Export can hand over only the selected lines
-   *  (reports built from 2026-09-28 on). Absent or false: Export is the full
-   *  report whatever the filter, and the page says so. */
-  line_export?: boolean;
   source: string;
   status: string;
   queued_at: string | null;
