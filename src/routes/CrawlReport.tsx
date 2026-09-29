@@ -239,9 +239,12 @@ export default function CrawlReport() {
           </>
         )}
         {/* The one exception to "Export is an Excel", said before the click
-            (David, 2026-09-28: it must not be confusing at all). */}
-        {lines.length === 0 && exportInfo.format === "zip" && (
+            (David, 2026-09-28: it must not be confusing at all), whenever
+            Export hands over the full report: no filter, or a filter this
+            report cannot be cut by. */}
+        {(lines.length === 0 || !exportInfo.line_export) && exportInfo.format === "zip" && (
           <span className="text-critical">
+            {lines.length > 0 && " "}
             {zipExplanation(exportInfo)}
           </span>
         )}
@@ -683,12 +686,18 @@ export function reportDate(summary: { finished_at: string | null }): string {
     : new Date().toISOString().slice(0, 10);
 }
 
-/** Why Export is a zip, in the same words the Excel's Summary uses. */
+/**
+ * Why Export is a zip, naming the list the way the Excel's Summary does.
+ * Its rows are one per app per seat line, so the count can be several
+ * times the Matched apps number on the card; the sentence says so.
+ */
 export function zipExplanation(info: ExportInfo): string {
   const limit = (info.excel_row_limit ?? 1_048_576).toLocaleString();
-  const rows = info.apps_rows ? `${info.apps_rows.toLocaleString()} rows, ` : "";
+  const rows = info.apps_rows
+    ? `${info.apps_rows.toLocaleString()} rows (one per app per seat line), `
+    : "";
   return (
-    `Export gives a zip: the app list has ${rows}more than Excel allows ` +
+    `Export gives a zip: the Matched apps list has ${rows}more than Excel allows ` +
     `(${limit} rows in one tab), so it comes as a CSV file next to the Excel.`
   );
 }
@@ -711,7 +720,7 @@ function ExportResultsButton({
   const narrowed = lines.length > 0 && info.line_export;
   const title = narrowed
     ? "Downloads only the selected lines"
-    : lines.length > 0
+    : lines.length > 0 && info.format !== "zip"
       ? "This report downloads in full"
       : info.format === "zip"
         ? zipExplanation(info)
