@@ -147,6 +147,46 @@ export const api = {
     return out;
   },
   /**
+   * What "Export results" hands over, so the page can say it in words:
+   * the report's Excel, or, when its Matched apps list has more rows than
+   * Excel allows, a zip of the Excel plus that list as a CSV (2026-09-28).
+   * Also whether a download of only the selected lines exists. Never
+   * throws: an answer that cannot be read is the safe default (the full
+   * report, as an Excel, no per-line download).
+   *
+   * In MOCK mode `?bigapps=1` answers with the zip case, for review.
+   */
+  exportInfo: async (token: string): Promise<ExportInfo> => {
+    if (MOCK) {
+      const big = new URLSearchParams(window.location.search).has("bigapps");
+      return big
+        ? { format: "zip", line_export: true, excel_row_limit: 1_048_576, apps_rows: 3_682_524 }
+        : { format: "xlsx", line_export: true, excel_row_limit: 1_048_576 };
+    }
+    const fallback: ExportInfo = { format: "xlsx", line_export: false };
+    // A plain fetch, never req(): an API from before this endpoint answers
+    // 404, and req() reads a 404 on a token path as "this link is dead" and
+    // swaps the whole page for the expired-link card. Nothing that goes
+    // wrong here may touch the sign-in gate; the summary's own calls do that.
+    try {
+      const res = await fetch(`${BASE}/v1/viewer/${token}/export-info`, {
+        credentials: "include",
+      });
+      if (!res.ok) return fallback;
+      const info = (await res.json()) as Partial<ExportInfo> | null;
+      if (
+        !info ||
+        !["xlsx", "zip", "none"].includes(info.format as string) ||
+        typeof info.line_export !== "boolean"
+      ) {
+        return fallback;
+      }
+      return info as ExportInfo;
+    } catch {
+      return fallback;
+    }
+  },
+  /**
    * Same-origin URL of the CUSTOMER workbook for this run: the xlsx the
    * crawler bakes per crawl, the same file the Overview's "Export results"
    * button hands the reader. A plain link target, not a fetch, so the
@@ -595,16 +635,23 @@ export const api = {
 
 // ---- types ----
 
+/** What Export hands over (GET /v1/viewer/{token}/export-info). */
+export type ExportInfo = {
+  /** "zip" = the Excel plus the Matched apps list as CSV (too big for Excel). */
+  format: "xlsx" | "zip" | "none";
+  /** A download of only the selected lines exists for this report. */
+  line_export: boolean;
+  excel_row_limit?: number;
+  /** Rows in the Matched apps CSV, when format is "zip". */
+  apps_rows?: number | null;
+};
+
 export type Summary = {
   crawl_id: number;
   /** The watchlist this report was built from: what the seat-line filter
    *  offers. Optional: artifacts frozen before it was exposed omit it, and
    *  the filter then simply does not show. */
   watchlist?: { seats: MatchedSeatLine[]; discover: string[] };
-  /** True when this report's Export can hand over only the selected lines
-   *  (reports built from 2026-09-28 on). Absent or false: Export is the full
-   *  report whatever the filter, and the page says so. */
-  line_export?: boolean;
   source: string;
   status: string;
   queued_at: string | null;
