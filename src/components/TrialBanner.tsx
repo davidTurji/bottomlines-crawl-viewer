@@ -37,7 +37,7 @@ export default function TrialBanner({ caps, summary }: { caps: TrialCaps; summar
         </div>
       </div>
       <div className="flex-shrink-0">
-        <ContactUs compact label="See the full report" />
+        <ContactUs label="Unlock the full report" />
       </div>
     </div>
   );

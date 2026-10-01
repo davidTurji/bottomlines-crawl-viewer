@@ -344,9 +344,10 @@ export default function CrawlDeclarations() {
               capped={data.legacy}
             />
           ))}
-          {data.trial && (
+          {(summary?.trial || data.trial) && (
             <LockedTail
-              slice={data.trial}
+              slice={data.trial ?? null}
+              caps={summary?.trial ?? null}
               noun="declarations"
               detail="file that names your domain, who declared it and where"
             />

@@ -710,9 +710,10 @@ export default function CrawlChanges() {
 
       {/* Counts the PREVIOUS filter's groups while a new one is in
           flight, so it stays down with the list it describes. */}
-      {!showSkeleton && !loading && trial && (
+      {!showSkeleton && !loading && (summary?.trial || trial) && (
         <LockedTail
           slice={trial}
+          caps={summary?.trial ?? null}
           noun="line changes"
           detail="change, on every publisher, week after week"
         />

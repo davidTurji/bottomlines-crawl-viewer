@@ -348,14 +348,15 @@ export default function CrawlDiscovered() {
         </div>
       )}
 
-      {trial && (
+      {(summary?.trial || trial) && (
         <LockedTail
           slice={trial}
+          caps={summary?.trial ?? null}
           noun="discovered lines"
           detail="line on the open web that carries one of your domains, with every placement"
         />
       )}
-      {!trial && total > 0 && pageCount > 1 && (
+      {!trial && !summary?.trial && total > 0 && pageCount > 1 && (
         <div className="flex items-center justify-between border-t border-border/70 pt-4 text-xs text-slate-500">
           <span>
             Showing {(startRow ?? 0).toLocaleString()} to{" "}

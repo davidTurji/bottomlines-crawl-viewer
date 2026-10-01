@@ -12,7 +12,7 @@ import { useLineFilter } from "@/lib/lineFilter";
 import { Link } from "react-router-dom";
 import { ChevronDown, Download, Globe, Search, Smartphone } from "lucide-react";
 import {
-  type TrialSlice,
+  type TrialCaps, type TrialSlice,
   api,
   ApiError,
   ENABLE_CHAT,
@@ -407,7 +407,7 @@ export default function CrawlReport() {
               see the exact seat lines it carried, and what moved this week.
             </p>
           </div>
-          <DrilldownList token={token} lines={lines} />
+          <DrilldownList token={token} lines={lines} caps={summary.trial ?? null} />
         </div>
       ) : (
         <div>
@@ -421,7 +421,7 @@ export default function CrawlReport() {
               it carried, and what moved this week.
             </p>
           </div>
-          <MatchedAppsList token={token} lines={lines} />
+          <MatchedAppsList token={token} lines={lines} caps={summary.trial ?? null} />
         </div>
       )}
     </PageShell>
@@ -786,7 +786,16 @@ type Row = {
   cert_changed_lines: MatchedSeatLine[];
 };
 
-function DrilldownList({ token, lines }: { token: string; lines: string[] }) {
+function DrilldownList({
+  token,
+  lines,
+  caps,
+}: {
+  token: string;
+  lines: string[];
+  /** The trial's caps, on a trial: the unlock card stands on every tab. */
+  caps: TrialCaps | null;
+}) {
   const [tab, setTab] = useState<DrillTab>("all");
   const [rows, setRows] = useState<Row[]>([]);
   const [total, setTotal] = useState(0);
@@ -974,14 +983,17 @@ function DrilldownList({ token, lines }: { token: string; lines: string[] }) {
             ))}
           </div>
         )}
-        {settled > 0 && !error && rows.length > 0 && trial && (
+        {/* On a trial the card stands on every tab, rows or none: the way to
+            the full report never depends on the tab the reader is on. */}
+        {settled > 0 && !error && (caps || trial) && (
           <LockedTail
             slice={trial}
+            caps={caps}
             noun={tab === "all" ? "matched publishers" : "publishers with changes"}
             detail="publisher, every line it carries and every change, week after week"
           />
         )}
-        {settled > 0 && !error && rows.length > 0 && !trial && (
+        {settled > 0 && !error && rows.length > 0 && !trial && !caps && (
           <div className="mt-4">
             <Pager
               page={page}
@@ -1506,7 +1518,15 @@ function lineEventToSeatLine(e: LineEvent): MatchedSeatLine {
  * family colour. The tabs filter the loaded apps by their weekly change; an
  * app that did not move this week appears under "All matched" only.
  */
-function MatchedAppsList({ token, lines }: { token: string; lines: string[] }) {
+function MatchedAppsList({
+  token,
+  lines,
+  caps,
+}: {
+  token: string;
+  lines: string[];
+  caps: TrialCaps | null;
+}) {
   const [tab, setTab] = useState<DrillTab>("all");
   const [allRows, setAllRows] = useState<MatchedApp[]>([]);
   const [loading, setLoading] = useState(true);
@@ -1654,14 +1674,15 @@ function MatchedAppsList({ token, lines }: { token: string; lines: string[] }) {
           All matched. The change tabs filter the loaded page in the browser,
           so their count is a count of this page and paging it would be a
           claim the data cannot support. */}
-      {settled > 0 && !failed && tab === "all" && rows.length > 0 && trial && (
+      {settled > 0 && !failed && (caps || trial) && (
         <LockedTail
           slice={trial}
+          caps={caps}
           noun="matched apps"
           detail="app, its store listing and every line it carries"
         />
       )}
-      {settled > 0 && !failed && tab === "all" && rows.length > 0 && !trial && (
+      {settled > 0 && !failed && tab === "all" && rows.length > 0 && !trial && !caps && (
         <div className="mt-4">
           <Pager
             page={page}
