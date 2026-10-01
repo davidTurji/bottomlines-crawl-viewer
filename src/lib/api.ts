@@ -266,7 +266,10 @@ export const api = {
   ) => {
     if (MOCK) {
       const { mockDeveloperEvents } = await import("./mockData");
-      return mockDeveloperEvents(event, page, lines ?? []);
+      const r = mockDeveloperEvents(event, page, lines ?? []);
+      return trialMock()
+        ? { ...r, page: 1, ...cutRows(r.rows, TRIAL_CAPS_MOCK.publishers, r.total) }
+        : r;
     }
     return req<DeveloperEventsPage>(
       "GET",
@@ -288,7 +291,12 @@ export const api = {
   ) => {
     if (MOCK) {
       const { mockLineEvents } = await import("./mockData");
-      return mockLineEvents(filters);
+      const r = mockLineEvents(filters);
+      // The server keeps the events of the visible publishers only; the
+      // mock keeps a dozen and says how many there are in full.
+      return trialMock()
+        ? { ...r, ...cutRows(r.rows, 12, r.total) }
+        : r;
     }
     const { lines, ...rest } = filters;
     const q = new URLSearchParams();
