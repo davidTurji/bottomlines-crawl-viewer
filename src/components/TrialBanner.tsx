@@ -24,7 +24,7 @@ export default function TrialBanner({ caps, summary }: { caps: TrialCaps; summar
             Trial report: a taste of your domain's full picture.
           </p>
           <p className="mt-0.5 text-[12px] leading-relaxed text-slate-600">
-            You see the first {caps.publishers} matched publishers, {caps.apps} apps,{" "}
+            You see up to the first {caps.publishers} matched publishers, {caps.apps} apps,{" "}
             {caps.declarations} declarations and {caps.discovered_lines} discovered lines. Your
             full report holds{" "}
             <strong className="font-semibold text-slate-900">

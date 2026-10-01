@@ -1,3 +1,4 @@
+import LockedTail from "@/components/LockedTail";
 import TrialBanner from "@/components/TrialBanner";
 import { SkeletonRows, SkeletonStatCards } from "@/components/Skeleton";
 import { useEffect, useMemo, useState } from "react";
@@ -17,7 +18,7 @@ import {
   Search,
 } from "lucide-react";
 
-import { api, type LineEvent, type Summary } from "../lib/api";
+import { api, type LineEvent, type Summary, type TrialSlice } from "../lib/api";
 import { formatWeek, WeekLine } from "@/components/WeekLine";
 import { useReportScope } from "@/lib/reportScope";
 import { PageShell } from "@/components/PageShell";
@@ -124,6 +125,9 @@ export default function CrawlChanges() {
   const [ssp, setSsp] = useState("");
   const [rows, setRows] = useState<LineEvent[]>([]);
   const [truncated, setTruncated] = useState(false);
+  /** Present on a trial: the server cut the line events to the visible
+   *  publishers' and says how many there are in full. */
+  const [trial, setTrial] = useState<TrialSlice | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [page, setPage] = useState(1);
@@ -196,6 +200,7 @@ export default function CrawlChanges() {
         if (cancelled) return;
         setRows(r.rows);
         setTruncated(r.truncated);
+        setTrial(r.trial);
         setOpen(new Set());
         setSettled((n) => n + 1);
         setSettledFor(linesKey);
@@ -702,7 +707,14 @@ export default function CrawlChanges() {
 
       {/* Counts the PREVIOUS filter's groups while a new one is in
           flight, so it stays down with the list it describes. */}
-      {!showSkeleton && total > PAGE_SIZE && (
+      {!showSkeleton && !loading && trial && (
+        <LockedTail
+          slice={trial}
+          noun="line changes"
+          detail="change, on every publisher, week after week"
+        />
+      )}
+      {!showSkeleton && !trial && total > PAGE_SIZE && (
         <div className="flex items-center justify-between border-t border-border/70 pt-4 text-xs text-slate-500">
           <span>
             Showing {startRow.toLocaleString()} to {endRow.toLocaleString()} of{" "}
@@ -1254,18 +1266,22 @@ export function fileLabel(kind: string): string {
 async function fetchAllEvents(
   token: string,
   filters: { ssp_domain?: string; lines?: string[] },
-): Promise<{ rows: LineEvent[]; truncated: boolean }> {
+): Promise<{ rows: LineEvent[]; truncated: boolean; trial: TrialSlice | null }> {
   const acc: LineEvent[] = [];
+  // The cut, when there is one, is stamped on every page; the first
+  // page's stamp is kept and shown under the list.
+  let trial: TrialSlice | null = null;
   for (let p = 1; p <= FETCH_CAP; p += 1) {
     const r = await api.lineEvents(token, {
       ...filters,
       page: p,
       page_size: FETCH_PAGE_SIZE,
     });
+    if (p === 1) trial = r.trial ?? null;
     acc.push(...r.rows);
     if (r.rows.length < FETCH_PAGE_SIZE) {
-      return { rows: acc, truncated: false };
+      return { rows: acc, truncated: false, trial };
     }
   }
-  return { rows: acc, truncated: true };
+  return { rows: acc, truncated: true, trial };
 }

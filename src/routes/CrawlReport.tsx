@@ -977,7 +977,7 @@ function DrilldownList({ token, lines }: { token: string; lines: string[] }) {
         {settled > 0 && !error && rows.length > 0 && trial && (
           <LockedTail
             slice={trial}
-            noun="matched publishers"
+            noun={tab === "all" ? "matched publishers" : "publishers with changes"}
             detail="publisher, every line it carries and every change, week after week"
           />
         )}

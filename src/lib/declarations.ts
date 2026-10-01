@@ -18,7 +18,8 @@
  * report simply has no tab.
  */
 
-import type { TrialSlice,
+import type {
+  TrialSlice,
   DeclarationRow,
   Declarations,
   DeclarationsPayload,
