@@ -12,7 +12,31 @@ export const MOCK = (import.meta.env.VITE_MOCK as string | undefined) === "true"
 /** In MOCK mode, ``?trial=1`` renders the report as a trial (lead magnet):
  *  the lists cut to the caps below, no download, the banner and the locked
  *  tails on. The same convention as ``?bigapps=1`` and ``?legacy=1``. */
-const trialMock = () => MOCK && new URLSearchParams(window.location.search).has("trial");
+//  In MOCK mode the switch is remembered for the tab (sessionStorage) once
+//  ``?trial=1`` has been seen, because the sidebar links drop the query and
+//  a demo that forgot it mid-navigation looked like a report that could be
+//  bypassed. ``?trial=0`` turns it off again. Production never reads the
+//  URL for this: the flag is in the link's record and every request is cut
+//  on the server.
+const TRIAL_MOCK_KEY = "pf-mock-trial";
+const trialMock = () => {
+  if (!MOCK) return false;
+  const params = new URLSearchParams(window.location.search);
+  if (params.has("trial")) {
+    try {
+      sessionStorage.setItem(TRIAL_MOCK_KEY, params.get("trial") === "0" ? "0" : "1");
+    } catch {
+      /* no storage: the URL alone decides */
+    }
+  }
+  try {
+    const kept = sessionStorage.getItem(TRIAL_MOCK_KEY);
+    if (kept !== null) return kept === "1";
+  } catch {
+    /* fall through */
+  }
+  return params.has("trial") && params.get("trial") !== "0";
+};
 const TRIAL_CAPS_MOCK = { publishers: 3, apps: 3, declarations: 3, discovered_lines: 3 };
 function cutRows<T>(rows: T[], cap: number, total: number) {
   const shown = Math.min(cap, rows.length, total);
