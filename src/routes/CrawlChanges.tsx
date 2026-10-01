@@ -1,3 +1,6 @@
+import LockedTail from "@/components/LockedTail";
+import TrialBanner from "@/components/TrialBanner";
+import TrialDock from "@/components/TrialDock";
 import { SkeletonRows, SkeletonStatCards } from "@/components/Skeleton";
 import { useEffect, useMemo, useState } from "react";
 import { Dots } from "@/components/Dots";
@@ -16,7 +19,7 @@ import {
   Search,
 } from "lucide-react";
 
-import { api, type LineEvent, type Summary } from "../lib/api";
+import { api, type LineEvent, type Summary, type TrialSlice } from "../lib/api";
 import { formatWeek, WeekLine } from "@/components/WeekLine";
 import { useReportScope } from "@/lib/reportScope";
 import { PageShell } from "@/components/PageShell";
@@ -123,6 +126,9 @@ export default function CrawlChanges() {
   const [ssp, setSsp] = useState("");
   const [rows, setRows] = useState<LineEvent[]>([]);
   const [truncated, setTruncated] = useState(false);
+  /** Present on a trial: the server cut the line events to the visible
+   *  publishers' and says how many there are in full. */
+  const [trial, setTrial] = useState<TrialSlice | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [page, setPage] = useState(1);
@@ -195,6 +201,7 @@ export default function CrawlChanges() {
         if (cancelled) return;
         setRows(r.rows);
         setTruncated(r.truncated);
+        setTrial(r.trial);
         setOpen(new Set());
         setSettled((n) => n + 1);
         setSettledFor(linesKey);
@@ -314,7 +321,10 @@ export default function CrawlChanges() {
   // The "showing the first N" note below stays either way.
   // A seat-line filter makes every current count a slice of the week while
   // last week's figures are the whole week, so nothing is comparable.
-  const comparable = !filter && !truncated && lines.length === 0;
+  // Not on a trial either: this week's figures are counted on the cut
+  // rows while last week's are whole, and a delta between the two would
+  // be confident and wrong.
+  const comparable = !filter && !truncated && lines.length === 0 && !trial;
   const prevCounts = useMemo<Record<EventKind, number | null>>(
     () => ({
       added: previous?.hero_diff.line_totals.added ?? null,
@@ -364,6 +374,8 @@ export default function CrawlChanges() {
 
   return (
     <PageShell>
+      {summary?.trial && <TrialBanner caps={summary.trial} summary={summary} />}
+      {summary?.trial && <TrialDock caps={summary.trial} summary={summary} />}
       {/* Page header. The seat-line filter sits top right, exactly where the
           overview keeps it, so it is the same control in the same place on
           both pages. */}
@@ -700,6 +712,16 @@ export default function CrawlChanges() {
 
       {/* Counts the PREVIOUS filter's groups while a new one is in
           flight, so it stays down with the list it describes. */}
+      {!showSkeleton && !loading && trial && (
+        <LockedTail
+          slice={trial}
+          noun="line changes"
+          detail="change, on every publisher, week after week"
+        />
+      )}
+      {/* This pager is client-side (every served row is already here), so
+          it stays on a trial: the locked tail above counts what the server
+          kept back, the pager turns the pages of what it sent. */}
       {!showSkeleton && total > PAGE_SIZE && (
         <div className="flex items-center justify-between border-t border-border/70 pt-4 text-xs text-slate-500">
           <span>
@@ -1252,18 +1274,22 @@ export function fileLabel(kind: string): string {
 async function fetchAllEvents(
   token: string,
   filters: { ssp_domain?: string; lines?: string[] },
-): Promise<{ rows: LineEvent[]; truncated: boolean }> {
+): Promise<{ rows: LineEvent[]; truncated: boolean; trial: TrialSlice | null }> {
   const acc: LineEvent[] = [];
+  // The cut, when there is one, is stamped on every page; the first
+  // page's stamp is kept and shown under the list.
+  let trial: TrialSlice | null = null;
   for (let p = 1; p <= FETCH_CAP; p += 1) {
     const r = await api.lineEvents(token, {
       ...filters,
       page: p,
       page_size: FETCH_PAGE_SIZE,
     });
+    if (p === 1) trial = r.trial ?? null;
     acc.push(...r.rows);
     if (r.rows.length < FETCH_PAGE_SIZE) {
-      return { rows: acc, truncated: false };
+      return { rows: acc, truncated: false, trial };
     }
   }
-  return { rows: acc, truncated: true };
+  return { rows: acc, truncated: true, trial };
 }

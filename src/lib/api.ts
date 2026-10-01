@@ -9,6 +9,16 @@ import { LINES_PARAM, linesQuery, serializeLines } from "./lineFilter";
 
 export const MOCK = (import.meta.env.VITE_MOCK as string | undefined) === "true";
 
+/** In MOCK mode, ``?trial=1`` renders the report as a trial (lead magnet):
+ *  the lists cut to the caps below, no download, the banner and the locked
+ *  tails on. The same convention as ``?bigapps=1`` and ``?legacy=1``. */
+const trialMock = () => MOCK && new URLSearchParams(window.location.search).has("trial");
+const TRIAL_CAPS_MOCK = { publishers: 5, apps: 5, declarations: 3, discovered_lines: 3 };
+function cutRows<T>(rows: T[], cap: number, total: number) {
+  const shown = Math.min(cap, rows.length, total);
+  return { rows: rows.slice(0, cap), trial: { cap, shown, full_total: total } };
+}
+
 // ── AI chat flag ─────────────────────────────────────────────────
 // The MVP backend ships no chat endpoint, so the Ask AI surface is
 // hidden unless explicitly enabled (VITE_ENABLE_CHAT=true), e.g. for
@@ -158,6 +168,7 @@ export const api = {
    */
   exportInfo: async (token: string): Promise<ExportInfo> => {
     if (MOCK) {
+      if (trialMock()) return { format: "none", line_export: false, trial: true };
       const big = new URLSearchParams(window.location.search).has("bigapps");
       return big
         ? { format: "zip", line_export: true, excel_row_limit: 1_048_576, apps_rows: 3_682_524 }
@@ -203,7 +214,8 @@ export const api = {
   summary: async (token: string, lines?: string[]) => {
     if (MOCK) {
       const { mockSummaryFor } = await import("./mockData");
-      return mockSummaryFor(lines ?? []);
+      const s = mockSummaryFor(lines ?? []);
+      return trialMock() ? { ...s, trial: TRIAL_CAPS_MOCK } : s;
     }
     const q = linesQuery(lines);
     return req<Summary>("GET", `/v1/viewer/${token}/summary${q ? `?${q.slice(1)}` : ""}`);
@@ -305,7 +317,10 @@ export const api = {
   matchedDevelopers: async (token: string, page = 1, q = "", lines?: string[]) => {
     if (MOCK) {
       const { mockMatchedDevelopers } = await import("./mockData");
-      return mockMatchedDevelopers(page, q, lines ?? []);
+      const r = mockMatchedDevelopers(page, q, lines ?? []);
+      return trialMock()
+        ? { ...r, page: 1, ...cutRows(r.rows, TRIAL_CAPS_MOCK.publishers, r.total) }
+        : r;
     }
     return req<MatchedDevelopersPage>(
       "GET",
@@ -340,7 +355,8 @@ export const api = {
   matchedApps: async (token: string, page = 1, q = "", lines?: string[]) => {
     if (MOCK) {
       const { mockMatchedApps } = await import("./mockData");
-      return mockMatchedApps(page, q, lines ?? []);
+      const r = mockMatchedApps(page, q, lines ?? []);
+      return trialMock() ? { ...r, page: 1, ...cutRows(r.rows, TRIAL_CAPS_MOCK.apps, r.total) } : r;
     }
     return req<MatchedAppsPage>(
       "GET",
@@ -536,7 +552,10 @@ export const api = {
   ) => {
     if (MOCK) {
       const { mockDiscoveredLines } = await import("./mockData");
-      return mockDiscoveredLines(opts);
+      const r = mockDiscoveredLines(opts);
+      return trialMock()
+        ? { ...r, page: 1, ...cutRows(r.rows, TRIAL_CAPS_MOCK.discovered_lines, r.total) }
+        : r;
     }
     const q = new URLSearchParams();
     q.set("page", String(opts.page ?? 1));
@@ -588,6 +607,10 @@ export const api = {
       // `?legacy=1` exercises the grouped shape older links answer with.
       const legacy = new URLSearchParams(window.location.search).has("legacy");
       const { mockDeclarations, mockDeclarationRows } = await import("./mockData");
+      if (trialMock() && !legacy) {
+        const cut = cutRows(mockDeclarationRows.rows, TRIAL_CAPS_MOCK.declarations, mockDeclarationRows.total);
+        return { ...mockDeclarationRows, ...cut };
+      }
       return legacy ? mockDeclarations : mockDeclarationRows;
     }
     return req<DeclarationsPayload>("GET", `/v1/viewer/${token}/declarations`);
@@ -636,9 +659,24 @@ export const api = {
 // ---- types ----
 
 /** What Export hands over (GET /v1/viewer/{token}/export-info). */
+/** A trial (lead magnet) report: how many rows of each list the reader may
+ *  see. The headline counts on the summary are never capped; the lists are. */
+export type TrialCaps = {
+  publishers: number;
+  apps: number;
+  declarations: number;
+  discovered_lines: number;
+};
+
+/** How a capped list was cut on a trial report: the cap, how many rows are
+ *  shown, and the full count behind the cut. Absent on a full report. */
+export type TrialSlice = { cap: number; shown: number; full_total: number };
+
 export type ExportInfo = {
   /** "zip" = the Excel plus the Matched apps list as CSV (too big for Excel). */
   format: "xlsx" | "zip" | "none";
+  /** True on a trial report: there is no download, by design. */
+  trial?: boolean;
   /** A download of only the selected lines exists for this report. */
   line_export: boolean;
   excel_row_limit?: number;
@@ -648,6 +686,8 @@ export type ExportInfo = {
 
 export type Summary = {
   crawl_id: number;
+  /** Set on a trial report (see ``TrialCaps``); null or absent on a full one. */
+  trial?: TrialCaps | null;
   /** The watchlist this report was built from: what the seat-line filter
    *  offers. Optional: artifacts frozen before it was exposed omit it, and
    *  the filter then simply does not show. */
@@ -719,6 +759,8 @@ export type DeveloperEvent = {
 };
 
 export type DeveloperEventsPage = {
+  /** Present on a trial report: this list was cut (see ``TrialSlice``). */
+  trial?: TrialSlice | null;
   event: string;
   page: number;
   page_size: number;
@@ -777,6 +819,8 @@ export type LineEvent = {
 };
 
 export type LineEventsPage = {
+  /** Present on a trial report: this list was cut (see ``TrialSlice``). */
+  trial?: TrialSlice | null;
   page: number;
   page_size: number;
   total: number;
@@ -843,6 +887,8 @@ export type MatchedDeveloper = {
 };
 
 export type MatchedDevelopersPage = {
+  /** Present on a trial report: this list was cut (see ``TrialSlice``). */
+  trial?: TrialSlice | null;
   page: number;
   page_size: number;
   total: number;
@@ -937,6 +983,8 @@ export type MatchedApp = {
 };
 
 export type MatchedAppsPage = {
+  /** Present on a trial report: this list was cut (see ``TrialSlice``). */
+  trial?: TrialSlice | null;
   page: number;
   page_size: number;
   total: number;
@@ -1036,6 +1084,8 @@ export type DiscoveredTotals = {
 };
 
 export type DiscoveredLinesPage = {
+  /** Present on a trial report: this list was cut (see ``TrialSlice``). */
+  trial?: TrialSlice | null;
   page: number;
   page_size: number;
   total: number;
@@ -1122,6 +1172,8 @@ export type DeclarationRow = {
 export type DeclarationRowsPayload = {
   rows: DeclarationRow[];
   total: number;
+  /** Present on a trial report: the rows were cut (see ``TrialSlice``). */
+  trial?: TrialSlice | null;
 };
 
 /**
