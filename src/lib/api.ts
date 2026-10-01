@@ -13,7 +13,7 @@ export const MOCK = (import.meta.env.VITE_MOCK as string | undefined) === "true"
  *  the lists cut to the caps below, no download, the banner and the locked
  *  tails on. The same convention as ``?bigapps=1`` and ``?legacy=1``. */
 const trialMock = () => MOCK && new URLSearchParams(window.location.search).has("trial");
-const TRIAL_CAPS_MOCK = { publishers: 50, apps: 50, declarations: 3, discovered_lines: 3 };
+const TRIAL_CAPS_MOCK = { publishers: 5, apps: 5, declarations: 3, discovered_lines: 3 };
 function cutRows<T>(rows: T[], cap: number, total: number) {
   const shown = Math.min(cap, rows.length, total);
   return { rows: rows.slice(0, cap), trial: { cap, shown, full_total: total } };

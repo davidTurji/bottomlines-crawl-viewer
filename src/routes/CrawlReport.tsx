@@ -1,5 +1,6 @@
 import LockedTail from "@/components/LockedTail";
 import TrialBanner from "@/components/TrialBanner";
+import TrialDock from "@/components/TrialDock";
 import {
   OverviewSkeleton,
   SkeletonRows,
@@ -233,6 +234,7 @@ export default function CrawlReport() {
       {/* Reserved whether or not a filter is on, so toggling one never
           pushes the cards below down and back up. */}
       {summary.trial && <TrialBanner caps={summary.trial} summary={summary} />}
+      {summary.trial && <TrialDock caps={summary.trial} summary={summary} />}
       <p className="-mt-2 min-h-[18px] text-[12px] leading-[18px] text-slate-500">
         {lines.length > 0 && (
           <>
