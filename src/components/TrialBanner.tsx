@@ -10,7 +10,9 @@ import type { Summary, TrialCaps } from "@/lib/api";
  * about the reader's domain, cut to a few rows per list, with the full
  * counts in plain sight. The counts are the hook; they are never capped.
  */
-export default function TrialBanner({ caps, summary }: { caps: TrialCaps; summary: Summary }) {
+/** `caps` is accepted for the callers' sake; the banner no longer lists them,
+ *  the locked tails under each list do. */
+export default function TrialBanner({ summary }: { caps?: TrialCaps; summary: Summary }) {
   const devs = summary.counters.matched.developers;
   const apps = summary.counters.matched.apps;
   return (
@@ -20,24 +22,18 @@ export default function TrialBanner({ caps, summary }: { caps: TrialCaps; summar
           <Sparkles className="h-4 w-4" />
         </span>
         <div className="min-w-0">
-          <p className="text-[13px] font-semibold text-slate-900">
-            Trial report: a taste of your domain's full picture.
-          </p>
-          <p className="mt-0.5 text-[12px] leading-relaxed text-slate-600">
-            You see up to the first {caps.publishers} matched publishers, {caps.apps} apps,{" "}
-            {caps.declarations} declarations and {caps.discovered_lines} discovered lines. Your
-            full report holds{" "}
-            <strong className="font-semibold text-slate-900">
-              {devs.toLocaleString()} matched publishers
-            </strong>{" "}
-            and{" "}
-            <strong className="font-semibold text-slate-900">{apps.toLocaleString()} apps</strong>
-            , refreshed every week.
+          <p className="text-[13px] leading-relaxed text-slate-700">
+            <strong className="font-semibold text-slate-900">Just a glimpse of what we found.</strong>{" "}
+            Your full report contains{" "}
+            <strong className="font-semibold text-slate-900">{devs.toLocaleString()} publishers</strong>
+            {" + "}
+            <strong className="font-semibold text-slate-900">{apps.toLocaleString()} apps</strong>,
+            refreshed weekly.
           </p>
         </div>
       </div>
       <div className="flex-shrink-0">
-        <ContactUs label="Unlock the full report" />
+        <ContactUs label="Unlock Now" />
       </div>
     </div>
   );
