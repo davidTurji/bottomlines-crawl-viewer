@@ -1,6 +1,5 @@
 import LockedTail from "@/components/LockedTail";
 import TrialBanner from "@/components/TrialBanner";
-import TrialDock from "@/components/TrialDock";
 import { SkeletonRows, SkeletonStatCards } from "@/components/Skeleton";
 import { useEffect, useMemo, useState } from "react";
 import { Dots } from "@/components/Dots";
@@ -375,7 +374,6 @@ export default function CrawlChanges() {
   return (
     <PageShell>
       {summary?.trial && <TrialBanner caps={summary.trial} summary={summary} />}
-      {summary?.trial && <TrialDock caps={summary.trial} summary={summary} />}
       {/* Page header. The seat-line filter sits top right, exactly where the
           overview keeps it, so it is the same control in the same place on
           both pages. */}

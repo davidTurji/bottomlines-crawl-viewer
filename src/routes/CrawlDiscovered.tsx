@@ -1,6 +1,5 @@
 import LockedTail from "@/components/LockedTail";
 import TrialBanner from "@/components/TrialBanner";
-import TrialDock from "@/components/TrialDock";
 import {
   SkeletonInlineRows,
   SkeletonRows,
@@ -208,7 +207,6 @@ export default function CrawlDiscovered() {
   return (
     <PageShell>
       {summary?.trial && <TrialBanner caps={summary.trial} summary={summary} />}
-      {summary?.trial && <TrialDock caps={summary.trial} summary={summary} />}
       {/* Page header */}
       <div className="min-w-0">
         <h1 className="text-xl font-bold leading-tight tracking-tight text-slate-900 sm:text-2xl">
