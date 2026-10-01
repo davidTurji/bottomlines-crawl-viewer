@@ -1,3 +1,5 @@
+import LockedTail from "@/components/LockedTail";
+import TrialBanner from "@/components/TrialBanner";
 import {
   OverviewSkeleton,
   SkeletonRows,
@@ -10,6 +12,7 @@ import { useLineFilter } from "@/lib/lineFilter";
 import { Link } from "react-router-dom";
 import { ChevronDown, Download, Globe, Search, Smartphone } from "lucide-react";
 import {
+  type TrialSlice,
   api,
   ApiError,
   ENABLE_CHAT,
@@ -217,16 +220,19 @@ export default function CrawlReport() {
             onChange={setLines}
             busy={refreshing}
           />
-          <ExportResultsButton
-            token={token}
-            summary={summary}
-            lines={lines}
-            info={exportInfo}
-          />
+          {exportInfo.format !== "none" && (
+            <ExportResultsButton
+              token={token}
+              summary={summary}
+              lines={lines}
+              info={exportInfo}
+            />
+          )}
         </div>
       </div>
       {/* Reserved whether or not a filter is on, so toggling one never
           pushes the cards below down and back up. */}
+      {summary.trial && <TrialBanner caps={summary.trial} summary={summary} />}
       <p className="-mt-2 min-h-[18px] text-[12px] leading-[18px] text-slate-500">
         {lines.length > 0 && (
           <>
@@ -790,6 +796,8 @@ function DrilldownList({ token, lines }: { token: string; lines: string[] }) {
   const [page, setPage] = useState(1);
   const [query, setQuery] = useState("");
   const [truncated, setTruncated] = useState(false);
+  /** The cut this trial report made to the list, or null on a full report. */
+  const [trial, setTrial] = useState<TrialSlice | null>(null);
   // Bumps each time a list lands, so the new rows ease in as one piece.
   const [settled, setSettled] = useState(0);
 
@@ -842,6 +850,7 @@ function DrilldownList({ token, lines }: { token: string; lines: string[] }) {
             ),
             total: r.total,
             truncated: r.truncated ?? false,
+            trial: r.trial ?? null,
           }))
         : api.developerEvents(token, tab, page, query, lines).then((r) => ({
             rows: r.rows.map(
@@ -863,12 +872,14 @@ function DrilldownList({ token, lines }: { token: string; lines: string[] }) {
             ),
             total: r.total,
             truncated: false,
+            trial: r.trial ?? null,
           }));
     p.then((data) => {
       if (cancelled) return;
       setRows(data.rows);
       setTotal(data.total);
       setTruncated(data.truncated);
+      setTrial(data.trial);
       setSettled((n) => n + 1);
     })
       .catch((e: Error) => !cancelled && setError(e.message))
@@ -963,7 +974,14 @@ function DrilldownList({ token, lines }: { token: string; lines: string[] }) {
             ))}
           </div>
         )}
-        {settled > 0 && !error && rows.length > 0 && (
+        {settled > 0 && !error && rows.length > 0 && trial && (
+          <LockedTail
+            slice={trial}
+            noun="matched publishers"
+            detail="publisher, every line it carries and every change, week after week"
+          />
+        )}
+        {settled > 0 && !error && rows.length > 0 && !trial && (
           <div className="mt-4">
             <Pager
               page={page}
@@ -1498,6 +1516,8 @@ function MatchedAppsList({ token, lines }: { token: string; lines: string[] }) {
   const [query, setQuery] = useState("");
   const [total, setTotal] = useState(0);
   const [truncated, setTruncated] = useState(false);
+  /** The cut this trial report made to the list, or null on a full report. */
+  const [trial, setTrial] = useState<TrialSlice | null>(null);
 
   const keyOf = (a: MatchedApp) => `${a.store}:${a.bundle_id}`;
   const [settled, setSettled] = useState(0);
@@ -1526,6 +1546,7 @@ function MatchedAppsList({ token, lines }: { token: string; lines: string[] }) {
           setAllRows(r.rows ?? []);
           setTotal(r.total ?? 0);
           setTruncated(r.truncated ?? false);
+          setTrial(r.trial ?? null);
           setSettled((n) => n + 1);
         }
       })
@@ -1633,7 +1654,14 @@ function MatchedAppsList({ token, lines }: { token: string; lines: string[] }) {
           All matched. The change tabs filter the loaded page in the browser,
           so their count is a count of this page and paging it would be a
           claim the data cannot support. */}
-      {settled > 0 && !failed && tab === "all" && rows.length > 0 && (
+      {settled > 0 && !failed && tab === "all" && rows.length > 0 && trial && (
+        <LockedTail
+          slice={trial}
+          noun="matched apps"
+          detail="app, its store listing and every line it carries"
+        />
+      )}
+      {settled > 0 && !failed && tab === "all" && rows.length > 0 && !trial && (
         <div className="mt-4">
           <Pager
             page={page}

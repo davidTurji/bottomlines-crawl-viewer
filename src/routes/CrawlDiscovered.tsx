@@ -1,3 +1,5 @@
+import LockedTail from "@/components/LockedTail";
+import TrialBanner from "@/components/TrialBanner";
 import {
   SkeletonInlineRows,
   SkeletonRows,
@@ -7,6 +9,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { ChevronDown, Download, Radar } from "lucide-react";
 
 import {
+  type TrialSlice,
   api,
   type DiscoveredLine,
   type DiscoveredLineKey,
@@ -72,6 +75,8 @@ export default function CrawlDiscovered() {
   const [rows, setRows] = useState<DiscoveredLine[]>([]);
   const [total, setTotal] = useState(0);
   const [totals, setTotals] = useState<DiscoveredTotals | null>(null);
+  /** The cut this trial report made to the list, or null on a full report. */
+  const [trial, setTrial] = useState<TrialSlice | null>(null);
   const [page, setPage] = useState(1);
   const [ssp, setSsp] = useState("");
   const [loading, setLoading] = useState(true);
@@ -124,6 +129,7 @@ export default function CrawlDiscovered() {
         setRows(r.rows);
         setTotal(r.total);
         setTotals(r.totals);
+        setTrial(r.trial ?? null);
         // Changing page or filter re-renders a different set of cards, so
         // an expansion held open from the previous set would either vanish
         // or, worse, appear to belong to a line it does not.
@@ -200,6 +206,7 @@ export default function CrawlDiscovered() {
 
   return (
     <PageShell>
+      {summary?.trial && <TrialBanner caps={summary.trial} summary={summary} />}
       {/* Page header */}
       <div className="min-w-0">
         <h1 className="text-xl font-bold leading-tight tracking-tight text-slate-900 sm:text-2xl">
@@ -341,7 +348,14 @@ export default function CrawlDiscovered() {
         </div>
       )}
 
-      {total > 0 && pageCount > 1 && (
+      {trial && (
+        <LockedTail
+          slice={trial}
+          noun="discovered lines"
+          detail="line on the open web that carries one of your domains, with every placement"
+        />
+      )}
+      {!trial && total > 0 && pageCount > 1 && (
         <div className="flex items-center justify-between border-t border-border/70 pt-4 text-xs text-slate-500">
           <span>
             Showing {(startRow ?? 0).toLocaleString()} to{" "}

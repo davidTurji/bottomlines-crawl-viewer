@@ -18,7 +18,7 @@
  * report simply has no tab.
  */
 
-import type {
+import type { TrialSlice,
   DeclarationRow,
   Declarations,
   DeclarationsPayload,
@@ -99,6 +99,8 @@ export type NormalizedDeclarations = {
   mismatches: RelationshipMismatch[];
   /** True when the payload was the capped legacy shape. */
   legacy: boolean;
+  /** Present on a trial report: the rows were cut (see ``TrialSlice``). */
+  trial?: TrialSlice | null;
 };
 
 export const EMPTY_DECLARATIONS: NormalizedDeclarations = {
@@ -235,7 +237,8 @@ export function normalizeDeclarations(
 ): NormalizedDeclarations {
   if (!payload || typeof payload !== "object") return EMPTY_DECLARATIONS;
   if (Array.isArray((payload as { rows?: unknown }).rows)) {
-    return fromRows((payload as { rows: DeclarationRow[] }).rows);
+    const rows = payload as { rows: DeclarationRow[]; trial?: TrialSlice | null };
+    return { ...fromRows(rows.rows), trial: rows.trial ?? null };
   }
   const legacy = payload as Declarations;
   if (legacy.totals || legacy.ipd || legacy.owner_claims) return fromLegacy(legacy);
