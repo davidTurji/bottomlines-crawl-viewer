@@ -119,7 +119,7 @@ export default function ContactUs({
           </div>
 
           <a
-            href={`mailto:${EMAIL}?subject=${encodeURIComponent("Path Finder: show me my full report")}`}
+            href={`mailto:${EMAIL}?subject=${encodeURIComponent("Pathfinder: show me my full report")}`}
             className="mt-4 flex h-11 w-full items-center justify-center gap-2 rounded-full bg-gradient-to-br from-primary to-[hsl(150_58%_22%)] text-sm font-medium text-primary-foreground shadow-sm transition-all duration-200 hover:-translate-y-px hover:shadow-md"
           >
             <Mail className="h-4 w-4" />

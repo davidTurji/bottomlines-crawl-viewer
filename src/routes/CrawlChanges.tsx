@@ -320,7 +320,10 @@ export default function CrawlChanges() {
   // The "showing the first N" note below stays either way.
   // A seat-line filter makes every current count a slice of the week while
   // last week's figures are the whole week, so nothing is comparable.
-  const comparable = !filter && !truncated && lines.length === 0;
+  // Not on a trial either: this week's figures are counted on the cut
+  // rows while last week's are whole, and a delta between the two would
+  // be confident and wrong.
+  const comparable = !filter && !truncated && lines.length === 0 && !trial;
   const prevCounts = useMemo<Record<EventKind, number | null>>(
     () => ({
       added: previous?.hero_diff.line_totals.added ?? null,
@@ -714,7 +717,10 @@ export default function CrawlChanges() {
           detail="change, on every publisher, week after week"
         />
       )}
-      {!showSkeleton && !trial && total > PAGE_SIZE && (
+      {/* This pager is client-side (every served row is already here), so
+          it stays on a trial: the locked tail above counts what the server
+          kept back, the pager turns the pages of what it sent. */}
+      {!showSkeleton && total > PAGE_SIZE && (
         <div className="flex items-center justify-between border-t border-border/70 pt-4 text-xs text-slate-500">
           <span>
             Showing {startRow.toLocaleString()} to {endRow.toLocaleString()} of{" "}
