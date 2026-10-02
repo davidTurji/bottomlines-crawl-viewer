@@ -26,7 +26,11 @@ interface ReportTourContextValue {
   stepId: string | null;
   status: TourStatus;
   /** Whether the first-visit "would you like a walkthrough?" card is up. */
-  prompting: boolean;
+  /**
+   * Which pop-up is up, if any: "offer" asks on load (Show me around / No
+   * thanks); "intro" is what the How this works button opens (Continue).
+   */
+  prompting: "offer" | "intro" | null;
   /** Opens the walkthrough. Pass `restart` to ignore saved progress. */
   start: (options?: { restart?: boolean }) => void;
   /** Records the reader's position without closing, so a reload resumes here. */
@@ -37,6 +41,8 @@ interface ReportTourContextValue {
   complete: () => void;
   /** Answers the welcome prompt: yes starts from the top, no never asks again. */
   answerPrompt: (yes: boolean) => void;
+  /** The How this works button: the pop-up first, then the walkthrough. */
+  introduce: () => void;
 }
 
 const ReportTourContext = createContext<ReportTourContextValue | undefined>(undefined);
@@ -62,7 +68,7 @@ const PROMPT_DELAY_MS = 700;
 
 export function ReportTourProvider({ children }: { children: React.ReactNode }) {
   const [progress, setProgress] = useState<TourProgress>(loadTourProgress);
-  const [prompting, setPrompting] = useState(false);
+  const [prompting, setPrompting] = useState<"offer" | "intro" | null>(null);
 
   /** Persist on every change so a mid-walkthrough reload resumes in place. */
   useEffect(() => {
@@ -70,7 +76,7 @@ export function ReportTourProvider({ children }: { children: React.ReactNode }) 
   }, [progress]);
 
   const start = useCallback((options?: { restart?: boolean }) => {
-    setPrompting(false);
+    setPrompting(null);
     setProgress((prev) => ({
       status: "in-progress",
       stepId: options?.restart ? null : prev.stepId,
@@ -96,7 +102,7 @@ export function ReportTourProvider({ children }: { children: React.ReactNode }) 
 
   const answerPrompt = useCallback(
     (yes: boolean) => {
-      setPrompting(false);
+      setPrompting(null);
       if (yes) start({ restart: true });
       else setProgress({ status: "skipped", stepId: null, open: false });
     },
@@ -120,7 +126,7 @@ export function ReportTourProvider({ children }: { children: React.ReactNode }) 
     const timer = window.setInterval(() => {
       if (document.querySelector(READY_ANCHOR)) {
         window.clearInterval(timer);
-        delay = window.setTimeout(() => setPrompting(true), PROMPT_DELAY_MS);
+        delay = window.setTimeout(() => setPrompting("offer"), PROMPT_DELAY_MS);
       } else if (++attempts >= READY_ATTEMPTS) {
         window.clearInterval(timer);
       }
@@ -133,6 +139,10 @@ export function ReportTourProvider({ children }: { children: React.ReactNode }) 
     // re-running this on that change would re-arm it against itself.
   }, []);
 
+  /** Pressing How this works opens the same pop-up, as a "here we go"
+   *  rather than a question (David, 2026-10-02): one Continue button. */
+  const introduce = useCallback(() => setPrompting("intro"), []);
+
   const value = useMemo<ReportTourContextValue>(
     () => ({
       open: progress.open,
@@ -144,8 +154,9 @@ export function ReportTourProvider({ children }: { children: React.ReactNode }) 
       skip,
       complete,
       answerPrompt,
+      introduce,
     }),
-    [progress.open, progress.stepId, progress.status, prompting, start, goToStep, skip, complete, answerPrompt],
+    [progress.open, progress.stepId, progress.status, prompting, start, goToStep, skip, complete, answerPrompt, introduce],
   );
 
   return <ReportTourContext.Provider value={value}>{children}</ReportTourContext.Provider>;
@@ -162,12 +173,13 @@ export function useReportTour(): ReportTourContextValue {
       open: false,
       stepId: null,
       status: "unseen",
-      prompting: false,
+      prompting: null,
       start: () => {},
       goToStep: () => {},
       skip: () => {},
       complete: () => {},
       answerPrompt: () => {},
+      introduce: () => {},
     };
   }
   return context;

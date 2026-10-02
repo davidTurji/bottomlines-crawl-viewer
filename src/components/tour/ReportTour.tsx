@@ -26,7 +26,7 @@ import { TourOverlay } from "./TourOverlay";
 import { reportTourSteps, type ReportFeatures, type ReportPage } from "./reportTourSteps";
 import { useReportTour } from "./useReportTour";
 
-/** The rail's name for each page, as the page-change card says it. */
+/** The rail's name for each page, as the page-move label says it. */
 const PAGE_LABEL: Record<ReportPage, string> = {
   "": "Overview",
   changes: "Changes",
@@ -34,14 +34,30 @@ const PAGE_LABEL: Record<ReportPage, string> = {
   declarations: "Declarations",
 };
 
+/** The rail's order, which decides which way a page slides. */
+const PAGE_ORDER: ReportPage[] = ["", "changes", "discovery", "declarations"];
+
 /**
- * The page change, in two beats. The highlight glides to the page's link in
- * the rail (the glide is 520ms), the page switches at NAV_MS with the link
- * still lit so the reader watches it become the active one, and at
- * TRANSIT_MS the highlight moves on to the step on the new page.
+ * THE PAGE MOVE: WATCH THE PAGE SLIDE (David, 2026-10-02, after two
+ * versions that did not read as moving pages). About three seconds:
+ *
+ *   0         the walkthrough steps aside: backdrop and card fade out, the
+ *             frame goes to the next page's link in the rail (the menu
+ *             button on a phone) with a "Moving to <page>" label beside it
+ *   OUT_MS    the current page slides out sideways and fades
+ *   NAV_MS    the route changes behind it, scrolled to the top; the rail
+ *             link becomes the active page
+ *   IN_MS     the new page slides in from the other side
+ *   DONE_MS   the backdrop returns and the walkthrough carries on
+ *
+ * Forward through the rail slides left, like turning a page; back slides
+ * right. The numbers are the whole tuning surface.
  */
-const NAV_MS = 650;
-const TRANSIT_MS = 1150;
+const OUT_MS = 650;
+const NAV_MS = 1050;
+const IN_MS = 1110;
+const SETTLE_MS = 1800;
+const DONE_MS = 2600;
 
 /** Read before the first card, so the step list never changes under the reader. */
 function useReportFeatures(enabled: boolean): ReportFeatures | null {
@@ -84,7 +100,7 @@ export function ReportTour() {
   const location = useLocation();
 
   // Read as soon as the prompt shows, so a "yes" opens straight onto step one.
-  const features = useReportFeatures(open || prompting);
+  const features = useReportFeatures(open || prompting !== null);
   const steps = useMemo(() => (features ? reportTourSteps(features) : []), [features]);
 
   // A saved step id that no longer exists (a step this report does not have)
@@ -98,9 +114,8 @@ export function ReportTour() {
    * 2026-10-02: "it is not clear it is moving pages").
    *
    * A step on the page already open just shows. A step on another page first
-   * points at that page's link in the rail (on a phone, where the rail is
-   * hidden, at the menu button) with a "Moving to" card, then navigates, then
-   * hands over to the step. See NAV_MS and TRANSIT_MS.
+   * steps aside and lets the reader watch the page slide across, then hands
+   * over to the step. See the timeline above OUT_MS.
    *
    * Keyed on the step, not on the location: navigating whenever the two
    * disagree would drag a reader back the moment they followed a link on the
@@ -113,14 +128,15 @@ export function ReportTour() {
   // the page switched, cutting the "Moving to" card short.
   const navigateRef = useRef(navigate);
   navigateRef.current = navigate;
-  const [transit, setTransit] = useState<{ anchor: string; title: string; durationMs: number } | null>(null);
+  const [transit, setTransit] = useState<{ anchor: string; to: string } | null>(null);
   useEffect(() => {
     if (!open || !step) {
       setTransit(null);
       return;
     }
     const target = step.page ? `${basePath}/${step.page}` : basePath;
-    if (locRef.current.pathname.replace(/\/+$/, "") === target) {
+    const here = locRef.current.pathname.replace(/\/+$/, "");
+    if (here === target) {
       setTransit(null);
       return;
     }
@@ -129,17 +145,35 @@ export function ReportTour() {
     // The rail is a sheet on narrow screens and its links are not on screen,
     // so point at the button that opens it.
     const anchor = linkEl && linkEl.getClientRects().length > 0 ? link : "nav-trigger";
-    setTransit({ anchor, title: PAGE_LABEL[step.page], durationMs: TRANSIT_MS });
-    const go = window.setTimeout(
-      () => navigateRef.current({ pathname: target, search: locRef.current.search }),
-      NAV_MS,
-    );
-    const done = window.setTimeout(() => setTransit(null), TRANSIT_MS);
-    // Cleared if the reader moves on, or closes, before the change lands:
-    // the page then stays where it is.
+    const fromPage = (here.startsWith(basePath) ? here.slice(basePath.length) : "").replace(/^\//, "");
+    const forward = PAGE_ORDER.indexOf(step.page) >= PAGE_ORDER.indexOf(fromPage as ReportPage);
+    // The page area Layout marks. The slide is CSS (index.css) keyed on a
+    // data attribute, so no page component knows anything about it.
+    const main = document.querySelector<HTMLElement>("[data-report-main]");
+    const reduce = window.matchMedia?.("(prefers-reduced-motion: reduce)").matches ?? false;
+    const slide = (phase: "out" | "in") => {
+      if (main && !reduce) main.dataset.pageMove = `${phase}-${forward ? "left" : "right"}`;
+    };
+
+    setTransit({ anchor, to: PAGE_LABEL[step.page] });
+    const timers = [
+      window.setTimeout(() => slide("out"), OUT_MS),
+      window.setTimeout(() => {
+        navigateRef.current({ pathname: target, search: locRef.current.search });
+        // The old page is out of sight by now; start the new one at its top.
+        if (main) main.scrollTop = 0;
+      }, NAV_MS),
+      window.setTimeout(() => slide("in"), IN_MS),
+      window.setTimeout(() => {
+        if (main) delete main.dataset.pageMove;
+      }, SETTLE_MS),
+      window.setTimeout(() => setTransit(null), DONE_MS),
+    ];
+    // Cleared if the reader moves on, or closes, mid-move. The attribute
+    // must go too, or a page caught mid-slide would stay invisible.
     return () => {
-      window.clearTimeout(go);
-      window.clearTimeout(done);
+      timers.forEach((t) => window.clearTimeout(t));
+      if (main) delete main.dataset.pageMove;
     };
   }, [open, step?.id, step?.page, basePath]);
 
@@ -157,7 +191,7 @@ export function ReportTour() {
     else skip();
   }, [index, steps.length, complete, skip]);
 
-  if (prompting) return <WelcomePrompt onAnswer={answerPrompt} />;
+  if (prompting) return <WelcomePrompt mode={prompting} onAnswer={answerPrompt} />;
   if (!open || !step) return null;
 
   return (
@@ -186,8 +220,18 @@ export function ReportTour() {
  *
  * The two answers are the same size and weight (David, 2026-10-02): green
  * for yes, white for no.
+ *
+ * The How this works button opens the same card as an "intro": nothing to
+ * decide, the reader already asked, so it says what is about to happen and
+ * has one Continue button. The X and Esc still close it.
  */
-function WelcomePrompt({ onAnswer }: { onAnswer: (yes: boolean) => void }) {
+function WelcomePrompt({
+  mode,
+  onAnswer,
+}: {
+  mode: "offer" | "intro";
+  onAnswer: (yes: boolean) => void;
+}) {
   // Focus goes to the card, not to a button: a focused button wears a ring,
   // and the two answers must look exactly alike until one is chosen.
   const cardRef = useRef<HTMLDivElement>(null);
@@ -211,7 +255,7 @@ function WelcomePrompt({ onAnswer }: { onAnswer: (yes: boolean) => void }) {
       <div
         ref={cardRef}
         tabIndex={-1}
-        className="relative w-full max-w-[21rem] rounded-3xl border border-white/70 bg-white/95 p-5 shadow-[0_24px_60px_-12px_rgba(15,23,42,0.35)] outline-none animate-tour-pop motion-reduce:animate-none"
+        className="relative w-full max-w-[21rem] rounded-3xl border border-slate-200/70 bg-white p-5 shadow-[0_24px_60px_-12px_rgba(15,23,42,0.35)] outline-none animate-tour-pop motion-reduce:animate-none"
       >
         <button
           type="button"
@@ -228,12 +272,22 @@ function WelcomePrompt({ onAnswer }: { onAnswer: (yes: boolean) => void }) {
           id="walkthrough-prompt-title"
           className="mt-3 font-display text-base font-semibold tracking-tight text-slate-900"
         >
-          Want a quick walkthrough?
+          {mode === "intro" ? "We\u2019ll walk you through it" : "Want a quick walkthrough?"}
         </h2>
         <p className="mt-1 text-[13px] leading-snug text-slate-500">
           A <strong className="font-semibold text-slate-800">1 minute</strong> tour
           of your report.
         </p>
+        {mode === "intro" ? (
+          <button
+            type="button"
+            onClick={() => onAnswer(true)}
+            className="mt-4 inline-flex h-10 w-full items-center justify-center rounded-full border border-transparent bg-gradient-to-b from-[hsl(152_50%_32%)] to-primary px-3 text-[13px] font-semibold text-primary-foreground shadow-md shadow-primary/25 transition-all duration-200 hover:brightness-110 active:scale-[0.98] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
+          >
+            Continue
+          </button>
+        ) : (
+        <>
         {/* Two equal columns on every screen, so the answers are exactly the
             same size: green for yes, white for no. */}
         <div className="mt-4 grid grid-cols-2 gap-2">
@@ -256,6 +310,8 @@ function WelcomePrompt({ onAnswer }: { onAnswer: (yes: boolean) => void }) {
           Replay anytime from{" "}
           <strong className="font-semibold text-slate-500">How this works</strong>.
         </p>
+        </>
+        )}
       </div>
     </div>,
     document.body,

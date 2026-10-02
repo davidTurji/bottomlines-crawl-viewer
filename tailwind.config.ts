@@ -260,13 +260,14 @@ export default {
           from: { opacity: "0" },
           to: { opacity: "1" },
         },
-        "tour-arrow": {
-          from: { opacity: "0", transform: "translate3d(-6px, 0, 0)" },
-          to: { opacity: "1", transform: "translate3d(0, 0, 0)" },
+        /* The page-move label: toward its rail link, or up from the bottom. */
+        "tour-label-in": {
+          from: { opacity: "0", transform: "translate3d(-10px, 0, 0) scale(0.96)" },
+          to: { opacity: "1", transform: "translate3d(0, 0, 0) scale(1)" },
         },
-        "tour-progress": {
-          from: { transform: "scaleX(0)" },
-          to: { transform: "scaleX(1)" },
+        "tour-label-up": {
+          from: { opacity: "0", transform: "translate3d(0, 10px, 0) scale(0.96)" },
+          to: { opacity: "1", transform: "translate3d(0, 0, 0) scale(1)" },
         },
       },
       animation: {
@@ -296,9 +297,8 @@ export default {
         "tour-pop": "tour-pop 0.42s cubic-bezier(0.22, 1, 0.36, 1) both",
         "tour-card-in": "tour-card-in 0.32s cubic-bezier(0.22, 1, 0.36, 1) both",
         "tour-fade": "tour-fade 0.3s ease-out both",
-        "tour-arrow": "tour-arrow 0.45s cubic-bezier(0.22, 1, 0.36, 1) 0.1s both",
-        // Duration is set per use, to match how long the page change takes.
-        "tour-progress": "tour-progress 1s cubic-bezier(0.4, 0, 0.2, 1) both",
+        "tour-label-in": "tour-label-in 0.5s cubic-bezier(0.22, 1, 0.36, 1) 0.15s both",
+        "tour-label-up": "tour-label-up 0.5s cubic-bezier(0.22, 1, 0.36, 1) 0.15s both",
       },
     },
   },

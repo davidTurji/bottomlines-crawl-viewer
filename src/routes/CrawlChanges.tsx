@@ -378,7 +378,7 @@ export default function CrawlChanges() {
           overview keeps it, so it is the same control in the same place on
           both pages. */}
       <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
-        <div className="min-w-0">
+        <div className="min-w-0" data-tour="changes-header">
           <h1 className="text-xl font-bold leading-tight tracking-tight text-slate-900 sm:text-2xl">
             Changes
           </h1>
@@ -615,9 +615,17 @@ export default function CrawlChanges() {
             </span>
           </p>
         )}
-        <div className="flex items-center gap-3">
+        <div className="flex min-w-0 items-center gap-3">
+          {/* ON A PHONE, A WEEK WITH SIX TABS IS WIDER THAN THE SCREEN. The
+              row scrolls sideways on its own, so the tabs never push the
+              whole page into a sideways scroll (it did, by about 100px). */}
+          <div className="min-w-0 overflow-x-auto">
           <Tabs value={bucket} onValueChange={(v) => setBucket(v as Bucket)}>
-            <TabsList>
+            {/* max-w-none: the base layer caps every element at 100% of its
+                parent, which squeezed this strip to the screen and, being
+                centred, pushed All and Added off its left edge where no
+                scroll could reach them. */}
+            <TabsList className="w-max max-w-none">
               <TabsTrigger value="all">All</TabsTrigger>
               <TabsTrigger value="added">Added</TabsTrigger>
               <TabsTrigger value="removed">Removed</TabsTrigger>
@@ -640,6 +648,7 @@ export default function CrawlChanges() {
               ))}
             </TabsList>
           </Tabs>
+          </div>
           {loading && rows.length > 0 && <Dots />}
         </div>
 
