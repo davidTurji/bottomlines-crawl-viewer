@@ -120,17 +120,10 @@ export interface TourOverlayProps {
  *  card gap live in `tourPlacement`, which owns the geometry. */
 const SPOT_PAD = 8;
 
-/**
- * One easing for everything that moves between steps (the highlight, the
- * blur around it, the card), so they travel together as one piece instead
- * of three things arriving at slightly different moments. Fast out, long
- * soft landing.
- */
-const GLIDE = "duration-500 ease-[cubic-bezier(0.22,1,0.36,1)] motion-reduce:transition-none";
 
-/** How long a step change keeps the glide transitions on. A little longer
- *  than the glide itself, so it always finishes on the transition. */
-const GLIDE_MS = 650;
+/** How long a glide between two steps takes. One clock and one ease-out-quint
+ *  for the highlight and the card, so they travel as one piece. */
+const GLIDE_MS = 520;
 
 /** How long the highlight holds its last spot while the next step's page
  *  loads, before giving up on the anchor and centring the card. */
@@ -146,6 +139,37 @@ const MAX_DOTS = 12;
 /** Card width, and the height assumed for one frame before it is measured. */
 const CARD_W = 320;
 const CARD_H_GUESS = 140;
+
+/** A box partway from `a` to `b`. */
+function lerpBox(a: Box, b: Box, e: number): Box {
+  return {
+    top: a.top + (b.top - a.top) * e,
+    left: a.left + (b.left - a.left) * e,
+    width: a.width + (b.width - a.width) * e,
+    height: a.height + (b.height - a.height) * e,
+  };
+}
+
+/** Corner radius of the hole and the frame (rounded-2xl). */
+const HOLE_RADIUS = 16;
+
+/**
+ * The backdrop's clip: the whole viewport with `box` cut out as a rounded
+ * rectangle (even-odd fill). Sub-pixel values are kept, so a glide is smooth
+ * rather than stepping a pixel at a time.
+ */
+function holePath(box: Box, viewport: { width: number; height: number }): string {
+  const { top: y, left: x, width: w, height: h } = box;
+  const r = Math.max(0, Math.min(HOLE_RADIUS, w / 2, h / 2));
+  const f = (n: number) => n.toFixed(2);
+  return (
+    `path(evenodd, "M0 0H${f(viewport.width)}V${f(viewport.height)}H0Z ` +
+    `M${f(x + r)} ${f(y)}H${f(x + w - r)}A${f(r)} ${f(r)} 0 0 1 ${f(x + w)} ${f(y + r)}` +
+    `V${f(y + h - r)}A${f(r)} ${f(r)} 0 0 1 ${f(x + w - r)} ${f(y + h)}` +
+    `H${f(x + r)}A${f(r)} ${f(r)} 0 0 1 ${f(x)} ${f(y + h - r)}` +
+    `V${f(y + r)}A${f(r)} ${f(r)} 0 0 1 ${f(x + r)} ${f(y)}Z")`
+  );
+}
 
 /**
  * The element that actually scrolls `el`, which is not always the window.
@@ -175,7 +199,6 @@ export function TourOverlay({
   footer,
   doneLabel = "Done",
 }: TourOverlayProps) {
-  const [rect, setRect] = useState<DOMRect | null>(null);
   const cardRef = useRef<HTMLDivElement>(null);
 
   const step = steps[index];
@@ -263,91 +286,141 @@ export function TourOverlay({
   }, [open, index, activeAnchor, revealAnchor]);
 
   /**
-   * Transitions are on only while a step changes (David, 2026-10-02: "smooth
-   * animation, no blipping"). Between steps the highlight, the blur and the
-   * card glide together to the new spot. The rest of the time they track the
-   * page exactly: with a 500ms transition always on, every frame of a scroll
-   * restarted it and the highlight trailed the component it was framing.
+   * ONE PAINT LOOP MOVES EVERYTHING (David, 2026-10-02: "extremely laggy",
+   * "cutting lines", "no blipping").
    *
-   * This replaced a per-step "settle", which opened each step with the
-   * cutout oversized and the dimming lighter, then snapped both to rest: a
-   * pulse on every Next, read as blinking.
+   * Every frame it measures the anchor, eases the highlight toward it, and
+   * writes the result straight onto three elements: the backdrop's cut-out,
+   * the frame around it, and the card. Nothing here goes through React, so a
+   * step change re-renders the card's words once and then the motion is pure
+   * style writes. The earlier version set React state every frame and moved
+   * four blurred panes plus the card with CSS transitions on layout
+   * properties: each frame re-laid-out and re-blurred five elements, the
+   * transitions restarted on every scroll frame, and the four panes met in
+   * visible seams around a rounded hole.
+   *
+   * The glide: on a step change (or when a page that was still loading
+   * produces its anchor) the loop eases from wherever things are on screen to
+   * where they belong, over GLIDE_MS on an ease-out-quint, retargeting every
+   * frame so a page scrolling underneath is followed, not chased. Outside a
+   * glide they track the anchor exactly.
    */
-  const [gliding, setGliding] = useState(false);
-  const glideTimer = useRef(0);
-  /** Turn the glide on for one GLIDE_MS window, restarting it if running. */
+  const shownRef = useRef<Box | null>(null);
+  const cardPosRef = useRef<{ left: number; top: number } | null>(null);
+  const glideRef = useRef<{ box: Box | null; card: { left: number; top: number } | null; start: number }>({
+    box: null,
+    card: null,
+    start: 0,
+  });
+  const dimRef = useRef<HTMLDivElement>(null);
+  const frameRef = useRef<HTMLDivElement>(null);
+  /** Start a glide from wherever the highlight and card are right now. */
   const kickGlide = useCallback(() => {
-    setGliding(true);
-    window.clearTimeout(glideTimer.current);
-    glideTimer.current = window.setTimeout(() => setGliding(false), GLIDE_MS);
+    glideRef.current = { box: shownRef.current, card: cardPosRef.current, start: performance.now() };
   }, []);
   useEffect(() => {
     if (open) kickGlide();
-    return () => window.clearTimeout(glideTimer.current);
   }, [open, index, kickGlide]);
-  const glide = gliding ? cn("transition-all", GLIDE) : "";
 
-  /** Track the anchor's rect every frame so the spotlight follows scroll,
-   *  resizes, and the smooth scrollIntoView above, only re-rendering when
-   *  the measured box actually moved. Skipped entirely in `panel` mode,
-   *  which draws no spotlight and so has nothing to measure. */
   useEffect(() => {
     if (!open || !spotlight) return;
+    const reduce = window.matchMedia?.("(prefers-reduced-motion: reduce)").matches ?? false;
+    const cardSide = steps[index]?.cardSide;
     let raf = 0;
     // HOLD THE LAST SPOT across a page change. The next step's anchor does not
-    // exist until its page has loaded, and dropping the rect meant the hole
-    // closed (the whole screen flashed dark) and then reopened somewhere else.
-    // Held, the highlight stays put for that moment and then glides over.
+    // exist until its page has loaded; dropping it closed the hole (a dark
+    // flash) and reopened it somewhere else. Held, everything stays put for
+    // that moment and then glides over.
     let missingSince = 0;
     const tick = () => {
+      raf = requestAnimationFrame(tick);
       const el = activeAnchor
         ? document.querySelector<HTMLElement>(`[data-tour="${activeAnchor}"]`)
         : null;
-      let r = el ? el.getBoundingClientRect() : null;
+      let r: DOMRect | null = el ? el.getBoundingClientRect() : null;
+      if (r && r.width === 0 && r.height === 0) r = null;
       if (r) {
-        // Found after a wait (the page took a moment to load): the step's
-        // own glide window may be over, so open another one for this move.
+        // Found after a wait: open a glide for this move.
         if (missingSince) kickGlide();
         missingSince = 0;
       } else if (activeAnchor) {
         missingSince ||= performance.now();
-        if (performance.now() - missingSince < HOLD_MS) {
-          raf = requestAnimationFrame(tick);
-          return;
+        if (performance.now() - missingSince < HOLD_MS) return;
+      }
+
+      const viewport = { width: window.innerWidth, height: window.innerHeight };
+      const target = r ? highlightBox(r, SPOT_PAD, viewport) : null;
+      const cardH = cardHeightRef.current;
+      const cardW = Math.min(CARD_W, viewport.width - EDGE * 2);
+      const narrowNow = viewport.width <= NARROW_MAX;
+      let cardTarget: { left: number; top: number; width: number };
+      if (target && narrowNow) {
+        const edge = resolveDockEdge(target, cardH, viewport, dockEdge);
+        const b = dockedCard(edge, cardH, viewport);
+        cardTarget = { left: b.left, top: b.top, width: b.width };
+      } else if (target) {
+        const b = placeCard(target, { width: cardW, height: cardH }, viewport, cardSide);
+        cardTarget = { left: b.left, top: b.top, width: cardW };
+      } else {
+        cardTarget = {
+          left: (viewport.width - cardW) / 2,
+          top: Math.max(EDGE, (viewport.height - cardH) / 2),
+          width: cardW,
+        };
+      }
+
+      // Ease toward the targets while a glide is running.
+      const g = glideRef.current;
+      const t = reduce ? 1 : Math.min(1, (performance.now() - g.start) / GLIDE_MS);
+      const e = 1 - Math.pow(1 - t, 5);
+      const box = target && g.box && t < 1 ? lerpBox(g.box, target, e) : target;
+      const card =
+        g.card && t < 1
+          ? {
+              left: g.card.left + (cardTarget.left - g.card.left) * e,
+              top: g.card.top + (cardTarget.top - g.card.top) * e,
+            }
+          : { left: cardTarget.left, top: cardTarget.top };
+      shownRef.current = box;
+      cardPosRef.current = card;
+
+      const dim = dimRef.current;
+      if (dim) {
+        dim.style.clipPath = box ? holePath(box, viewport) : "none";
+      }
+      const frame = frameRef.current;
+      if (frame) {
+        if (box) {
+          frame.style.opacity = "1";
+          frame.style.transform = `translate3d(${box.left}px, ${box.top}px, 0)`;
+          frame.style.width = `${box.width}px`;
+          frame.style.height = `${box.height}px`;
+        } else {
+          frame.style.opacity = "0";
         }
       }
-      if (r && r.width === 0 && r.height === 0) r = null;
-      setRect((prev) => {
-        if (!prev && !r) return prev;
-        if (
-          prev &&
-          r &&
-          prev.top === r.top &&
-          prev.left === r.left &&
-          prev.width === r.width &&
-          prev.height === r.height
-        ) {
-          return prev;
-        }
-        return r;
-      });
-      raf = requestAnimationFrame(tick);
+      const cardEl = cardRef.current;
+      if (cardEl) {
+        cardEl.style.transform = `translate3d(${card.left}px, ${card.top}px, 0)`;
+        cardEl.style.width = `${cardTarget.width}px`;
+        cardEl.style.opacity = "1";
+      }
     };
     raf = requestAnimationFrame(tick);
     return () => cancelAnimationFrame(raf);
-  }, [open, index, activeAnchor, spotlight, kickGlide]);
+  }, [open, index, steps, activeAnchor, spotlight, dockEdge, kickGlide]);
 
   /**
    * Measure the card rather than assume it.
    *
    * Placement has to know the real height or a long step overflows the bottom
    * edge, and the height is only knowable after the body has rendered. The
-   * card is hidden for that one frame (see `measured`) so nobody sees it at
-   * the guessed position.
+   * paint loop reads it from `cardHeightRef` every frame; the card stays
+   * invisible until the loop's first placement, so nobody sees it at the
+   * guessed position.
    */
-  const [cardSize, setCardSize] = useState({ width: CARD_W, height: CARD_H_GUESS });
   const [measured, setMeasured] = useState(false);
-  // Hidden for the first measurement only. Resetting this on every step
+  // Reset only when the walkthrough closes. Resetting this on every step
   // faded the card out and back in on each Next, which read as a blink.
   useEffect(() => {
     if (!open) setMeasured(false);
@@ -359,11 +432,6 @@ export function TourOverlay({
       const { width, height } = el.getBoundingClientRect();
       if (!width || !height) return;
       cardHeightRef.current = height;
-      setCardSize((prev) =>
-        Math.abs(prev.width - width) < 1 && Math.abs(prev.height - height) < 1
-          ? prev
-          : { width, height },
-      );
       setMeasured(true);
     };
     read();
@@ -412,72 +480,13 @@ export function TourOverlay({
 
   if (!open || !step) return null;
 
-  // The highlight box, padded and clamped to the viewport. Everything below
-  // positions against this rather than the raw rect, so an anchor that runs
-  // off the bottom of the screen still yields a box with on-screen edges.
-  const pad = SPOT_PAD;
   const viewport = { width: window.innerWidth, height: window.innerHeight };
-  const spot: Box | null = rect ? highlightBox(rect, pad, viewport) : null;
-
   const cardW = Math.min(CARD_W, viewport.width - EDGE * 2);
-  let cardStyle: React.CSSProperties | undefined;
-  if (spotlight) {
-    if (narrow && spot) {
-      // Phone: dock to an edge and let the anchor have the rest. Floating a
-      // card this wide next to anything on a 390px screen is not a placement
-      // problem that has a good answer, and every candidate would cover the
-      // highlight it is describing. The edge is re-checked against where the
-      // highlight actually ended up, because a page too short to scroll cannot
-      // move it out from under the preferred edge.
-      const edge = resolveDockEdge(spot, cardSize.height, viewport, dockEdge);
-      const box = dockedCard(edge, cardSize.height, viewport);
-      cardStyle = { position: "fixed", top: box.top, left: box.left, width: box.width };
-    } else if (spot) {
-      const box = placeCard(
-        spot,
-        { width: cardW, height: cardSize.height },
-        viewport,
-        step.cardSide,
-      );
-      cardStyle = { position: "fixed", top: box.top, left: box.left, width: cardW };
-    } else {
-      cardStyle = {
-        position: "fixed",
-        top: "50%",
-        left: "50%",
-        transform: "translate(-50%, -50%)",
-        width: cardW,
-      };
-    }
-  }
-
-  /**
-   * The click-catcher, as four panes around the highlight instead of one sheet
-   * over everything. The pane layout is what lets a step both keep the rest of
-   * the page inert and leave the component it is pointing at clickable, so a
-   * step can say "press Send" and mean it.
-   */
-  // The panes also carry the light blur (David, 2026-10-02: "blur the
-  // screen behind it, lightly"): blurring everything except the hole keeps
-  // the highlighted component sharp while the rest of the page softens.
-  const pane = cn("absolute backdrop-blur-[3px]", glide);
-  const catcher =
-    inert && spot ? (
-      <>
-        <div className={cn(pane, "inset-x-0 top-0")} style={{ height: Math.max(0, spot.top) }} />
-        <div className={cn(pane, "inset-x-0 bottom-0")} style={{ top: spot.top + spot.height }} />
-        <div
-          className={cn(pane, "left-0")}
-          style={{ top: spot.top, height: spot.height, width: Math.max(0, spot.left) }}
-        />
-        <div
-          className={cn(pane, "right-0")}
-          style={{ top: spot.top, height: spot.height, left: spot.left + spot.width }}
-        />
-      </>
-    ) : inert ? (
-      <div className="absolute inset-0 backdrop-blur-[3px]" />
-    ) : null;
+  // Position, width and opacity are written by the paint loop above. React
+  // owns only what does not move, so a re-render can never yank the card.
+  const cardStyle: React.CSSProperties | undefined = spotlight
+    ? { position: "fixed", top: 0, left: 0, width: cardW, opacity: 0, willChange: "transform" }
+    : undefined;
 
   const progress = (
     <div className="flex min-w-0 items-center gap-2">
@@ -527,48 +536,41 @@ export function TourOverlay({
     >
       {spotlight && (
         <>
-          {catcher}
-          {spot ? (
-            /* Spotlight. The 9999px shadow dims the whole page except this
-               box, so the anchored component keeps its real colours while
-               everything around it recedes: nothing is drawn over the thing
-               the copy is about. The same element is reused across steps, so
-               the browser tweens top/left/width/height and moving between
-               two anchors glides instead of cutting.
-
-               STILL, NOT PULSING (David, 2026-10-02: "no blipping"). A white
-               hairline and a soft green band frame the component; the page
-               around it is darkened and lightly blurred by the panes above.
-               Nothing on it moves except when the step does.
-
-               An interactive step keeps the ring and drops the dimming: the
-               reader is about to work in the page, and anything the page opens
-               in response would otherwise come up underneath a grey sheet. */
+          {/* THE BACKDROP: one layer, darkened and lightly blurred, with the
+              highlight cut out of it as a rounded hole (clip-path, written
+              by the paint loop). One element means no seams, and the hole's
+              corners are the frame's corners exactly. clip-path also clips
+              hit-testing, so this same layer is the click-catcher: the page
+              is inert everywhere except inside the hole. An interactive step
+              has no backdrop at all, so the reader can use the page. */}
+          {inert && (
             <div
-              className={cn(
-                "pointer-events-none fixed rounded-2xl",
-                glide,
-                !inert && "ring-[3px] ring-primary",
-              )}
+              ref={dimRef}
+              className="absolute inset-0"
               style={{
-                top: spot.top,
-                left: spot.left,
-                width: spot.width,
-                height: spot.height,
-                boxShadow: inert
-                  ? "0 0 0 1.5px rgba(255, 255, 255, 0.9), 0 0 0 7px rgba(52, 168, 110, 0.22), 0 0 0 9999px rgba(15, 23, 42, 0.55)"
-                  : // No backdrop to separate it from the page, so the ring has
-                    // to carry the whole job of saying "here". A tinted halo
-                    // plus a lift shadow does what the dimming did, without
-                    // taking the page away from a reader who is about to use it.
-                    "0 0 0 6px rgba(21, 81, 53, 0.14), 0 10px 34px rgba(15, 23, 42, 0.14)",
+                background: "rgba(15, 23, 42, 0.5)",
+                backdropFilter: "blur(3px)",
+                WebkitBackdropFilter: "blur(3px)",
               }}
             />
-          ) : (
-            inert && (
-              <div className="pointer-events-none fixed inset-0 bg-slate-900/55" />
-            )
           )}
+          {/* THE FRAME: still, never pulsing. A white hairline and a faint
+              green edge, toned down (David, 2026-10-02: "the green glow a
+              bit too much"). */}
+          <div
+            ref={frameRef}
+            aria-hidden
+            className="pointer-events-none fixed left-0 top-0 rounded-2xl"
+            style={{
+              opacity: 0,
+              willChange: "transform",
+              boxShadow: inert
+                ? "0 0 0 1.5px rgba(255, 255, 255, 0.85), 0 0 0 4px rgba(52, 168, 110, 0.12)"
+                : // No backdrop to separate it from the page, so the frame
+                  // carries the whole job of saying "here".
+                  "0 0 0 3px hsl(var(--primary)), 0 0 0 7px rgba(21, 81, 53, 0.12), 0 10px 34px rgba(15, 23, 42, 0.14)",
+            }}
+          />
         </>
       )}
 
@@ -577,12 +579,11 @@ export function TourOverlay({
         ref={cardRef}
         style={cardStyle}
         className={cn(
-          "pointer-events-auto flex flex-col rounded-2xl border border-white/70 bg-white/95 p-4 shadow-[0_20px_50px_-12px_rgba(15,23,42,0.4)] backdrop-blur-md",
-          // Anchored cards fade in once they have been measured, so nobody
-          // sees the one frame drawn at the guessed height.
+          // Solid white: a see-through card let the page's text ghost through
+          // its words.
+          "pointer-events-auto flex flex-col rounded-2xl border border-slate-200/80 bg-white p-4 shadow-[0_20px_50px_-12px_rgba(15,23,42,0.4)]",
+          // The loop fades it in once, on its first placement.
           spotlight && "transition-opacity duration-300",
-          spotlight && gliding && cn("transition-[top,left,opacity]", GLIDE),
-          spotlight && !measured && "opacity-0",
           // A docked card must leave the anchor more room than it takes, or
           // the step is a card with a sliver of page behind it. The body
           // scrolls inside the cap rather than pushing the card taller.
