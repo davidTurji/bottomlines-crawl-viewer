@@ -260,6 +260,15 @@ export default {
           from: { opacity: "0" },
           to: { opacity: "1" },
         },
+        /* The page-move label: toward its rail link, or up from the bottom. */
+        "tour-label-in": {
+          from: { opacity: "0", transform: "translate3d(-10px, 0, 0) scale(0.96)" },
+          to: { opacity: "1", transform: "translate3d(0, 0, 0) scale(1)" },
+        },
+        "tour-label-up": {
+          from: { opacity: "0", transform: "translate3d(0, 10px, 0) scale(0.96)" },
+          to: { opacity: "1", transform: "translate3d(0, 0, 0) scale(1)" },
+        },
       },
       animation: {
         "accordion-down": "accordion-down 0.3s cubic-bezier(0.4, 0, 0.2, 1)",
@@ -288,6 +297,8 @@ export default {
         "tour-pop": "tour-pop 0.42s cubic-bezier(0.22, 1, 0.36, 1) both",
         "tour-card-in": "tour-card-in 0.32s cubic-bezier(0.22, 1, 0.36, 1) both",
         "tour-fade": "tour-fade 0.3s ease-out both",
+        "tour-label-in": "tour-label-in 0.5s cubic-bezier(0.22, 1, 0.36, 1) 0.15s both",
+        "tour-label-up": "tour-label-up 0.5s cubic-bezier(0.22, 1, 0.36, 1) 0.15s both",
       },
     },
   },

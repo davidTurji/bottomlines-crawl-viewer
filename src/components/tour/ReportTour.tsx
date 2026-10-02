@@ -56,7 +56,7 @@ const PAGE_ORDER: ReportPage[] = ["", "changes", "discovery", "declarations"];
 const OUT_MS = 650;
 const NAV_MS = 1050;
 const IN_MS = 1110;
-const SETTLE_MS = 1700;
+const SETTLE_MS = 1800;
 const DONE_MS = 2600;
 
 /** Read before the first card, so the step list never changes under the reader. */

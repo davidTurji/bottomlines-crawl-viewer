@@ -416,22 +416,28 @@ export function TourOverlay({
           frame.style.opacity = "0";
         }
       }
-      // The page-move label rides with the frame: beside the rail link on a
-      // wide screen, under the menu button on a phone, kept on screen.
+      // The page-move label. On a wide screen it rides with the frame,
+      // beside the rail link it names. On a phone it docks at the bottom,
+      // where the walkthrough card always sits, rather than over the page's
+      // title: the reader's eye is already there.
       const moveLabel = moveLabelRef.current;
       if (moveLabel) {
-        if (box) {
+        if (box || narrowNow) {
           const lw = moveLabel.offsetWidth;
           const lh = moveLabel.offsetHeight;
-          let lx = narrowNow ? box.left : box.left + box.width + 12;
-          let ly = narrowNow ? box.top + box.height + 10 : box.top + box.height / 2 - lh / 2;
+          let lx: number;
+          let ly: number;
+          if (narrowNow || !box) {
+            lx = (viewport.width - lw) / 2;
+            ly = viewport.height - lh - 20;
+          } else {
+            lx = box.left + box.width + 14;
+            ly = box.top + box.height / 2 - lh / 2;
+          }
           lx = Math.max(EDGE, Math.min(lx, viewport.width - lw - EDGE));
           ly = Math.max(EDGE, Math.min(ly, viewport.height - lh - EDGE));
           moveLabel.style.transform = `translate3d(${lx}px, ${ly}px, 0)`;
           moveLabel.style.opacity = "1";
-          // Which side its pointer is on: toward the link on the left, or up
-          // toward the menu button on a phone.
-          moveLabel.dataset.side = narrowNow ? "below" : "right";
         } else {
           moveLabel.style.opacity = "0";
         }
@@ -629,22 +635,38 @@ export function TourOverlay({
               words, pinned to the page being opened, for the whole move.
               Placed by the paint loop, so it travels with the frame. */}
           {transit && (
+            /* Outer: placed by the paint loop. Inner: the pill, which eases
+               in on its own (toward its link on a wide screen, up from the
+               edge on a phone), so placement and entrance never fight over
+               the same transform. */
             <div
               ref={moveLabelRef}
               role="status"
-              className="group pointer-events-none fixed left-0 top-0 inline-flex items-center gap-2 whitespace-nowrap rounded-full border border-slate-200/80 bg-white py-1.5 pl-1.5 pr-3.5 text-[13px] text-slate-600 shadow-[0_12px_32px_-8px_rgba(15,23,42,0.35)] transition-opacity duration-300"
+              className="pointer-events-none fixed left-0 top-0 transition-opacity duration-300"
               style={{ opacity: 0, willChange: "transform" }}
             >
-              {/* The pointer, tooltip style, so the label reads as attached
-                  to the page it names rather than floating over the page. */}
-              <span
-                aria-hidden
-                className="absolute h-2.5 w-2.5 rotate-45 border-slate-200/80 bg-white group-data-[side=right]:-left-[5px] group-data-[side=right]:top-1/2 group-data-[side=right]:-mt-[5px] group-data-[side=right]:border-b group-data-[side=right]:border-l group-data-[side=below]:-top-[5px] group-data-[side=below]:left-4 group-data-[side=below]:border-l group-data-[side=below]:border-t"
-              />
-              <span className="flex h-6 w-6 items-center justify-center rounded-full bg-gradient-to-b from-[hsl(152_50%_32%)] to-primary text-white">
-                <ArrowRight className="h-3.5 w-3.5" />
-              </span>
-              Moving to <strong className="font-semibold text-slate-900">{transit.to}</strong>
+              <div
+                className={cn(
+                  "relative inline-flex items-center gap-2.5 whitespace-nowrap rounded-full border border-slate-200/80 bg-white py-1.5 pl-1.5 pr-4 text-[13px] text-slate-500 shadow-[0_14px_36px_-10px_rgba(15,23,42,0.4)] motion-reduce:animate-none",
+                  narrow ? "animate-tour-label-up" : "animate-tour-label-in",
+                )}
+              >
+                {/* The pointer, tooltip style, toward the rail link it
+                    names. A phone has no link on screen to point at. */}
+                {!narrow && (
+                  <span
+                    aria-hidden
+                    className="absolute -left-[5px] top-1/2 -mt-[5px] h-2.5 w-2.5 rotate-45 border-b border-l border-slate-200/80 bg-white"
+                  />
+                )}
+                <span className="flex h-7 w-7 items-center justify-center rounded-full bg-gradient-to-b from-[hsl(152_50%_32%)] to-primary text-white shadow-sm shadow-primary/30">
+                  <ArrowRight className="h-3.5 w-3.5" />
+                </span>
+                <span>
+                  Moving to{" "}
+                  <strong className="font-semibold text-slate-900">{transit.to}</strong>
+                </span>
+              </div>
             </div>
           )}
         </>
