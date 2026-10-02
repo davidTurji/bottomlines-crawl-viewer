@@ -1855,10 +1855,13 @@ function declarationSources(count: number, offset: number): DeclarationSource[] 
  * watchlist. Totals match the arrays because nothing here is filtered.
  */
 /*
- * The customer-report shape: the Excel sheet's rows, flat. Lifted from a
+ * The customer-report shape: the Excel sheet's rows, flat. Shaped like a
  * real run (2026-09-15): a handful of partners each named by many
  * publisher files, in both files where the publisher has both, plus owner
  * domains and a few country-scoped manager domains so every kind renders.
+ * Every domain is made up and was DNS-checked to resolve nowhere
+ * (2026-10-02): the public demo is built from this file, and the real
+ * run's customer and publishers must not appear on it.
  */
 /** The mock customer's own domain: what its downloads are named after. */
 export const MOCK_CUSTOMER_DOMAIN = "madeupmedia.com";
@@ -1868,14 +1871,14 @@ const DECLARATION_ROWS_SEED: [string, string, string[], string][] = [
   // sheet is per customer since 2026-09-15, and discover domains are not
   // the customer's domain.
   ["inventory partner", "madeupmedia.com", [
-    "gamezop.com", "playgama.com", "kedoo.com", "afrolandtv.com", "pubbliteam.it",
-    "remynetwork.com", "net-com.tv", "metaxads.com", "allhiphop.com", "whatstheword.tv",
-    "10news.com", "abc15.com", "denver7.com", "wcpo.com", "wxyz.com", "kgun9.com",
+    "quokkaplay-games.com", "tidepoolarcade.com", "brambleloop-apps.com", "lanternbay-tv.com", "fernhollow-team.it",
+    "velvetmoth-network.com", "silvergull-media.tv", "orchardtide-ads.com", "copperwren-hiphop.com", "whistlecove-tv.tv",
+    "harborview7news.com", "cobaltriver15.com", "pinecrest-denver9.com", "mesaridge-news.com", "northfold-tv.com", "ambermile-news9.com",
   ], ""],
-  ["owner domain", "madeupmedia.com", ["gamezop.com", "playgama.com"], ""],
-  ["manager domain", "madeupmedia.com", ["gamezop.com", "playgama.com", "kedoo.com"], ""],
-  ["manager domain", "madeupmedia.com", ["gamezop.com"], "IN"],
-  ["manager domain", "madeupmedia.com", ["playgama.com"], "BR"],
+  ["owner domain", "madeupmedia.com", ["quokkaplay-games.com", "tidepoolarcade.com"], ""],
+  ["manager domain", "madeupmedia.com", ["quokkaplay-games.com", "tidepoolarcade.com", "brambleloop-apps.com"], ""],
+  ["manager domain", "madeupmedia.com", ["quokkaplay-games.com"], "IN"],
+  ["manager domain", "madeupmedia.com", ["tidepoolarcade.com"], "BR"],
 ];
 
 export const mockDeclarationRows: DeclarationRowsPayload = (() => {
