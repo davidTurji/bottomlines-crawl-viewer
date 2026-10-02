@@ -29,6 +29,7 @@ import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import {
   EmptyResult,
   Pager,
+  usePaging,
   TruncatedNotice,
 } from "@/components/ListControls";
 import { Card } from "@/components/ui/card";
@@ -832,6 +833,7 @@ function DrilldownList({
   const [error, setError] = useState<string | null>(null);
   const [expanded, setExpanded] = useState<number | null>(null);
   const [page, setPage] = useState(1);
+  const paging = usePaging(setPage);
   const [query, setQuery] = useState("");
   const [truncated, setTruncated] = useState(false);
   /** The cut this trial report made to the list, or null on a full report. */
@@ -988,6 +990,18 @@ function DrilldownList({
             <EmptyResult query={query} noun="publishers" />
           </div>
         )}
+        {settled > 0 && !error && rows.length > 0 && !trial && !caps && (
+          <Pager
+            placement="top"
+            anchorRef={paging.topRef}
+            className="mb-3"
+            page={page}
+            pageSize={250}
+            total={total}
+            onPage={paging.onPage}
+            noun={tab === "all" ? "publishers" : "with changes"}
+          />
+        )}
         {/* `settled > 0` as well as rows: while a new tab or filter is
             in flight the previous list is still in state, and without
             this guard it would render underneath the skeleton. */}
@@ -1028,7 +1042,7 @@ function DrilldownList({
               page={page}
               pageSize={250}
               total={total}
-              onPage={setPage}
+              onPage={paging.onPage}
               noun={tab === "all" ? "publishers" : "with changes"}
             />
             {truncated && <TruncatedNotice shown={total} noun="publishers" />}
@@ -1562,6 +1576,7 @@ function MatchedAppsList({
   const [failed, setFailed] = useState(false);
   const [expanded, setExpanded] = useState<string | null>(null);
   const [page, setPage] = useState(1);
+  const paging = usePaging(setPage);
   const [query, setQuery] = useState("");
   const [total, setTotal] = useState(0);
   const [truncated, setTruncated] = useState(false);
@@ -1676,6 +1691,18 @@ function MatchedAppsList({
           )}
         </div>
       )}
+      {settled > 0 && !failed && tab === "all" && rows.length > 0 && !trial && !caps && (
+        <Pager
+          placement="top"
+          anchorRef={paging.topRef}
+          className="mb-3"
+          page={page}
+          pageSize={250}
+          total={total}
+          onPage={paging.onPage}
+          noun="apps"
+        />
+      )}
       {/* `settled > 0` as well: the previous list is still in state while a
           new filter is in flight, and would render under the skeleton. */}
       {settled > 0 && rows.length > 0 && (
@@ -1717,7 +1744,7 @@ function MatchedAppsList({
             page={page}
             pageSize={250}
             total={total}
-            onPage={setPage}
+            onPage={paging.onPage}
             noun="apps"
           />
           {truncated && <TruncatedNotice shown={total} noun="apps" />}
