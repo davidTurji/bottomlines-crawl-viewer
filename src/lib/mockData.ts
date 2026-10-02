@@ -1861,21 +1861,21 @@ function declarationSources(count: number, offset: number): DeclarationSource[] 
  * domains and a few country-scoped manager domains so every kind renders.
  */
 /** The mock customer's own domain: what its downloads are named after. */
-export const MOCK_CUSTOMER_DOMAIN = "selectmedia.asia";
+export const MOCK_CUSTOMER_DOMAIN = "madeupmedia.com";
 
 const DECLARATION_ROWS_SEED: [string, string, string[], string][] = [
-  // Only rows that NAME the customer's own domain (selectmedia.asia): the
+  // Only rows that NAME the customer's own domain (madeupmedia.com): the
   // sheet is per customer since 2026-09-15, and discover domains are not
   // the customer's domain.
-  ["inventory partner", "selectmedia.asia", [
+  ["inventory partner", "madeupmedia.com", [
     "gamezop.com", "playgama.com", "kedoo.com", "afrolandtv.com", "pubbliteam.it",
     "remynetwork.com", "net-com.tv", "metaxads.com", "allhiphop.com", "whatstheword.tv",
     "10news.com", "abc15.com", "denver7.com", "wcpo.com", "wxyz.com", "kgun9.com",
   ], ""],
-  ["owner domain", "selectmedia.asia", ["gamezop.com", "playgama.com"], ""],
-  ["manager domain", "selectmedia.asia", ["gamezop.com", "playgama.com", "kedoo.com"], ""],
-  ["manager domain", "selectmedia.asia", ["gamezop.com"], "IN"],
-  ["manager domain", "selectmedia.asia", ["playgama.com"], "BR"],
+  ["owner domain", "madeupmedia.com", ["gamezop.com", "playgama.com"], ""],
+  ["manager domain", "madeupmedia.com", ["gamezop.com", "playgama.com", "kedoo.com"], ""],
+  ["manager domain", "madeupmedia.com", ["gamezop.com"], "IN"],
+  ["manager domain", "madeupmedia.com", ["playgama.com"], "BR"],
 ];
 
 export const mockDeclarationRows: DeclarationRowsPayload = (() => {
