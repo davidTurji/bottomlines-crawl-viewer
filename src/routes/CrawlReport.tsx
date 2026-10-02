@@ -461,17 +461,29 @@ function DeltaChip({ delta }: { delta: Delta }) {
   const pctDisplay = Math.abs(delta.pct) >= 0.1
     ? `${sign}${delta.pct.toFixed(1)}%`
     : `${sign}${delta.pct.toFixed(2)}%`;
+  /* TWO UNBREAKABLE HALVES THAT WRAP AS WHOLES. On a phone a stat tile is
+     ~150px wide and the chip is wider than that. As one non-wrapping row
+     every piece shrank at once: the figures ran into each other and
+     "vs last week" broke over two lines on top of them. Now the figures
+     stay together on one line and "vs last week" drops beneath them. */
   return (
-    <span className={cn("inline-flex items-center gap-1 text-[11px] font-medium", tone)}>
-      <span className="text-[9px]">{glyph}</span>
-      <span className="font-mono tabular-nums">
-        {sign}
-        {delta.abs.toLocaleString()}
+    <span
+      className={cn(
+        "inline-flex flex-wrap items-center gap-x-1 text-[11px] font-medium",
+        tone,
+      )}
+    >
+      <span className="inline-flex items-center gap-1 whitespace-nowrap">
+        <span className="text-[9px]">{glyph}</span>
+        <span className="font-mono tabular-nums">
+          {sign}
+          {delta.abs.toLocaleString()}
+        </span>
+        <span className="font-mono tabular-nums text-slate-500">
+          ({pctDisplay})
+        </span>
       </span>
-      <span className="font-mono tabular-nums text-slate-500">
-        ({pctDisplay})
-      </span>
-      <span className="text-slate-500">vs last week</span>
+      <span className="whitespace-nowrap text-slate-500">vs last week</span>
     </span>
   );
 }
