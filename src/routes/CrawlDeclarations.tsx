@@ -1,3 +1,4 @@
+import { Pager, usePaging } from "@/components/ListControls";
 import LockedTail from "@/components/LockedTail";
 import TrialBanner from "@/components/TrialBanner";
 import { DeclarationsSkeleton } from "@/components/Skeleton";
@@ -20,6 +21,7 @@ import {
 import { FilterBar, FilterSearch, FilterSelect } from "@/components/FilterBar";
 import { PageShell } from "@/components/PageShell";
 import { formatWeek, WeekLine } from "@/components/WeekLine";
+import { PAGE_SIZE } from "@/lib/paging";
 import { useReportScope } from "@/lib/reportScope";
 import { cn } from "@/lib/utils";
 import { MiniStat, SplitStat, reportDate, type StatTone } from "./CrawlReport";
@@ -50,7 +52,6 @@ import { MiniStat, SplitStat, reportDate, type StatTone } from "./CrawlReport";
  * every link ever minted keeps opening. Nothing here asks the crawler.
  */
 
-const PAGE_SIZE = 25;
 
 type KindFilter = "all" | DeclarationKind;
 type SortKey = "files" | "name";
@@ -229,7 +230,7 @@ export default function CrawlDeclarations() {
   return (
     <PageShell>
       {summary?.trial && <TrialBanner caps={summary.trial} summary={summary} />}
-      <div className="min-w-0">
+      <div className="min-w-0" data-tour="declarations-header">
         <h1 className="text-xl font-bold leading-tight tracking-tight text-slate-900 sm:text-2xl">
           Declarations
         </h1>
@@ -406,6 +407,7 @@ function KindSection({
 }) {
   const copy = KIND_COPY[section.kind];
   const tone = KIND_TONE[section.kind];
+  const paging = usePaging(onPage);
   const total = section.subjects.length;
   const pageCount = Math.max(1, Math.ceil(total / PAGE_SIZE));
   const start = (page - 1) * PAGE_SIZE;
@@ -437,6 +439,17 @@ function KindSection({
         )}
       </div>
 
+      <Pager
+        placement="top"
+        anchorRef={paging.topRef}
+        className="mb-3"
+        page={page}
+        pageSize={PAGE_SIZE}
+        total={total}
+        onPage={paging.onPage}
+        noun="domains"
+      />
+
       {total === 0 ? (
         <SectionEmpty>
           {filtered
@@ -459,32 +472,14 @@ function KindSection({
       )}
 
       {pageCount > 1 && (
-        <div className="mt-3 flex items-center justify-between border-t border-border/70 pt-3 text-xs text-slate-500">
-          <span>
-            Showing {(start + 1).toLocaleString()} to{" "}
-            {Math.min(start + PAGE_SIZE, total).toLocaleString()} of{" "}
-            {total.toLocaleString()}
-          </span>
-          <div className="flex items-center gap-2">
-            <button
-              disabled={page <= 1}
-              onClick={() => onPage(page - 1)}
-              className="rounded-full border border-border bg-white px-3 py-1 transition-colors hover:border-primary/30 disabled:opacity-40 disabled:hover:border-border"
-            >
-              Previous
-            </button>
-            <span className="font-mono tabular-nums">
-              {page} / {pageCount.toLocaleString()}
-            </span>
-            <button
-              disabled={page >= pageCount}
-              onClick={() => onPage(page + 1)}
-              className="rounded-full border border-border bg-white px-3 py-1 transition-colors hover:border-primary/30 disabled:opacity-40 disabled:hover:border-border"
-            >
-              Next
-            </button>
-          </div>
-        </div>
+        <Pager
+          className="mt-3 border-t border-border/70 pt-3"
+          page={page}
+          pageSize={PAGE_SIZE}
+          total={total}
+          onPage={paging.onPage}
+          noun="domains"
+        />
       )}
     </div>
   );

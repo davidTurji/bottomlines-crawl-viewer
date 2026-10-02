@@ -17,6 +17,9 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { useEffect, useState, useRef } from "react";
+import { ReportTourProvider } from "./tour/useReportTour";
+import { ReportTour } from "./tour/ReportTour";
+import { WalkthroughButton } from "./tour/WalkthroughButton";
 
 interface LayoutProps {
   children: React.ReactNode;
@@ -29,9 +32,11 @@ interface LayoutProps {
  *
  * Same SidebarProvider + SidebarInset shape, same 12/14 header, same sticky
  * back-to-top button. Auth, permissions guards, seed-data operator affordance
- * and the tour/spend-pill widgets are dropped: this viewer is one report
- * behind a signed URL, so it has one identity (the email on the report) and
- * no dashboards to gate.
+ * and the spend pill are dropped: this viewer is one report behind a signed
+ * URL, so it has one identity (the email on the report) and no dashboards to
+ * gate. The walkthrough came back as its own report-shaped version (see
+ * components/tour): a "How this works" button beside the account menu, and a
+ * one-time offer of it on a first visit.
  */
 export default function Layout({ children, email }: LayoutProps) {
   /* THE IDENTITY SHOWN IS THE ONE THAT SIGNED IN, or nothing. The prop
@@ -125,6 +130,7 @@ export default function Layout({ children, email }: LayoutProps) {
   };
 
   return (
+    <ReportTourProvider>
     <SidebarProvider defaultOpen={true}>
       <div className="h-screen h-[100dvh] w-full flex bg-background overflow-hidden md:pt-0">
         <AppSidebar />
@@ -134,10 +140,14 @@ export default function Layout({ children, email }: LayoutProps) {
               the right. iOS safe-area aware. */}
           <header className="flex h-12 sm:h-14 shrink-0 items-center justify-between border-b border-slate-200/80 px-2 sm:px-6 bg-white/95 backdrop-blur-sm mt-[env(safe-area-inset-top)] md:mt-0 isolate">
             <div className="flex items-center gap-1.5 sm:gap-2">
-              <SidebarTrigger className="text-slate-500 hover:bg-slate-100 lg:hidden h-8 w-8 p-0" />
+              <SidebarTrigger
+                data-tour="nav-trigger"
+                className="text-slate-500 hover:bg-slate-100 lg:hidden h-8 w-8 p-0"
+              />
             </div>
 
             <div className="flex items-center gap-2">
+              <WalkthroughButton />
               <DropdownMenu>
                 <DropdownMenuTrigger asChild>
                   <button
@@ -200,6 +210,10 @@ export default function Layout({ children, email }: LayoutProps) {
           </div>
         </SidebarInset>
       </div>
+      {/* Portals to document.body; mounted here, inside the router and the
+          provider, so it survives navigation between report pages. */}
+      <ReportTour />
     </SidebarProvider>
+    </ReportTourProvider>
   );
 }

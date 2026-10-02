@@ -8,6 +8,7 @@ import {
 import { useEffect, useMemo, useState } from "react";
 import { LineFilter } from "@/components/LineFilter";
 import { Dots } from "@/components/Dots";
+import { PAGE_SIZE } from "@/lib/paging";
 import { useLineFilter } from "@/lib/lineFilter";
 import { Link } from "react-router-dom";
 import { ChevronDown, Download, Globe, Search, Smartphone } from "lucide-react";
@@ -29,6 +30,7 @@ import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import {
   EmptyResult,
   Pager,
+  usePaging,
   TruncatedNotice,
 } from "@/components/ListControls";
 import { Card } from "@/components/ui/card";
@@ -204,7 +206,7 @@ export default function CrawlReport() {
           date chip. The h1 and its subtitle already carry the week. The
           export sits top right, the one action this page offers. */}
       <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
-        <div className="min-w-0">
+        <div className="min-w-0" data-tour="overview-header">
           <h1 className="font-display text-xl font-semibold leading-tight tracking-tight text-slate-900 sm:text-2xl">
             Your weekly crawl
           </h1>
@@ -269,7 +271,10 @@ export default function CrawlReport() {
         <SkeletonStatCards count={2} />
       ) : (
       <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
-        <div className="rounded-2xl border border-border bg-white p-5 shadow-sm">
+        <div
+          className="rounded-2xl border border-border bg-white p-5 shadow-sm"
+          data-tour="overview-changes"
+        >
           <div className="mb-3 flex items-baseline justify-between gap-3">
             <div>
               <div className="font-display text-sm font-medium text-slate-700">
@@ -328,7 +333,10 @@ export default function CrawlReport() {
           )}
         </div>
 
-        <div className="rounded-2xl border border-border bg-white p-5 shadow-sm">
+        <div
+          className="rounded-2xl border border-border bg-white p-5 shadow-sm"
+          data-tour="overview-matched"
+        >
           <div className="mb-3 flex items-baseline justify-between gap-3">
             <div>
               <div className="font-display text-sm font-medium text-slate-700">
@@ -397,7 +405,7 @@ export default function CrawlReport() {
           HierarchyCard: colored disc, generous padding, right-aligned stats,
           tinted expansion. Publishers are green, apps are pink. */}
       {matchedView === "publishers" ? (
-        <div>
+        <div data-tour="overview-list">
           <div className="mb-3">
             <h2 className="font-display text-base font-semibold tracking-tight text-slate-900">
               Matched publishers
@@ -410,7 +418,7 @@ export default function CrawlReport() {
           <DrilldownList token={token} lines={lines} caps={summary.trial ?? null} />
         </div>
       ) : (
-        <div>
+        <div data-tour="overview-list">
           <div className="mb-3">
             <h2 className="font-display text-base font-semibold tracking-tight text-slate-900">
               Matched apps
@@ -455,17 +463,29 @@ function DeltaChip({ delta }: { delta: Delta }) {
   const pctDisplay = Math.abs(delta.pct) >= 0.1
     ? `${sign}${delta.pct.toFixed(1)}%`
     : `${sign}${delta.pct.toFixed(2)}%`;
+  /* TWO UNBREAKABLE HALVES THAT WRAP AS WHOLES. On a phone a stat tile is
+     ~150px wide and the chip is wider than that. As one non-wrapping row
+     every piece shrank at once: the figures ran into each other and
+     "vs last week" broke over two lines on top of them. Now the figures
+     stay together on one line and "vs last week" drops beneath them. */
   return (
-    <span className={cn("inline-flex items-center gap-1 text-[11px] font-medium", tone)}>
-      <span className="text-[9px]">{glyph}</span>
-      <span className="font-mono tabular-nums">
-        {sign}
-        {delta.abs.toLocaleString()}
+    <span
+      className={cn(
+        "inline-flex flex-wrap items-center gap-x-1 text-[11px] font-medium",
+        tone,
+      )}
+    >
+      <span className="inline-flex items-center gap-1 whitespace-nowrap">
+        <span className="text-[9px]">{glyph}</span>
+        <span className="font-mono tabular-nums">
+          {sign}
+          {delta.abs.toLocaleString()}
+        </span>
+        <span className="font-mono tabular-nums text-slate-500">
+          ({pctDisplay})
+        </span>
       </span>
-      <span className="font-mono tabular-nums text-slate-500">
-        ({pctDisplay})
-      </span>
-      <span className="text-slate-500">vs last week</span>
+      <span className="whitespace-nowrap text-slate-500">vs last week</span>
     </span>
   );
 }
@@ -749,15 +769,26 @@ function ExportResultsButton({
     }
     window.location.href = api.exportUrl(token, narrowed ? lines : []);
   };
+  /* THE ONE ACTION ON THE PAGE LOOKS LIKE ONE (David, 2026-10-02: "a green
+     tempting button"). It was a white pill the same weight as the line
+     filter beside it, so the thing a customer came to take away read as
+     chrome. Solid brand green, white type, a lift on hover.
+
+     The label says what the file is. "Export complete report" whenever the
+     download is the whole report, which includes a filter this report
+     cannot be cut by; only a download that really carries just the
+     selected lines says so instead, because calling that file complete
+     would be false. */
   return (
     <button
       type="button"
       onClick={onClick}
       title={title}
-      className="inline-flex h-9 flex-shrink-0 items-center gap-2 self-start rounded-full border border-border bg-white px-4 text-xs font-medium text-slate-700 shadow-sm transition-colors hover:border-primary/30 hover:text-primary"
+      data-tour="export"
+      className="inline-flex h-9 flex-shrink-0 items-center gap-2 self-start rounded-full bg-gradient-to-b from-[hsl(152_50%_32%)] to-primary px-4 text-[13px] font-semibold text-primary-foreground shadow-md shadow-primary/25 ring-1 ring-inset ring-white/10 transition-all duration-150 hover:-translate-y-px hover:shadow-lg hover:shadow-primary/30 hover:brightness-110 active:translate-y-0 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
     >
-      <Download aria-hidden className="h-3.5 w-3.5" />
-      Export results
+      <Download aria-hidden className="h-4 w-4" />
+      {narrowed ? "Export selected lines" : "Export complete report"}
     </button>
   );
 }
@@ -803,6 +834,7 @@ function DrilldownList({
   const [error, setError] = useState<string | null>(null);
   const [expanded, setExpanded] = useState<number | null>(null);
   const [page, setPage] = useState(1);
+  const paging = usePaging(setPage);
   const [query, setQuery] = useState("");
   const [truncated, setTruncated] = useState(false);
   /** The cut this trial report made to the list, or null on a full report. */
@@ -959,6 +991,18 @@ function DrilldownList({
             <EmptyResult query={query} noun="publishers" />
           </div>
         )}
+        {settled > 0 && !error && rows.length > 0 && !trial && !caps && (
+          <Pager
+            placement="top"
+            anchorRef={paging.topRef}
+            className="mb-3"
+            page={page}
+            pageSize={PAGE_SIZE}
+            total={total}
+            onPage={paging.onPage}
+            noun={tab === "all" ? "publishers" : "with changes"}
+          />
+        )}
         {/* `settled > 0` as well as rows: while a new tab or filter is
             in flight the previous list is still in state, and without
             this guard it would render underneath the skeleton. */}
@@ -997,9 +1041,9 @@ function DrilldownList({
           <div className="mt-4">
             <Pager
               page={page}
-              pageSize={250}
+              pageSize={PAGE_SIZE}
               total={total}
-              onPage={setPage}
+              onPage={paging.onPage}
               noun={tab === "all" ? "publishers" : "with changes"}
             />
             {truncated && <TruncatedNotice shown={total} noun="publishers" />}
@@ -1533,6 +1577,7 @@ function MatchedAppsList({
   const [failed, setFailed] = useState(false);
   const [expanded, setExpanded] = useState<string | null>(null);
   const [page, setPage] = useState(1);
+  const paging = usePaging(setPage);
   const [query, setQuery] = useState("");
   const [total, setTotal] = useState(0);
   const [truncated, setTruncated] = useState(false);
@@ -1647,6 +1692,18 @@ function MatchedAppsList({
           )}
         </div>
       )}
+      {settled > 0 && !failed && tab === "all" && rows.length > 0 && !trial && !caps && (
+        <Pager
+          placement="top"
+          anchorRef={paging.topRef}
+          className="mb-3"
+          page={page}
+          pageSize={PAGE_SIZE}
+          total={total}
+          onPage={paging.onPage}
+          noun="apps"
+        />
+      )}
       {/* `settled > 0` as well: the previous list is still in state while a
           new filter is in flight, and would render under the skeleton. */}
       {settled > 0 && rows.length > 0 && (
@@ -1686,9 +1743,9 @@ function MatchedAppsList({
         <div className="mt-4">
           <Pager
             page={page}
-            pageSize={250}
+            pageSize={PAGE_SIZE}
             total={total}
-            onPage={setPage}
+            onPage={paging.onPage}
             noun="apps"
           />
           {truncated && <TruncatedNotice shown={total} noun="apps" />}

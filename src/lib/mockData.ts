@@ -40,6 +40,7 @@ import type {
 // The discovered-lines ORDER BY, shared with the page's sort control so the
 // mock endpoint and the client's "default" option cannot disagree.
 import { compareDefault } from "./discoveredSort";
+import { PAGE_SIZE } from "./paging";
 
 /*
  * THE CUSTOMER'S WATCHLIST. Six seat lines, the shape a real customer's
@@ -522,12 +523,13 @@ export function mockDeveloperEvents(
       ...changeArrays(d.developer_id, d.lines_added, d.lines_removed, d.lines_cert_changed),
     }))
     .filter((d) => carries(d.matched_lines ?? matchedLinesFor(d.developer_id, 6), lines));
+  // Paged like the live endpoint, so the change tabs page in a local run.
   return {
     event,
     page,
-    page_size: 50,
+    page_size: PAGE_SIZE,
     total: rows.length,
-    rows,
+    rows: rows.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE),
   };
 }
 
@@ -1156,7 +1158,7 @@ export function mockMatchedDevelopers(
   lines: string[] = [],
 ): MatchedDevelopersPage {
   const pool = MATCHED_DEVS.filter((d) => carries(d.matched_lines, lines));
-  return mockPage(pool, page, q, ["name", "domain"]) as MatchedDevelopersPage;
+  return mockPage(pool, page, q, ["name", "domain"], PAGE_SIZE) as MatchedDevelopersPage;
 }
 
 /* App bundle seed. Long-tail same as developers: a head of hero apps that
@@ -1312,7 +1314,7 @@ const MATCHED_APPS = buildMatchedApps();
 
 export function mockMatchedApps(page: number, q = "", lines: string[] = []): MatchedAppsPage {
   const pool = MATCHED_APPS.filter((a) => carries(a.matched_lines, lines));
-  return mockPage(pool, page, q, ["app_name", "bundle_id", "owner_domain"]) as MatchedAppsPage;
+  return mockPage(pool, page, q, ["app_name", "bundle_id", "owner_domain"], PAGE_SIZE) as MatchedAppsPage;
 }
 
 /** The summary under a seat-line filter: the matched counters re-counted
@@ -1855,27 +1857,30 @@ function declarationSources(count: number, offset: number): DeclarationSource[] 
  * watchlist. Totals match the arrays because nothing here is filtered.
  */
 /*
- * The customer-report shape: the Excel sheet's rows, flat. Lifted from a
+ * The customer-report shape: the Excel sheet's rows, flat. Shaped like a
  * real run (2026-09-15): a handful of partners each named by many
  * publisher files, in both files where the publisher has both, plus owner
  * domains and a few country-scoped manager domains so every kind renders.
+ * Every domain is made up and was DNS-checked to resolve nowhere
+ * (2026-10-02): the public demo is built from this file, and the real
+ * run's customer and publishers must not appear on it.
  */
 /** The mock customer's own domain: what its downloads are named after. */
-export const MOCK_CUSTOMER_DOMAIN = "selectmedia.asia";
+export const MOCK_CUSTOMER_DOMAIN = "madeupmedia.com";
 
 const DECLARATION_ROWS_SEED: [string, string, string[], string][] = [
-  // Only rows that NAME the customer's own domain (selectmedia.asia): the
+  // Only rows that NAME the customer's own domain (madeupmedia.com): the
   // sheet is per customer since 2026-09-15, and discover domains are not
   // the customer's domain.
-  ["inventory partner", "selectmedia.asia", [
-    "gamezop.com", "playgama.com", "kedoo.com", "afrolandtv.com", "pubbliteam.it",
-    "remynetwork.com", "net-com.tv", "metaxads.com", "allhiphop.com", "whatstheword.tv",
-    "10news.com", "abc15.com", "denver7.com", "wcpo.com", "wxyz.com", "kgun9.com",
+  ["inventory partner", "madeupmedia.com", [
+    "quokkaplay-games.com", "tidepoolarcade.com", "brambleloop-apps.com", "lanternbay-tv.com", "fernhollow-team.it",
+    "velvetmoth-network.com", "silvergull-media.tv", "orchardtide-ads.com", "copperwren-hiphop.com", "whistlecove-tv.tv",
+    "harborview7news.com", "cobaltriver15.com", "pinecrest-denver9.com", "mesaridge-news.com", "northfold-tv.com", "ambermile-news9.com",
   ], ""],
-  ["owner domain", "selectmedia.asia", ["gamezop.com", "playgama.com"], ""],
-  ["manager domain", "selectmedia.asia", ["gamezop.com", "playgama.com", "kedoo.com"], ""],
-  ["manager domain", "selectmedia.asia", ["gamezop.com"], "IN"],
-  ["manager domain", "selectmedia.asia", ["playgama.com"], "BR"],
+  ["owner domain", "madeupmedia.com", ["quokkaplay-games.com", "tidepoolarcade.com"], ""],
+  ["manager domain", "madeupmedia.com", ["quokkaplay-games.com", "tidepoolarcade.com", "brambleloop-apps.com"], ""],
+  ["manager domain", "madeupmedia.com", ["quokkaplay-games.com"], "IN"],
+  ["manager domain", "madeupmedia.com", ["tidepoolarcade.com"], "BR"],
 ];
 
 export const mockDeclarationRows: DeclarationRowsPayload = (() => {

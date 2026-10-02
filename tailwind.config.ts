@@ -245,6 +245,29 @@ export default {
           "55%": { transform: "scale(1.08)", boxShadow: "0 0 0 12px rgba(21, 81, 53, 0)" },
           "100%": { transform: "scale(1)", boxShadow: "0 0 0 0 rgba(21, 81, 53, 0)" },
         },
+        /* Report walkthrough. Opacity, transform and box-shadow only, so
+           every one of them composites on the GPU and stays smooth on a
+           phone. */
+        "tour-pop": {
+          from: { opacity: "0", transform: "translate3d(0, 14px, 0) scale(0.96)" },
+          to: { opacity: "1", transform: "translate3d(0, 0, 0) scale(1)" },
+        },
+        "tour-card-in": {
+          from: { opacity: "0", transform: "translate3d(0, 6px, 0)" },
+          to: { opacity: "1", transform: "translate3d(0, 0, 0)" },
+        },
+        "tour-fade": {
+          from: { opacity: "0" },
+          to: { opacity: "1" },
+        },
+        "tour-arrow": {
+          from: { opacity: "0", transform: "translate3d(-6px, 0, 0)" },
+          to: { opacity: "1", transform: "translate3d(0, 0, 0)" },
+        },
+        "tour-progress": {
+          from: { transform: "scaleX(0)" },
+          to: { transform: "scaleX(1)" },
+        },
       },
       animation: {
         "accordion-down": "accordion-down 0.3s cubic-bezier(0.4, 0, 0.2, 1)",
@@ -270,6 +293,12 @@ export default {
         "dot-bounce": "dot-bounce 0.8s ease-in-out infinite",
         "auth-rise": "auth-rise 0.4s cubic-bezier(0.22, 1, 0.36, 1) both",
         "tour-beat": "tour-beat 1.6s cubic-bezier(0.4, 0, 0.2, 1) infinite",
+        "tour-pop": "tour-pop 0.42s cubic-bezier(0.22, 1, 0.36, 1) both",
+        "tour-card-in": "tour-card-in 0.32s cubic-bezier(0.22, 1, 0.36, 1) both",
+        "tour-fade": "tour-fade 0.3s ease-out both",
+        "tour-arrow": "tour-arrow 0.45s cubic-bezier(0.22, 1, 0.36, 1) 0.1s both",
+        // Duration is set per use, to match how long the page change takes.
+        "tour-progress": "tour-progress 1s cubic-bezier(0.4, 0, 0.2, 1) both",
       },
     },
   },

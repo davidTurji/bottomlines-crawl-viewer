@@ -1,9 +1,11 @@
+import { Pager, usePaging } from "@/components/ListControls";
 import LockedTail from "@/components/LockedTail";
 import TrialBanner from "@/components/TrialBanner";
 import { SkeletonRows, SkeletonStatCards } from "@/components/Skeleton";
 import { useEffect, useMemo, useState } from "react";
 import { Dots } from "@/components/Dots";
 import { LineFilter } from "@/components/LineFilter";
+import { PAGE_SIZE } from "@/lib/paging";
 import { useLineFilter } from "@/lib/lineFilter";
 import {
   ArrowRight,
@@ -61,7 +63,6 @@ import { computeDelta, MiniStat, SplitStat } from "./CrawlReport";
  * event in words, which is what a colourblind reader reads.
  */
 
-const PAGE_SIZE = 40;
 
 /**
  * How many pages of line events to walk before giving up.
@@ -131,6 +132,7 @@ export default function CrawlChanges() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [page, setPage] = useState(1);
+  const paging = usePaging(setPage);
   const [open, setOpen] = useState<Set<string>>(new Set());
   // Bumps each time a list lands, so the new cards ease in as one piece.
   const [settled, setSettled] = useState(0);
@@ -233,8 +235,6 @@ export default function CrawlChanges() {
   const pageCount = Math.max(1, Math.ceil(total / PAGE_SIZE));
   const safePage = Math.min(page, pageCount);
   const shown = visible.slice((safePage - 1) * PAGE_SIZE, safePage * PAGE_SIZE);
-  const startRow = total === 0 ? 0 : (safePage - 1) * PAGE_SIZE + 1;
-  const endRow = Math.min(total, safePage * PAGE_SIZE);
 
   const weekLabel = summary?.finished_at
     ? formatWeek(new Date(summary.finished_at))
@@ -594,7 +594,7 @@ export default function CrawlChanges() {
       {/* Controls: the bucket, then a full-width SSP filter on its own row.
           The search used to be a fixed-width pill floating on the right of the
           tabs; as a wide bar spanning the row it reads as the search it is. */}
-      <div className="space-y-3">
+      <div className="space-y-3" data-tour="changes-controls">
         {/* The same plain segmented control the overview's drilldown wears.
             The per-tab counts it used to carry now live in the KPI row
             directly above, which re-scopes with the tab, so printing them
@@ -680,6 +680,18 @@ export default function CrawlChanges() {
         </p>
       )}
 
+      {!showSkeleton && total > PAGE_SIZE && (
+        <Pager
+          placement="top"
+          anchorRef={paging.topRef}
+          page={safePage}
+          pageSize={PAGE_SIZE}
+          total={total}
+          onPage={paging.onPage}
+          noun="lines"
+        />
+      )}
+
       {/* Not while the skeleton is up: the previous filter's rows are
           still in state and would render underneath it. */}
       {!showSkeleton && !error && shown.length > 0 && (
@@ -722,31 +734,14 @@ export default function CrawlChanges() {
           it stays on a trial: the locked tail above counts what the server
           kept back, the pager turns the pages of what it sent. */}
       {!showSkeleton && total > PAGE_SIZE && (
-        <div className="flex items-center justify-between border-t border-border/70 pt-4 text-xs text-slate-500">
-          <span>
-            Showing {startRow.toLocaleString()} to {endRow.toLocaleString()} of{" "}
-            {total.toLocaleString()} {total === 1 ? "line" : "lines"}
-          </span>
-          <div className="flex items-center gap-2">
-            <button
-              disabled={safePage <= 1}
-              onClick={() => setPage((p) => p - 1)}
-              className="rounded-full border border-border bg-white px-3 py-1 transition-colors hover:border-primary/30 disabled:opacity-40 disabled:hover:border-border"
-            >
-              Previous
-            </button>
-            <span className="font-mono tabular-nums">
-              {safePage} / {pageCount.toLocaleString()}
-            </span>
-            <button
-              disabled={safePage >= pageCount}
-              onClick={() => setPage((p) => p + 1)}
-              className="rounded-full border border-border bg-white px-3 py-1 transition-colors hover:border-primary/30 disabled:opacity-40 disabled:hover:border-border"
-            >
-              Next
-            </button>
-          </div>
-        </div>
+        <Pager
+          className="border-t border-border/70 pt-4"
+          page={safePage}
+          pageSize={PAGE_SIZE}
+          total={total}
+          onPage={paging.onPage}
+          noun="lines"
+        />
       )}
     </PageShell>
   );

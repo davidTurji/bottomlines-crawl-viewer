@@ -1,3 +1,4 @@
+import { Pager, usePaging } from "@/components/ListControls";
 import LockedTail from "@/components/LockedTail";
 import TrialBanner from "@/components/TrialBanner";
 import {
@@ -25,6 +26,7 @@ import {
 import { FilterAction, FilterBar, FilterSearch, FilterSelect } from "@/components/FilterBar";
 import { PageShell } from "@/components/PageShell";
 import { formatWeek, WeekLine } from "@/components/WeekLine";
+import { PAGE_SIZE } from "@/lib/paging";
 import { useReportScope } from "@/lib/reportScope";
 import { cn, foundInLabel, storeLabel } from "@/lib/utils";
 import { computeDelta, MiniStat, SplitStat } from "./CrawlReport";
@@ -58,7 +60,6 @@ import { computeDelta, MiniStat, SplitStat } from "./CrawlReport";
  * documented on api.discoveredLines in src/lib/api.ts.
  */
 
-const PAGE_SIZE = 50;
 
 export default function CrawlDiscovered() {
   const { token } = useReportScope();
@@ -78,6 +79,7 @@ export default function CrawlDiscovered() {
   /** The cut this trial report made to the list, or null on a full report. */
   const [trial, setTrial] = useState<TrialSlice | null>(null);
   const [page, setPage] = useState(1);
+  const paging = usePaging(setPage);
   const [ssp, setSsp] = useState("");
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -183,8 +185,6 @@ export default function CrawlDiscovered() {
    */
   const sorted = useMemo(() => sortDiscoveredLines(rows, sort), [rows, sort]);
   const localOnly = sort !== "default" && pageCount > 1;
-  const startRow = total === 0 ? 0 : (page - 1) * PAGE_SIZE + 1;
-  const endRow = Math.min(total, page * PAGE_SIZE);
 
   // No rows, no filter, and the crawl itself has none: a seat-line-only
   // crawl, which is a normal thing to be, not an error.
@@ -234,7 +234,10 @@ export default function CrawlDiscovered() {
       {loading && !totals && <SkeletonStatCards />}
 
       {!noDiscovery && totals && (
-        <div className="rounded-2xl border border-border bg-white p-5 shadow-sm">
+        <div
+          className="rounded-2xl border border-border bg-white p-5 shadow-sm"
+          data-tour="discovery-kpi"
+        >
           <div className="mb-3 flex items-baseline justify-between gap-3">
             <div>
               <div className="font-display text-sm font-medium text-slate-700">
@@ -331,6 +334,18 @@ export default function CrawlDiscovered() {
         </p>
       )}
 
+      {!error && !trial && !summary?.trial && total > 0 && pageCount > 1 && (
+        <Pager
+          placement="top"
+          anchorRef={paging.topRef}
+          page={page}
+          pageSize={PAGE_SIZE}
+          total={total ?? 0}
+          onPage={paging.onPage}
+          noun="lines"
+        />
+      )}
+
       {!loading && !error && sorted.length > 0 && (
         <div className="space-y-3">
           {sorted.map((line) => {
@@ -357,31 +372,14 @@ export default function CrawlDiscovered() {
         />
       )}
       {!trial && !summary?.trial && total > 0 && pageCount > 1 && (
-        <div className="flex items-center justify-between border-t border-border/70 pt-4 text-xs text-slate-500">
-          <span>
-            Showing {(startRow ?? 0).toLocaleString()} to{" "}
-            {(endRow ?? 0).toLocaleString()} of {(total ?? 0).toLocaleString()}
-          </span>
-          <div className="flex items-center gap-2">
-            <button
-              disabled={page <= 1}
-              onClick={() => setPage((p) => p - 1)}
-              className="rounded-full border border-border bg-white px-3 py-1 transition-colors hover:border-primary/30 disabled:opacity-40 disabled:hover:border-border"
-            >
-              Previous
-            </button>
-            <span className="font-mono tabular-nums">
-              {page} / {pageCount.toLocaleString()}
-            </span>
-            <button
-              disabled={page >= pageCount}
-              onClick={() => setPage((p) => p + 1)}
-              className="rounded-full border border-border bg-white px-3 py-1 transition-colors hover:border-primary/30 disabled:opacity-40 disabled:hover:border-border"
-            >
-              Next
-            </button>
-          </div>
-        </div>
+        <Pager
+          className="border-t border-border/70 pt-4"
+          page={page}
+          pageSize={PAGE_SIZE}
+          total={total ?? 0}
+          onPage={paging.onPage}
+          noun="lines"
+        />
       )}
     </PageShell>
   );
