@@ -594,7 +594,7 @@ export default function CrawlChanges() {
       {/* Controls: the bucket, then a full-width SSP filter on its own row.
           The search used to be a fixed-width pill floating on the right of the
           tabs; as a wide bar spanning the row it reads as the search it is. */}
-      <div className="space-y-3">
+      <div className="space-y-3" data-tour="changes-controls">
         {/* The same plain segmented control the overview's drilldown wears.
             The per-tab counts it used to carry now live in the KPI row
             directly above, which re-scopes with the tab, so printing them

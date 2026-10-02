@@ -135,7 +135,7 @@ export function AppSidebar() {
             full row below where the eye expects it -- the gap David
             circled. One number, one source of truth: the brand row. */}
         <div className="absolute inset-x-0 bottom-0 top-14 sm:top-16 overflow-y-auto">
-          <SidebarGroup className="px-2.5 py-3">
+          <SidebarGroup className="px-2.5 py-3" data-tour="report-nav">
             <SidebarGroupContent>
               <SidebarMenu className="gap-0.5">
                 {items.map((item) => (

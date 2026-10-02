@@ -247,6 +247,7 @@ export function LineFilter({
           type="button"
           aria-label="Filter by seat line"
           aria-busy={busy}
+          data-tour="line-filter"
           className={cn(
             HEADER_PILL,
             "flex flex-shrink-0 items-center gap-2 rounded-full border bg-white px-3.5 text-xs font-medium text-slate-900 shadow-sm transition-colors hover:bg-slate-50",

@@ -234,7 +234,10 @@ export default function CrawlDiscovered() {
       {loading && !totals && <SkeletonStatCards />}
 
       {!noDiscovery && totals && (
-        <div className="rounded-2xl border border-border bg-white p-5 shadow-sm">
+        <div
+          className="rounded-2xl border border-border bg-white p-5 shadow-sm"
+          data-tour="discovery-kpi"
+        >
           <div className="mb-3 flex items-baseline justify-between gap-3">
             <div>
               <div className="font-display text-sm font-medium text-slate-700">

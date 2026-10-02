@@ -204,7 +204,7 @@ export default function CrawlReport() {
           date chip. The h1 and its subtitle already carry the week. The
           export sits top right, the one action this page offers. */}
       <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
-        <div className="min-w-0">
+        <div className="min-w-0" data-tour="overview-header">
           <h1 className="font-display text-xl font-semibold leading-tight tracking-tight text-slate-900 sm:text-2xl">
             Your weekly crawl
           </h1>
@@ -269,7 +269,10 @@ export default function CrawlReport() {
         <SkeletonStatCards count={2} />
       ) : (
       <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
-        <div className="rounded-2xl border border-border bg-white p-5 shadow-sm">
+        <div
+          className="rounded-2xl border border-border bg-white p-5 shadow-sm"
+          data-tour="overview-changes"
+        >
           <div className="mb-3 flex items-baseline justify-between gap-3">
             <div>
               <div className="font-display text-sm font-medium text-slate-700">
@@ -328,7 +331,10 @@ export default function CrawlReport() {
           )}
         </div>
 
-        <div className="rounded-2xl border border-border bg-white p-5 shadow-sm">
+        <div
+          className="rounded-2xl border border-border bg-white p-5 shadow-sm"
+          data-tour="overview-matched"
+        >
           <div className="mb-3 flex items-baseline justify-between gap-3">
             <div>
               <div className="font-display text-sm font-medium text-slate-700">
@@ -397,7 +403,7 @@ export default function CrawlReport() {
           HierarchyCard: colored disc, generous padding, right-aligned stats,
           tinted expansion. Publishers are green, apps are pink. */}
       {matchedView === "publishers" ? (
-        <div>
+        <div data-tour="overview-list">
           <div className="mb-3">
             <h2 className="font-display text-base font-semibold tracking-tight text-slate-900">
               Matched publishers
@@ -410,7 +416,7 @@ export default function CrawlReport() {
           <DrilldownList token={token} lines={lines} caps={summary.trial ?? null} />
         </div>
       ) : (
-        <div>
+        <div data-tour="overview-list">
           <div className="mb-3">
             <h2 className="font-display text-base font-semibold tracking-tight text-slate-900">
               Matched apps
@@ -749,15 +755,26 @@ function ExportResultsButton({
     }
     window.location.href = api.exportUrl(token, narrowed ? lines : []);
   };
+  /* THE ONE ACTION ON THE PAGE LOOKS LIKE ONE (David, 2026-10-02: "a green
+     tempting button"). It was a white pill the same weight as the line
+     filter beside it, so the thing a customer came to take away read as
+     chrome. Solid brand green, white type, a lift on hover.
+
+     The label says what the file is. "Export complete report" whenever the
+     download is the whole report, which includes a filter this report
+     cannot be cut by; only a download that really carries just the
+     selected lines says so instead, because calling that file complete
+     would be false. */
   return (
     <button
       type="button"
       onClick={onClick}
       title={title}
-      className="inline-flex h-9 flex-shrink-0 items-center gap-2 self-start rounded-full border border-border bg-white px-4 text-xs font-medium text-slate-700 shadow-sm transition-colors hover:border-primary/30 hover:text-primary"
+      data-tour="export"
+      className="inline-flex h-9 flex-shrink-0 items-center gap-2 self-start rounded-full bg-gradient-to-b from-[hsl(152_50%_32%)] to-primary px-4 text-[13px] font-semibold text-primary-foreground shadow-md shadow-primary/25 ring-1 ring-inset ring-white/10 transition-all duration-150 hover:-translate-y-px hover:shadow-lg hover:shadow-primary/30 hover:brightness-110 active:translate-y-0 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
     >
-      <Download aria-hidden className="h-3.5 w-3.5" />
-      Export results
+      <Download aria-hidden className="h-4 w-4" />
+      {narrowed ? "Export selected lines" : "Export complete report"}
     </button>
   );
 }

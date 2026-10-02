@@ -229,7 +229,7 @@ export default function CrawlDeclarations() {
   return (
     <PageShell>
       {summary?.trial && <TrialBanner caps={summary.trial} summary={summary} />}
-      <div className="min-w-0">
+      <div className="min-w-0" data-tour="declarations-header">
         <h1 className="text-xl font-bold leading-tight tracking-tight text-slate-900 sm:text-2xl">
           Declarations
         </h1>
