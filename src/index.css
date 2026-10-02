@@ -799,3 +799,46 @@ All colors MUST be HSL.
     display: none;
   }
 }
+
+/* ── Walkthrough page move ────────────────────────────────────────────
+   ReportTour sets data-page-move on the page area while the tour moves
+   between pages: the old page slides out and fades, the route changes
+   while nothing is visible, then the new page slides in from the other
+   side. "left" is forward through the rail, "right" is back. Only the
+   walkthrough sets it; ordinary navigation never slides. */
+[data-report-main][data-page-move] > * {
+  will-change: transform, opacity;
+}
+[data-report-main][data-page-move="out-left"] > *,
+[data-report-main][data-page-move="out-right"] > * {
+  opacity: 0;
+  transition: transform 380ms cubic-bezier(0.4, 0, 1, 1), opacity 380ms ease-in;
+}
+[data-report-main][data-page-move="out-left"] > * {
+  transform: translate3d(-96px, 0, 0);
+}
+[data-report-main][data-page-move="out-right"] > * {
+  transform: translate3d(96px, 0, 0);
+}
+[data-report-main][data-page-move="in-left"] > * {
+  animation: page-in-from-right 520ms cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+[data-report-main][data-page-move="in-right"] > * {
+  animation: page-in-from-left 520ms cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+@keyframes page-in-from-right {
+  from { opacity: 0; transform: translate3d(96px, 0, 0); }
+  to { opacity: 1; transform: translate3d(0, 0, 0); }
+}
+@keyframes page-in-from-left {
+  from { opacity: 0; transform: translate3d(-96px, 0, 0); }
+  to { opacity: 1; transform: translate3d(0, 0, 0); }
+}
+@media (prefers-reduced-motion: reduce) {
+  [data-report-main][data-page-move] > * {
+    animation: none !important;
+    transition: none !important;
+    transform: none !important;
+    opacity: 1 !important;
+  }
+}

@@ -38,7 +38,7 @@
 
 import React, { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
-import { ArrowRight, Check, ChevronLeft, ChevronRight, X } from "lucide-react";
+import { ChevronLeft, ChevronRight, X } from "lucide-react";
 import {
   dockedCard,
   EDGE,
@@ -115,22 +115,13 @@ export interface TourOverlayProps {
   /** Label for the primary button on the last step. */
   doneLabel?: string;
   /**
-   * A page change in progress. While set, the highlight points at `anchor`
-   * (the page's link in the rail, or the menu button on a phone) and the card
-   * says where the walkthrough is going, with a bar that fills over
-   * `durationMs`. The caller owns the navigation and clears this once the new
-   * page is on screen.
+   * A page move in progress (David, 2026-10-02: "watch the page slide").
+   * While set, the walkthrough steps aside: the backdrop and the card fade
+   * out so the page is in plain view, and the frame waits on `anchor` (the
+   * next page's link in the rail, or the menu button on a phone) while the
+   * caller slides the page across. Cleared, everything returns.
    */
-  transit?: {
-    /** One id per move, so the bar runs once across both beats. */
-    id: string;
-    /** On the way (pointing at the rail), or arrived (at the new page's title). */
-    phase: "leaving" | "arrived";
-    anchor: string;
-    from: string;
-    to: string;
-    durationMs: number;
-  } | null;
+  transit?: { anchor: string } | null;
 }
 
 /** Spotlight padding around the anchored element. Viewport margins and the
@@ -246,7 +237,10 @@ export function TourOverlay({
   /** The anchor this viewport should actually point at. */
   const activeAnchor = transit?.anchor ?? ((narrow && step?.mobileAnchor) || step?.anchor);
   /** A page change points at a rail link, so the card goes beside it. */
-  const cardSide = transit ? (transit.phase === "leaving" ? "right" : undefined) : step?.cardSide;
+  const cardSide = transit ? undefined : step?.cardSide;
+  /** Read by the paint loop, which must not restart when a move begins. */
+  const transitRef = useRef(false);
+  transitRef.current = !!transit;
 
   /**
    * Bring the anchored element into view when the step changes.
@@ -422,9 +416,17 @@ export function TourOverlay({
       }
       const cardEl = cardRef.current;
       if (cardEl) {
-        cardEl.style.transform = `translate3d(${card.left}px, ${card.top}px, 0)`;
-        cardEl.style.width = `${cardTarget.width}px`;
-        cardEl.style.opacity = "1";
+        if (transitRef.current) {
+          // Stepped aside for a page move. Forgetting the position makes the
+          // card land on its new spot when it returns, rather than flying in
+          // from wherever it was on the last page.
+          cardEl.style.opacity = "0";
+          cardPosRef.current = null;
+        } else {
+          cardEl.style.transform = `translate3d(${card.left}px, ${card.top}px, 0)`;
+          cardEl.style.width = `${cardTarget.width}px`;
+          cardEl.style.opacity = "1";
+        }
       }
     };
     raf = requestAnimationFrame(tick);
@@ -572,6 +574,10 @@ export function TourOverlay({
                 background: "rgba(15, 23, 42, 0.5)",
                 backdropFilter: "blur(3px)",
                 WebkitBackdropFilter: "blur(3px)",
+                // Lifted for a page move, so the page sliding across is in
+                // plain view rather than behind a dark, blurred sheet.
+                opacity: transit ? 0 : 1,
+                transition: "opacity 350ms ease",
               }}
             />
           )}
@@ -581,11 +587,15 @@ export function TourOverlay({
           <div
             ref={frameRef}
             aria-hidden
-            className="pointer-events-none fixed left-0 top-0 rounded-2xl"
+            className="pointer-events-none fixed left-0 top-0 rounded-2xl transition-shadow duration-300"
             style={{
               opacity: 0,
               willChange: "transform",
-              boxShadow: inert
+              boxShadow: transit
+                ? // No backdrop during a page move, so the frame alone marks
+                  // the page being opened.
+                  "0 0 0 2px rgba(52, 168, 110, 0.95), 0 0 0 6px rgba(52, 168, 110, 0.18)"
+                : inert
                 ? "0 0 0 1.5px rgba(255, 255, 255, 0.85), 0 0 0 4px rgba(52, 168, 110, 0.12)"
                 : // No backdrop to separate it from the page, so the frame
                   // carries the whole job of saying "here".
@@ -613,61 +623,6 @@ export function TourOverlay({
             "fixed inset-x-3 bottom-3 max-h-[70vh] sm:inset-x-auto sm:bottom-6 sm:right-6 sm:w-[24rem]",
         )}
       >
-        {transit ? (
-          /* THE PAGE CHANGE (David, 2026-10-02: "make it more clear it's
-             moving between pages"). Two beats on one card: on the way, the
-             highlight sits on the next page's link and the card reads
-             "Overview -> Changes"; on arrival it sits on the new page's title
-             and reads "You're now on Changes". The words cross-fade between
-             the beats; the bar under them runs once across the whole move. */
-          <div>
-            <div
-              key={`${transit.id}-${transit.phase}`}
-              className="flex items-center gap-3 animate-tour-card-in motion-reduce:animate-none"
-            >
-              {transit.phase === "leaving" ? (
-                <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-primary/10 text-primary">
-                  <ArrowRight className="h-4 w-4 animate-tour-arrow motion-reduce:animate-none" />
-                </span>
-              ) : (
-                <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-gradient-to-b from-[hsl(152_50%_32%)] to-primary text-white shadow-sm shadow-primary/30">
-                  <Check className="h-4 w-4" />
-                </span>
-              )}
-              <div className="min-w-0 flex-1">
-                <p className="text-[11px] font-semibold text-primary">
-                  {transit.phase === "leaving" ? "Next page" : "You’re now on"}
-                </p>
-                {transit.phase === "leaving" ? (
-                  <h2 className="flex items-center gap-1.5 text-[15px] font-semibold leading-snug">
-                    <span className="font-medium text-slate-400">{transit.from}</span>
-                    <ArrowRight className="h-3.5 w-3.5 shrink-0 text-slate-400" />
-                    <span className="text-slate-900">{transit.to}</span>
-                  </h2>
-                ) : (
-                  <h2 className="text-[15px] font-semibold leading-snug text-slate-900">
-                    {transit.to}
-                  </h2>
-                )}
-              </div>
-              <button
-                type="button"
-                onClick={onClose}
-                aria-label={`Close ${ariaLabel}`}
-                className="-mr-1.5 flex h-7 w-7 shrink-0 items-center justify-center self-start rounded-full text-slate-400 transition-colors hover:bg-slate-100 hover:text-slate-700"
-              >
-                <X className="h-3.5 w-3.5" />
-              </button>
-            </div>
-            <div key={`bar-${transit.id}`} className="mt-3 h-1 overflow-hidden rounded-full bg-slate-100">
-              <div
-                className="h-full origin-left rounded-full bg-primary animate-tour-progress motion-reduce:animate-none"
-                style={{ animationDuration: `${transit.durationMs}ms`, animationTimingFunction: "linear" }}
-              />
-            </div>
-          </div>
-        ) : (
-        <>
         {/* Keyed on the step, so each step's words ease in rather than
             swapping under the reader while the card glides to its new spot. */}
         <div key={step.id} className="flex min-h-0 flex-1 flex-col animate-tour-card-in motion-reduce:animate-none">
@@ -721,8 +676,6 @@ export function TourOverlay({
             indicator still has to live somewhere, so it drops to its own row
             rather than competing with the control for the same slot. */}
         {footer && <div className="mt-3 border-t border-border pt-3">{progress}</div>}
-        </>
-        )}
       </div>
     </div>,
     document.body,

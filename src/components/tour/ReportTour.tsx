@@ -26,50 +26,30 @@ import { TourOverlay } from "./TourOverlay";
 import { reportTourSteps, type ReportFeatures, type ReportPage } from "./reportTourSteps";
 import { useReportTour } from "./useReportTour";
 
-/** The rail's name for each page, as the page-change card says it. */
-const PAGE_LABEL: Record<ReportPage, string> = {
-  "": "Overview",
-  changes: "Changes",
-  discovery: "Discovery",
-  declarations: "Declarations",
-};
-
-/** Each page's title block, where the "you're now on" beat points. */
-const PAGE_HEADER: Record<ReportPage, string> = {
-  "": "overview-header",
-  changes: "changes-header",
-  discovery: "discovery-header",
-  declarations: "declarations-header",
-};
+/** The rail's order, which decides which way a page slides. */
+const PAGE_ORDER: ReportPage[] = ["", "changes", "discovery", "declarations"];
 
 /**
- * THE PAGE CHANGE, IN THREE BEATS, about three and a half seconds (David,
- * 2026-10-02: "a longer move, three or four seconds, it's not clear that
- * it's moving between pages"). One bar fills across all of it.
+ * THE PAGE MOVE: WATCH THE PAGE SLIDE (David, 2026-10-02, after two
+ * versions that did not read as moving pages). About three seconds:
  *
- *   0          the highlight glides to the next page's link in the rail
- *              (the menu button on a phone): "Next page: Overview -> Changes"
- *   NAV_MS     the page switches, with the link still lit, so the reader
- *              watches it become the active page, like a click
- *   ARRIVE_MS  the highlight glides to the new page's title: "You're now on
- *              Changes"
- *   DONE_MS    the walkthrough carries on with the step on that page
+ *   0         the walkthrough steps aside: backdrop and card fade out, the
+ *             frame goes to the next page's link in the rail (the menu
+ *             button on a phone)
+ *   OUT_MS    the current page slides out sideways and fades
+ *   NAV_MS    the route changes behind it, scrolled to the top; the rail
+ *             link becomes the active page
+ *   IN_MS     the new page slides in from the other side
+ *   DONE_MS   the backdrop returns and the walkthrough carries on
  *
- * The three numbers are the whole tuning surface.
+ * Forward through the rail slides left, like turning a page; back slides
+ * right. The numbers are the whole tuning surface.
  */
-const NAV_MS = 1400;
-const ARRIVE_MS = 2000;
-const DONE_MS = 3400;
-
-export type Transit = {
-  /** The step being travelled to: the bar runs once per move. */
-  id: string;
-  phase: "leaving" | "arrived";
-  anchor: string;
-  from: string;
-  to: string;
-  durationMs: number;
-};
+const OUT_MS = 650;
+const NAV_MS = 1050;
+const IN_MS = 1110;
+const SETTLE_MS = 1700;
+const DONE_MS = 2600;
 
 /** Read before the first card, so the step list never changes under the reader. */
 function useReportFeatures(enabled: boolean): ReportFeatures | null {
@@ -126,10 +106,8 @@ export function ReportTour() {
    * 2026-10-02: "it is not clear it is moving pages").
    *
    * A step on the page already open just shows. A step on another page first
-   * points at that page's link in the rail (on a phone, where the rail is
-   * hidden, at the menu button), then navigates, then points at the new
-   * page's title, then hands over to the step. See NAV_MS, ARRIVE_MS and
-   * DONE_MS.
+   * steps aside and lets the reader watch the page slide across, then hands
+   * over to the step. See the timeline above OUT_MS.
    *
    * Keyed on the step, not on the location: navigating whenever the two
    * disagree would drag a reader back the moment they followed a link on the
@@ -142,14 +120,15 @@ export function ReportTour() {
   // the page switched, cutting the "Moving to" card short.
   const navigateRef = useRef(navigate);
   navigateRef.current = navigate;
-  const [transit, setTransit] = useState<Transit | null>(null);
+  const [transit, setTransit] = useState<{ anchor: string } | null>(null);
   useEffect(() => {
     if (!open || !step) {
       setTransit(null);
       return;
     }
     const target = step.page ? `${basePath}/${step.page}` : basePath;
-    if (locRef.current.pathname.replace(/\/+$/, "") === target) {
+    const here = locRef.current.pathname.replace(/\/+$/, "");
+    if (here === target) {
       setTransit(null);
       return;
     }
@@ -158,27 +137,35 @@ export function ReportTour() {
     // The rail is a sheet on narrow screens and its links are not on screen,
     // so point at the button that opens it.
     const anchor = linkEl && linkEl.getClientRects().length > 0 ? link : "nav-trigger";
-    // Where the reader is now, named the way the rail names it.
-    const here = locRef.current.pathname.replace(/\/+$/, "");
     const fromPage = (here.startsWith(basePath) ? here.slice(basePath.length) : "").replace(/^\//, "");
-    const from = PAGE_LABEL[fromPage as ReportPage] ?? "This page";
-    const to = PAGE_LABEL[step.page];
-    setTransit({ id: step.id, phase: "leaving", anchor, from, to, durationMs: DONE_MS });
-    const go = window.setTimeout(
-      () => navigateRef.current({ pathname: target, search: locRef.current.search }),
-      NAV_MS,
-    );
-    const arrive = window.setTimeout(
-      () => setTransit((t) => t && { ...t, phase: "arrived", anchor: PAGE_HEADER[step.page] }),
-      ARRIVE_MS,
-    );
-    const done = window.setTimeout(() => setTransit(null), DONE_MS);
-    // Cleared if the reader moves on, or closes, before the change lands:
-    // the page then stays where it is.
+    const forward = PAGE_ORDER.indexOf(step.page) >= PAGE_ORDER.indexOf(fromPage as ReportPage);
+    // The page area Layout marks. The slide is CSS (index.css) keyed on a
+    // data attribute, so no page component knows anything about it.
+    const main = document.querySelector<HTMLElement>("[data-report-main]");
+    const reduce = window.matchMedia?.("(prefers-reduced-motion: reduce)").matches ?? false;
+    const slide = (phase: "out" | "in") => {
+      if (main && !reduce) main.dataset.pageMove = `${phase}-${forward ? "left" : "right"}`;
+    };
+
+    setTransit({ anchor });
+    const timers = [
+      window.setTimeout(() => slide("out"), OUT_MS),
+      window.setTimeout(() => {
+        navigateRef.current({ pathname: target, search: locRef.current.search });
+        // The old page is out of sight by now; start the new one at its top.
+        if (main) main.scrollTop = 0;
+      }, NAV_MS),
+      window.setTimeout(() => slide("in"), IN_MS),
+      window.setTimeout(() => {
+        if (main) delete main.dataset.pageMove;
+      }, SETTLE_MS),
+      window.setTimeout(() => setTransit(null), DONE_MS),
+    ];
+    // Cleared if the reader moves on, or closes, mid-move. The attribute
+    // must go too, or a page caught mid-slide would stay invisible.
     return () => {
-      window.clearTimeout(go);
-      window.clearTimeout(arrive);
-      window.clearTimeout(done);
+      timers.forEach((t) => window.clearTimeout(t));
+      if (main) delete main.dataset.pageMove;
     };
   }, [open, step?.id, step?.page, basePath]);
 
