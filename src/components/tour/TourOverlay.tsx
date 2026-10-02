@@ -38,7 +38,7 @@
 
 import React, { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
-import { ChevronLeft, ChevronRight, X } from "lucide-react";
+import { ArrowRight, ChevronLeft, ChevronRight, X } from "lucide-react";
 import {
   dockedCard,
   EDGE,
@@ -121,7 +121,7 @@ export interface TourOverlayProps {
    * next page's link in the rail, or the menu button on a phone) while the
    * caller slides the page across. Cleared, everything returns.
    */
-  transit?: { anchor: string } | null;
+  transit?: { anchor: string; to: string } | null;
 }
 
 /** Spotlight padding around the anchored element. Viewport margins and the
@@ -328,6 +328,8 @@ export function TourOverlay({
   });
   const dimRef = useRef<HTMLDivElement>(null);
   const frameRef = useRef<HTMLDivElement>(null);
+  /** The "Moving to <page>" label pinned to the frame during a page move. */
+  const moveLabelRef = useRef<HTMLDivElement>(null);
   /** Start a glide from wherever the highlight and card are right now. */
   const kickGlide = useCallback(() => {
     glideRef.current = { box: shownRef.current, card: cardPosRef.current, start: performance.now() };
@@ -412,6 +414,26 @@ export function TourOverlay({
           frame.style.height = `${box.height}px`;
         } else {
           frame.style.opacity = "0";
+        }
+      }
+      // The page-move label rides with the frame: beside the rail link on a
+      // wide screen, under the menu button on a phone, kept on screen.
+      const moveLabel = moveLabelRef.current;
+      if (moveLabel) {
+        if (box) {
+          const lw = moveLabel.offsetWidth;
+          const lh = moveLabel.offsetHeight;
+          let lx = narrowNow ? box.left : box.left + box.width + 12;
+          let ly = narrowNow ? box.top + box.height + 10 : box.top + box.height / 2 - lh / 2;
+          lx = Math.max(EDGE, Math.min(lx, viewport.width - lw - EDGE));
+          ly = Math.max(EDGE, Math.min(ly, viewport.height - lh - EDGE));
+          moveLabel.style.transform = `translate3d(${lx}px, ${ly}px, 0)`;
+          moveLabel.style.opacity = "1";
+          // Which side its pointer is on: toward the link on the left, or up
+          // toward the menu button on a phone.
+          moveLabel.dataset.side = narrowNow ? "below" : "right";
+        } else {
+          moveLabel.style.opacity = "0";
         }
       }
       const cardEl = cardRef.current;
@@ -602,6 +624,29 @@ export function TourOverlay({
                   "0 0 0 3px hsl(var(--primary)), 0 0 0 7px rgba(21, 81, 53, 0.12), 0 10px 34px rgba(15, 23, 42, 0.14)",
             }}
           />
+          {/* THE PAGE-MOVE LABEL (David, 2026-10-02: "mark the page, and
+              say moving page"). The slide shows the move; this says it, in
+              words, pinned to the page being opened, for the whole move.
+              Placed by the paint loop, so it travels with the frame. */}
+          {transit && (
+            <div
+              ref={moveLabelRef}
+              role="status"
+              className="group pointer-events-none fixed left-0 top-0 inline-flex items-center gap-2 whitespace-nowrap rounded-full border border-slate-200/80 bg-white py-1.5 pl-1.5 pr-3.5 text-[13px] text-slate-600 shadow-[0_12px_32px_-8px_rgba(15,23,42,0.35)] transition-opacity duration-300"
+              style={{ opacity: 0, willChange: "transform" }}
+            >
+              {/* The pointer, tooltip style, so the label reads as attached
+                  to the page it names rather than floating over the page. */}
+              <span
+                aria-hidden
+                className="absolute h-2.5 w-2.5 rotate-45 border-slate-200/80 bg-white group-data-[side=right]:-left-[5px] group-data-[side=right]:top-1/2 group-data-[side=right]:-mt-[5px] group-data-[side=right]:border-b group-data-[side=right]:border-l group-data-[side=below]:-top-[5px] group-data-[side=below]:left-4 group-data-[side=below]:border-l group-data-[side=below]:border-t"
+              />
+              <span className="flex h-6 w-6 items-center justify-center rounded-full bg-gradient-to-b from-[hsl(152_50%_32%)] to-primary text-white">
+                <ArrowRight className="h-3.5 w-3.5" />
+              </span>
+              Moving to <strong className="font-semibold text-slate-900">{transit.to}</strong>
+            </div>
+          )}
         </>
       )}
 

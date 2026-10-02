@@ -26,6 +26,14 @@ import { TourOverlay } from "./TourOverlay";
 import { reportTourSteps, type ReportFeatures, type ReportPage } from "./reportTourSteps";
 import { useReportTour } from "./useReportTour";
 
+/** The rail's name for each page, as the page-move label says it. */
+const PAGE_LABEL: Record<ReportPage, string> = {
+  "": "Overview",
+  changes: "Changes",
+  discovery: "Discovery",
+  declarations: "Declarations",
+};
+
 /** The rail's order, which decides which way a page slides. */
 const PAGE_ORDER: ReportPage[] = ["", "changes", "discovery", "declarations"];
 
@@ -35,7 +43,7 @@ const PAGE_ORDER: ReportPage[] = ["", "changes", "discovery", "declarations"];
  *
  *   0         the walkthrough steps aside: backdrop and card fade out, the
  *             frame goes to the next page's link in the rail (the menu
- *             button on a phone)
+ *             button on a phone) with a "Moving to <page>" label beside it
  *   OUT_MS    the current page slides out sideways and fades
  *   NAV_MS    the route changes behind it, scrolled to the top; the rail
  *             link becomes the active page
@@ -120,7 +128,7 @@ export function ReportTour() {
   // the page switched, cutting the "Moving to" card short.
   const navigateRef = useRef(navigate);
   navigateRef.current = navigate;
-  const [transit, setTransit] = useState<{ anchor: string } | null>(null);
+  const [transit, setTransit] = useState<{ anchor: string; to: string } | null>(null);
   useEffect(() => {
     if (!open || !step) {
       setTransit(null);
@@ -147,7 +155,7 @@ export function ReportTour() {
       if (main && !reduce) main.dataset.pageMove = `${phase}-${forward ? "left" : "right"}`;
     };
 
-    setTransit({ anchor });
+    setTransit({ anchor, to: PAGE_LABEL[step.page] });
     const timers = [
       window.setTimeout(() => slide("out"), OUT_MS),
       window.setTimeout(() => {
