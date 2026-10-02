@@ -35,7 +35,7 @@ interface LayoutProps {
  * and the spend pill are dropped: this viewer is one report behind a signed
  * URL, so it has one identity (the email on the report) and no dashboards to
  * gate. The walkthrough came back as its own report-shaped version (see
- * components/tour): a Walkthrough button beside the account menu, and a
+ * components/tour): a "How this works" button beside the account menu, and a
  * one-time offer of it on a first visit.
  */
 export default function Layout({ children, email }: LayoutProps) {

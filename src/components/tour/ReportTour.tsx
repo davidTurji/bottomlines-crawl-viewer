@@ -196,7 +196,8 @@ function WelcomePrompt({ onAnswer }: { onAnswer: (yes: boolean) => void }) {
           </button>
         </div>
         <p className="mt-4 text-[12px] text-slate-400">
-          You can start it any time from Walkthrough, top right.
+          You can open it again any time from &ldquo;How this works&rdquo; at
+          the top right.
         </p>
       </div>
     </div>,

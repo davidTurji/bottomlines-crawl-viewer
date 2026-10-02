@@ -1,10 +1,12 @@
 /**
- * The Walkthrough button in the header, top right beside the account menu.
+ * The "How this works" button in the header, top right beside the account
+ * menu. It opens the walkthrough.
  *
  * A labelled pill rather than the console's bare help icon: on a report a
- * customer opens once a week, a question mark is easy to miss, and the word
- * says what it does. Always restarts from the top; the walkthrough is short
- * enough that resuming part-way is not worth a second choice.
+ * customer opens once a week, a question mark is easy to miss, and the words
+ * say what it does (David chose the label, 2026-10-02). Always restarts
+ * from the top; the walkthrough is short enough that resuming part-way is
+ * not worth a second choice.
  */
 
 import { Compass } from "lucide-react";
@@ -22,7 +24,7 @@ export function WalkthroughButton() {
       title="A short tour of this report, page by page"
     >
       <Compass className="h-4 w-4" />
-      Walkthrough
+      How this works
     </button>
   );
 }
