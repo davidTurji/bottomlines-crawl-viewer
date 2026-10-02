@@ -69,9 +69,11 @@ export function AppSidebar() {
   // overview's matched counters and then re-listed the publishers the
   // overview already drills into, so it cost a click to arrive back where
   // the reader started.
-  const items: { to: string; label: string; end?: boolean }[] = [
-    { to: basePath, label: "Overview", end: true },
-    { to: `${basePath}/changes`, label: "Changes" },
+  // `tour` names each link for the walkthrough, which points at the page it
+  // is about to open before it opens it (see ReportTour's page change).
+  const items: { to: string; label: string; tour: string; end?: boolean }[] = [
+    { to: basePath, label: "Overview", tour: "nav-overview", end: true },
+    { to: `${basePath}/changes`, label: "Changes", tour: "nav-changes" },
     // Listed ONLY when this crawl actually discovered something (David,
     // 2026-09-04: "only when you actually discover lines you show it").
     // A seat-line-only crawl has no discovery story to tell, so an entry
@@ -79,13 +81,13 @@ export function AppSidebar() {
     // report. The route itself stays registered, so a direct link still
     // resolves; this only governs the rail.
     ...(hasDiscovered
-      ? [{ to: `${basePath}/discovery`, label: "Discovery" }]
+      ? [{ to: `${basePath}/discovery`, label: "Discovery", tour: "nav-discovery" }]
       : []),
     // Always listed (David, 2026-09-15: "by default on any crawl"). The
     // page is scoped to the customer's own domains, so "nobody names you"
     // is itself the answer a customer came for, and it is said plainly on
     // the page rather than hidden behind a missing entry.
-    { to: `${basePath}/declarations`, label: "Declarations" },
+    { to: `${basePath}/declarations`, label: "Declarations", tour: "nav-declarations" },
   ];
 
   return (
@@ -147,6 +149,7 @@ export function AppSidebar() {
                       <NavLink
                         to={item.to}
                         end={item.end}
+                        data-tour={item.tour}
                         className={getNavCls}
                         onClick={handleMobileNavClick}
                       >

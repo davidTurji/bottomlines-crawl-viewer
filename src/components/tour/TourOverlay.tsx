@@ -38,7 +38,7 @@
 
 import React, { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
-import { ChevronLeft, ChevronRight, X } from "lucide-react";
+import { ArrowRight, ChevronLeft, ChevronRight, X } from "lucide-react";
 import {
   dockedCard,
   EDGE,
@@ -114,6 +114,14 @@ export interface TourOverlayProps {
   footer?: React.ReactNode;
   /** Label for the primary button on the last step. */
   doneLabel?: string;
+  /**
+   * A page change in progress. While set, the highlight points at `anchor`
+   * (the page's link in the rail, or the menu button on a phone) and the card
+   * says where the walkthrough is going, with a bar that fills over
+   * `durationMs`. The caller owns the navigation and clears this once the new
+   * page is on screen.
+   */
+  transit?: { anchor: string; title: string; durationMs: number } | null;
 }
 
 /** Spotlight padding around the anchored element. Viewport margins and the
@@ -198,6 +206,7 @@ export function TourOverlay({
   variant = "spotlight",
   footer,
   doneLabel = "Done",
+  transit = null,
 }: TourOverlayProps) {
   const cardRef = useRef<HTMLDivElement>(null);
 
@@ -226,7 +235,9 @@ export function TourOverlay({
   /** Which edge a docked card takes. `above` is the opt-out from the default. */
   const dockEdge: DockEdge = step?.cardSide === "above" ? "top" : "bottom";
   /** The anchor this viewport should actually point at. */
-  const activeAnchor = (narrow && step?.mobileAnchor) || step?.anchor;
+  const activeAnchor = transit?.anchor ?? ((narrow && step?.mobileAnchor) || step?.anchor);
+  /** A page change points at a rail link, so the card goes beside it. */
+  const cardSide = transit ? "right" : step?.cardSide;
 
   /**
    * Bring the anchored element into view when the step changes.
@@ -318,14 +329,15 @@ export function TourOverlay({
   const kickGlide = useCallback(() => {
     glideRef.current = { box: shownRef.current, card: cardPosRef.current, start: performance.now() };
   }, []);
+  // A new step, and also a new anchor within one step: a page change points
+  // at the rail first and at the step's own anchor after, and both are moves.
   useEffect(() => {
     if (open) kickGlide();
-  }, [open, index, kickGlide]);
+  }, [open, index, activeAnchor, kickGlide]);
 
   useEffect(() => {
     if (!open || !spotlight) return;
     const reduce = window.matchMedia?.("(prefers-reduced-motion: reduce)").matches ?? false;
-    const cardSide = steps[index]?.cardSide;
     let raf = 0;
     // HOLD THE LAST SPOT across a page change. The next step's anchor does not
     // exist until its page has loaded; dropping it closed the hole (a dark
@@ -408,7 +420,7 @@ export function TourOverlay({
     };
     raf = requestAnimationFrame(tick);
     return () => cancelAnimationFrame(raf);
-  }, [open, index, steps, activeAnchor, spotlight, dockEdge, kickGlide]);
+  }, [open, index, steps, activeAnchor, cardSide, spotlight, dockEdge, kickGlide]);
 
   /**
    * Measure the card rather than assume it.
@@ -592,6 +604,43 @@ export function TourOverlay({
             "fixed inset-x-3 bottom-3 max-h-[70vh] sm:inset-x-auto sm:bottom-6 sm:right-6 sm:w-[24rem]",
         )}
       >
+        {transit ? (
+          /* THE PAGE CHANGE (David, 2026-10-02: "it is not clear it is moving
+             pages"). The highlight sits on the page's link in the rail, the
+             card says where it is going, and the bar fills while the page
+             switches underneath, so the move reads as a move. */
+          <div
+            key={`transit-${transit.title}`}
+            className="animate-tour-card-in motion-reduce:animate-none"
+          >
+            <div className="flex items-center gap-3">
+              <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-primary/10 text-primary">
+                <ArrowRight className="h-4 w-4 animate-tour-arrow motion-reduce:animate-none" />
+              </span>
+              <div className="min-w-0 flex-1">
+                <p className="text-[11px] font-semibold text-primary">Moving to</p>
+                <h2 className="text-[15px] font-semibold leading-snug text-slate-900">
+                  {transit.title}
+                </h2>
+              </div>
+              <button
+                type="button"
+                onClick={onClose}
+                aria-label={`Close ${ariaLabel}`}
+                className="-mr-1.5 flex h-7 w-7 shrink-0 items-center justify-center self-start rounded-full text-slate-400 transition-colors hover:bg-slate-100 hover:text-slate-700"
+              >
+                <X className="h-3.5 w-3.5" />
+              </button>
+            </div>
+            <div className="mt-3 h-1 overflow-hidden rounded-full bg-slate-100">
+              <div
+                className="h-full origin-left rounded-full bg-primary animate-tour-progress motion-reduce:animate-none"
+                style={{ animationDuration: `${transit.durationMs}ms` }}
+              />
+            </div>
+          </div>
+        ) : (
+        <>
         {/* Keyed on the step, so each step's words ease in rather than
             swapping under the reader while the card glides to its new spot. */}
         <div key={step.id} className="flex min-h-0 flex-1 flex-col animate-tour-card-in motion-reduce:animate-none">
@@ -645,6 +694,8 @@ export function TourOverlay({
             indicator still has to live somewhere, so it drops to its own row
             rather than competing with the control for the same slot. */}
         {footer && <div className="mt-3 border-t border-border pt-3">{progress}</div>}
+        </>
+        )}
       </div>
     </div>,
     document.body,

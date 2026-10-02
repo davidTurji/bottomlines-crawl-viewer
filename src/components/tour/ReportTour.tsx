@@ -23,8 +23,25 @@ import { Compass, X } from "lucide-react";
 import { api } from "@/lib/api";
 import { useReportScope } from "@/lib/reportScope";
 import { TourOverlay } from "./TourOverlay";
-import { reportTourSteps, type ReportFeatures } from "./reportTourSteps";
+import { reportTourSteps, type ReportFeatures, type ReportPage } from "./reportTourSteps";
 import { useReportTour } from "./useReportTour";
+
+/** The rail's name for each page, as the page-change card says it. */
+const PAGE_LABEL: Record<ReportPage, string> = {
+  "": "Overview",
+  changes: "Changes",
+  discovery: "Discovery",
+  declarations: "Declarations",
+};
+
+/**
+ * The page change, in two beats. The highlight glides to the page's link in
+ * the rail (the glide is 520ms), the page switches at NAV_MS with the link
+ * still lit so the reader watches it become the active one, and at
+ * TRANSIT_MS the highlight moves on to the step on the new page.
+ */
+const NAV_MS = 650;
+const TRANSIT_MS = 1150;
 
 /** Read before the first card, so the step list never changes under the reader. */
 function useReportFeatures(enabled: boolean): ReportFeatures | null {
@@ -77,26 +94,54 @@ export function ReportTour() {
   const step = steps[index];
 
   /**
-   * Take the reader to the step's page, once per step.
+   * Take the reader to the step's page, and SHOW the move (David,
+   * 2026-10-02: "it is not clear it is moving pages").
    *
-   * Keyed on the step rather than the location on purpose: navigating
-   * whenever the two disagree would drag a reader back the moment they
-   * followed a link on the page the step told them to explore.
+   * A step on the page already open just shows. A step on another page first
+   * points at that page's link in the rail (on a phone, where the rail is
+   * hidden, at the menu button) with a "Moving to" card, then navigates, then
+   * hands over to the step. See NAV_MS and TRANSIT_MS.
+   *
+   * Keyed on the step, not on the location: navigating whenever the two
+   * disagree would drag a reader back the moment they followed a link on the
+   * page a step told them to explore. The location is read through a ref.
    */
-  const navigatedFor = useRef<string | null>(null);
+  const locRef = useRef(location);
+  locRef.current = location;
+  // Through a ref as well: react-router hands out a new `navigate` whenever
+  // the path changes, and as a dependency that re-ran this effect the moment
+  // the page switched, cutting the "Moving to" card short.
+  const navigateRef = useRef(navigate);
+  navigateRef.current = navigate;
+  const [transit, setTransit] = useState<{ anchor: string; title: string; durationMs: number } | null>(null);
   useEffect(() => {
     if (!open || !step) {
-      navigatedFor.current = null;
+      setTransit(null);
       return;
     }
-    if (navigatedFor.current === step.id) return;
-    navigatedFor.current = step.id;
     const target = step.page ? `${basePath}/${step.page}` : basePath;
-    if (location.pathname.replace(/\/+$/, "") !== target) {
-      navigate({ pathname: target, search: location.search });
+    if (locRef.current.pathname.replace(/\/+$/, "") === target) {
+      setTransit(null);
+      return;
     }
-    // location is read, not tracked: this must fire on step changes only.
-  }, [open, step, basePath, navigate]);
+    const link = `nav-${step.page || "overview"}`;
+    const linkEl = document.querySelector(`[data-tour="${link}"]`);
+    // The rail is a sheet on narrow screens and its links are not on screen,
+    // so point at the button that opens it.
+    const anchor = linkEl && linkEl.getClientRects().length > 0 ? link : "nav-trigger";
+    setTransit({ anchor, title: PAGE_LABEL[step.page], durationMs: TRANSIT_MS });
+    const go = window.setTimeout(
+      () => navigateRef.current({ pathname: target, search: locRef.current.search }),
+      NAV_MS,
+    );
+    const done = window.setTimeout(() => setTransit(null), TRANSIT_MS);
+    // Cleared if the reader moves on, or closes, before the change lands:
+    // the page then stays where it is.
+    return () => {
+      window.clearTimeout(go);
+      window.clearTimeout(done);
+    };
+  }, [open, step?.id, step?.page, basePath]);
 
   const handleIndexChange = useCallback(
     (next: number) => {
@@ -124,6 +169,7 @@ export function ReportTour() {
       onClose={handleClose}
       ariaLabel="Report walkthrough"
       variant="spotlight"
+      transit={transit}
       doneLabel="Finish"
       // No Skip link: the X and Esc already leave, and one less control is
       // one less thing on a card meant to be read at a glance.
