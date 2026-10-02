@@ -18,7 +18,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
 import { createPortal } from "react-dom";
-import { Compass } from "lucide-react";
+import { Compass, X } from "lucide-react";
 
 import { api } from "@/lib/api";
 import { useReportScope } from "@/lib/reportScope";
@@ -144,12 +144,18 @@ export function ReportTour() {
  * Asked once per browser, only on the overview, only once the report has
  * actually opened (see useReportTour). Either answer is remembered: yes runs
  * the walkthrough, no never asks again. The header button stays for both.
+ *
+ * The two answers are the same size and weight (David, 2026-10-02): green
+ * for yes, white for no. The X and Esc are a no, so a reader who just wants
+ * the card gone is never asked again either.
  */
 function WelcomePrompt({ onAnswer }: { onAnswer: (yes: boolean) => void }) {
-  const yesRef = useRef<HTMLButtonElement>(null);
+  // Focus goes to the card, not to a button: a focused button wears a ring,
+  // and the two answers must look exactly alike until one is chosen.
+  const cardRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
-    yesRef.current?.focus();
+    cardRef.current?.focus();
     const onKey = (e: KeyboardEvent) => {
       if (e.key === "Escape") onAnswer(false);
     };
@@ -164,7 +170,19 @@ function WelcomePrompt({ onAnswer }: { onAnswer: (yes: boolean) => void }) {
       aria-modal
       aria-labelledby="walkthrough-prompt-title"
     >
-      <div className="w-full max-w-[26rem] rounded-2xl border border-border bg-card p-6 shadow-xl animate-in fade-in zoom-in-95 duration-200">
+      <div
+        ref={cardRef}
+        tabIndex={-1}
+        className="relative w-full max-w-[26rem] rounded-2xl border border-border bg-card p-6 shadow-xl outline-none animate-in fade-in zoom-in-95 duration-200"
+      >
+        <button
+          type="button"
+          onClick={() => onAnswer(false)}
+          aria-label="Close"
+          className="absolute right-3 top-3 flex h-8 w-8 items-center justify-center rounded-full text-slate-400 transition-colors hover:bg-muted hover:text-slate-700 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50"
+        >
+          <X className="h-4 w-4" />
+        </button>
         <span className="flex h-10 w-10 items-center justify-center rounded-full bg-primary/10 text-primary">
           <Compass className="h-5 w-5" />
         </span>
@@ -175,22 +193,23 @@ function WelcomePrompt({ onAnswer }: { onAnswer: (yes: boolean) => void }) {
           Want a quick walkthrough?
         </h2>
         <p className="mt-1.5 text-sm leading-relaxed text-slate-500">
-          We&apos;ll take you through your crawl report page by page and show
-          you what each part means. It takes about a minute.
+          We&apos;ll take you through your report, and show you what each
+          part means. It takes about a minute.
         </p>
-        <div className="mt-5 flex flex-col-reverse gap-2 sm:flex-row sm:justify-end">
+        {/* Two equal columns, so both answers are exactly the same size.
+            Stacked on a phone, yes on top, each still full width. */}
+        <div className="mt-5 grid grid-cols-1 gap-2.5 sm:grid-cols-2">
           <button
             type="button"
             onClick={() => onAnswer(false)}
-            className="inline-flex h-10 items-center justify-center rounded-full px-4 text-sm font-medium text-slate-600 transition-colors hover:bg-muted hover:text-slate-900"
+            className="order-2 inline-flex h-11 items-center justify-center rounded-full border border-slate-200 bg-white px-3 text-sm font-semibold text-slate-700 shadow-sm transition-colors hover:border-slate-300 hover:bg-slate-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 sm:order-1"
           >
             No thanks
           </button>
           <button
-            ref={yesRef}
             type="button"
             onClick={() => onAnswer(true)}
-            className="inline-flex h-10 items-center justify-center rounded-full bg-primary px-5 text-sm font-semibold text-primary-foreground shadow-sm transition-colors hover:bg-primary/90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
+            className="order-1 inline-flex h-11 items-center justify-center rounded-full border border-transparent bg-gradient-to-b from-[hsl(152_50%_32%)] to-primary px-3 text-sm font-semibold text-primary-foreground shadow-md shadow-primary/25 transition-all hover:brightness-110 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 sm:order-2"
           >
             Yes, show me around
           </button>
