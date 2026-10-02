@@ -40,6 +40,7 @@ import type {
 // The discovered-lines ORDER BY, shared with the page's sort control so the
 // mock endpoint and the client's "default" option cannot disagree.
 import { compareDefault } from "./discoveredSort";
+import { PAGE_SIZE } from "./paging";
 
 /*
  * THE CUSTOMER'S WATCHLIST. Six seat lines, the shape a real customer's
@@ -48,6 +49,17 @@ import { compareDefault } from "./discoveredSort";
  * true to narrow by. Declared first: the event seed below reads it at
  * module load.
  */
+// PROVENANCE, EXERCISED (2026-09-25). Every line says where it came from
+// and the day it was added, hinted under the line in the filter and
+// nowhere else. The mix here is deliberate, so a preview shows every
+// state rather than the happy one:
+//
+//   * a bulk sellers.json import, the majority in a real customer;
+//   * lines a person typed, on later dates;
+//   * both discovery buttons, which read the same to a customer;
+//   * one line with no provenance at all, which is what every line on an
+//     artifact frozen before this looks like. It must hint NOTHING rather
+//     than guess "added manually".
 export const CUSTOMER_SEATS: MatchedSeatLine[] = [
   { ssp_domain: "magnite.com", publisher_id: "dm-880114", relationship: "RESELLER" },
   { ssp_domain: "magnite.com", publisher_id: "dm-880115", relationship: "RESELLER" },
@@ -899,8 +911,8 @@ export function mockDeveloperEvents(
     .filter((d) => carries(d.matched_lines ?? matchedLinesFor(d.developer_id, 6), lines));
   // Actually paged. It used to return every row whatever the page, which
   // was invisible while the tables held six rows and would now hand the
-  // browser eleven hundred publishers per request.
-  const page_size = 50;
+  // browser eleven hundred publishers per request. Same page size as live.
+  const page_size = PAGE_SIZE;
   const start = Math.max(0, (page - 1) * page_size);
   return {
     event,
@@ -1324,6 +1336,11 @@ function changeLinesFor(
     if (alwaysCert || (seed + i) % 4 === 0) {
       line.cert_id = certId(seed * 13 + i * 7 + 3);
     }
+    // WHERE IT MOVED. The crawler started writing this onto the change
+    // windows on 2026-09-26; before that the artifact carried no lines at
+    // all behind those counts, and this mock invented them WITHOUT the
+    // file, which is exactly how the gap stayed invisible in preview.
+    line.found_in = (seed + i) % 5 === 0 ? "both" : (seed + i) % 2 === 0 ? "ads.txt" : "app-ads.txt";
     out.push(line);
   }
   return out;
@@ -1535,7 +1552,7 @@ export function mockMatchedDevelopers(
   lines: string[] = [],
 ): MatchedDevelopersPage {
   const pool = MATCHED_DEVS.filter((d) => carries(d.matched_lines, lines));
-  return mockPage(pool, page, q, ["name", "domain"]) as MatchedDevelopersPage;
+  return mockPage(pool, page, q, ["name", "domain"], PAGE_SIZE) as MatchedDevelopersPage;
 }
 
 /* App bundle seed. Long-tail same as developers: a head of hero apps that
@@ -1748,7 +1765,7 @@ const MATCHED_APPS = buildMatchedApps();
 
 export function mockMatchedApps(page: number, q = "", lines: string[] = []): MatchedAppsPage {
   const pool = MATCHED_APPS.filter((a) => carries(a.matched_lines, lines));
-  return mockPage(pool, page, q, ["app_name", "bundle_id", "owner_domain"]) as MatchedAppsPage;
+  return mockPage(pool, page, q, ["app_name", "bundle_id", "owner_domain"], PAGE_SIZE) as MatchedAppsPage;
 }
 
 /** The summary under a seat-line filter: the matched counters re-counted
@@ -2291,16 +2308,19 @@ function declarationSources(count: number, offset: number): DeclarationSource[] 
  * watchlist. Totals match the arrays because nothing here is filtered.
  */
 /*
- * The customer-report shape: the Excel sheet's rows, flat. Lifted from a
- * shape of a real run: a handful of partners each named by many
+ * The customer-report shape: the Excel sheet's rows, flat. Shaped like a
+ * real run (2026-09-15): a handful of partners each named by many
  * publisher files, in both files where the publisher has both, plus owner
  * domains and a few country-scoped manager domains so every kind renders.
+ * Every domain is made up and was DNS-checked to resolve nowhere
+ * (2026-10-02): the public demo is built from this file, and the real
+ * run's customer and publishers must not appear on it.
  */
 /** The mock customer's own domain: what its downloads are named after. */
 export const MOCK_CUSTOMER_DOMAIN = "madeupmedia.com";
 
 const DECLARATION_ROWS_SEED: [string, string, string[], string][] = [
-  // Only rows that NAME the customer's own domain (arcaneflow.com): the
+  // Only rows that NAME the customer's own domain (madeupmedia.com): the
   // sheet is per customer, and discover domains are not the customer's
   // domain.
   ["inventory partner", "madeupmedia.com", [

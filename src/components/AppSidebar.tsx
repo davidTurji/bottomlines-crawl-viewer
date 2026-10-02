@@ -69,9 +69,11 @@ export function AppSidebar() {
   // overview's matched counters and then re-listed the publishers the
   // overview already drills into, so it cost a click to arrive back where
   // the reader started.
-  const items: { to: string; label: string; end?: boolean }[] = [
-    { to: basePath, label: "Overview", end: true },
-    { to: `${basePath}/changes`, label: "Changes" },
+  // `tour` names each link for the walkthrough, which points at the page it
+  // is about to open before it opens it (see ReportTour's page change).
+  const items: { to: string; label: string; tour: string; end?: boolean }[] = [
+    { to: basePath, label: "Overview", tour: "nav-overview", end: true },
+    { to: `${basePath}/changes`, label: "Changes", tour: "nav-changes" },
     // Listed ONLY when this crawl actually discovered something (David,
     // 2026-09-04: "only when you actually discover lines you show it").
     // A seat-line-only crawl has no discovery story to tell, so an entry
@@ -79,13 +81,13 @@ export function AppSidebar() {
     // report. The route itself stays registered, so a direct link still
     // resolves; this only governs the rail.
     ...(hasDiscovered
-      ? [{ to: `${basePath}/discovery`, label: "Discovery" }]
+      ? [{ to: `${basePath}/discovery`, label: "Discovery", tour: "nav-discovery" }]
       : []),
     // Always listed (David, 2026-09-15: "by default on any crawl"). The
     // page is scoped to the customer's own domains, so "nobody names you"
     // is itself the answer a customer came for, and it is said plainly on
     // the page rather than hidden behind a missing entry.
-    { to: `${basePath}/declarations`, label: "Declarations" },
+    { to: `${basePath}/declarations`, label: "Declarations", tour: "nav-declarations" },
   ];
 
   return (
@@ -106,15 +108,21 @@ export function AppSidebar() {
             everything else on screen -- David circled it. */}
         <NavLink
           to={basePath}
-          className="flex items-center px-3 h-12 sm:h-14 border-b border-sidebar-border/50 transition-colors duration-150 hover:bg-sidebar-accent/40"
+          className="flex items-center px-3 h-14 sm:h-16 border-b border-sidebar-border/50 transition-colors duration-150 hover:bg-sidebar-accent/40"
           onClick={handleMobileNavClick}
           aria-label="PathFinder, Overview"
         >
+          {/* Sized to the RAIL, not to a comfortable minimum. At h-8 the
+              mark was ~90px in a 232px rail, so the lockup sat in the corner
+              as a stamp and the wordmark was unreadable: David could not see
+              the logo. The header grew just enough to hold a bigger one,
+              which is the opposite failure from the old h-20 slot that
+              floated it above everything else. */}
           <img
             src={pathfinderLogo}
             alt="PathFinder"
             draggable={false}
-            className="h-8 sm:h-9 w-auto max-w-full object-contain object-left select-none"
+            className="h-11 sm:h-12 w-auto max-w-full object-contain object-left select-none"
           />
         </NavLink>
 
@@ -125,11 +133,11 @@ export function AppSidebar() {
             chrome that could only ever hide the whole nav from itself. */}
         {/* Pinned to the BRAND'S height, which is the header's height.
             This offset still carried the old tall lockup slot (top-20/24)
-            after the brand shrank to h-12/h-14, so the menu floated a
+            after the brand shrank, so the menu floated a
             full row below where the eye expects it -- the gap David
             circled. One number, one source of truth: the brand row. */}
-        <div className="absolute inset-x-0 bottom-0 top-12 sm:top-14 overflow-y-auto">
-          <SidebarGroup className="px-2.5 py-3">
+        <div className="absolute inset-x-0 bottom-0 top-14 sm:top-16 overflow-y-auto">
+          <SidebarGroup className="px-2.5 py-3" data-tour="report-nav">
             <SidebarGroupContent>
               <SidebarMenu className="gap-0.5">
                 {items.map((item) => (
@@ -141,6 +149,7 @@ export function AppSidebar() {
                       <NavLink
                         to={item.to}
                         end={item.end}
+                        data-tour={item.tour}
                         className={getNavCls}
                         onClick={handleMobileNavClick}
                       >

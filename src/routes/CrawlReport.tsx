@@ -1,3 +1,5 @@
+import LockedTail from "@/components/LockedTail";
+import TrialBanner from "@/components/TrialBanner";
 import {
   OverviewSkeleton,
   SkeletonRows,
@@ -6,14 +8,17 @@ import {
 import { useEffect, useMemo, useState } from "react";
 import { LineFilter } from "@/components/LineFilter";
 import { Dots } from "@/components/Dots";
+import { PAGE_SIZE } from "@/lib/paging";
 import { useLineFilter } from "@/lib/lineFilter";
 import { Link } from "react-router-dom";
-import { Building2, ChevronDown, Download, Search, Smartphone } from "lucide-react";
+import { ChevronDown, Download, Globe, Search, Smartphone } from "lucide-react";
 import {
+  type TrialCaps, type TrialSlice,
   api,
   ApiError,
   ENABLE_CHAT,
   MOCK,
+  type ExportInfo,
   type Summary,
   type DeveloperEvent,
   type MatchedDeveloper,
@@ -25,13 +30,14 @@ import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import {
   EmptyResult,
   Pager,
+  usePaging,
   TruncatedNotice,
 } from "@/components/ListControls";
 import { Card } from "@/components/ui/card";
 import InlineAskAI from "@/components/InlineAskAI";
 import { PageShell } from "@/components/PageShell";
 import { formatWeek } from "@/components/WeekLine";
-import { cn, storeLabel } from "@/lib/utils";
+import { cn, foundInLabel, storeLabel } from "@/lib/utils";
 import { useReportScope } from "@/lib/reportScope";
 
 /* The rail under the composer, and the grid the chat panel shows before the
@@ -73,6 +79,11 @@ export default function CrawlReport() {
   const { token } = useReportScope();
   const [summary, setSummary] = useState<Summary | null>(null);
   const [previous, setPrevious] = useState<Summary | null>(null);
+  // What Export hands over; the safe default until it answers.
+  const [exportInfo, setExportInfo] = useState<ExportInfo>({
+    format: "xlsx",
+    line_export: false,
+  });
   const [error, setError] = useState<string | null>(null);
   // Which matched list the section below shows. The two matched-inventory
   // cards act as its selector; publishers is the default.
@@ -108,6 +119,17 @@ export default function CrawlReport() {
       cancelled = true;
     };
   }, [token, lines, linesKey]);
+
+  // What Export hands over does not take the line filter either.
+  useEffect(() => {
+    let cancelled = false;
+    api.exportInfo(token).then((info) => {
+      if (!cancelled) setExportInfo(info);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [token]);
 
   // LAST WEEK'S SUMMARY DOES NOT TAKE THE LINE FILTER, so it belongs in its
   // own effect keyed on the token alone. It used to sit in the one above
@@ -197,7 +219,7 @@ export default function CrawlReport() {
           date chip. The h1 and its subtitle already carry the week. The
           export sits top right, the one action this page offers. */}
       <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
-        <div className="min-w-0">
+        <div className="min-w-0" data-tour="overview-header">
           <h1 className="font-display text-xl font-semibold leading-tight tracking-tight text-slate-900 sm:text-2xl">
             Your weekly crawl
           </h1>
@@ -213,11 +235,19 @@ export default function CrawlReport() {
             onChange={setLines}
             busy={refreshing}
           />
-          <ExportResultsButton token={token} summary={summary} />
+          {exportInfo.format !== "none" && (
+            <ExportResultsButton
+              token={token}
+              summary={summary}
+              lines={lines}
+              info={exportInfo}
+            />
+          )}
         </div>
       </div>
       {/* Reserved whether or not a filter is on, so toggling one never
           pushes the cards below down and back up. */}
+      {summary.trial && <TrialBanner caps={summary.trial} summary={summary} />}
       <p className="-mt-2 min-h-[18px] text-[12px] leading-[18px] text-slate-500">
         {lines.length > 0 && (
           <>
@@ -225,8 +255,19 @@ export default function CrawlReport() {
             <span className="font-mono text-slate-700">
               {lines.length === 1 ? "the selected line" : `${lines.length} selected lines`}
             </span>
-            . Line totals and the week's changes follow the same filter.
+            . Line totals and the week&apos;s changes follow the same filter
+            {exportInfo.line_export ? ", and so does Export." : ". Export gives the full report."}
           </>
+        )}
+        {/* The one exception to "Export is an Excel", said before the click
+            (David, 2026-09-28: it must not be confusing at all), whenever
+            Export hands over the full report: no filter, or a filter this
+            report cannot be cut by. */}
+        {(lines.length === 0 || !exportInfo.line_export) && exportInfo.format === "zip" && (
+          <span className="text-critical">
+            {lines.length > 0 && " "}
+            {zipExplanation(exportInfo)}
+          </span>
         )}
       </p>
 
@@ -243,7 +284,10 @@ export default function CrawlReport() {
         <SkeletonStatCards count={2} />
       ) : (
       <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
-        <div className="rounded-2xl border border-border bg-white p-5 shadow-sm">
+        <div
+          className="rounded-2xl border border-border bg-white p-5 shadow-sm"
+          data-tour="overview-changes"
+        >
           <div className="mb-3 flex items-baseline justify-between gap-3">
             <div>
               <div className="font-display text-sm font-medium text-slate-700">
@@ -302,7 +346,10 @@ export default function CrawlReport() {
           )}
         </div>
 
-        <div className="rounded-2xl border border-border bg-white p-5 shadow-sm">
+        <div
+          className="rounded-2xl border border-border bg-white p-5 shadow-sm"
+          data-tour="overview-matched"
+        >
           <div className="mb-3 flex items-baseline justify-between gap-3">
             <div>
               <div className="font-display text-sm font-medium text-slate-700">
@@ -328,7 +375,7 @@ export default function CrawlReport() {
           <div className="grid grid-cols-2 gap-3">
             <MatchedTile
               tone="publisher"
-              icon={Building2}
+              icon={Globe}
               number={matchedDevs}
               label="Matched publishers"
               delta={matchedDevsDelta}
@@ -375,7 +422,7 @@ export default function CrawlReport() {
           HierarchyCard: colored disc, generous padding, right-aligned stats,
           tinted expansion. Publishers are green, apps are pink. */}
       {matchedView === "publishers" ? (
-        <div>
+        <div data-tour="overview-list">
           <div className="mb-3">
             <h2 className="font-display text-base font-semibold tracking-tight text-slate-900">
               Matched publishers
@@ -385,10 +432,10 @@ export default function CrawlReport() {
               see the exact seat lines it carried, and what moved this week.
             </p>
           </div>
-          <DrilldownList token={token} lines={lines} />
+          <DrilldownList token={token} lines={lines} caps={summary.trial ?? null} />
         </div>
       ) : (
-        <div>
+        <div data-tour="overview-list">
           <div className="mb-3">
             <h2 className="font-display text-base font-semibold tracking-tight text-slate-900">
               Matched apps
@@ -399,7 +446,7 @@ export default function CrawlReport() {
               it carried, and what moved this week.
             </p>
           </div>
-          <MatchedAppsList token={token} lines={lines} />
+          <MatchedAppsList token={token} lines={lines} caps={summary.trial ?? null} />
         </div>
       )}
     </PageShell>
@@ -433,37 +480,29 @@ function DeltaChip({ delta }: { delta: Delta }) {
   const pctDisplay = Math.abs(delta.pct) >= 0.1
     ? `${sign}${delta.pct.toFixed(1)}%`
     : `${sign}${delta.pct.toFixed(2)}%`;
-  /*
-   * WRAPS, AND ITS PARTS NEVER SHRINK.
-   *
-   * This was one nowrap flex line. On a phone the hero cards sit two to a
-   * row, so each half is about 150px, and a chip reading "+1,253 (+35.1%)
-   * vs last week" does not fit in that. Flex items shrink by default, and
-   * mono tabular figures cannot compress, so the parts squeezed past each
-   * other and rendered ON TOP of one another -- the delta on the headline
-   * number of the whole report, unreadable, on the format most people will
-   * open this on.
-   *
-   * Wrapping instead costs a second line and always reads.
-   */
+  /* TWO UNBREAKABLE HALVES THAT WRAP AS WHOLES. On a phone a stat tile is
+     ~150px wide and the chip is wider than that. As one non-wrapping row
+     every piece shrank at once: the figures ran into each other and
+     "vs last week" broke over two lines on top of them. Now the figures
+     stay together on one line and "vs last week" drops beneath them. */
   return (
     <span
       className={cn(
-        "inline-flex flex-wrap items-center gap-x-1 gap-y-0.5 text-[11px] font-medium leading-tight",
+        "inline-flex flex-wrap items-center gap-x-1 text-[11px] font-medium",
         tone,
       )}
     >
-      <span className="flex-shrink-0 text-[9px]">{glyph}</span>
-      <span className="flex-shrink-0 whitespace-nowrap font-mono tabular-nums">
-        {sign}
-        {delta.abs.toLocaleString()}
+      <span className="inline-flex items-center gap-1 whitespace-nowrap">
+        <span className="text-[9px]">{glyph}</span>
+        <span className="font-mono tabular-nums">
+          {sign}
+          {delta.abs.toLocaleString()}
+        </span>
+        <span className="font-mono tabular-nums text-slate-500">
+          ({pctDisplay})
+        </span>
       </span>
-      <span className="flex-shrink-0 whitespace-nowrap font-mono tabular-nums text-slate-500">
-        ({pctDisplay})
-      </span>
-      <span className="flex-shrink-0 whitespace-nowrap text-slate-500">
-        vs last week
-      </span>
+      <span className="whitespace-nowrap text-slate-500">vs last week</span>
     </span>
   );
 }
@@ -593,7 +632,7 @@ function MatchedTile({
   onClick,
 }: {
   tone: "publisher" | "app";
-  icon: typeof Building2;
+  icon: typeof Globe;
   number: number;
   label: string;
   delta?: Delta | null;
@@ -690,7 +729,45 @@ export function reportDate(summary: { finished_at: string | null }): string {
     : new Date().toISOString().slice(0, 10);
 }
 
-function ExportResultsButton({ token, summary }: { token: string; summary: Summary }) {
+/**
+ * Why Export is a zip, naming the list the way the Excel's Summary does.
+ * Its rows are one per app per seat line, so the count can be several
+ * times the Matched apps number on the card; the sentence says so.
+ */
+export function zipExplanation(info: ExportInfo): string {
+  const limit = (info.excel_row_limit ?? 1_048_576).toLocaleString();
+  const rows = info.apps_rows
+    ? `${info.apps_rows.toLocaleString()} rows (one per app per seat line), `
+    : "";
+  return (
+    `Export gives a zip: the Matched apps list has ${rows}more than Excel allows ` +
+    `(${limit} rows in one tab), so it comes as a CSV file next to the Excel.`
+  );
+}
+
+function ExportResultsButton({
+  token,
+  summary,
+  lines,
+  info,
+}: {
+  token: string;
+  summary: Summary;
+  lines: string[];
+  info: ExportInfo;
+}) {
+  // Under a line filter the download carries only those lines, when the
+  // report can be cut that way (the crawler says so in export-info). An
+  // older report exports whole, and the button says so rather than hand
+  // over a file that looks filtered and is not.
+  const narrowed = lines.length > 0 && info.line_export;
+  const title = narrowed
+    ? "Downloads only the selected lines"
+    : lines.length > 0 && info.format !== "zip"
+      ? "This report downloads in full"
+      : info.format === "zip"
+        ? zipExplanation(info)
+        : undefined;
   const onClick = async () => {
     if (MOCK) {
       const { buildXlsxBlob } = await import("../lib/xlsx");
@@ -707,16 +784,28 @@ function ExportResultsButton({ token, summary }: { token: string; summary: Summa
       URL.revokeObjectURL(url);
       return;
     }
-    window.location.href = api.exportUrl(token);
+    window.location.href = api.exportUrl(token, narrowed ? lines : []);
   };
+  /* THE ONE ACTION ON THE PAGE LOOKS LIKE ONE (David, 2026-10-02: "a green
+     tempting button"). It was a white pill the same weight as the line
+     filter beside it, so the thing a customer came to take away read as
+     chrome. Solid brand green, white type, a lift on hover.
+
+     The label says what the file is. "Export complete report" whenever the
+     download is the whole report, which includes a filter this report
+     cannot be cut by; only a download that really carries just the
+     selected lines says so instead, because calling that file complete
+     would be false. */
   return (
     <button
       type="button"
       onClick={onClick}
-      className="inline-flex h-9 flex-shrink-0 items-center gap-2 self-start rounded-full border border-border bg-white px-4 text-xs font-medium text-slate-700 shadow-sm transition-colors hover:border-primary/30 hover:text-primary"
+      title={title}
+      data-tour="export"
+      className="inline-flex h-9 flex-shrink-0 items-center gap-2 self-start rounded-full bg-gradient-to-b from-[hsl(152_50%_32%)] to-primary px-4 text-[13px] font-semibold text-primary-foreground shadow-md shadow-primary/25 ring-1 ring-inset ring-white/10 transition-all duration-150 hover:-translate-y-px hover:shadow-lg hover:shadow-primary/30 hover:brightness-110 active:translate-y-0 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
     >
-      <Download aria-hidden className="h-3.5 w-3.5" />
-      Export results
+      <Download aria-hidden className="h-4 w-4" />
+      {narrowed ? "Export selected lines" : "Export complete report"}
     </button>
   );
 }
@@ -745,7 +834,16 @@ type Row = {
   cert_changed_lines: MatchedSeatLine[];
 };
 
-function DrilldownList({ token, lines }: { token: string; lines: string[] }) {
+function DrilldownList({
+  token,
+  lines,
+  caps,
+}: {
+  token: string;
+  lines: string[];
+  /** The trial's caps, on a trial: the unlock card stands on every tab. */
+  caps: TrialCaps | null;
+}) {
   const [tab, setTab] = useState<DrillTab>("all");
   const [rows, setRows] = useState<Row[]>([]);
   const [total, setTotal] = useState(0);
@@ -753,8 +851,11 @@ function DrilldownList({ token, lines }: { token: string; lines: string[] }) {
   const [error, setError] = useState<string | null>(null);
   const [expanded, setExpanded] = useState<number | null>(null);
   const [page, setPage] = useState(1);
+  const paging = usePaging(setPage);
   const [query, setQuery] = useState("");
   const [truncated, setTruncated] = useState(false);
+  /** The cut this trial report made to the list, or null on a full report. */
+  const [trial, setTrial] = useState<TrialSlice | null>(null);
   // Bumps each time a list lands, so the new rows ease in as one piece.
   const [settled, setSettled] = useState(0);
 
@@ -807,6 +908,7 @@ function DrilldownList({ token, lines }: { token: string; lines: string[] }) {
             ),
             total: r.total,
             truncated: r.truncated ?? false,
+            trial: r.trial ?? null,
           }))
         : api.developerEvents(token, tab, page, query, lines).then((r) => ({
             rows: r.rows.map(
@@ -828,12 +930,14 @@ function DrilldownList({ token, lines }: { token: string; lines: string[] }) {
             ),
             total: r.total,
             truncated: false,
+            trial: r.trial ?? null,
           }));
     p.then((data) => {
       if (cancelled) return;
       setRows(data.rows);
       setTotal(data.total);
       setTruncated(data.truncated);
+      setTrial(data.trial);
       setSettled((n) => n + 1);
     })
       .catch((e: Error) => !cancelled && setError(e.message))
@@ -904,6 +1008,18 @@ function DrilldownList({ token, lines }: { token: string; lines: string[] }) {
             <EmptyResult query={query} noun="publishers" />
           </div>
         )}
+        {settled > 0 && !error && rows.length > 0 && !trial && !caps && (
+          <Pager
+            placement="top"
+            anchorRef={paging.topRef}
+            className="mb-3"
+            page={page}
+            pageSize={PAGE_SIZE}
+            total={total}
+            onPage={paging.onPage}
+            noun={tab === "all" ? "publishers" : "with changes"}
+          />
+        )}
         {/* `settled > 0` as well as rows: while a new tab or filter is
             in flight the previous list is still in state, and without
             this guard it would render underneath the skeleton. */}
@@ -928,13 +1044,23 @@ function DrilldownList({ token, lines }: { token: string; lines: string[] }) {
             ))}
           </div>
         )}
-        {settled > 0 && !error && rows.length > 0 && (
+        {/* On a trial the card stands on every tab, rows or none: the way to
+            the full report never depends on the tab the reader is on. */}
+        {settled > 0 && !error && (caps || trial) && (
+          <LockedTail
+            slice={trial}
+            caps={caps}
+            noun={tab === "all" ? "matched publishers" : "publishers with changes"}
+            detail="publisher, every line it carries and every change, week after week"
+          />
+        )}
+        {settled > 0 && !error && rows.length > 0 && !trial && !caps && (
           <div className="mt-4">
             <Pager
               page={page}
-              pageSize={250}
+              pageSize={PAGE_SIZE}
               total={total}
-              onPage={setPage}
+              onPage={paging.onPage}
               noun={tab === "all" ? "publishers" : "with changes"}
             />
             {truncated && <TruncatedNotice shown={total} noun="publishers" />}
@@ -1155,10 +1281,15 @@ const CHANGE_WINDOW: Record<
  */
 function SeatLineRow({ line, muted }: { line: MatchedSeatLine; muted?: boolean }) {
   return (
-    <li className="px-3 py-1.5">
+    // THE FILE GOES TO THE RIGHT MARGIN (David, 2026-09-26). Trailing the
+    // line, it read as a fourth field of the ads.txt record, which it is
+    // not, and it moved with the length of the cert so no two rows agreed
+    // on where it sat. At the margin it forms a column the eye can run
+    // down. The cert stays inline, because that one IS part of the line.
+    <li className="flex items-baseline gap-3 px-3 py-1.5">
       <code
         className={cn(
-          "block truncate font-mono text-[11px] tabular-nums",
+          "min-w-0 flex-1 truncate font-mono text-[11px] tabular-nums",
           muted ? "text-slate-500" : "text-slate-800",
         )}
       >
@@ -1166,15 +1297,12 @@ function SeatLineRow({ line, muted }: { line: MatchedSeatLine; muted?: boolean }
         {line.cert_id && (
           <span className="font-normal text-slate-400">, {line.cert_id}</span>
         )}
-        {/* PROVENANCE, in grey, per the owner: which file carried the
-            line. "both" is the deduped case -- ads.txt and app-ads.txt
-            agreeing is one fact wearing one row. */}
-        {line.found_in && (
-          <span className="ml-2 font-sans text-[10px] font-normal text-slate-400">
-            {line.found_in === "both" ? "ads.txt + app-ads.txt" : line.found_in}
-          </span>
-        )}
       </code>
+      {foundInLabel(line.found_in) && (
+        <span className="flex-shrink-0 text-[10px] text-slate-400">
+          {foundInLabel(line.found_in)}
+        </span>
+      )}
     </li>
   );
 }
@@ -1451,16 +1579,27 @@ function lineEventToSeatLine(e: LineEvent): MatchedSeatLine {
  * family colour. The tabs filter the loaded apps by their weekly change; an
  * app that did not move this week appears under "All matched" only.
  */
-function MatchedAppsList({ token, lines }: { token: string; lines: string[] }) {
+function MatchedAppsList({
+  token,
+  lines,
+  caps,
+}: {
+  token: string;
+  lines: string[];
+  caps: TrialCaps | null;
+}) {
   const [tab, setTab] = useState<DrillTab>("all");
   const [allRows, setAllRows] = useState<MatchedApp[]>([]);
   const [loading, setLoading] = useState(true);
   const [failed, setFailed] = useState(false);
   const [expanded, setExpanded] = useState<string | null>(null);
   const [page, setPage] = useState(1);
+  const paging = usePaging(setPage);
   const [query, setQuery] = useState("");
   const [total, setTotal] = useState(0);
   const [truncated, setTruncated] = useState(false);
+  /** The cut this trial report made to the list, or null on a full report. */
+  const [trial, setTrial] = useState<TrialSlice | null>(null);
 
   const keyOf = (a: MatchedApp) => `${a.store}:${a.bundle_id}`;
   const [settled, setSettled] = useState(0);
@@ -1489,6 +1628,7 @@ function MatchedAppsList({ token, lines }: { token: string; lines: string[] }) {
           setAllRows(r.rows ?? []);
           setTotal(r.total ?? 0);
           setTruncated(r.truncated ?? false);
+          setTrial(r.trial ?? null);
           setSettled((n) => n + 1);
         }
       })
@@ -1569,6 +1709,18 @@ function MatchedAppsList({ token, lines }: { token: string; lines: string[] }) {
           )}
         </div>
       )}
+      {settled > 0 && !failed && tab === "all" && rows.length > 0 && !trial && !caps && (
+        <Pager
+          placement="top"
+          anchorRef={paging.topRef}
+          className="mb-3"
+          page={page}
+          pageSize={PAGE_SIZE}
+          total={total}
+          onPage={paging.onPage}
+          noun="apps"
+        />
+      )}
       {/* `settled > 0` as well: the previous list is still in state while a
           new filter is in flight, and would render under the skeleton. */}
       {settled > 0 && rows.length > 0 && (
@@ -1596,13 +1748,21 @@ function MatchedAppsList({ token, lines }: { token: string; lines: string[] }) {
           All matched. The change tabs filter the loaded page in the browser,
           so their count is a count of this page and paging it would be a
           claim the data cannot support. */}
-      {settled > 0 && !failed && tab === "all" && rows.length > 0 && (
+      {settled > 0 && !failed && (caps || trial) && (
+        <LockedTail
+          slice={trial}
+          caps={caps}
+          noun="matched apps"
+          detail="app, its store listing and every line it carries"
+        />
+      )}
+      {settled > 0 && !failed && tab === "all" && rows.length > 0 && !trial && !caps && (
         <div className="mt-4">
           <Pager
             page={page}
-            pageSize={250}
+            pageSize={PAGE_SIZE}
             total={total}
-            onPage={setPage}
+            onPage={paging.onPage}
             noun="apps"
           />
           {truncated && <TruncatedNotice shown={total} noun="apps" />}

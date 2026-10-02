@@ -6,6 +6,7 @@ const BASE = (import.meta.env.VITE_API_BASE as string) ?? "/api";
 // required, useful for UI-only reviews and screenshots.
 // The mock adapter lives in src/lib/mockData.ts.
 import { LINES_PARAM, linesQuery, serializeLines } from "./lineFilter";
+import { PAGE_SIZE } from "./paging";
 
 export const MOCK = (import.meta.env.VITE_MOCK as string | undefined) === "true";
 
@@ -19,6 +20,39 @@ const mockPause = () =>
   MOCK_DELAY > 0
     ? new Promise((r) => setTimeout(r, MOCK_DELAY))
     : Promise.resolve();
+/** In MOCK mode, ``?trial=1`` renders the report as a trial (lead magnet):
+ *  the lists cut to the caps below, no download, the banner and the locked
+ *  tails on. The same convention as ``?bigapps=1`` and ``?legacy=1``. */
+//  In MOCK mode the switch is remembered for the tab (sessionStorage) once
+//  ``?trial=1`` has been seen, because the sidebar links drop the query and
+//  a demo that forgot it mid-navigation looked like a report that could be
+//  bypassed. ``?trial=0`` turns it off again. Production never reads the
+//  URL for this: the flag is in the link's record and every request is cut
+//  on the server.
+const TRIAL_MOCK_KEY = "pf-mock-trial";
+const trialMock = () => {
+  if (!MOCK) return false;
+  const params = new URLSearchParams(window.location.search);
+  if (params.has("trial")) {
+    try {
+      sessionStorage.setItem(TRIAL_MOCK_KEY, params.get("trial") === "0" ? "0" : "1");
+    } catch {
+      /* no storage: the URL alone decides */
+    }
+  }
+  try {
+    const kept = sessionStorage.getItem(TRIAL_MOCK_KEY);
+    if (kept !== null) return kept === "1";
+  } catch {
+    /* fall through */
+  }
+  return params.has("trial") && params.get("trial") !== "0";
+};
+const TRIAL_CAPS_MOCK = { publishers: 3, apps: 3, declarations: 3, discovered_lines: 3 };
+function cutRows<T>(rows: T[], cap: number, total: number) {
+  const shown = Math.min(cap, rows.length, total);
+  return { rows: rows.slice(0, cap), trial: { cap, shown, full_total: total } };
+}
 
 // ── AI chat flag ─────────────────────────────────────────────────
 // The MVP backend ships no chat endpoint, so the Ask AI surface is
@@ -158,6 +192,47 @@ export const api = {
     return out;
   },
   /**
+   * What "Export results" hands over, so the page can say it in words:
+   * the report's Excel, or, when its Matched apps list has more rows than
+   * Excel allows, a zip of the Excel plus that list as a CSV (2026-09-28).
+   * Also whether a download of only the selected lines exists. Never
+   * throws: an answer that cannot be read is the safe default (the full
+   * report, as an Excel, no per-line download).
+   *
+   * In MOCK mode `?bigapps=1` answers with the zip case, for review.
+   */
+  exportInfo: async (token: string): Promise<ExportInfo> => {
+    if (MOCK) {
+      if (trialMock()) return { format: "none", line_export: false, trial: true };
+      const big = new URLSearchParams(window.location.search).has("bigapps");
+      return big
+        ? { format: "zip", line_export: true, excel_row_limit: 1_048_576, apps_rows: 3_682_524 }
+        : { format: "xlsx", line_export: true, excel_row_limit: 1_048_576 };
+    }
+    const fallback: ExportInfo = { format: "xlsx", line_export: false };
+    // A plain fetch, never req(): an API from before this endpoint answers
+    // 404, and req() reads a 404 on a token path as "this link is dead" and
+    // swaps the whole page for the expired-link card. Nothing that goes
+    // wrong here may touch the sign-in gate; the summary's own calls do that.
+    try {
+      const res = await fetch(`${BASE}/v1/viewer/${token}/export-info`, {
+        credentials: "include",
+      });
+      if (!res.ok) return fallback;
+      const info = (await res.json()) as Partial<ExportInfo> | null;
+      if (
+        !info ||
+        !["xlsx", "zip", "none"].includes(info.format as string) ||
+        typeof info.line_export !== "boolean"
+      ) {
+        return fallback;
+      }
+      return info as ExportInfo;
+    } catch {
+      return fallback;
+    }
+  },
+  /**
    * Same-origin URL of the CUSTOMER workbook for this run: the xlsx the
    * crawler bakes per crawl, the same file the Overview's "Export results"
    * button hands the reader. A plain link target, not a fetch, so the
@@ -167,12 +242,16 @@ export const api = {
    * MOCK mode has no backend, so the button short-circuits to a small stub
    * rather than pointing at this (see CrawlReport's ExportResultsButton).
    */
-  exportUrl: (token: string) => `${BASE}/v1/viewer/${token}/export.xlsx`,
+  exportUrl: (token: string, lines: string[] = []) =>
+    `${BASE}/v1/viewer/${token}/export.xlsx${
+      lines.length ? `?${LINES_PARAM}=${serializeLines(lines)}` : ""
+    }`,
   summary: async (token: string, lines?: string[]) => {
     if (MOCK) {
       await mockPause();
       const { mockSummaryFor } = await import("./mockData");
-      return mockSummaryFor(lines ?? []);
+      const s = mockSummaryFor(lines ?? []);
+      return trialMock() ? { ...s, trial: TRIAL_CAPS_MOCK } : s;
     }
     const q = linesQuery(lines);
     return req<Summary>("GET", `/v1/viewer/${token}/summary${q ? `?${q.slice(1)}` : ""}`);
@@ -224,11 +303,14 @@ export const api = {
     if (MOCK) {
       await mockPause();
       const { mockDeveloperEvents } = await import("./mockData");
-      return mockDeveloperEvents(event, page, lines ?? []);
+      const r = mockDeveloperEvents(event, page, lines ?? []);
+      return trialMock()
+        ? { ...r, page: 1, ...cutRows(r.rows, TRIAL_CAPS_MOCK.publishers, r.total) }
+        : r;
     }
     return req<DeveloperEventsPage>(
       "GET",
-      `/v1/viewer/${token}/developer-events?event=${event}&page=${page}&page_size=50${q ? `&q=${encodeURIComponent(q)}` : ""}${linesQuery(lines)}`,
+      `/v1/viewer/${token}/developer-events?event=${event}&page=${page}&page_size=${PAGE_SIZE}${q ? `&q=${encodeURIComponent(q)}` : ""}${linesQuery(lines)}`,
     );
   },
   lineEvents: async (
@@ -247,7 +329,12 @@ export const api = {
     if (MOCK) {
       await mockPause();
       const { mockLineEvents } = await import("./mockData");
-      return mockLineEvents(filters);
+      const r = mockLineEvents(filters);
+      // The server keeps the events of the visible publishers only; the
+      // mock keeps a dozen and says how many there are in full.
+      return trialMock()
+        ? { ...r, ...cutRows(r.rows, 12, r.total) }
+        : r;
     }
     const { lines, ...rest } = filters;
     const q = new URLSearchParams();
@@ -277,11 +364,14 @@ export const api = {
     if (MOCK) {
       await mockPause();
       const { mockMatchedDevelopers } = await import("./mockData");
-      return mockMatchedDevelopers(page, q, lines ?? []);
+      const r = mockMatchedDevelopers(page, q, lines ?? []);
+      return trialMock()
+        ? { ...r, page: 1, ...cutRows(r.rows, TRIAL_CAPS_MOCK.publishers, r.total) }
+        : r;
     }
     return req<MatchedDevelopersPage>(
       "GET",
-      `/v1/viewer/${token}/matched-developers?page=${page}&page_size=250${q ? `&q=${encodeURIComponent(q)}` : ""}${linesQuery(lines)}`,
+      `/v1/viewer/${token}/matched-developers?page=${page}&page_size=${PAGE_SIZE}${q ? `&q=${encodeURIComponent(q)}` : ""}${linesQuery(lines)}`,
     );
   },
   matchedBundles: async (token: string, page = 1, q = "") => {
@@ -313,11 +403,12 @@ export const api = {
     if (MOCK) {
       await mockPause();
       const { mockMatchedApps } = await import("./mockData");
-      return mockMatchedApps(page, q, lines ?? []);
+      const r = mockMatchedApps(page, q, lines ?? []);
+      return trialMock() ? { ...r, page: 1, ...cutRows(r.rows, TRIAL_CAPS_MOCK.apps, r.total) } : r;
     }
     return req<MatchedAppsPage>(
       "GET",
-      `/v1/viewer/${token}/matched-apps?page=${page}&page_size=250${q ? `&q=${encodeURIComponent(q)}` : ""}${linesQuery(lines)}`,
+      `/v1/viewer/${token}/matched-apps?page=${page}&page_size=${PAGE_SIZE}${q ? `&q=${encodeURIComponent(q)}` : ""}${linesQuery(lines)}`,
     );
   },
   /**
@@ -510,7 +601,10 @@ export const api = {
     if (MOCK) {
       await mockPause();
       const { mockDiscoveredLines } = await import("./mockData");
-      return mockDiscoveredLines(opts);
+      const r = mockDiscoveredLines(opts);
+      return trialMock()
+        ? { ...r, page: 1, ...cutRows(r.rows, TRIAL_CAPS_MOCK.discovered_lines, r.total) }
+        : r;
     }
     const q = new URLSearchParams();
     q.set("page", String(opts.page ?? 1));
@@ -563,6 +657,10 @@ export const api = {
       // `?legacy=1` exercises the grouped shape older links answer with.
       const legacy = new URLSearchParams(window.location.search).has("legacy");
       const { mockDeclarations, mockDeclarationRows } = await import("./mockData");
+      if (trialMock() && !legacy) {
+        const cut = cutRows(mockDeclarationRows.rows, TRIAL_CAPS_MOCK.declarations, mockDeclarationRows.total);
+        return { ...mockDeclarationRows, ...cut };
+      }
       return legacy ? mockDeclarations : mockDeclarationRows;
     }
     return req<DeclarationsPayload>("GET", `/v1/viewer/${token}/declarations`);
@@ -610,8 +708,36 @@ export const api = {
 
 // ---- types ----
 
+/** What Export hands over (GET /v1/viewer/{token}/export-info). */
+/** A trial (lead magnet) report: how many rows of each list the reader may
+ *  see. The headline counts on the summary are never capped; the lists are. */
+export type TrialCaps = {
+  publishers: number;
+  apps: number;
+  declarations: number;
+  discovered_lines: number;
+};
+
+/** How a capped list was cut on a trial report: the cap, how many rows are
+ *  shown, and the full count behind the cut. Absent on a full report. */
+export type TrialSlice = { cap: number; shown: number; full_total: number };
+
+export type ExportInfo = {
+  /** "zip" = the Excel plus the Matched apps list as CSV (too big for Excel). */
+  format: "xlsx" | "zip" | "none";
+  /** True on a trial report: there is no download, by design. */
+  trial?: boolean;
+  /** A download of only the selected lines exists for this report. */
+  line_export: boolean;
+  excel_row_limit?: number;
+  /** Rows in the Matched apps CSV, when format is "zip". */
+  apps_rows?: number | null;
+};
+
 export type Summary = {
   crawl_id: number;
+  /** Set on a trial report (see ``TrialCaps``); null or absent on a full one. */
+  trial?: TrialCaps | null;
   /** The watchlist this report was built from: what the seat-line filter
    *  offers. Optional: artifacts frozen before it was exposed omit it, and
    *  the filter then simply does not show. */
@@ -683,6 +809,8 @@ export type DeveloperEvent = {
 };
 
 export type DeveloperEventsPage = {
+  /** Present on a trial report: this list was cut (see ``TrialSlice``). */
+  trial?: TrialSlice | null;
   event: string;
   page: number;
   page_size: number;
@@ -741,6 +869,8 @@ export type LineEvent = {
 };
 
 export type LineEventsPage = {
+  /** Present on a trial report: this list was cut (see ``TrialSlice``). */
+  trial?: TrialSlice | null;
   page: number;
   page_size: number;
   total: number;
@@ -759,6 +889,16 @@ export type MatchedSeatLine = {
   relationship: string;
   /** "" or absent when the file omits the fourth field, the majority case. */
   cert_id?: string;
+  /**
+   * Where the line came from and the day it was added to this customer's
+   * list (2026-09-25). Four values, two of which are one idea reached by
+   * two buttons: `sellers_json` imported in bulk, `manual` put there by a
+   * person, `signal` and `discovered` both found on a discovery domain.
+   * Absent on artifacts frozen before this, where the honest answer is
+   * that we do not know, and the line carries no hint at all.
+   */
+  source?: "sellers_json" | "manual" | "signal" | "discovered" | "";
+  added_at?: string | null;
   /**
    * Where the line was found: "ads.txt", "app-ads.txt", or "both" when
    * the same seat sits in the two files (one row, per the dedupe -- the
@@ -797,6 +937,8 @@ export type MatchedDeveloper = {
 };
 
 export type MatchedDevelopersPage = {
+  /** Present on a trial report: this list was cut (see ``TrialSlice``). */
+  trial?: TrialSlice | null;
   page: number;
   page_size: number;
   total: number;
@@ -891,6 +1033,8 @@ export type MatchedApp = {
 };
 
 export type MatchedAppsPage = {
+  /** Present on a trial report: this list was cut (see ``TrialSlice``). */
+  trial?: TrialSlice | null;
   page: number;
   page_size: number;
   total: number;
@@ -990,6 +1134,8 @@ export type DiscoveredTotals = {
 };
 
 export type DiscoveredLinesPage = {
+  /** Present on a trial report: this list was cut (see ``TrialSlice``). */
+  trial?: TrialSlice | null;
   page: number;
   page_size: number;
   total: number;
@@ -1076,6 +1222,8 @@ export type DeclarationRow = {
 export type DeclarationRowsPayload = {
   rows: DeclarationRow[];
   total: number;
+  /** Present on a trial report: the rows were cut (see ``TrialSlice``). */
+  trial?: TrialSlice | null;
 };
 
 /**

@@ -1,7 +1,11 @@
+import { Pager, usePaging } from "@/components/ListControls";
+import LockedTail from "@/components/LockedTail";
+import TrialBanner from "@/components/TrialBanner";
 import { SkeletonRows, SkeletonStatCards } from "@/components/Skeleton";
 import { useEffect, useMemo, useState } from "react";
 import { Dots } from "@/components/Dots";
 import { LineFilter } from "@/components/LineFilter";
+import { PAGE_SIZE } from "@/lib/paging";
 import { useLineFilter } from "@/lib/lineFilter";
 import {
   ArrowRight,
@@ -16,12 +20,12 @@ import {
   Search,
 } from "lucide-react";
 
-import { api, type LineEvent, type Summary } from "../lib/api";
+import { api, type LineEvent, type Summary, type TrialSlice } from "../lib/api";
 import { formatWeek, WeekLine } from "@/components/WeekLine";
 import { useReportScope } from "@/lib/reportScope";
 import { PageShell } from "@/components/PageShell";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { cn } from "@/lib/utils";
+import { cn, foundInLabel } from "@/lib/utils";
 import { computeDelta, MiniStat, SplitStat } from "./CrawlReport";
 
 /**
@@ -59,7 +63,6 @@ import { computeDelta, MiniStat, SplitStat } from "./CrawlReport";
  * event in words, which is what a colourblind reader reads.
  */
 
-const PAGE_SIZE = 40;
 
 /**
  * How many pages of line events to walk before giving up.
@@ -112,12 +115,24 @@ export default function CrawlChanges() {
   const [summarySettled, setSummarySettled] = useState(false);
   const [previous, setPrevious] = useState<Summary | null>(null);
   const [bucket, setBucket] = useState<Bucket>("all");
+  // Which scope tabs this week earns, from the crawl-wide totals.
+  const scopeTabs = useMemo<[EventKind, string][]>(() => {
+    const t = summary?.hero_diff?.line_totals;
+    if (!t) return [];
+    return (["newly_monitored", "monitoring_stopped"] as const)
+      .filter((k) => (t[k] ?? 0) > 0)
+      .map((k) => [k, TONES[k].label]);
+  }, [summary]);
   const [ssp, setSsp] = useState("");
   const [rows, setRows] = useState<LineEvent[]>([]);
   const [truncated, setTruncated] = useState(false);
+  /** Present on a trial: the server cut the line events to the visible
+   *  publishers' and says how many there are in full. */
+  const [trial, setTrial] = useState<TrialSlice | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [page, setPage] = useState(1);
+  const paging = usePaging(setPage);
   const [open, setOpen] = useState<Set<string>>(new Set());
   // Bumps each time a list lands, so the new cards ease in as one piece.
   const [settled, setSettled] = useState(0);
@@ -187,6 +202,7 @@ export default function CrawlChanges() {
         if (cancelled) return;
         setRows(r.rows);
         setTruncated(r.truncated);
+        setTrial(r.trial);
         setOpen(new Set());
         setSettled((n) => n + 1);
         setSettledFor(linesKey);
@@ -219,8 +235,6 @@ export default function CrawlChanges() {
   const pageCount = Math.max(1, Math.ceil(total / PAGE_SIZE));
   const safePage = Math.min(page, pageCount);
   const shown = visible.slice((safePage - 1) * PAGE_SIZE, safePage * PAGE_SIZE);
-  const startRow = total === 0 ? 0 : (safePage - 1) * PAGE_SIZE + 1;
-  const endRow = Math.min(total, safePage * PAGE_SIZE);
 
   const weekLabel = summary?.finished_at
     ? formatWeek(new Date(summary.finished_at))
@@ -306,7 +320,10 @@ export default function CrawlChanges() {
   // The "showing the first N" note below stays either way.
   // A seat-line filter makes every current count a slice of the week while
   // last week's figures are the whole week, so nothing is comparable.
-  const comparable = !filter && !truncated && lines.length === 0;
+  // Not on a trial either: this week's figures are counted on the cut
+  // rows while last week's are whole, and a delta between the two would
+  // be confident and wrong.
+  const comparable = !filter && !truncated && lines.length === 0 && !trial;
   const prevCounts = useMemo<Record<EventKind, number | null>>(
     () => ({
       added: previous?.hero_diff.line_totals.added ?? null,
@@ -356,6 +373,7 @@ export default function CrawlChanges() {
 
   return (
     <PageShell>
+      {summary?.trial && <TrialBanner caps={summary.trial} summary={summary} />}
       {/* Page header. The seat-line filter sits top right, exactly where the
           overview keeps it, so it is the same control in the same place on
           both pages. */}
@@ -437,9 +455,14 @@ export default function CrawlChanges() {
                       ? "Relative to last week"
                       : bucket === "first_appearance"
                         ? "New to your report, nothing to compare against"
-                        : isScopeKind(bucket)
-                          ? "First week, nothing to compare against"
-                        : "This tab only"}
+                        : bucket === "newly_monitored"
+                          ? "Their first week on your seat lines"
+                          // Not "first week": these lines came OFF the list,
+                          // so the week they are having is their last. The
+                          // publishers still carry them.
+                          : bucket === "monitoring_stopped"
+                            ? "Came off your seat lines, still carried"
+                            : "This tab only"}
                 </div>
               </div>
               <span className="text-xs text-slate-500">
@@ -571,11 +594,27 @@ export default function CrawlChanges() {
       {/* Controls: the bucket, then a full-width SSP filter on its own row.
           The search used to be a fixed-width pill floating on the right of the
           tabs; as a wide bar spanning the row it reads as the search it is. */}
-      <div className="space-y-3">
+      <div className="space-y-3" data-tour="changes-controls">
         {/* The same plain segmented control the overview's drilldown wears.
             The per-tab counts it used to carry now live in the KPI row
             directly above, which re-scopes with the tab, so printing them
             on the control as well was the same number twice. */}
+        {/* THE NOTE SITS WITH THE TABS IT IS ABOUT, not inside the KPI
+            card. Inside the card it pushed the two headline numbers down
+            and left the pair of cards uneven, which is a layout cost paid
+            on the one week a customer most needs the numbers to read
+            normally. Here it explains the two extra tabs, an arm's length
+            from them, and disturbs nothing above it. */}
+        {!isFirstCrawl && scopeTabs.length > 0 && (
+          <p className="mb-2 flex items-start gap-1.5 text-[12px] leading-relaxed text-slate-500">
+            <Eye aria-hidden className="mt-[3px] h-3.5 w-3.5 flex-shrink-0 text-slate-400" />
+            <span>
+              Your seat lines changed since last week. Lines you started or
+              stopped watching are on their own tabs, and are not counted as
+              added or removed: the publishers carrying them did not change.
+            </span>
+          </p>
+        )}
         <div className="flex items-center gap-3">
           <Tabs value={bucket} onValueChange={(v) => setBucket(v as Bucket)}>
             <TabsList>
@@ -583,6 +622,22 @@ export default function CrawlChanges() {
               <TabsTrigger value="added">Added</TabsTrigger>
               <TabsTrigger value="removed">Removed</TabsTrigger>
               <TabsTrigger value="cert_changed">Cert changes</TabsTrigger>
+              {/* THE WATCHLIST MOVED, so the lines it moved get somewhere to
+                  be. Shown only on a week that has them -- the ordinary week
+                  keeps four tabs -- and counted from the summary rather than
+                  from the rows on screen, which are already scoped to the
+                  open tab and would make the tab that reveals them vanish
+                  the moment it was used.
+
+                  Without these, a customer who trimmed fifty lines could
+                  see the note above and then have no way to find which
+                  fifty: the rows sit in All, mixed into a week of real
+                  market movement. */}
+              {scopeTabs.map(([kind, label]) => (
+                <TabsTrigger key={kind} value={kind}>
+                  {label}
+                </TabsTrigger>
+              ))}
             </TabsList>
           </Tabs>
           {loading && rows.length > 0 && <Dots />}
@@ -625,6 +680,18 @@ export default function CrawlChanges() {
         </p>
       )}
 
+      {!showSkeleton && total > PAGE_SIZE && (
+        <Pager
+          placement="top"
+          anchorRef={paging.topRef}
+          page={safePage}
+          pageSize={PAGE_SIZE}
+          total={total}
+          onPage={paging.onPage}
+          noun="lines"
+        />
+      )}
+
       {/* Not while the skeleton is up: the previous filter's rows are
           still in state and would render underneath it. */}
       {!showSkeleton && !error && shown.length > 0 && (
@@ -655,32 +722,26 @@ export default function CrawlChanges() {
 
       {/* Counts the PREVIOUS filter's groups while a new one is in
           flight, so it stays down with the list it describes. */}
+      {!showSkeleton && !loading && (summary?.trial || trial) && (
+        <LockedTail
+          slice={trial}
+          caps={summary?.trial ?? null}
+          noun="line changes"
+          detail="change, on every publisher, week after week"
+        />
+      )}
+      {/* This pager is client-side (every served row is already here), so
+          it stays on a trial: the locked tail above counts what the server
+          kept back, the pager turns the pages of what it sent. */}
       {!showSkeleton && total > PAGE_SIZE && (
-        <div className="flex items-center justify-between border-t border-border/70 pt-4 text-xs text-slate-500">
-          <span>
-            Showing {startRow.toLocaleString()} to {endRow.toLocaleString()} of{" "}
-            {total.toLocaleString()} {total === 1 ? "line" : "lines"}
-          </span>
-          <div className="flex items-center gap-2">
-            <button
-              disabled={safePage <= 1}
-              onClick={() => setPage((p) => p - 1)}
-              className="rounded-full border border-border bg-white px-3 py-1 transition-colors hover:border-primary/30 disabled:opacity-40 disabled:hover:border-border"
-            >
-              Previous
-            </button>
-            <span className="font-mono tabular-nums">
-              {safePage} / {pageCount.toLocaleString()}
-            </span>
-            <button
-              disabled={safePage >= pageCount}
-              onClick={() => setPage((p) => p + 1)}
-              className="rounded-full border border-border bg-white px-3 py-1 transition-colors hover:border-primary/30 disabled:opacity-40 disabled:hover:border-border"
-            >
-              Next
-            </button>
-          </div>
-        </div>
+        <Pager
+          className="border-t border-border/70 pt-4"
+          page={safePage}
+          pageSize={PAGE_SIZE}
+          total={total}
+          onPage={paging.onPage}
+          noun="lines"
+        />
       )}
     </PageShell>
   );
@@ -897,9 +958,11 @@ function ChangeCard({
                     {p.developer_name ?? ""}
                   </span>
                   {/* Rendered, never the raw enum: this is a customer's
-                      screen, and "APP_ADS_TXT" is not a file name. */}
+                      screen, and "APP_ADS_TXT" is not a file name. Said as
+                      a sentence, the same one every other surface uses, so
+                      a bare filename is never left to explain itself. */}
                   <span className="ml-auto flex-shrink-0 text-[10px] text-slate-400">
-                    {fileLabel(p.file_kind)}
+                    {foundInLabel(fileLabel(p.file_kind))}
                   </span>
                 </li>
               ))}
@@ -953,7 +1016,10 @@ const TONES: Record<
   // the green of an addition would put them back in the column this whole
   // distinction exists to keep them out of.
   newly_monitored: {
-    label: "Newly monitored",
+    // Plain verbs, not system vocabulary. "Monitored" is how the operator
+    // view talks about its own machinery; a customer reading their own
+    // report is being told what THEY did to their list (David, 2026-09-26).
+    label: "Started watching",
     preposition: "on",
     expandedTitle: "Publishers carrying this line in its first week",
     disc: "bg-muted text-muted-foreground",
@@ -961,7 +1027,7 @@ const TONES: Record<
     icon: Eye,
   },
   monitoring_stopped: {
-    label: "No longer monitored",
+    label: "Stopped watching",
     preposition: "on",
     expandedTitle: "Publishers that carried this line when we last looked",
     disc: "bg-muted text-muted-foreground",
@@ -1202,18 +1268,22 @@ export function fileLabel(kind: string): string {
 async function fetchAllEvents(
   token: string,
   filters: { ssp_domain?: string; lines?: string[] },
-): Promise<{ rows: LineEvent[]; truncated: boolean }> {
+): Promise<{ rows: LineEvent[]; truncated: boolean; trial: TrialSlice | null }> {
   const acc: LineEvent[] = [];
+  // The cut, when there is one, is stamped on every page; the first
+  // page's stamp is kept and shown under the list.
+  let trial: TrialSlice | null = null;
   for (let p = 1; p <= FETCH_CAP; p += 1) {
     const r = await api.lineEvents(token, {
       ...filters,
       page: p,
       page_size: FETCH_PAGE_SIZE,
     });
+    if (p === 1) trial = r.trial ?? null;
     acc.push(...r.rows);
     if (r.rows.length < FETCH_PAGE_SIZE) {
-      return { rows: acc, truncated: false };
+      return { rows: acc, truncated: false, trial };
     }
   }
-  return { rows: acc, truncated: true };
+  return { rows: acc, truncated: true, trial };
 }
