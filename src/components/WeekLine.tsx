@@ -58,7 +58,9 @@ export function WeekLine({
     ) : null;
   }
   return (
-    <p className={cn("text-[13px] text-slate-500", className)}>
+    // data-report-ready: this line only exists once the summary has
+    // answered, so the walkthrough prompt waits for it (useReportTour).
+    <p data-report-ready className={cn("text-[13px] text-slate-500", className)}>
       Week of <span className="font-medium text-slate-700">{week}</span>
       {previousWeek ? (
         <>

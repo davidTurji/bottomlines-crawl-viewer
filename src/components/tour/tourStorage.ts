@@ -15,16 +15,16 @@
  *   the router, so a step change is a real navigation, and a reload half way
  *   through should land the reader back on the same step, not end it.
  *
- * One record per browser, not per report. A customer gets a new link every
- * week; asking them again on every one of them would be nagging. The
- * Walkthrough button in the header is always there for anyone who wants it.
+ * One record per browser, not per report. It no longer decides whether the
+ * welcome prompt shows (that is every load, by request); it remembers where
+ * a walkthrough got to, so a reload mid-tour resumes it.
  */
 
 /** Versioned so a future incompatible shape can be ignored rather than parsed. */
 const STORAGE_KEY = "pf_report_walkthrough_v1";
 
 export type TourStatus =
-  /** Never offered on this browser. The only status that shows the welcome prompt. */
+  /** Never opened on this browser. */
   | "unseen"
   /** Opened and left part-way through. */
   | "in-progress"

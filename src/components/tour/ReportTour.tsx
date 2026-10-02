@@ -134,13 +134,12 @@ export function ReportTour() {
 /**
  * The first-visit question: would you like to be shown around?
  *
- * Asked once per browser, only on the overview, only once the report has
- * actually opened (see useReportTour). Either answer is remembered: yes runs
- * the walkthrough, no never asks again. The header button stays for both.
+ * Asked on every load of any report page, once the report has actually
+ * opened (see useReportTour). Yes runs the walkthrough; no, the X and Esc
+ * close the card until the next load. The header button is always there.
  *
  * The two answers are the same size and weight (David, 2026-10-02): green
- * for yes, white for no. The X and Esc are a no, so a reader who just wants
- * the card gone is never asked again either.
+ * for yes, white for no.
  */
 function WelcomePrompt({ onAnswer }: { onAnswer: (yes: boolean) => void }) {
   // Focus goes to the card, not to a button: a focused button wears a ring,

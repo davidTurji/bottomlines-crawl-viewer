@@ -13,7 +13,6 @@
 
 import { createContext, useCallback, useContext, useEffect, useMemo, useState } from "react";
 
-import { useReportScope } from "@/lib/reportScope";
 import {
   loadTourProgress,
   saveTourProgress,
@@ -43,16 +42,16 @@ interface ReportTourContextValue {
 const ReportTourContext = createContext<ReportTourContextValue | undefined>(undefined);
 
 /**
- * The element whose arrival means the report really opened. It is the
- * overview's header, which only renders once the summary has loaded.
+ * The elements whose arrival means the report really opened: the overview's
+ * header, and the week line on every other page. Both only render once the
+ * summary has loaded.
  *
- * Waiting for it rather than for a timer is what keeps the prompt off the
+ * Waiting for them rather than for a timer is what keeps the prompt off the
  * sign-in card: the gate in front of the report is optimistic, so the shell
  * renders first and only swaps to the password card when the first data call
- * answers 401. A timer would race that answer; the header never renders
- * behind a 401 at all.
+ * answers 401. A timer would race that answer; neither renders behind a 401.
  */
-const READY_ANCHOR = '[data-tour="overview-header"]';
+const READY_ANCHOR = '[data-tour="overview-header"], [data-report-ready]';
 
 /** How often to look for it, and for how long, before giving up quietly. */
 const READY_POLL_MS = 250;
@@ -62,7 +61,6 @@ const READY_ATTEMPTS = 240;
 const PROMPT_DELAY_MS = 700;
 
 export function ReportTourProvider({ children }: { children: React.ReactNode }) {
-  const { basePath } = useReportScope();
   const [progress, setProgress] = useState<TourProgress>(loadTourProgress);
   const [prompting, setPrompting] = useState(false);
 
@@ -106,16 +104,17 @@ export function ReportTourProvider({ children }: { children: React.ReactNode }) 
   );
 
   /**
-   * First visit on this browser: offer the walkthrough, once.
+   * Offer the walkthrough on EVERY load, on every report page (David,
+   * 2026-10-02: "on each load show the walkthrough popup, on each refresh").
+   * It used to ask once per browser and only on the overview; a reader who
+   * had answered once never saw it again.
    *
-   * Only on the overview. Someone who followed a link straight to Changes
-   * asked a specific question, and a card asking them to take a tour first is
-   * in the way of the answer. The header button is there for them anyway.
+   * The one exception is a walkthrough already in progress: a reload in the
+   * middle of it resumes the tour, and asking whether they want one would be
+   * asking a question they are in the middle of answering.
    */
   useEffect(() => {
-    if (progress.status !== "unseen") return;
-    const here = window.location.pathname.replace(/\/+$/, "");
-    if (here !== basePath.replace(/\/+$/, "")) return;
+    if (progress.open) return;
     let attempts = 0;
     let delay = 0;
     const timer = window.setInterval(() => {
