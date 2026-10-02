@@ -92,7 +92,7 @@ export function ReportTour() {
   const location = useLocation();
 
   // Read as soon as the prompt shows, so a "yes" opens straight onto step one.
-  const features = useReportFeatures(open || prompting);
+  const features = useReportFeatures(open || prompting !== null);
   const steps = useMemo(() => (features ? reportTourSteps(features) : []), [features]);
 
   // A saved step id that no longer exists (a step this report does not have)
@@ -183,7 +183,7 @@ export function ReportTour() {
     else skip();
   }, [index, steps.length, complete, skip]);
 
-  if (prompting) return <WelcomePrompt onAnswer={answerPrompt} />;
+  if (prompting) return <WelcomePrompt mode={prompting} onAnswer={answerPrompt} />;
   if (!open || !step) return null;
 
   return (
@@ -212,8 +212,18 @@ export function ReportTour() {
  *
  * The two answers are the same size and weight (David, 2026-10-02): green
  * for yes, white for no.
+ *
+ * The How this works button opens the same card as an "intro": nothing to
+ * decide, the reader already asked, so it says what is about to happen and
+ * has one Continue button. The X and Esc still close it.
  */
-function WelcomePrompt({ onAnswer }: { onAnswer: (yes: boolean) => void }) {
+function WelcomePrompt({
+  mode,
+  onAnswer,
+}: {
+  mode: "offer" | "intro";
+  onAnswer: (yes: boolean) => void;
+}) {
   // Focus goes to the card, not to a button: a focused button wears a ring,
   // and the two answers must look exactly alike until one is chosen.
   const cardRef = useRef<HTMLDivElement>(null);
@@ -237,7 +247,7 @@ function WelcomePrompt({ onAnswer }: { onAnswer: (yes: boolean) => void }) {
       <div
         ref={cardRef}
         tabIndex={-1}
-        className="relative w-full max-w-[21rem] rounded-3xl border border-white/70 bg-white/95 p-5 shadow-[0_24px_60px_-12px_rgba(15,23,42,0.35)] outline-none animate-tour-pop motion-reduce:animate-none"
+        className="relative w-full max-w-[21rem] rounded-3xl border border-slate-200/70 bg-white p-5 shadow-[0_24px_60px_-12px_rgba(15,23,42,0.35)] outline-none animate-tour-pop motion-reduce:animate-none"
       >
         <button
           type="button"
@@ -254,12 +264,22 @@ function WelcomePrompt({ onAnswer }: { onAnswer: (yes: boolean) => void }) {
           id="walkthrough-prompt-title"
           className="mt-3 font-display text-base font-semibold tracking-tight text-slate-900"
         >
-          Want a quick walkthrough?
+          {mode === "intro" ? "We\u2019ll walk you through it" : "Want a quick walkthrough?"}
         </h2>
         <p className="mt-1 text-[13px] leading-snug text-slate-500">
           A <strong className="font-semibold text-slate-800">1 minute</strong> tour
           of your report.
         </p>
+        {mode === "intro" ? (
+          <button
+            type="button"
+            onClick={() => onAnswer(true)}
+            className="mt-4 inline-flex h-10 w-full items-center justify-center rounded-full border border-transparent bg-gradient-to-b from-[hsl(152_50%_32%)] to-primary px-3 text-[13px] font-semibold text-primary-foreground shadow-md shadow-primary/25 transition-all duration-200 hover:brightness-110 active:scale-[0.98] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
+          >
+            Continue
+          </button>
+        ) : (
+        <>
         {/* Two equal columns on every screen, so the answers are exactly the
             same size: green for yes, white for no. */}
         <div className="mt-4 grid grid-cols-2 gap-2">
@@ -282,6 +302,8 @@ function WelcomePrompt({ onAnswer }: { onAnswer: (yes: boolean) => void }) {
           Replay anytime from{" "}
           <strong className="font-semibold text-slate-500">How this works</strong>.
         </p>
+        </>
+        )}
       </div>
     </div>,
     document.body,
