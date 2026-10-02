@@ -378,7 +378,7 @@ export default function CrawlChanges() {
           overview keeps it, so it is the same control in the same place on
           both pages. */}
       <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
-        <div className="min-w-0">
+        <div className="min-w-0" data-tour="changes-header">
           <h1 className="text-xl font-bold leading-tight tracking-tight text-slate-900 sm:text-2xl">
             Changes
           </h1>

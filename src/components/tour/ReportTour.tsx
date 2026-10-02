@@ -34,14 +34,42 @@ const PAGE_LABEL: Record<ReportPage, string> = {
   declarations: "Declarations",
 };
 
+/** Each page's title block, where the "you're now on" beat points. */
+const PAGE_HEADER: Record<ReportPage, string> = {
+  "": "overview-header",
+  changes: "changes-header",
+  discovery: "discovery-header",
+  declarations: "declarations-header",
+};
+
 /**
- * The page change, in two beats. The highlight glides to the page's link in
- * the rail (the glide is 520ms), the page switches at NAV_MS with the link
- * still lit so the reader watches it become the active one, and at
- * TRANSIT_MS the highlight moves on to the step on the new page.
+ * THE PAGE CHANGE, IN THREE BEATS, about three and a half seconds (David,
+ * 2026-10-02: "a longer move, three or four seconds, it's not clear that
+ * it's moving between pages"). One bar fills across all of it.
+ *
+ *   0          the highlight glides to the next page's link in the rail
+ *              (the menu button on a phone): "Next page: Overview -> Changes"
+ *   NAV_MS     the page switches, with the link still lit, so the reader
+ *              watches it become the active page, like a click
+ *   ARRIVE_MS  the highlight glides to the new page's title: "You're now on
+ *              Changes"
+ *   DONE_MS    the walkthrough carries on with the step on that page
+ *
+ * The three numbers are the whole tuning surface.
  */
-const NAV_MS = 650;
-const TRANSIT_MS = 1150;
+const NAV_MS = 1400;
+const ARRIVE_MS = 2000;
+const DONE_MS = 3400;
+
+export type Transit = {
+  /** The step being travelled to: the bar runs once per move. */
+  id: string;
+  phase: "leaving" | "arrived";
+  anchor: string;
+  from: string;
+  to: string;
+  durationMs: number;
+};
 
 /** Read before the first card, so the step list never changes under the reader. */
 function useReportFeatures(enabled: boolean): ReportFeatures | null {
@@ -99,8 +127,9 @@ export function ReportTour() {
    *
    * A step on the page already open just shows. A step on another page first
    * points at that page's link in the rail (on a phone, where the rail is
-   * hidden, at the menu button) with a "Moving to" card, then navigates, then
-   * hands over to the step. See NAV_MS and TRANSIT_MS.
+   * hidden, at the menu button), then navigates, then points at the new
+   * page's title, then hands over to the step. See NAV_MS, ARRIVE_MS and
+   * DONE_MS.
    *
    * Keyed on the step, not on the location: navigating whenever the two
    * disagree would drag a reader back the moment they followed a link on the
@@ -113,7 +142,7 @@ export function ReportTour() {
   // the page switched, cutting the "Moving to" card short.
   const navigateRef = useRef(navigate);
   navigateRef.current = navigate;
-  const [transit, setTransit] = useState<{ anchor: string; title: string; durationMs: number } | null>(null);
+  const [transit, setTransit] = useState<Transit | null>(null);
   useEffect(() => {
     if (!open || !step) {
       setTransit(null);
@@ -129,16 +158,26 @@ export function ReportTour() {
     // The rail is a sheet on narrow screens and its links are not on screen,
     // so point at the button that opens it.
     const anchor = linkEl && linkEl.getClientRects().length > 0 ? link : "nav-trigger";
-    setTransit({ anchor, title: PAGE_LABEL[step.page], durationMs: TRANSIT_MS });
+    // Where the reader is now, named the way the rail names it.
+    const here = locRef.current.pathname.replace(/\/+$/, "");
+    const fromPage = (here.startsWith(basePath) ? here.slice(basePath.length) : "").replace(/^\//, "");
+    const from = PAGE_LABEL[fromPage as ReportPage] ?? "This page";
+    const to = PAGE_LABEL[step.page];
+    setTransit({ id: step.id, phase: "leaving", anchor, from, to, durationMs: DONE_MS });
     const go = window.setTimeout(
       () => navigateRef.current({ pathname: target, search: locRef.current.search }),
       NAV_MS,
     );
-    const done = window.setTimeout(() => setTransit(null), TRANSIT_MS);
+    const arrive = window.setTimeout(
+      () => setTransit((t) => t && { ...t, phase: "arrived", anchor: PAGE_HEADER[step.page] }),
+      ARRIVE_MS,
+    );
+    const done = window.setTimeout(() => setTransit(null), DONE_MS);
     // Cleared if the reader moves on, or closes, before the change lands:
     // the page then stays where it is.
     return () => {
       window.clearTimeout(go);
+      window.clearTimeout(arrive);
       window.clearTimeout(done);
     };
   }, [open, step?.id, step?.page, basePath]);

@@ -208,7 +208,7 @@ export default function CrawlDiscovered() {
     <PageShell>
       {summary?.trial && <TrialBanner caps={summary.trial} summary={summary} />}
       {/* Page header */}
-      <div className="min-w-0">
+      <div className="min-w-0" data-tour="discovery-header">
         <h1 className="text-xl font-bold leading-tight tracking-tight text-slate-900 sm:text-2xl">
           Discovery
         </h1>

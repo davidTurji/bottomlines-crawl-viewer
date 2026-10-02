@@ -38,7 +38,7 @@
 
 import React, { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
-import { ArrowRight, ChevronLeft, ChevronRight, X } from "lucide-react";
+import { ArrowRight, Check, ChevronLeft, ChevronRight, X } from "lucide-react";
 import {
   dockedCard,
   EDGE,
@@ -121,7 +121,16 @@ export interface TourOverlayProps {
    * `durationMs`. The caller owns the navigation and clears this once the new
    * page is on screen.
    */
-  transit?: { anchor: string; title: string; durationMs: number } | null;
+  transit?: {
+    /** One id per move, so the bar runs once across both beats. */
+    id: string;
+    /** On the way (pointing at the rail), or arrived (at the new page's title). */
+    phase: "leaving" | "arrived";
+    anchor: string;
+    from: string;
+    to: string;
+    durationMs: number;
+  } | null;
 }
 
 /** Spotlight padding around the anchored element. Viewport margins and the
@@ -237,7 +246,7 @@ export function TourOverlay({
   /** The anchor this viewport should actually point at. */
   const activeAnchor = transit?.anchor ?? ((narrow && step?.mobileAnchor) || step?.anchor);
   /** A page change points at a rail link, so the card goes beside it. */
-  const cardSide = transit ? "right" : step?.cardSide;
+  const cardSide = transit ? (transit.phase === "leaving" ? "right" : undefined) : step?.cardSide;
 
   /**
    * Bring the anchored element into view when the step changes.
@@ -605,23 +614,41 @@ export function TourOverlay({
         )}
       >
         {transit ? (
-          /* THE PAGE CHANGE (David, 2026-10-02: "it is not clear it is moving
-             pages"). The highlight sits on the page's link in the rail, the
-             card says where it is going, and the bar fills while the page
-             switches underneath, so the move reads as a move. */
-          <div
-            key={`transit-${transit.title}`}
-            className="animate-tour-card-in motion-reduce:animate-none"
-          >
-            <div className="flex items-center gap-3">
-              <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-primary/10 text-primary">
-                <ArrowRight className="h-4 w-4 animate-tour-arrow motion-reduce:animate-none" />
-              </span>
+          /* THE PAGE CHANGE (David, 2026-10-02: "make it more clear it's
+             moving between pages"). Two beats on one card: on the way, the
+             highlight sits on the next page's link and the card reads
+             "Overview -> Changes"; on arrival it sits on the new page's title
+             and reads "You're now on Changes". The words cross-fade between
+             the beats; the bar under them runs once across the whole move. */
+          <div>
+            <div
+              key={`${transit.id}-${transit.phase}`}
+              className="flex items-center gap-3 animate-tour-card-in motion-reduce:animate-none"
+            >
+              {transit.phase === "leaving" ? (
+                <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-primary/10 text-primary">
+                  <ArrowRight className="h-4 w-4 animate-tour-arrow motion-reduce:animate-none" />
+                </span>
+              ) : (
+                <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-gradient-to-b from-[hsl(152_50%_32%)] to-primary text-white shadow-sm shadow-primary/30">
+                  <Check className="h-4 w-4" />
+                </span>
+              )}
               <div className="min-w-0 flex-1">
-                <p className="text-[11px] font-semibold text-primary">Moving to</p>
-                <h2 className="text-[15px] font-semibold leading-snug text-slate-900">
-                  {transit.title}
-                </h2>
+                <p className="text-[11px] font-semibold text-primary">
+                  {transit.phase === "leaving" ? "Next page" : "You’re now on"}
+                </p>
+                {transit.phase === "leaving" ? (
+                  <h2 className="flex items-center gap-1.5 text-[15px] font-semibold leading-snug">
+                    <span className="font-medium text-slate-400">{transit.from}</span>
+                    <ArrowRight className="h-3.5 w-3.5 shrink-0 text-slate-400" />
+                    <span className="text-slate-900">{transit.to}</span>
+                  </h2>
+                ) : (
+                  <h2 className="text-[15px] font-semibold leading-snug text-slate-900">
+                    {transit.to}
+                  </h2>
+                )}
               </div>
               <button
                 type="button"
@@ -632,10 +659,10 @@ export function TourOverlay({
                 <X className="h-3.5 w-3.5" />
               </button>
             </div>
-            <div className="mt-3 h-1 overflow-hidden rounded-full bg-slate-100">
+            <div key={`bar-${transit.id}`} className="mt-3 h-1 overflow-hidden rounded-full bg-slate-100">
               <div
                 className="h-full origin-left rounded-full bg-primary animate-tour-progress motion-reduce:animate-none"
-                style={{ animationDuration: `${transit.durationMs}ms` }}
+                style={{ animationDuration: `${transit.durationMs}ms`, animationTimingFunction: "linear" }}
               />
             </div>
           </div>
