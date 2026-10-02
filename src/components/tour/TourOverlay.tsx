@@ -115,13 +115,13 @@ export interface TourOverlayProps {
   /** Label for the primary button on the last step. */
   doneLabel?: string;
   /**
-   * A page change in progress. While set, the highlight points at `anchor`
-   * (the page's link in the rail, or the menu button on a phone) and the card
-   * says where the walkthrough is going, with a bar that fills over
-   * `durationMs`. The caller owns the navigation and clears this once the new
-   * page is on screen.
+   * A page move in progress (David, 2026-10-02: "watch the page slide").
+   * While set, the walkthrough steps aside: the backdrop and the card fade
+   * out so the page is in plain view, and the frame waits on `anchor` (the
+   * next page's link in the rail, or the menu button on a phone) while the
+   * caller slides the page across. Cleared, everything returns.
    */
-  transit?: { anchor: string; title: string; durationMs: number } | null;
+  transit?: { anchor: string; to: string } | null;
 }
 
 /** Spotlight padding around the anchored element. Viewport margins and the
@@ -237,7 +237,10 @@ export function TourOverlay({
   /** The anchor this viewport should actually point at. */
   const activeAnchor = transit?.anchor ?? ((narrow && step?.mobileAnchor) || step?.anchor);
   /** A page change points at a rail link, so the card goes beside it. */
-  const cardSide = transit ? "right" : step?.cardSide;
+  const cardSide = transit ? undefined : step?.cardSide;
+  /** Read by the paint loop, which must not restart when a move begins. */
+  const transitRef = useRef(false);
+  transitRef.current = !!transit;
 
   /**
    * Bring the anchored element into view when the step changes.
@@ -325,6 +328,8 @@ export function TourOverlay({
   });
   const dimRef = useRef<HTMLDivElement>(null);
   const frameRef = useRef<HTMLDivElement>(null);
+  /** The "Moving to <page>" label pinned to the frame during a page move. */
+  const moveLabelRef = useRef<HTMLDivElement>(null);
   /** Start a glide from wherever the highlight and card are right now. */
   const kickGlide = useCallback(() => {
     glideRef.current = { box: shownRef.current, card: cardPosRef.current, start: performance.now() };
@@ -411,11 +416,45 @@ export function TourOverlay({
           frame.style.opacity = "0";
         }
       }
+      // The page-move label. On a wide screen it rides with the frame,
+      // beside the rail link it names. On a phone it docks at the bottom,
+      // where the walkthrough card always sits, rather than over the page's
+      // title: the reader's eye is already there.
+      const moveLabel = moveLabelRef.current;
+      if (moveLabel) {
+        if (box || narrowNow) {
+          const lw = moveLabel.offsetWidth;
+          const lh = moveLabel.offsetHeight;
+          let lx: number;
+          let ly: number;
+          if (narrowNow || !box) {
+            lx = (viewport.width - lw) / 2;
+            ly = viewport.height - lh - 20;
+          } else {
+            lx = box.left + box.width + 14;
+            ly = box.top + box.height / 2 - lh / 2;
+          }
+          lx = Math.max(EDGE, Math.min(lx, viewport.width - lw - EDGE));
+          ly = Math.max(EDGE, Math.min(ly, viewport.height - lh - EDGE));
+          moveLabel.style.transform = `translate3d(${lx}px, ${ly}px, 0)`;
+          moveLabel.style.opacity = "1";
+        } else {
+          moveLabel.style.opacity = "0";
+        }
+      }
       const cardEl = cardRef.current;
       if (cardEl) {
-        cardEl.style.transform = `translate3d(${card.left}px, ${card.top}px, 0)`;
-        cardEl.style.width = `${cardTarget.width}px`;
-        cardEl.style.opacity = "1";
+        if (transitRef.current) {
+          // Stepped aside for a page move. Forgetting the position makes the
+          // card land on its new spot when it returns, rather than flying in
+          // from wherever it was on the last page.
+          cardEl.style.opacity = "0";
+          cardPosRef.current = null;
+        } else {
+          cardEl.style.transform = `translate3d(${card.left}px, ${card.top}px, 0)`;
+          cardEl.style.width = `${cardTarget.width}px`;
+          cardEl.style.opacity = "1";
+        }
       }
     };
     raf = requestAnimationFrame(tick);
@@ -563,6 +602,10 @@ export function TourOverlay({
                 background: "rgba(15, 23, 42, 0.5)",
                 backdropFilter: "blur(3px)",
                 WebkitBackdropFilter: "blur(3px)",
+                // Lifted for a page move, so the page sliding across is in
+                // plain view rather than behind a dark, blurred sheet.
+                opacity: transit ? 0 : 1,
+                transition: "opacity 350ms ease",
               }}
             />
           )}
@@ -572,17 +615,60 @@ export function TourOverlay({
           <div
             ref={frameRef}
             aria-hidden
-            className="pointer-events-none fixed left-0 top-0 rounded-2xl"
+            className="pointer-events-none fixed left-0 top-0 rounded-2xl transition-shadow duration-300"
             style={{
               opacity: 0,
               willChange: "transform",
-              boxShadow: inert
+              boxShadow: transit
+                ? // No backdrop during a page move, so the frame alone marks
+                  // the page being opened.
+                  "0 0 0 2px rgba(52, 168, 110, 0.95), 0 0 0 6px rgba(52, 168, 110, 0.18)"
+                : inert
                 ? "0 0 0 1.5px rgba(255, 255, 255, 0.85), 0 0 0 4px rgba(52, 168, 110, 0.12)"
                 : // No backdrop to separate it from the page, so the frame
                   // carries the whole job of saying "here".
                   "0 0 0 3px hsl(var(--primary)), 0 0 0 7px rgba(21, 81, 53, 0.12), 0 10px 34px rgba(15, 23, 42, 0.14)",
             }}
           />
+          {/* THE PAGE-MOVE LABEL (David, 2026-10-02: "mark the page, and
+              say moving page"). The slide shows the move; this says it, in
+              words, pinned to the page being opened, for the whole move.
+              Placed by the paint loop, so it travels with the frame. */}
+          {transit && (
+            /* Outer: placed by the paint loop. Inner: the pill, which eases
+               in on its own (toward its link on a wide screen, up from the
+               edge on a phone), so placement and entrance never fight over
+               the same transform. */
+            <div
+              ref={moveLabelRef}
+              role="status"
+              className="pointer-events-none fixed left-0 top-0 transition-opacity duration-300"
+              style={{ opacity: 0, willChange: "transform" }}
+            >
+              <div
+                className={cn(
+                  "relative inline-flex items-center gap-2.5 whitespace-nowrap rounded-full border border-slate-200/80 bg-white py-1.5 pl-1.5 pr-4 text-[13px] text-slate-500 shadow-[0_14px_36px_-10px_rgba(15,23,42,0.4)] motion-reduce:animate-none",
+                  narrow ? "animate-tour-label-up" : "animate-tour-label-in",
+                )}
+              >
+                {/* The pointer, tooltip style, toward the rail link it
+                    names. A phone has no link on screen to point at. */}
+                {!narrow && (
+                  <span
+                    aria-hidden
+                    className="absolute -left-[5px] top-1/2 -mt-[5px] h-2.5 w-2.5 rotate-45 border-b border-l border-slate-200/80 bg-white"
+                  />
+                )}
+                <span className="flex h-7 w-7 items-center justify-center rounded-full bg-gradient-to-b from-[hsl(152_50%_32%)] to-primary text-white shadow-sm shadow-primary/30">
+                  <ArrowRight className="h-3.5 w-3.5" />
+                </span>
+                <span>
+                  Moving to{" "}
+                  <strong className="font-semibold text-slate-900">{transit.to}</strong>
+                </span>
+              </div>
+            </div>
+          )}
         </>
       )}
 
@@ -604,43 +690,6 @@ export function TourOverlay({
             "fixed inset-x-3 bottom-3 max-h-[70vh] sm:inset-x-auto sm:bottom-6 sm:right-6 sm:w-[24rem]",
         )}
       >
-        {transit ? (
-          /* THE PAGE CHANGE (David, 2026-10-02: "it is not clear it is moving
-             pages"). The highlight sits on the page's link in the rail, the
-             card says where it is going, and the bar fills while the page
-             switches underneath, so the move reads as a move. */
-          <div
-            key={`transit-${transit.title}`}
-            className="animate-tour-card-in motion-reduce:animate-none"
-          >
-            <div className="flex items-center gap-3">
-              <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-primary/10 text-primary">
-                <ArrowRight className="h-4 w-4 animate-tour-arrow motion-reduce:animate-none" />
-              </span>
-              <div className="min-w-0 flex-1">
-                <p className="text-[11px] font-semibold text-primary">Moving to</p>
-                <h2 className="text-[15px] font-semibold leading-snug text-slate-900">
-                  {transit.title}
-                </h2>
-              </div>
-              <button
-                type="button"
-                onClick={onClose}
-                aria-label={`Close ${ariaLabel}`}
-                className="-mr-1.5 flex h-7 w-7 shrink-0 items-center justify-center self-start rounded-full text-slate-400 transition-colors hover:bg-slate-100 hover:text-slate-700"
-              >
-                <X className="h-3.5 w-3.5" />
-              </button>
-            </div>
-            <div className="mt-3 h-1 overflow-hidden rounded-full bg-slate-100">
-              <div
-                className="h-full origin-left rounded-full bg-primary animate-tour-progress motion-reduce:animate-none"
-                style={{ animationDuration: `${transit.durationMs}ms` }}
-              />
-            </div>
-          </div>
-        ) : (
-        <>
         {/* Keyed on the step, so each step's words ease in rather than
             swapping under the reader while the card glides to its new spot. */}
         <div key={step.id} className="flex min-h-0 flex-1 flex-col animate-tour-card-in motion-reduce:animate-none">
@@ -694,8 +743,6 @@ export function TourOverlay({
             indicator still has to live somewhere, so it drops to its own row
             rather than competing with the control for the same slot. */}
         {footer && <div className="mt-3 border-t border-border pt-3">{progress}</div>}
-        </>
-        )}
       </div>
     </div>,
     document.body,

@@ -105,6 +105,9 @@ export function reportTourSteps(f: ReportFeatures): ReportTourStep[] {
       id: "matched-list",
       page: "",
       anchor: "overview-list",
+      // The whole list is taller than a phone, so a highlight of it covers
+      // the screen and points at nothing. On a phone, its heading.
+      mobileAnchor: "overview-list-head",
       eyebrow: "Overview",
       title: "Every match",
       body: (

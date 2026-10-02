@@ -4,9 +4,10 @@
  *
  * A labelled pill rather than the console's bare help icon: on a report a
  * customer opens once a week, a question mark is easy to miss, and the words
- * say what it does (David chose the label, 2026-10-02). Always restarts
- * from the top; the walkthrough is short enough that resuming part-way is
- * not worth a second choice.
+ * say what it does (David chose the label, 2026-10-02). It opens the
+ * walkthrough's pop-up with a single Continue, then runs the tour from the
+ * top; the walkthrough is short enough that resuming part-way is not worth
+ * a second choice.
  *
  * Made to be pressed (David, 2026-10-02: "more tempting"): a green-tinted
  * pill with the icon in a solid green disc and a soft green glow, a lift on
@@ -18,12 +19,12 @@ import { Compass } from "lucide-react";
 import { useReportTour } from "./useReportTour";
 
 export function WalkthroughButton() {
-  const { start } = useReportTour();
+  const { introduce } = useReportTour();
   return (
     <button
       type="button"
       data-tour="walkthrough-button"
-      onClick={() => start({ restart: true })}
+      onClick={introduce}
       className="group inline-flex h-9 items-center gap-2 rounded-full border border-primary/20 bg-gradient-to-b from-white to-[hsl(152_45%_95%)] py-1 pl-1 pr-3.5 text-[13px] font-semibold text-primary shadow-sm transition-all duration-200 hover:-translate-y-px hover:border-primary/40 hover:shadow-md hover:shadow-primary/10 active:translate-y-0 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50"
       title="A short tour of this report, page by page"
     >

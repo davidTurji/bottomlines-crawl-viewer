@@ -423,7 +423,7 @@ export default function CrawlReport() {
           tinted expansion. Publishers are green, apps are pink. */}
       {matchedView === "publishers" ? (
         <div data-tour="overview-list">
-          <div className="mb-3">
+          <div className="mb-3" data-tour="overview-list-head">
             <h2 className="font-display text-base font-semibold tracking-tight text-slate-900">
               Matched publishers
             </h2>
@@ -436,7 +436,7 @@ export default function CrawlReport() {
         </div>
       ) : (
         <div data-tour="overview-list">
-          <div className="mb-3">
+          <div className="mb-3" data-tour="overview-list-head">
             <h2 className="font-display text-base font-semibold tracking-tight text-slate-900">
               Matched apps
             </h2>
