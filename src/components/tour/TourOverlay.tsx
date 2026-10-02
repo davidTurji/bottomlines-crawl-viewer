@@ -120,8 +120,21 @@ export interface TourOverlayProps {
  *  card gap live in `tourPlacement`, which owns the geometry. */
 const SPOT_PAD = 8;
 
-/** Extra padding the cutout starts at before settling, the "zoom in" travel. */
-const SETTLE_PAD = 22;
+/**
+ * One easing for everything that moves between steps (the highlight, the
+ * blur around it, the card), so they travel together as one piece instead
+ * of three things arriving at slightly different moments. Fast out, long
+ * soft landing.
+ */
+const GLIDE = "duration-500 ease-[cubic-bezier(0.22,1,0.36,1)] motion-reduce:transition-none";
+
+/** How long a step change keeps the glide transitions on. A little longer
+ *  than the glide itself, so it always finishes on the transition. */
+const GLIDE_MS = 650;
+
+/** How long the highlight holds its last spot while the next step's page
+ *  loads, before giving up on the anchor and centring the card. */
+const HOLD_MS = 1500;
 
 /** Anchor polling while a page loads its data: 50 x 100ms = 5s of grace. */
 const SCROLL_POLL_MS = 100;
@@ -131,8 +144,8 @@ const SCROLL_ATTEMPTS = 50;
 const MAX_DOTS = 12;
 
 /** Card width, and the height assumed for one frame before it is measured. */
-const CARD_W = 384;
-const CARD_H_GUESS = 210;
+const CARD_W = 320;
+const CARD_H_GUESS = 140;
 
 /**
  * The element that actually scrolls `el`, which is not always the window.
@@ -250,22 +263,29 @@ export function TourOverlay({
   }, [open, index, activeAnchor, revealAnchor]);
 
   /**
-   * Drives the settle-in animation: each step starts with the cutout slightly
-   * oversized and relaxes to the measured box, which reads as the highlight
-   * closing in on the component rather than teleporting onto it. Purely
-   * decorative, and skipped outright under `prefers-reduced-motion`.
+   * Transitions are on only while a step changes (David, 2026-10-02: "smooth
+   * animation, no blipping"). Between steps the highlight, the blur and the
+   * card glide together to the new spot. The rest of the time they track the
+   * page exactly: with a 500ms transition always on, every frame of a scroll
+   * restarted it and the highlight trailed the component it was framing.
+   *
+   * This replaced a per-step "settle", which opened each step with the
+   * cutout oversized and the dimming lighter, then snapped both to rest: a
+   * pulse on every Next, read as blinking.
    */
-  const [settled, setSettled] = useState(false);
+  const [gliding, setGliding] = useState(false);
+  const glideTimer = useRef(0);
+  /** Turn the glide on for one GLIDE_MS window, restarting it if running. */
+  const kickGlide = useCallback(() => {
+    setGliding(true);
+    window.clearTimeout(glideTimer.current);
+    glideTimer.current = window.setTimeout(() => setGliding(false), GLIDE_MS);
+  }, []);
   useEffect(() => {
-    if (!open || !spotlight) return;
-    if (window.matchMedia?.("(prefers-reduced-motion: reduce)").matches) {
-      setSettled(true);
-      return;
-    }
-    setSettled(false);
-    const raf = requestAnimationFrame(() => setSettled(true));
-    return () => cancelAnimationFrame(raf);
-  }, [open, index, spotlight]);
+    if (open) kickGlide();
+    return () => window.clearTimeout(glideTimer.current);
+  }, [open, index, kickGlide]);
+  const glide = gliding ? cn("transition-all", GLIDE) : "";
 
   /** Track the anchor's rect every frame so the spotlight follows scroll,
    *  resizes, and the smooth scrollIntoView above, only re-rendering when
@@ -274,11 +294,29 @@ export function TourOverlay({
   useEffect(() => {
     if (!open || !spotlight) return;
     let raf = 0;
+    // HOLD THE LAST SPOT across a page change. The next step's anchor does not
+    // exist until its page has loaded, and dropping the rect meant the hole
+    // closed (the whole screen flashed dark) and then reopened somewhere else.
+    // Held, the highlight stays put for that moment and then glides over.
+    let missingSince = 0;
     const tick = () => {
       const el = activeAnchor
         ? document.querySelector<HTMLElement>(`[data-tour="${activeAnchor}"]`)
         : null;
-      const r = el ? el.getBoundingClientRect() : null;
+      let r = el ? el.getBoundingClientRect() : null;
+      if (r) {
+        // Found after a wait (the page took a moment to load): the step's
+        // own glide window may be over, so open another one for this move.
+        if (missingSince) kickGlide();
+        missingSince = 0;
+      } else if (activeAnchor) {
+        missingSince ||= performance.now();
+        if (performance.now() - missingSince < HOLD_MS) {
+          raf = requestAnimationFrame(tick);
+          return;
+        }
+      }
+      if (r && r.width === 0 && r.height === 0) r = null;
       setRect((prev) => {
         if (!prev && !r) return prev;
         if (
@@ -297,7 +335,7 @@ export function TourOverlay({
     };
     raf = requestAnimationFrame(tick);
     return () => cancelAnimationFrame(raf);
-  }, [open, index, activeAnchor, spotlight]);
+  }, [open, index, activeAnchor, spotlight, kickGlide]);
 
   /**
    * Measure the card rather than assume it.
@@ -309,9 +347,11 @@ export function TourOverlay({
    */
   const [cardSize, setCardSize] = useState({ width: CARD_W, height: CARD_H_GUESS });
   const [measured, setMeasured] = useState(false);
+  // Hidden for the first measurement only. Resetting this on every step
+  // faded the card out and back in on each Next, which read as a blink.
   useEffect(() => {
-    setMeasured(false);
-  }, [index, open]);
+    if (!open) setMeasured(false);
+  }, [open]);
   useLayoutEffect(() => {
     const el = cardRef.current;
     if (!open || !el) return;
@@ -375,7 +415,7 @@ export function TourOverlay({
   // The highlight box, padded and clamped to the viewport. Everything below
   // positions against this rather than the raw rect, so an anchor that runs
   // off the bottom of the screen still yields a box with on-screen edges.
-  const pad = settled ? SPOT_PAD : SETTLE_PAD;
+  const pad = SPOT_PAD;
   const viewport = { width: window.innerWidth, height: window.innerHeight };
   const spot: Box | null = rect ? highlightBox(rect, pad, viewport) : null;
 
@@ -417,22 +457,26 @@ export function TourOverlay({
    * the page inert and leave the component it is pointing at clickable, so a
    * step can say "press Send" and mean it.
    */
+  // The panes also carry the light blur (David, 2026-10-02: "blur the
+  // screen behind it, lightly"): blurring everything except the hole keeps
+  // the highlighted component sharp while the rest of the page softens.
+  const pane = cn("absolute backdrop-blur-[3px]", glide);
   const catcher =
     inert && spot ? (
       <>
-        <div className="absolute inset-x-0 top-0" style={{ height: Math.max(0, spot.top) }} />
-        <div className="absolute inset-x-0 bottom-0" style={{ top: spot.top + spot.height }} />
+        <div className={cn(pane, "inset-x-0 top-0")} style={{ height: Math.max(0, spot.top) }} />
+        <div className={cn(pane, "inset-x-0 bottom-0")} style={{ top: spot.top + spot.height }} />
         <div
-          className="absolute left-0"
+          className={cn(pane, "left-0")}
           style={{ top: spot.top, height: spot.height, width: Math.max(0, spot.left) }}
         />
         <div
-          className="absolute right-0"
+          className={cn(pane, "right-0")}
           style={{ top: spot.top, height: spot.height, left: spot.left + spot.width }}
         />
       </>
     ) : inert ? (
-      <div className="absolute inset-0" />
+      <div className="absolute inset-0 backdrop-blur-[3px]" />
     ) : null;
 
   const progress = (
@@ -443,8 +487,8 @@ export function TourOverlay({
             <span
               key={s.id}
               className={cn(
-                "h-1.5 rounded-full transition-all",
-                i === index ? "w-4 bg-primary" : "w-1.5 bg-muted",
+                "h-1.5 rounded-full transition-all duration-300",
+                i === index ? "w-4 bg-primary" : i < index ? "w-1.5 bg-primary/35" : "w-1.5 bg-slate-200",
               )}
             />
           ))}
@@ -471,7 +515,7 @@ export function TourOverlay({
   return createPortal(
     <div
       className={cn(
-        "fixed inset-0 z-[100]",
+        "fixed inset-0 z-[100] animate-tour-fade motion-reduce:animate-none",
         // Anything that is not the click-catcher must let clicks through: in
         // panel mode the page is the point, and on an interactive step the
         // reader is being asked to use it.
@@ -488,18 +532,23 @@ export function TourOverlay({
             /* Spotlight. The 9999px shadow dims the whole page except this
                box, so the anchored component keeps its real colours while
                everything around it recedes: nothing is drawn over the thing
-               the copy is about. The pad animates from SETTLE_PAD down to
-               SPOT_PAD on each step, and because the same element is reused
-               across steps the browser also tweens top/left/width/height,
-               so moving between two anchors glides instead of cutting.
+               the copy is about. The same element is reused across steps, so
+               the browser tweens top/left/width/height and moving between
+               two anchors glides instead of cutting.
+
+               STILL, NOT PULSING (David, 2026-10-02: "no blipping"). A white
+               hairline and a soft green band frame the component; the page
+               around it is darkened and lightly blurred by the panes above.
+               Nothing on it moves except when the step does.
 
                An interactive step keeps the ring and drops the dimming: the
                reader is about to work in the page, and anything the page opens
                in response would otherwise come up underneath a grey sheet. */
             <div
               className={cn(
-                "pointer-events-none fixed rounded-2xl transition-all duration-300 ease-out",
-                inert ? "ring-2 ring-primary/70" : "ring-[3px] ring-primary",
+                "pointer-events-none fixed rounded-2xl",
+                glide,
+                !inert && "ring-[3px] ring-primary",
               )}
               style={{
                 top: spot.top,
@@ -507,7 +556,7 @@ export function TourOverlay({
                 width: spot.width,
                 height: spot.height,
                 boxShadow: inert
-                  ? `0 0 0 9999px rgba(15, 23, 42, ${settled ? 0.55 : 0.4})`
+                  ? "0 0 0 1.5px rgba(255, 255, 255, 0.9), 0 0 0 7px rgba(52, 168, 110, 0.22), 0 0 0 9999px rgba(15, 23, 42, 0.55)"
                   : // No backdrop to separate it from the page, so the ring has
                     // to carry the whole job of saying "here". A tinted halo
                     // plus a lift shadow does what the dimming did, without
@@ -516,7 +565,9 @@ export function TourOverlay({
               }}
             />
           ) : (
-            inert && <div className="pointer-events-none fixed inset-0 bg-slate-900/55" />
+            inert && (
+              <div className="pointer-events-none fixed inset-0 bg-slate-900/55" />
+            )
           )}
         </>
       )}
@@ -526,61 +577,66 @@ export function TourOverlay({
         ref={cardRef}
         style={cardStyle}
         className={cn(
-          "pointer-events-auto flex flex-col rounded-2xl border border-border bg-card p-5 shadow-xl",
+          "pointer-events-auto flex flex-col rounded-2xl border border-white/70 bg-white/95 p-4 shadow-[0_20px_50px_-12px_rgba(15,23,42,0.4)] backdrop-blur-md",
           // Anchored cards fade in once they have been measured, so nobody
           // sees the one frame drawn at the guessed height.
-          spotlight && "transition-[top,left,opacity] duration-200 ease-out",
+          spotlight && "transition-opacity duration-300",
+          spotlight && gliding && cn("transition-[top,left,opacity]", GLIDE),
           spotlight && !measured && "opacity-0",
           // A docked card must leave the anchor more room than it takes, or
           // the step is a card with a sliver of page behind it. The body
           // scrolls inside the cap rather than pushing the card taller.
-          spotlight && narrow && "max-h-[46vh] p-4",
+          spotlight && narrow && "max-h-[46vh]",
           !spotlight &&
             "fixed inset-x-3 bottom-3 max-h-[70vh] sm:inset-x-auto sm:bottom-6 sm:right-6 sm:w-[24rem]",
         )}
       >
-        <div className="flex items-start justify-between gap-3">
-          <div className="min-w-0">
-            {step.eyebrow && (
-              /* Sentence case, not uppercase. A shouted label is heavier than
-                 the title under it, which inverts the hierarchy the card is
-                 built on, and it does not match the rest of the report. */
-              <p className="mb-1 text-[11px] font-medium text-muted-foreground">{step.eyebrow}</p>
-            )}
-            <h2 className="text-sm font-semibold text-foreground">{step.title}</h2>
+        {/* Keyed on the step, so each step's words ease in rather than
+            swapping under the reader while the card glides to its new spot. */}
+        <div key={step.id} className="flex min-h-0 flex-1 flex-col animate-tour-card-in motion-reduce:animate-none">
+          <div className="flex items-start justify-between gap-3">
+            <div className="min-w-0">
+              {step.eyebrow && (
+                /* Sentence case, not uppercase. A shouted label is heavier
+                   than the title under it, which inverts the hierarchy the
+                   card is built on, and it does not match the report. */
+                <p className="mb-0.5 text-[11px] font-semibold text-primary">{step.eyebrow}</p>
+              )}
+              <h2 className="text-[14px] font-semibold leading-snug text-slate-900">{step.title}</h2>
+            </div>
+            <button
+              type="button"
+              onClick={onClose}
+              aria-label={`Close ${ariaLabel}`}
+              className="-mr-1.5 -mt-1.5 flex h-7 w-7 shrink-0 items-center justify-center rounded-full text-slate-400 transition-colors hover:bg-slate-100 hover:text-slate-700"
+            >
+              <X className="h-3.5 w-3.5" />
+            </button>
           </div>
-          <button
-            type="button"
-            onClick={onClose}
-            aria-label={`Close ${ariaLabel}`}
-            className="-mr-1 -mt-1 rounded-md p-1 text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
-          >
-            <X className="h-3.5 w-3.5" />
-          </button>
+          <div className="mt-1 min-h-0 flex-1 overflow-y-auto text-[12.5px] leading-snug text-slate-500 [&_strong]:font-semibold [&_strong]:text-slate-800">
+            {step.body}
+          </div>
         </div>
-        <div className="mt-2 min-h-0 flex-1 overflow-y-auto text-[13px] leading-relaxed text-muted-foreground">
-          {step.body}
-        </div>
-        <div className="mt-4 flex items-center justify-between gap-3">
+        <div className="mt-3.5 flex items-center justify-between gap-3">
           {footer ?? progress}
-          <div className="flex shrink-0 items-center gap-2">
+          <div className="flex shrink-0 items-center gap-1.5">
             {index > 0 && (
               <button
                 type="button"
                 onClick={() => onIndexChange(index - 1)}
-                className="inline-flex h-8 items-center gap-1 rounded-full px-3 text-xs font-medium text-slate-600 transition-colors hover:bg-muted hover:text-slate-900"
+                aria-label="Back"
+                className="flex h-8 w-8 items-center justify-center rounded-full border border-slate-200 bg-white text-slate-500 transition-all duration-200 hover:border-slate-300 hover:text-slate-800 active:scale-95"
               >
-                <ChevronLeft className="h-3.5 w-3.5" />
-                Back
+                <ChevronLeft className="h-4 w-4" />
               </button>
             )}
             <button
               type="button"
               onClick={() => (last ? onClose() : onIndexChange(index + 1))}
-              className="inline-flex h-8 items-center gap-1 rounded-full bg-primary px-4 text-xs font-semibold text-primary-foreground transition-colors hover:bg-primary/90"
+              className="inline-flex h-8 items-center gap-1 rounded-full bg-gradient-to-b from-[hsl(152_50%_32%)] to-primary pl-4 pr-3 text-xs font-semibold text-primary-foreground shadow-md shadow-primary/25 transition-all duration-200 hover:brightness-110 active:scale-[0.97]"
             >
               {last ? doneLabel : "Next"}
-              {!last && <ChevronRight className="h-3.5 w-3.5" />}
+              {last ? <span className="w-1" /> : <ChevronRight className="h-3.5 w-3.5" />}
             </button>
           </div>
         </div>

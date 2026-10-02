@@ -26,6 +26,7 @@ import {
 import { FilterAction, FilterBar, FilterSearch, FilterSelect } from "@/components/FilterBar";
 import { PageShell } from "@/components/PageShell";
 import { formatWeek, WeekLine } from "@/components/WeekLine";
+import { PAGE_SIZE } from "@/lib/paging";
 import { useReportScope } from "@/lib/reportScope";
 import { cn, foundInLabel, storeLabel } from "@/lib/utils";
 import { computeDelta, MiniStat, SplitStat } from "./CrawlReport";
@@ -59,7 +60,6 @@ import { computeDelta, MiniStat, SplitStat } from "./CrawlReport";
  * documented on api.discoveredLines in src/lib/api.ts.
  */
 
-const PAGE_SIZE = 50;
 
 export default function CrawlDiscovered() {
   const { token } = useReportScope();

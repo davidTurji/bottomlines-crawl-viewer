@@ -21,6 +21,7 @@ import {
 import { FilterBar, FilterSearch, FilterSelect } from "@/components/FilterBar";
 import { PageShell } from "@/components/PageShell";
 import { formatWeek, WeekLine } from "@/components/WeekLine";
+import { PAGE_SIZE } from "@/lib/paging";
 import { useReportScope } from "@/lib/reportScope";
 import { cn } from "@/lib/utils";
 import { MiniStat, SplitStat, reportDate, type StatTone } from "./CrawlReport";
@@ -51,7 +52,6 @@ import { MiniStat, SplitStat, reportDate, type StatTone } from "./CrawlReport";
  * every link ever minted keeps opening. Nothing here asks the crawler.
  */
 
-const PAGE_SIZE = 25;
 
 type KindFilter = "all" | DeclarationKind;
 type SortKey = "files" | "name";

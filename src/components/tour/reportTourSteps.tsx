@@ -2,7 +2,7 @@
  * The report walkthrough: what it says, and in what order.
  *
  * Content lives apart from the runner so the copy can be reviewed as copy.
- * The rules are the console tour's (bottomlines-app, productTourSteps.tsx):
+ * The rules follow the console tour's (bottomlines-app, productTourSteps.tsx):
  *
  * 1. **Point, do not describe.** Every step names a `data-tour` anchor on its
  *    page, kept small: one card, one control. A missing anchor degrades to a
@@ -13,7 +13,10 @@
  * 3. **Follow the rail.** Overview, Changes, Discovery, Declarations, the
  *    sidebar's own order, so finishing leaves the reader able to find things
  *    again without it.
- * 4. **Only steps this report can show.** Discovery is in the rail only when
+ * 4. **One line each.** A dozen words, the words that matter in bold
+ *    (David, 2026-10-02: "super short text"). The reader is looking at the
+ *    page; the card only has to say what to look at.
+ * 5. **Only steps this report can show.** Discovery is in the rail only when
  *    the crawl discovered something, the line filter only when the report
  *    carries its watchlist, Export only when there is a file to hand over, and
  *    the preview note only on a trial. A step about something that is not on
@@ -55,12 +58,10 @@ export function reportTourSteps(f: ReportFeatures): ReportTourStep[] {
       page: "",
       anchor: "overview-header",
       eyebrow: "Overview",
-      title: "Your weekly crawl report",
+      title: "Your weekly crawl",
       body: (
         <p>
-          Each week we read the ads.txt and app-ads.txt files of the publishers
-          we scan and check which of them carry your seat lines. This page is
-          the headline of that crawl, compared with the week before.
+          Who carries <strong>your seat lines</strong>, and what <strong>changed</strong> since last week.
         </p>
       ),
     },
@@ -69,11 +70,10 @@ export function reportTourSteps(f: ReportFeatures): ReportTourStep[] {
       page: "",
       anchor: "trial-banner",
       eyebrow: "Overview",
-      title: "A preview of your report",
+      title: "A preview",
       body: (
         <p>
-          This report shows the first rows of every list, while the counts
-          show everything we found. Unlock Now asks us for the complete report.
+          First rows only. <strong>Unlock Now</strong> gets the full report.
         </p>
       ),
     },
@@ -82,13 +82,10 @@ export function reportTourSteps(f: ReportFeatures): ReportTourStep[] {
       page: "",
       anchor: "overview-changes",
       eyebrow: "Overview",
-      title: "What moved this week",
+      title: "What moved",
       body: (
         <p>
-          Seat lines publishers added or removed since last week, each compared
-          with last week&apos;s own count. The corner counts lines whose
-          certification ID changed. A first crawl is the baseline, so the
-          comparison starts the week after.
+          Lines <strong>added</strong> and <strong>removed</strong> since last week. A first crawl is your <strong>baseline</strong>.
         </p>
       ),
     },
@@ -100,9 +97,7 @@ export function reportTourSteps(f: ReportFeatures): ReportTourStep[] {
       title: "Matched inventory",
       body: (
         <p>
-          How many publishers and apps carry at least one of your seat lines,
-          with the total lines in the corner. The two tiles are also a switch:
-          they choose whether the list below shows publishers or apps.
+          <strong>Publishers</strong> and <strong>apps</strong> carrying your lines. Tap a tile to switch the list.
         </p>
       ),
     },
@@ -111,12 +106,10 @@ export function reportTourSteps(f: ReportFeatures): ReportTourStep[] {
       page: "",
       anchor: "overview-list",
       eyebrow: "Overview",
-      title: "Every match, one row each",
+      title: "Every match",
       body: (
         <p>
-          One row per publisher, or per app when the Matched apps tile is
-          selected. Click a row to see the exact seat lines it carries and what
-          moved on it this week.
+          <strong>Click a row</strong> to see its exact lines and this week&apos;s moves.
         </p>
       ),
     },
@@ -125,12 +118,10 @@ export function reportTourSteps(f: ReportFeatures): ReportTourStep[] {
       page: "",
       anchor: "line-filter",
       eyebrow: "Overview",
-      title: "Focus on some of your lines",
+      title: "Filter by line",
       body: (
         <p>
-          Tick one or more of your seat lines and press Apply. The numbers and
-          lists re-read under that selection, and the Changes page follows the
-          same filter.
+          Pick lines, press <strong>Apply</strong>. The whole report follows.
         </p>
       ),
     },
@@ -139,12 +130,10 @@ export function reportTourSteps(f: ReportFeatures): ReportTourStep[] {
       page: "",
       anchor: "export",
       eyebrow: "Overview",
-      title: "Export the complete report",
+      title: "Export",
       body: (
         <p>
-          Downloads this crawl&apos;s full report as an Excel file, ready to
-          share or work in. When the apps list is too big for Excel, it comes
-          as a zip with that list as a CSV beside the workbook.
+          The <strong>complete report</strong> as Excel. Very large lists come as a <strong>zip</strong>.
         </p>
       ),
     },
@@ -154,11 +143,10 @@ export function reportTourSteps(f: ReportFeatures): ReportTourStep[] {
       anchor: "report-nav",
       mobileAnchor: "nav-trigger",
       eyebrow: "Getting around",
-      title: "The pages of your report",
+      title: "Your pages",
       body: (
         <p>
-          {pageList}. Each one answers a different question about the same
-          crawl. Next, a quick look at each of them.
+          <strong>{pageList}</strong>. Next, a quick look at each.
         </p>
       ),
     },
@@ -167,13 +155,10 @@ export function reportTourSteps(f: ReportFeatures): ReportTourStep[] {
       page: "changes",
       anchor: "changes-controls",
       eyebrow: "Changes",
-      title: "Every line that moved",
+      title: "Lines that moved",
       body: (
         <p>
-          One card per seat line that publishers added, removed or
-          re-certified this week. The tabs pick one kind of change, the search
-          narrows to one SSP, and opening a card lists the publishers it moved
-          on.
+          One card per line. Narrow it by <strong>tab</strong> or <strong>SSP</strong>.
         </p>
       ),
     },
@@ -185,9 +170,7 @@ export function reportTourSteps(f: ReportFeatures): ReportTourStep[] {
       title: "Who carries your domains",
       body: (
         <p>
-          Every line on the open web carrying one of your domains, and how many
-          publishers carry it. New lines and the biggest weekly gains come
-          first, and Export CSV downloads the list.
+          Every matching line on the open web, <strong>newest first</strong>.
         </p>
       ),
     },
@@ -196,12 +179,10 @@ export function reportTourSteps(f: ReportFeatures): ReportTourStep[] {
       page: "declarations",
       anchor: "declarations-header",
       eyebrow: "Declarations",
-      title: "Who names you in their files",
+      title: "Who names you",
       body: (
         <p>
-          A publisher file can name another company as an inventory partner,
-          as the owner of the inventory, or as the manager selling it. This
-          page lists every file that names your domain, grouped by those three.
+          Files naming your domain as <strong>partner</strong>, <strong>owner</strong> or <strong>manager</strong>.
         </p>
       ),
     },
@@ -210,11 +191,10 @@ export function reportTourSteps(f: ReportFeatures): ReportTourStep[] {
       page: "",
       anchor: "walkthrough-button",
       eyebrow: "Done",
-      title: "That's the walkthrough",
+      title: "All set",
       body: (
         <p>
-          You&apos;re back on the overview. Open the walkthrough again any time
-          from this button.
+          Replay anytime from <strong>How this works</strong>.
         </p>
       ),
     },

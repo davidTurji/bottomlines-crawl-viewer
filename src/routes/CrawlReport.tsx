@@ -8,6 +8,7 @@ import {
 import { useEffect, useMemo, useState } from "react";
 import { LineFilter } from "@/components/LineFilter";
 import { Dots } from "@/components/Dots";
+import { PAGE_SIZE } from "@/lib/paging";
 import { useLineFilter } from "@/lib/lineFilter";
 import { Link } from "react-router-dom";
 import { ChevronDown, Download, Globe, Search, Smartphone } from "lucide-react";
@@ -996,7 +997,7 @@ function DrilldownList({
             anchorRef={paging.topRef}
             className="mb-3"
             page={page}
-            pageSize={250}
+            pageSize={PAGE_SIZE}
             total={total}
             onPage={paging.onPage}
             noun={tab === "all" ? "publishers" : "with changes"}
@@ -1040,7 +1041,7 @@ function DrilldownList({
           <div className="mt-4">
             <Pager
               page={page}
-              pageSize={250}
+              pageSize={PAGE_SIZE}
               total={total}
               onPage={paging.onPage}
               noun={tab === "all" ? "publishers" : "with changes"}
@@ -1697,7 +1698,7 @@ function MatchedAppsList({
           anchorRef={paging.topRef}
           className="mb-3"
           page={page}
-          pageSize={250}
+          pageSize={PAGE_SIZE}
           total={total}
           onPage={paging.onPage}
           noun="apps"
@@ -1742,7 +1743,7 @@ function MatchedAppsList({
         <div className="mt-4">
           <Pager
             page={page}
-            pageSize={250}
+            pageSize={PAGE_SIZE}
             total={total}
             onPage={paging.onPage}
             noun="apps"

@@ -125,15 +125,8 @@ export function ReportTour() {
       ariaLabel="Report walkthrough"
       variant="spotlight"
       doneLabel="Finish"
-      footer={
-        <button
-          type="button"
-          onClick={skip}
-          className="shrink-0 rounded-md text-xs font-medium text-muted-foreground underline-offset-4 transition-colors hover:text-foreground hover:underline"
-        >
-          Skip
-        </button>
-      }
+      // No Skip link: the X and Esc already leave, and one less control is
+      // one less thing on a card meant to be read at a glance.
     />
   );
 }
@@ -165,7 +158,7 @@ function WelcomePrompt({ onAnswer }: { onAnswer: (yes: boolean) => void }) {
 
   return createPortal(
     <div
-      className="fixed inset-0 z-[100] flex items-center justify-center bg-slate-900/55 px-4 animate-in fade-in duration-200"
+      className="fixed inset-0 z-[100] flex items-center justify-center bg-slate-900/30 px-5 backdrop-blur-[2px] animate-tour-fade motion-reduce:animate-none"
       role="dialog"
       aria-modal
       aria-labelledby="walkthrough-prompt-title"
@@ -173,50 +166,50 @@ function WelcomePrompt({ onAnswer }: { onAnswer: (yes: boolean) => void }) {
       <div
         ref={cardRef}
         tabIndex={-1}
-        className="relative w-full max-w-[26rem] rounded-2xl border border-border bg-card p-6 shadow-xl outline-none animate-in fade-in zoom-in-95 duration-200"
+        className="relative w-full max-w-[21rem] rounded-3xl border border-white/70 bg-white/95 p-5 shadow-[0_24px_60px_-12px_rgba(15,23,42,0.35)] outline-none animate-tour-pop motion-reduce:animate-none"
       >
         <button
           type="button"
           onClick={() => onAnswer(false)}
           aria-label="Close"
-          className="absolute right-3 top-3 flex h-8 w-8 items-center justify-center rounded-full text-slate-400 transition-colors hover:bg-muted hover:text-slate-700 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50"
+          className="absolute right-2.5 top-2.5 flex h-8 w-8 items-center justify-center rounded-full text-slate-400 transition-colors hover:bg-slate-100 hover:text-slate-700 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50"
         >
           <X className="h-4 w-4" />
         </button>
-        <span className="flex h-10 w-10 items-center justify-center rounded-full bg-primary/10 text-primary">
-          <Compass className="h-5 w-5" />
+        <span className="flex h-9 w-9 items-center justify-center rounded-full bg-gradient-to-b from-[hsl(152_50%_32%)] to-primary text-white shadow-md shadow-primary/25">
+          <Compass className="h-4 w-4" />
         </span>
         <h2
           id="walkthrough-prompt-title"
-          className="mt-4 font-display text-lg font-semibold tracking-tight text-slate-900"
+          className="mt-3 font-display text-base font-semibold tracking-tight text-slate-900"
         >
           Want a quick walkthrough?
         </h2>
-        <p className="mt-1.5 text-sm leading-relaxed text-slate-500">
-          We&apos;ll take you through your report, and show you what each
-          part means. It takes about a minute.
+        <p className="mt-1 text-[13px] leading-snug text-slate-500">
+          A <strong className="font-semibold text-slate-800">1 minute</strong> tour
+          of your report.
         </p>
-        {/* Two equal columns, so both answers are exactly the same size.
-            Stacked on a phone, yes on top, each still full width. */}
-        <div className="mt-5 grid grid-cols-1 gap-2.5 sm:grid-cols-2">
+        {/* Two equal columns on every screen, so the answers are exactly the
+            same size: green for yes, white for no. */}
+        <div className="mt-4 grid grid-cols-2 gap-2">
           <button
             type="button"
             onClick={() => onAnswer(false)}
-            className="order-2 inline-flex h-11 items-center justify-center rounded-full border border-slate-200 bg-white px-3 text-sm font-semibold text-slate-700 shadow-sm transition-colors hover:border-slate-300 hover:bg-slate-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 sm:order-1"
+            className="inline-flex h-10 items-center justify-center rounded-full border border-slate-200 bg-white px-3 text-[13px] font-semibold text-slate-700 shadow-sm transition-all duration-200 hover:border-slate-300 hover:bg-slate-50 active:scale-[0.98] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
           >
             No thanks
           </button>
           <button
             type="button"
             onClick={() => onAnswer(true)}
-            className="order-1 inline-flex h-11 items-center justify-center rounded-full border border-transparent bg-gradient-to-b from-[hsl(152_50%_32%)] to-primary px-3 text-sm font-semibold text-primary-foreground shadow-md shadow-primary/25 transition-all hover:brightness-110 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 sm:order-2"
+            className="inline-flex h-10 items-center justify-center rounded-full border border-transparent bg-gradient-to-b from-[hsl(152_50%_32%)] to-primary px-3 text-[13px] font-semibold text-primary-foreground shadow-md shadow-primary/25 transition-all duration-200 hover:brightness-110 active:scale-[0.98] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
           >
-            Yes, show me around
+            Show me around
           </button>
         </div>
-        <p className="mt-4 text-[12px] text-slate-400">
-          You can open it again any time from &ldquo;How this works&rdquo; at
-          the top right.
+        <p className="mt-3 text-center text-[11px] text-slate-400">
+          Replay anytime from{" "}
+          <strong className="font-semibold text-slate-500">How this works</strong>.
         </p>
       </div>
     </div>,

@@ -40,6 +40,7 @@ import type {
 // The discovered-lines ORDER BY, shared with the page's sort control so the
 // mock endpoint and the client's "default" option cannot disagree.
 import { compareDefault } from "./discoveredSort";
+import { PAGE_SIZE } from "./paging";
 
 /*
  * THE CUSTOMER'S WATCHLIST. Six seat lines, the shape a real customer's
@@ -522,12 +523,13 @@ export function mockDeveloperEvents(
       ...changeArrays(d.developer_id, d.lines_added, d.lines_removed, d.lines_cert_changed),
     }))
     .filter((d) => carries(d.matched_lines ?? matchedLinesFor(d.developer_id, 6), lines));
+  // Paged like the live endpoint, so the change tabs page in a local run.
   return {
     event,
     page,
-    page_size: 50,
+    page_size: PAGE_SIZE,
     total: rows.length,
-    rows,
+    rows: rows.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE),
   };
 }
 
@@ -1156,7 +1158,7 @@ export function mockMatchedDevelopers(
   lines: string[] = [],
 ): MatchedDevelopersPage {
   const pool = MATCHED_DEVS.filter((d) => carries(d.matched_lines, lines));
-  return mockPage(pool, page, q, ["name", "domain"]) as MatchedDevelopersPage;
+  return mockPage(pool, page, q, ["name", "domain"], PAGE_SIZE) as MatchedDevelopersPage;
 }
 
 /* App bundle seed. Long-tail same as developers: a head of hero apps that
@@ -1312,7 +1314,7 @@ const MATCHED_APPS = buildMatchedApps();
 
 export function mockMatchedApps(page: number, q = "", lines: string[] = []): MatchedAppsPage {
   const pool = MATCHED_APPS.filter((a) => carries(a.matched_lines, lines));
-  return mockPage(pool, page, q, ["app_name", "bundle_id", "owner_domain"]) as MatchedAppsPage;
+  return mockPage(pool, page, q, ["app_name", "bundle_id", "owner_domain"], PAGE_SIZE) as MatchedAppsPage;
 }
 
 /** The summary under a seat-line filter: the matched counters re-counted

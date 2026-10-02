@@ -6,6 +6,7 @@ const BASE = (import.meta.env.VITE_API_BASE as string) ?? "/api";
 // required, useful for UI-only reviews and screenshots.
 // The mock adapter lives in src/lib/mockData.ts.
 import { LINES_PARAM, linesQuery, serializeLines } from "./lineFilter";
+import { PAGE_SIZE } from "./paging";
 
 export const MOCK = (import.meta.env.VITE_MOCK as string | undefined) === "true";
 
@@ -297,7 +298,7 @@ export const api = {
     }
     return req<DeveloperEventsPage>(
       "GET",
-      `/v1/viewer/${token}/developer-events?event=${event}&page=${page}&page_size=50${q ? `&q=${encodeURIComponent(q)}` : ""}${linesQuery(lines)}`,
+      `/v1/viewer/${token}/developer-events?event=${event}&page=${page}&page_size=${PAGE_SIZE}${q ? `&q=${encodeURIComponent(q)}` : ""}${linesQuery(lines)}`,
     );
   },
   lineEvents: async (
@@ -356,7 +357,7 @@ export const api = {
     }
     return req<MatchedDevelopersPage>(
       "GET",
-      `/v1/viewer/${token}/matched-developers?page=${page}&page_size=250${q ? `&q=${encodeURIComponent(q)}` : ""}${linesQuery(lines)}`,
+      `/v1/viewer/${token}/matched-developers?page=${page}&page_size=${PAGE_SIZE}${q ? `&q=${encodeURIComponent(q)}` : ""}${linesQuery(lines)}`,
     );
   },
   matchedBundles: async (token: string, page = 1, q = "") => {
@@ -392,7 +393,7 @@ export const api = {
     }
     return req<MatchedAppsPage>(
       "GET",
-      `/v1/viewer/${token}/matched-apps?page=${page}&page_size=250${q ? `&q=${encodeURIComponent(q)}` : ""}${linesQuery(lines)}`,
+      `/v1/viewer/${token}/matched-apps?page=${page}&page_size=${PAGE_SIZE}${q ? `&q=${encodeURIComponent(q)}` : ""}${linesQuery(lines)}`,
     );
   },
   /**

@@ -7,6 +7,10 @@
  * say what it does (David chose the label, 2026-10-02). Always restarts
  * from the top; the walkthrough is short enough that resuming part-way is
  * not worth a second choice.
+ *
+ * Made to be pressed (David, 2026-10-02: "more tempting"): a green-tinted
+ * pill with the icon in a solid green disc and a soft green glow, a lift on
+ * hover. Still at rest: nothing on it pulses ("no blipping").
  */
 
 import { Compass } from "lucide-react";
@@ -20,10 +24,12 @@ export function WalkthroughButton() {
       type="button"
       data-tour="walkthrough-button"
       onClick={() => start({ restart: true })}
-      className="inline-flex h-9 items-center gap-1.5 rounded-full border border-slate-200 bg-white px-3 text-[13px] font-medium text-slate-600 transition-colors hover:border-primary/40 hover:bg-accent/60 hover:text-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50"
+      className="group inline-flex h-9 items-center gap-2 rounded-full border border-primary/20 bg-gradient-to-b from-white to-[hsl(152_45%_95%)] py-1 pl-1 pr-3.5 text-[13px] font-semibold text-primary shadow-sm transition-all duration-200 hover:-translate-y-px hover:border-primary/40 hover:shadow-md hover:shadow-primary/10 active:translate-y-0 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50"
       title="A short tour of this report, page by page"
     >
-      <Compass className="h-4 w-4" />
+      <span className="flex h-7 w-7 items-center justify-center rounded-full bg-gradient-to-b from-[hsl(152_50%_32%)] to-primary text-white shadow-[0_0_0_3px_rgba(52,168,110,0.15)] transition-transform duration-300 group-hover:rotate-12">
+        <Compass className="h-3.5 w-3.5" />
+      </span>
       How this works
     </button>
   );

@@ -5,6 +5,7 @@ import { SkeletonRows, SkeletonStatCards } from "@/components/Skeleton";
 import { useEffect, useMemo, useState } from "react";
 import { Dots } from "@/components/Dots";
 import { LineFilter } from "@/components/LineFilter";
+import { PAGE_SIZE } from "@/lib/paging";
 import { useLineFilter } from "@/lib/lineFilter";
 import {
   ArrowRight,
@@ -62,7 +63,6 @@ import { computeDelta, MiniStat, SplitStat } from "./CrawlReport";
  * event in words, which is what a colourblind reader reads.
  */
 
-const PAGE_SIZE = 40;
 
 /**
  * How many pages of line events to walk before giving up.
