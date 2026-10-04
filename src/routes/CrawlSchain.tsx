@@ -350,6 +350,27 @@ function AsOf({
 
 /* ── The three steps ───────────────────────────────────────────────── */
 
+/** The search row both list panels carry, so their lists start level. */
+function ListSearch({ value, onChange, placeholder }: { value: string; onChange: (v: string) => void; placeholder: string }) {
+  return (
+    <label className="mb-2 flex h-8 flex-shrink-0 items-center gap-2 rounded-lg border border-border px-2.5 focus-within:border-primary/40">
+      <Search aria-hidden className="h-3.5 w-3.5 text-slate-300" />
+      <input
+        value={value}
+        onChange={(e) => onChange(e.target.value)}
+        placeholder={placeholder}
+        aria-label={placeholder}
+        className="min-w-0 flex-1 bg-transparent text-xs outline-none placeholder:text-slate-400"
+      />
+    </label>
+  );
+}
+
+/** The one-line footer both list panels carry, so their lists end level. */
+function ListFooter({ children }: { children?: ReactNode }) {
+  return <div className="mt-3 flex h-5 flex-shrink-0 items-center text-[11px] text-slate-500">{children}</div>;
+}
+
 function StepHead({ n, title, hint, done }: { n: number; title: string; hint: string; done: boolean }) {
   return (
     <div className="mb-3 flex items-start gap-2.5">
@@ -396,18 +417,7 @@ function SdkStep({
         hint="From your sellers.json"
         done={!!selected && !!read && read !== "reading" && read.ok}
       />
-      {overview.sdks.length > 6 && (
-        <label className="mb-2 flex h-8 items-center gap-2 rounded-lg border border-border px-2.5 focus-within:border-primary/40">
-          <Search aria-hidden className="h-3.5 w-3.5 text-slate-300" />
-          <input
-            value={q}
-            onChange={(e) => setQ(e.target.value)}
-            placeholder="Find an SDK"
-            aria-label="Find an SDK"
-            className="min-w-0 flex-1 bg-transparent text-xs outline-none placeholder:text-slate-400"
-          />
-        </label>
-      )}
+      <ListSearch value={q} onChange={setQ} placeholder="Find an SDK" />
       <div className="scroll-y min-h-0 flex-1 overflow-y-auto rounded-xl border border-border bg-white">
         {list.map((s) => {
           const on = selected?.domain === s.domain;
@@ -438,7 +448,13 @@ function SdkStep({
         })}
         {list.length === 0 && <p className="px-2 py-3 text-xs text-slate-500">No SDK matches.</p>}
       </div>
-      {selected && read && <SdkCopy read={read} onRefresh={onRefresh} />}
+      <ListFooter>
+        {selected && read ? (
+          <SdkCopy read={read} onRefresh={onRefresh} />
+        ) : (
+          `${overview.sdks.length} SDKs in your sellers.json`
+        )}
+      </ListFooter>
     </div>
   );
 }
@@ -538,7 +554,7 @@ function SdkAvatar({
 function SdkCopy({ read, onRefresh }: { read: SchainSdkRead | "reading"; onRefresh: () => void }) {
   if (read === "reading") {
     return (
-      <p className="mt-3 flex items-center gap-1.5 text-[11px] text-slate-500">
+      <p className="flex w-full items-center gap-1.5 text-[11px] text-slate-500">
         <Loader2 className="h-3.5 w-3.5 animate-spin" />
         Reading its sellers.json
       </p>
@@ -556,15 +572,15 @@ function SdkCopy({ read, onRefresh }: { read: SchainSdkRead | "reading"; onRefre
   );
   if (!read.ok) {
     return (
-      <p className="mt-3 flex items-start gap-1.5 text-[11px] text-critical">
-        <CircleAlert className="mt-px h-3.5 w-3.5 flex-shrink-0" />
-        <span className="min-w-0">Could not read {read.url.replace(/^https?:\/\//, "")}: {read.reason}</span>
+      <p className="flex w-full items-center gap-1.5 text-[11px] text-critical">
+        <CircleAlert className="h-3.5 w-3.5 flex-shrink-0" />
+        <span className="min-w-0 truncate">Could not read {read.url.replace(/^https?:\/\//, "")}: {read.reason}</span>
         {refresh}
       </p>
     );
   }
   return (
-    <p className="mt-3 flex items-center gap-1.5 text-[11px] text-slate-500">
+    <p className="flex w-full items-center gap-1.5 text-[11px] text-slate-500">
       <Check className="h-3.5 w-3.5 flex-shrink-0 text-ok" />
       <span className="min-w-0 truncate">
         {read.source === "live" ? "Read live just now" : `Saved with this report, ${stamp(read.read_at)}`},{" "}
@@ -592,6 +608,12 @@ function SeatStep({
 }) {
   const byKey = new Map((counts ?? []).map((c) => [c.seat, c]));
   const counting = !!sdk && (!ready || counts === null);
+  const [q, setQ] = useState("");
+  const needle = q.trim().toLowerCase();
+  const lines = needle
+    ? overview.seat_lines.filter((l) => lineLabel(l).toLowerCase().includes(needle))
+    : overview.seat_lines;
+  const closing = counts ? counts.filter((c) => c.apps > 0).length : null;
   return (
     <div className={PANEL}>
       <StepHead
@@ -603,8 +625,10 @@ function SeatStep({
       {/* Drawn as the overview's line filter draws a line: the line itself
           in mono, verbatim, a hint in words under it, a hairline between
           one line and the next. */}
+      <ListSearch value={q} onChange={setQ} placeholder="Find a seat line" />
       <LineList>
-        {overview.seat_lines.map((l) => {
+        {lines.length === 0 && <p className="px-3 py-3 text-xs text-slate-500">No seat line matches.</p>}
+        {lines.map((l) => {
           const key = lineKey(l);
           const c = byKey.get(key);
           const empty = ready && counts !== null && (!c || c.apps === 0);
@@ -634,6 +658,11 @@ function SeatStep({
           );
         })}
       </LineList>
+      <ListFooter>
+        {sdk && closing !== null
+          ? `${closing} of ${overview.seat_lines.length} seat lines close a chain through ${sdk.name}`
+          : `${overview.seat_lines.length} seat lines on this report`}
+      </ListFooter>
     </div>
   );
 }
