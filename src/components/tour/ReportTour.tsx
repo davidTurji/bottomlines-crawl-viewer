@@ -32,10 +32,11 @@ const PAGE_LABEL: Record<ReportPage, string> = {
   changes: "Changes",
   discovery: "Discovery",
   declarations: "Declarations",
+  schain: "Schain",
 };
 
 /** The rail's order, which decides which way a page slides. */
-const PAGE_ORDER: ReportPage[] = ["", "changes", "discovery", "declarations"];
+const PAGE_ORDER: ReportPage[] = ["", "changes", "discovery", "declarations", "schain"];
 
 /**
  * THE PAGE MOVE: WATCH THE PAGE SLIDE (David, 2026-10-02, after two
@@ -76,13 +77,18 @@ function useReportFeatures(enabled: boolean): ReportFeatures | null {
         .catch(() => false),
       api.summary(token).catch(() => null),
       api.exportInfo(token).catch(() => null),
-    ]).then(([hasDiscovery, summary, exportInfo]) => {
+      api
+        .schain(token)
+        .then((o) => o?.status === "ok")
+        .catch(() => false),
+    ]).then(([hasDiscovery, summary, exportInfo, hasSchain]) => {
       if (!alive) return;
       setFeatures({
         hasDiscovery,
         hasLineFilter: (summary?.watchlist?.seats?.length ?? 0) > 0,
         canExport: !!exportInfo && exportInfo.format !== "none",
         trial: !!summary?.trial,
+        hasSchain,
       });
     });
     return () => {

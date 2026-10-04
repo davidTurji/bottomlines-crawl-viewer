@@ -648,6 +648,128 @@ export const api = {
     }
     return req<DeclarationsPayload>("GET", `/v1/viewer/${token}/declarations`);
   },
+  /**
+   * SCHAIN EXPORT: what the page opens on.
+   *
+   * Frozen at bake time from the customer's own sellers.json: the SDKs in
+   * it (every seller whose domain publishes its own sellers.json), each
+   * with the Seller ID(s) it holds there, plus the customer's seat lines
+   * and how many of the link's schain downloads are used. `status` other
+   * than "ok" hides the page from the rail.
+   */
+  schain: async (token: string): Promise<SchainOverview> => {
+    if (MOCK) {
+      const { mockSchainOverview } = await import("./mockSchain");
+      return mockSchainOverview(trialMock());
+    }
+    return req<SchainOverview>("GET", `/v1/viewer/${token}/schain`);
+  },
+  /**
+   * Which copy of ONE SDK's sellers.json step 3 checks against.
+   *
+   * By default the copy saved with this report, read when it was made, so
+   * the whole list is true of one moment and the page can say which.
+   * `refresh: true` re-reads the SDK's file live (David, 2026-10-04: "you
+   * can always refresh the sellers.json of the SDKs, not of the user"),
+   * and the server then proves the preview and the file against that read.
+   * The customer's own sellers.json is never refreshed here.
+   */
+  schainReadSdk: async (
+    token: string,
+    sdk: string,
+    opts: { refresh?: boolean } = {},
+  ): Promise<SchainSdkRead> => {
+    if (MOCK) {
+      const { mockSchainReadSdk } = await import("./mockSchain");
+      return mockSchainReadSdk(sdk, !!opts.refresh);
+    }
+    return req<SchainSdkRead>(
+      "POST",
+      `/v1/viewer/${token}/schain/sdk`,
+      { sdk, refresh: !!opts.refresh },
+    );
+  },
+  /** Per seat line, how many publishers and apps close a chain through
+   *  this SDK. Read after the SDK's file, so a line with none is greyed. */
+  schainSeatCounts: async (token: string, sdk: string, live = false): Promise<SchainSeatCount[]> => {
+    if (MOCK) {
+      const { mockSchainSeatCounts } = await import("./mockSchain");
+      return mockSchainSeatCounts(sdk);
+    }
+    const q = new URLSearchParams({ sdk });
+    if (live) q.set("live", "true");
+    return req<SchainSeatCount[]>("GET", `/v1/viewer/${token}/schain/seat-counts?${q.toString()}`);
+  },
+  /** The funnel, the totals and one page of the Apps rows for one
+   *  selection: SDK, seat line and reseller line. */
+  schainPreview: async (
+    token: string,
+    sel: SchainSelection,
+    opts: { page: number; page_size: number; q?: string },
+  ): Promise<SchainPreview> => {
+    if (MOCK) {
+      const { mockSchainPreview } = await import("./mockSchain");
+      return mockSchainPreview(sel, opts, trialMock());
+    }
+    const q = new URLSearchParams({
+      sdk: sel.sdk,
+      seat: sel.seat,
+      sid2: sel.sid2,
+      page: String(opts.page),
+      page_size: String(opts.page_size),
+    });
+    if (sel.live) q.set("live", "true");
+    if (opts.q) q.set("q", opts.q);
+    return req<SchainPreview>("GET", `/v1/viewer/${token}/schain/preview?${q.toString()}`);
+  },
+  /**
+   * Download the schain file for a selection. Counts against the link's 3
+   * schain downloads, except a selection already downloaded, which is free.
+   * Resolves with the downloads now used; the browser saves the file.
+   *
+   * In MOCK mode the workbook is built in the browser, in the same four
+   * sheets and columns as the admin Schain Export.
+   */
+  schainExport: async (
+    token: string,
+    sel: SchainSelection,
+    format: "xlsx" | "csv",
+  ): Promise<{ used: number; limit: number }> => {
+    if (MOCK) {
+      const { mockSchainExport } = await import("./mockSchain");
+      return mockSchainExport(sel, format);
+    }
+    const q = new URLSearchParams({ sdk: sel.sdk, seat: sel.seat, sid2: sel.sid2 });
+    if (sel.live) q.set("live", "true");
+    const res = await fetch(`${BASE}/v1/viewer/${token}/schain/export.${format}?${q.toString()}`, {
+      credentials: "include",
+      redirect: "follow",
+    });
+    if (!res.ok) {
+      let detail = "";
+      try {
+        detail = ((await res.json()) as { detail?: string }).detail ?? "";
+      } catch {
+        /* not JSON */
+      }
+      throw new ApiError(res.status, detail || `export failed: ${res.status}`);
+    }
+    const used = Number(res.headers.get("X-Schain-Downloads-Used") ?? 0);
+    const limit = Number(res.headers.get("X-Schain-Downloads-Limit") ?? 3);
+    const blob = await res.blob();
+    const name =
+      /filename="?([^";]+)"?/.exec(res.headers.get("Content-Disposition") ?? "")?.[1] ??
+      `schain.${format}`;
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = name;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+    return { used, limit };
+  },
   chat: async function* (
     token: string,
     prompt: string,
@@ -1222,3 +1344,111 @@ export type ChatFrame =
   | { type: "tool_call"; name: string; args: unknown; result_preview: unknown }
   | { type: "done" }
   | { type: "error"; message: string };
+
+// ---- schain export ----
+
+/** One SDK in the customer's sellers.json. `seller_ids` are the IDs the
+ *  customer gave it there (sid2): each one is a possible reseller line,
+ *  `<customer domain>, <sid2>, RESELLER`. */
+export type SchainSdk = {
+  domain: string;
+  name: string;
+  seller_type: string;
+  seller_ids: string[];
+};
+
+export type SchainOverview = {
+  /** The customer's name as their reports say it, for the file's title. */
+  customer_name: string;
+  status: "ok" | "no_sellers_json" | "no_sdks";
+  /** The customer's domain: asi2 in every chain, and the first field of
+   *  the reseller line. */
+  reseller_domain: string;
+  sellers_json_url: string;
+  /** When the customer's sellers.json was read (bake time). */
+  sellers_json_read_at: string;
+  /** When the publisher files behind this report were crawled. */
+  crawled_at: string;
+  /** The SDKs in the customer's sellers.json that we can check: the ones
+   *  on our list of popular SDKs whose own sellers.json we read. */
+  sdks: SchainSdk[];
+  /** How many popular SDKs we track, for "8 of 60". */
+  sdk_catalog_size: number;
+  seat_lines: MatchedSeatLine[];
+  /** Schain downloads on this link. `selections` are the ones already
+   *  taken (`sdk|seat|sid2`): downloading one of those again is free. */
+  downloads: { used: number; limit: number; selections: string[] };
+  /** On a trial: the preview is cut to this many rows, and export is locked. */
+  trial?: { cap: number } | null;
+};
+
+/** `source`: "report" is the copy saved when the report was made; "live"
+ *  a read made just now, on Refresh. */
+export type SchainSdkRead =
+  | {
+      ok: true;
+      domain: string;
+      url: string;
+      read_at: string;
+      sellers_count: number;
+      source: "report" | "live";
+    }
+  | { ok: false; domain: string; url: string; reason: string };
+
+export type SchainSeatCount = {
+  /** `ssp|publisher_id|REL`, the same key the seat-line filter uses. */
+  seat: string;
+  publishers: number;
+  apps: number;
+};
+
+export type SchainSelection = {
+  sdk: string;
+  /** Seat line key, `ssp|publisher_id|REL`. */
+  seat: string;
+  /** The SDK's Seller ID in the customer's sellers.json. */
+  sid2: string;
+  /** Check step 3 against this link's live read of the SDK's file
+   *  (after Refresh) rather than the copy saved with the report. */
+  live?: boolean;
+};
+
+/** The four checks, counted in publishers, in the order they are made.
+ *  Same four rows as the Summary sheet of the file. */
+export type SchainFunnel = {
+  seat_publishers: number;
+  with_sdk_direct: number;
+  owned_by_them: number;
+  reseller_authorised: number;
+};
+
+/** One row of the Apps sheet: one app whose chain closes. An app whose
+ *  publisher holds several valid accounts at the SDK lists them all in
+ *  `sid1`, comma separated, exactly as the file writes it. */
+export type SchainRow = {
+  publisher_domain: string;
+  app_name: string;
+  store: string;
+  bundle_id: string;
+  /** "Mobile" or "CTV". */
+  platform: string;
+  category: string;
+  asi1: string;
+  sid1: string;
+  asi2: string;
+  sid2: string;
+  store_url: string;
+};
+
+export type SchainPreview = {
+  funnel: SchainFunnel;
+  /** `valid_ids`: the publisher accounts at the SDK that passed step 3;
+   *  `ids_checked`: every DIRECT id at the SDK on those publishers' files. */
+  totals: { publishers: number; apps: number; valid_ids: number; ids_checked: number };
+  page: number;
+  page_size: number;
+  /** Rows matching `q`, for the pager. */
+  total: number;
+  rows: SchainRow[];
+  trial?: TrialSlice | null;
+};
