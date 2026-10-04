@@ -604,7 +604,7 @@ export function SplitStat({
  * baseline across both panels), then the delta. The selected tile carries a
  * toned ring and a deeper tint; the idle one is plain white and hoverable.
  */
-function MatchedTile({
+export function MatchedTile({
   tone,
   icon: Icon,
   number,

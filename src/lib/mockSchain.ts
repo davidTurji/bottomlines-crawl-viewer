@@ -33,6 +33,7 @@ import {
   type SchainFunnel,
   type SchainOverview,
   type SchainPreview,
+  type SchainPublisherRow,
   type SchainRow,
   type SchainSdk,
   type SchainSdkRead,
@@ -428,18 +429,34 @@ export async function mockSchainSeatCounts(domain: string): Promise<SchainSeatCo
   });
 }
 
+function publisherRows(proof: Proved, sel: SchainSelection): SchainPublisherRow[] {
+  return proof.publishers.map((p) => ({
+    publisher_domain: p.dev.domain,
+    apps: p.apps.length,
+    valid_ids: p.ids.filter((i) => i.valid).map((i) => i.id),
+    ids_checked: p.ids.length,
+    seat_written: seatText(sel.seat),
+    reseller_written: `${RESELLER}, ${sel.sid2}, RESELLER`,
+    direct_written: p.ids.filter((i) => i.valid).map((i) => i.written),
+    file_url: `https://${p.dev.domain}/app-ads.txt`,
+    found_in: "app-ads.txt",
+  }));
+}
+
 export function mockSchainPreview(
   sel: SchainSelection,
-  opts: { page: number; page_size: number; q?: string },
+  opts: { page: number; page_size: number; q?: string; view?: "apps" | "publishers" },
   trial: boolean,
 ): SchainPreview {
   const proof = prove(sel);
-  const { funnel, rows } = proof;
+  const { funnel } = proof;
+  const rows: (SchainRow | SchainPublisherRow)[] =
+    opts.view === "publishers" ? publisherRows(proof, sel) : proof.rows;
   const needle = (opts.q ?? "").trim().toLowerCase();
   const matched = needle
     ? rows.filter((r) =>
-        [r.app_name, r.bundle_id, r.publisher_domain, r.sid1].some((v) =>
-          v.toLowerCase().includes(needle),
+        ("app_name" in r ? [r.app_name, r.bundle_id, r.publisher_domain, r.sid1] : [r.publisher_domain]).some(
+          (v) => v.toLowerCase().includes(needle),
         ),
       )
     : rows;
@@ -450,7 +467,7 @@ export function mockSchainPreview(
       page: 1,
       page_size: TRIAL_CAP,
       total: matched.length,
-      rows: matched.slice(0, TRIAL_CAP),
+      rows: matched.slice(0, TRIAL_CAP) as SchainPreview["rows"],
       trial: { cap: TRIAL_CAP, shown: Math.min(TRIAL_CAP, matched.length), full_total: matched.length },
     };
   }
@@ -461,7 +478,7 @@ export function mockSchainPreview(
     page: opts.page,
     page_size: opts.page_size,
     total: matched.length,
-    rows: matched.slice(start, start + opts.page_size),
+    rows: matched.slice(start, start + opts.page_size) as SchainPreview["rows"],
     trial: null,
   };
 }

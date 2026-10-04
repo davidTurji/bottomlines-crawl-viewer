@@ -1,29 +1,34 @@
 import * as Dialog from "@radix-ui/react-dialog";
-import { Check, CircleAlert, Clock, Download, Landmark, Loader2, Lock, Play, RefreshCw, Search, Smartphone } from "lucide-react";
+import { Check, ChevronDown, CircleAlert, Clock, Download, Globe, Landmark, Loader2, Lock, Play, RefreshCw, Search, Smartphone } from "lucide-react";
 import { useEffect, useMemo, useState, type ReactNode } from "react";
 
 import ContactUs from "@/components/ContactUs";
 import { PageShell } from "@/components/PageShell";
 import SchainHowItWorks from "@/components/SchainHowItWorks";
-import { SkeletonStatCards } from "@/components/Skeleton";
+import { Pager, usePaging } from "@/components/ListControls";
+import LockedTail from "@/components/LockedTail";
+import { SkeletonRows, SkeletonStatCards } from "@/components/Skeleton";
 import TrialBanner from "@/components/TrialBanner";
 import { formatWeek, WeekLine } from "@/components/WeekLine";
 import { lineKey, lineLabel, sourceHint } from "@/lib/lineFilter";
 import { useReportScope } from "@/lib/reportScope";
-import { cn, storeLabel } from "@/lib/utils";
+import { PAGE_SIZE } from "@/lib/paging";
+import { cn, foundInLabel, storeLabel } from "@/lib/utils";
 
 import {
   api,
   ApiError,
   type SchainOverview,
   type SchainPreview,
+  type SchainPublisherRow,
+  type SchainRow,
   type SchainSdk,
   type SchainSdkRead,
   type SchainSeatCount,
   type SchainSelection,
   type Summary,
 } from "../lib/api";
-import { SplitStat } from "./CrawlReport";
+import { MatchedTile, MiniStat, SplitStat } from "./CrawlReport";
 
 /**
  * SCHAIN EXPORT.
@@ -40,7 +45,6 @@ import { SplitStat } from "./CrawlReport";
  * MINIMAL ON PURPOSE (David, 2026-10-04): one KPI card, one builder, and
  * after Run one result card. The step-by-step lives behind How it works.
  */
-const PREVIEW_ROWS = 10;
 /** Every builder panel is this tall, whatever it holds; each scrolls
  *  inside itself rather than growing the row (David, 2026-10-04). */
 const PANEL = "flex h-[440px] min-h-0 flex-col p-4 sm:p-5";
@@ -918,6 +922,8 @@ function Radio({ on }: { on: boolean }) {
 
 /* ── The result ────────────────────────────────────────────────────── */
 
+type ListView = "publishers" | "apps";
+
 function Result({
   token,
   overview,
@@ -939,139 +945,334 @@ function Result({
   asOf: AsOfPart[];
   onDownloaded: (used: number) => void;
 }) {
+  const [view, setView] = useState<ListView>("publishers");
+  const [page, setPage] = useState(1);
+  const paging = usePaging(setPage);
   const [preview, setPreview] = useState<SchainPreview | null>(null);
+  const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [open, setOpen] = useState<Set<string>>(new Set());
+
+  useEffect(() => setPage(1), [view]);
 
   useEffect(() => {
     let cancelled = false;
+    setLoading(true);
+    setOpen(new Set());
     api
-      .schainPreview(token, selection, { page: 1, page_size: PREVIEW_ROWS })
+      .schainPreview(token, selection, { page, page_size: PAGE_SIZE, view })
       .then((p) => !cancelled && setPreview(p))
-      .catch((e: Error) => !cancelled && setError(e.message));
+      .catch((e: Error) => !cancelled && setError(e.message))
+      .finally(() => !cancelled && setLoading(false));
     return () => {
       cancelled = true;
     };
-  }, [token, selection]);
+  }, [token, selection, page, view]);
 
   if (error) return <p className="py-2 text-sm text-critical">{error}</p>;
   if (!preview) return <SkeletonStatCards />;
 
   const f = preview.funnel;
   const t = preview.totals;
+  const toggle = (key: string) =>
+    setOpen((prev) => {
+      const next = new Set(prev);
+      if (next.has(key)) next.delete(key);
+      else next.add(key);
+      return next;
+    });
 
   return (
-    <div className="rounded-2xl border border-border bg-white shadow-sm" data-tour="schain-result">
-      <div className="flex flex-col gap-4 p-5 sm:flex-row sm:items-start sm:justify-between">
-        <div className="min-w-0">
-          <p className="font-display text-[17px] font-semibold leading-snug tracking-tight text-slate-900">
-            {t.apps > 0 ? (
-              <>
-                <span className="font-mono tabular-nums">{t.apps.toLocaleString()}</span> apps from{" "}
-                <span className="font-mono tabular-nums">{t.publishers.toLocaleString()}</span> publishers close the
-                chain
-              </>
-            ) : (
-              "No app closes this chain"
-            )}
-          </p>
-          <p className="mt-1 truncate text-[12px] text-slate-500">
-            <span className="font-mono">{seatLine}</span> via <span className="font-mono">{sdk.domain}</span>, resold as{" "}
-            <span className="font-mono">
-              {overview.reseller_domain}, {selection.sid2}
-            </span>
-          </p>
-        </div>
-        <Download3
-          token={token}
-          selection={selection}
-          overview={overview}
-          trial={trial}
-          empty={t.apps === 0}
-          seatLine={seatLine}
-          sdk={sdk}
-          asOf={asOf}
-          onDownloaded={onDownloaded}
-        />
-      </div>
-
-      {/* The four checks, one tile each. The last is the answer, so it
-          wears the brand tint; the three before it narrow toward it. */}
-      <div className="grid grid-cols-2 gap-2 px-5 pb-4 sm:grid-cols-4">
-        <Check4 n={1} value={f.seat_publishers} label="carry your seat line" />
-        <Check4 n={2} value={f.with_sdk_direct} label={`sell ${sdk.name} directly`} />
-        <Check4 n={3} value={f.owned_by_them} label={`${sdk.name} vouches for them`} />
-        <Check4 n={4} value={f.reseller_authorised} label="carry your reseller line" last />
-      </div>
-
-      {preview.rows.length > 0 && (
-        <div className="border-t border-border px-5 pb-4 pt-3">
-          <ul className="divide-y divide-border">
-            {preview.rows.map((r, i) => (
-              <li key={`${r.store}|${r.bundle_id}|${i}`} className="flex items-center gap-3 py-2 text-[12px]">
-                <span className="min-w-0 flex-1 truncate font-medium text-slate-800">{r.app_name}</span>
-                <span className="flex-shrink-0 rounded-full border border-app-border bg-app-bg px-1.5 py-px text-[10px] font-medium text-app">
-                  {storeLabel(r.store)}
-                </span>
-                <span className="hidden w-48 flex-shrink-0 truncate font-mono text-[11px] text-slate-500 md:block">
-                  {r.publisher_domain}
-                </span>
-                <span className="hidden w-36 flex-shrink-0 truncate text-right font-mono text-[11px] text-slate-400 sm:block">
-                  {r.sid1}
-                </span>
-              </li>
-            ))}
-          </ul>
-          <p className="mt-2 text-[11px] text-slate-400">
-            {trial ? (
-              <span className="inline-flex items-center gap-1">
-                <Lock className="h-3 w-3" />
-                {Math.min(preview.rows.length, t.apps)} of {t.apps.toLocaleString()} apps shown on this trial.
+    <div className="space-y-6" data-tour="schain-result">
+      <div className="rounded-2xl border border-border bg-white p-5 shadow-sm">
+        <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
+          <div className="min-w-0">
+            <p className="font-display text-[17px] font-semibold leading-snug tracking-tight text-slate-900">
+              {t.apps > 0 ? (
+                <>
+                  <span className="font-mono tabular-nums">{t.apps.toLocaleString()}</span> apps from{" "}
+                  <span className="font-mono tabular-nums">{t.publishers.toLocaleString()}</span> publishers close the
+                  chain
+                </>
+              ) : (
+                "No app closes this chain"
+              )}
+            </p>
+            <p className="mt-1 truncate text-[12px] text-slate-500">
+              <span className="font-mono">{seatLine}</span> via <span className="font-mono">{sdk.domain}</span>,
+              resold as{" "}
+              <span className="font-mono">
+                {overview.reseller_domain}, {selection.sid2}
               </span>
-            ) : t.apps > preview.rows.length ? (
-              `First ${preview.rows.length} of ${t.apps.toLocaleString()} apps. The file has every one.`
-            ) : (
-              "Every app is in the file."
-            )}
-          </p>
+            </p>
+          </div>
+          <Download3
+            token={token}
+            selection={selection}
+            overview={overview}
+            trial={trial}
+            empty={t.apps === 0}
+            seatLine={seatLine}
+            sdk={sdk}
+            asOf={asOf}
+            onDownloaded={onDownloaded}
+          />
         </div>
-      )}
-      {trial && summary?.trial && (
-        <div className="border-t border-border px-5 py-4">
-          <ContactUs compact label="Unlock the full report" />
+
+        {/* The four checks: small versions of the KPI tiles above, one per
+            check, each saying in words what it counted. The last is the
+            answer and wears the brand colour. */}
+        <div className="mt-4 grid grid-cols-2 gap-3 lg:grid-cols-4">
+          <CheckTile step={1} value={f.seat_publishers} label="Carry your seat line" />
+          <CheckTile step={2} value={f.with_sdk_direct} label={`Sell ${sdk.name} directly`} />
+          <CheckTile step={3} value={f.owned_by_them} label={`${sdk.name} vouches for them`} />
+          <CheckTile step={4} value={f.reseller_authorised} label="Carry your reseller line" last />
+        </div>
+      </div>
+
+      {t.apps > 0 && (
+        <div className="space-y-4">
+          {/* The overview's own tiles, switching the list below. */}
+          <div className="grid grid-cols-2 gap-3">
+            <MatchedTile
+              tone="publisher"
+              icon={Globe}
+              number={t.publishers}
+              label="Publishers in the file"
+              active={view === "publishers"}
+              onClick={() => setView("publishers")}
+            />
+            <MatchedTile
+              tone="app"
+              icon={Smartphone}
+              number={t.apps}
+              label="Apps in the file"
+              active={view === "apps"}
+              onClick={() => setView("apps")}
+            />
+          </div>
+
+          {!trial && preview.total > PAGE_SIZE && (
+            <Pager
+              placement="top"
+              anchorRef={paging.topRef}
+              page={page}
+              pageSize={PAGE_SIZE}
+              total={preview.total}
+              onPage={paging.onPage}
+              noun={view}
+            />
+          )}
+
+          {loading ? (
+            <SkeletonRows rows={5} label={`Loading ${view}`} />
+          ) : (
+            <div className="space-y-3">
+              {view === "publishers"
+                ? (preview.rows as SchainPublisherRow[]).map((r) => (
+                    <SchainPublisherCard
+                      key={r.publisher_domain}
+                      row={r}
+                      sdk={sdk}
+                      open={open.has(r.publisher_domain)}
+                      onToggle={() => toggle(r.publisher_domain)}
+                    />
+                  ))
+                : (preview.rows as SchainRow[]).map((r, i) => {
+                    const key = `${r.store}|${r.bundle_id}|${i}`;
+                    return (
+                      <SchainAppCard key={key} row={r} open={open.has(key)} onToggle={() => toggle(key)} />
+                    );
+                  })}
+            </div>
+          )}
+
+          {trial ? (
+            <LockedTail
+              slice={preview.trial ?? null}
+              caps={summary?.trial ?? null}
+              noun={view}
+              detail={view === "apps" ? "app that closes the chain, in the file" : "publisher that closes the chain, in the file"}
+            />
+          ) : (
+            preview.total > PAGE_SIZE && (
+              <Pager
+                className="border-t border-border/70 pt-4"
+                page={page}
+                pageSize={PAGE_SIZE}
+                total={preview.total}
+                onPage={paging.onPage}
+                noun={view}
+              />
+            )
+          )}
         </div>
       )}
     </div>
   );
 }
 
-function Check4({ n, value, label, last }: { n: number; value: number; label: string; last?: boolean }) {
+/** A check's count, drawn as a small KPI tile: the KPI card's number and label
+ *  rhythm at a smaller size. */
+function CheckTile({ step, value, label, last }: { step: number; value: number; label: string; last?: boolean }) {
   return (
     <div
       className={cn(
-        "rounded-xl border px-4 py-3",
-        last ? "border-primary/30 bg-primary/[0.06]" : "border-border bg-muted/20",
+        "rounded-xl border px-4 py-3.5 shadow-sm",
+        last ? "border-ok-border bg-ok-bg/60" : "border-border bg-white",
       )}
     >
-      <div className="flex items-center gap-1.5 text-[10px] font-medium text-slate-500">
-        <span
-          className={cn(
-            "flex h-4 w-4 items-center justify-center rounded-full font-mono text-[9px]",
-            last ? "bg-primary text-primary-foreground" : "bg-slate-200 text-slate-600",
-          )}
-        >
-          {n}
-        </span>
-        Publishers
-      </div>
       <div
         className={cn(
-          "mt-1 font-mono text-xl font-semibold tabular-nums leading-none",
+          "font-mono text-2xl font-semibold leading-none tabular-nums tracking-tight",
           last ? "text-primary" : "text-slate-900",
         )}
       >
         {value.toLocaleString()}
       </div>
-      <div className="mt-1 truncate text-[11px] text-slate-500">{label}</div>
+      <div className="mt-2 truncate text-[12px] font-medium text-slate-700">{label}</div>
+      <div className="text-[11px] leading-[17px] text-slate-500">Step {step} of 4</div>
+    </div>
+  );
+}
+
+/* ── Result cards, in the overview's own card grammar ──────────────── */
+
+/** One line as the report prints a line: mono, verbatim. */
+function CardLine({ label, line }: { label: string; line: string }) {
+  return (
+    <div className="flex flex-col gap-0.5 sm:flex-row sm:items-baseline sm:gap-3">
+      <span className="w-40 flex-shrink-0 text-[11px] text-slate-500">{label}</span>
+      <code className="min-w-0 truncate font-mono text-[12px] text-slate-900">{line}</code>
+    </div>
+  );
+}
+
+/** A publisher in the file, drawn exactly as the overview draws a matched
+ *  publisher: green disc, name and domain, right-aligned MiniStats, chevron,
+ *  tinted expansion. The expansion shows the lines its file carries. */
+function SchainPublisherCard({
+  row,
+  sdk,
+  open,
+  onToggle,
+}: {
+  row: SchainPublisherRow;
+  sdk: SchainSdk;
+  open: boolean;
+  onToggle: () => void;
+}) {
+  const initial = (row.publisher_domain.replace(/^www\./i, "").charAt(0) || "?").toUpperCase();
+  return (
+    <div
+      className={cn(
+        "overflow-hidden rounded-3xl border border-border bg-white shadow-sm transition-colors",
+        open && "shadow-md",
+      )}
+    >
+      <button
+        type="button"
+        onClick={onToggle}
+        aria-expanded={open}
+        className="flex w-full items-center gap-4 px-4 py-4 text-left sm:px-5"
+      >
+        <div className="flex h-11 w-11 flex-shrink-0 items-center justify-center rounded-full bg-accent text-base font-semibold text-primary">
+          {initial}
+        </div>
+        <div className="min-w-0 flex-1">
+          <div className="truncate text-base font-semibold tracking-tight text-slate-900">{row.publisher_domain}</div>
+          <div className="truncate text-xs text-slate-500">{foundInLabel(row.found_in) ?? "Found in app-ads.txt"}</div>
+        </div>
+        <div className="hidden items-center gap-6 text-right sm:flex">
+          <div className="w-[84px]">
+            <MiniStat label="Apps" value={row.apps} emphasis />
+          </div>
+          <div className="w-[84px]">
+            <MiniStat label={`Valid ${sdk.name} IDs`} value={row.valid_ids.length} />
+          </div>
+        </div>
+        <ChevronDown
+          aria-hidden
+          className={cn("h-4 w-4 flex-shrink-0 text-slate-400 transition-transform", open && "rotate-180")}
+        />
+      </button>
+      {open && (
+        <div className="space-y-1.5 border-t border-border bg-accent/30 px-4 pb-4 pt-3 sm:px-5">
+          <CardLine label="Your seat line" line={row.seat_written} />
+          {row.direct_written.map((l) => (
+            <CardLine key={l} label={`Sells ${sdk.name} directly`} line={l} />
+          ))}
+          <CardLine label="Your reseller line" line={row.reseller_written} />
+          <p className="pt-1 text-[11px] text-slate-500">
+            {row.ids_checked > row.valid_ids.length
+              ? `${row.ids_checked} ${sdk.name} accounts on the file, ${row.valid_ids.length} vouched for by ${sdk.domain}. `
+              : ""}
+            Checked in{" "}
+            <a href={row.file_url} target="_blank" rel="noreferrer noopener" className="font-mono text-slate-600 hover:text-primary">
+              {row.file_url.replace(/^https?:\/\//, "")}
+            </a>
+          </p>
+        </div>
+      )}
+    </div>
+  );
+}
+
+/** An app in the file, drawn exactly as the overview draws a matched app:
+ *  pink disc, name with its store, the publisher under it, a stat on the
+ *  right, tinted expansion with the chain the app sells through. */
+function SchainAppCard({ row, open, onToggle }: { row: SchainRow; open: boolean; onToggle: () => void }) {
+  return (
+    <div
+      className={cn(
+        "overflow-hidden rounded-3xl border shadow-sm transition-colors",
+        open ? "border-app-border bg-app-bg/40 shadow-md" : "border-border bg-white",
+      )}
+    >
+      <button
+        type="button"
+        onClick={onToggle}
+        aria-expanded={open}
+        className="flex w-full items-center gap-4 px-4 py-4 text-left sm:px-5"
+      >
+        <div className="flex h-11 w-11 flex-shrink-0 items-center justify-center rounded-full bg-app-bg text-app">
+          <Smartphone aria-hidden className="h-5 w-5" />
+        </div>
+        <div className="min-w-0 flex-1">
+          <div className="flex min-w-0 items-center gap-2">
+            <span className="truncate text-base font-semibold tracking-tight text-slate-900">{row.app_name}</span>
+            <span className="flex-shrink-0 rounded-full border border-app-border bg-app-bg px-1.5 py-px text-[10px] font-medium text-app">
+              {storeLabel(row.store)}
+            </span>
+          </div>
+          <div className="truncate text-xs text-slate-500">
+            publisher: <span className="text-slate-600">{row.publisher_domain}</span>
+          </div>
+        </div>
+        <div className="hidden text-right sm:block">
+          <div className="text-[10px] font-medium tracking-wide text-slate-500">SDK ID</div>
+          <div className="max-w-[160px] truncate font-mono text-sm tabular-nums text-slate-900">{row.sid1}</div>
+        </div>
+        <ChevronDown
+          aria-hidden
+          className={cn("h-4 w-4 flex-shrink-0 text-slate-400 transition-transform", open && "rotate-180")}
+        />
+      </button>
+      {open && (
+        <div className="space-y-1.5 border-t border-app-border bg-app-bg/30 px-4 pb-4 pt-3 sm:px-5">
+          <CardLine label="Bundle / store ID" line={row.bundle_id} />
+          <CardLine label="Node 1 (asi1, sid1)" line={`${row.asi1}, ${row.sid1}`} />
+          <CardLine label="Node 2 (asi2, sid2)" line={`${row.asi2}, ${row.sid2}`} />
+          {row.store_url && (
+            <p className="pt-1 text-[11px] text-slate-500">
+              <a href={row.store_url} target="_blank" rel="noreferrer noopener" className="hover:text-primary">
+                Open in the store
+              </a>
+              {row.category ? `, ${row.category}` : ""}
+            </p>
+          )}
+        </div>
+      )}
     </div>
   );
 }
@@ -1099,10 +1300,17 @@ function Download3({
   asOf: AsOfPart[];
   onDownloaded: (used: number) => void;
 }) {
-  const [format, setFormat] = useState<"xlsx" | "csv" | null>(null);
+  /** One Export button; the format is chosen in the confirm, Excel by default. */
+  const [open, setOpen] = useState(false);
+  const [format, setFormat] = useState<"xlsx" | "csv">("xlsx");
   /** The reader has said they understand the dates the list is true of. */
   const [agreed, setAgreed] = useState(false);
-  useEffect(() => setAgreed(false), [format]);
+  useEffect(() => {
+    if (open) {
+      setAgreed(false);
+      setFormat("xlsx");
+    }
+  }, [open]);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const key = `${selection.sdk}|${selection.seat}|${selection.sid2}`;
@@ -1120,13 +1328,12 @@ function Download3({
   }
 
   const go = async () => {
-    if (!format) return;
     setBusy(true);
     setError(null);
     try {
       const r = await api.schainExport(token, selection, format);
       onDownloaded(r.used);
-      setFormat(null);
+      setOpen(false);
     } catch (e) {
       setError(e instanceof ApiError ? e.message : "The download did not start. Try again in a minute.");
     } finally {
@@ -1136,30 +1343,20 @@ function Download3({
 
   return (
     <div className="flex flex-shrink-0 flex-col items-start gap-1.5 sm:items-end">
-      <div className="flex gap-2">
-        <button
-          type="button"
-          disabled={empty || out}
-          onClick={() => setFormat("xlsx")}
-          className="inline-flex h-10 items-center gap-2 rounded-full bg-gradient-to-br from-primary to-[hsl(150_58%_22%)] px-5 text-sm font-medium text-primary-foreground shadow-sm transition-all hover:-translate-y-px hover:shadow-md disabled:pointer-events-none disabled:opacity-40"
-        >
-          <Download className="h-4 w-4" />
-          Excel
-        </button>
-        <button
-          type="button"
-          disabled={empty || out}
-          onClick={() => setFormat("csv")}
-          className="inline-flex h-10 items-center gap-2 rounded-full border border-border px-4 text-sm font-medium text-slate-700 transition-colors hover:bg-muted/50 disabled:pointer-events-none disabled:opacity-40"
-        >
-          CSV
-        </button>
-      </div>
+      <button
+        type="button"
+        disabled={empty || out}
+        onClick={() => setOpen(true)}
+        className="inline-flex h-10 items-center gap-2 rounded-full bg-gradient-to-br from-primary to-[hsl(150_58%_22%)] px-5 text-sm font-medium text-primary-foreground shadow-sm transition-all hover:-translate-y-px hover:shadow-md disabled:pointer-events-none disabled:opacity-40"
+      >
+        <Download className="h-4 w-4" />
+        Export
+      </button>
       <span className="text-[11px] text-slate-500">
         {again ? "Downloaded before, free again" : out ? "No downloads left on this link" : `${left} of ${overview.downloads.limit} downloads left`}
       </span>
 
-      <Dialog.Root open={format !== null} onOpenChange={(o) => !o && !busy && setFormat(null)}>
+      <Dialog.Root open={open} onOpenChange={(o) => !busy && setOpen(o)}>
         <Dialog.Portal>
           <Dialog.Overlay className="fixed inset-0 z-50 bg-slate-900/40 backdrop-blur-[2px] data-[state=open]:animate-sheet-overlay-in data-[state=closed]:animate-sheet-overlay-out" />
           <Dialog.Content
@@ -1172,6 +1369,41 @@ function Download3({
             <p className="mt-2 truncate font-mono text-[12px] text-slate-600">
               {seatLine} via {sdk.domain}
             </p>
+            <div className="mt-4" role="radiogroup" aria-label="File format">
+              <div className="mb-1.5 text-[11px] font-medium text-slate-500">Format</div>
+              <div className="grid grid-cols-2 gap-2">
+                {(
+                  [
+                    ["xlsx", "Excel", "Summary, Publishers, SDK IDs, Apps"],
+                    ["csv", "CSV", "The Apps sheet only"],
+                  ] as const
+                ).map(([value, name, hint]) => (
+                  <button
+                    key={value}
+                    type="button"
+                    role="radio"
+                    aria-checked={format === value}
+                    onClick={() => setFormat(value)}
+                    className={cn(
+                      "flex items-start gap-2.5 rounded-xl border px-3 py-2.5 text-left transition-colors",
+                      format === value
+                        ? "border-primary/40 bg-primary/[0.06]"
+                        : "border-border hover:border-primary/25 hover:bg-muted/30",
+                    )}
+                  >
+                    <span className="mt-[2px]">
+                      <Radio on={format === value} />
+                    </span>
+                    <span className="min-w-0">
+                      <span className="block text-[13px] font-medium text-slate-900">
+                        {name} <span className="font-mono text-[11px] text-slate-400">.{value}</span>
+                      </span>
+                      <span className="block text-[11px] leading-snug text-slate-500">{hint}</span>
+                    </span>
+                  </button>
+                ))}
+              </div>
+            </div>
             <p className="mt-3 text-[13px] leading-relaxed text-slate-600">
               {again
                 ? "You downloaded this one before, so it is free."
@@ -1214,7 +1446,7 @@ function Download3({
                 className="inline-flex h-10 items-center gap-2 rounded-full bg-gradient-to-br from-primary to-[hsl(150_58%_22%)] px-5 text-sm font-medium text-primary-foreground shadow-sm transition-all hover:-translate-y-px hover:shadow-md disabled:opacity-60"
               >
                 {busy ? <Loader2 className="h-4 w-4 animate-spin" /> : <Download className="h-4 w-4" />}
-                {busy ? "Preparing" : format === "csv" ? "Download CSV" : "Download Excel"}
+                {busy ? "Preparing" : "Download"}
               </button>
             </div>
           </Dialog.Content>

@@ -705,7 +705,7 @@ export const api = {
   schainPreview: async (
     token: string,
     sel: SchainSelection,
-    opts: { page: number; page_size: number; q?: string },
+    opts: { page: number; page_size: number; q?: string; view?: "apps" | "publishers" },
   ): Promise<SchainPreview> => {
     if (MOCK) {
       const { mockSchainPreview } = await import("./mockSchain");
@@ -720,6 +720,7 @@ export const api = {
     });
     if (sel.live) q.set("live", "true");
     if (opts.q) q.set("q", opts.q);
+    if (opts.view) q.set("view", opts.view);
     return req<SchainPreview>("GET", `/v1/viewer/${token}/schain/preview?${q.toString()}`);
   },
   /**
@@ -1440,6 +1441,22 @@ export type SchainRow = {
   store_url: string;
 };
 
+/** One publisher whose chain closes, for the publisher cards. */
+export type SchainPublisherRow = {
+  publisher_domain: string;
+  apps: number;
+  /** The accounts at the SDK that passed step 3. */
+  valid_ids: string[];
+  /** Every DIRECT account at the SDK on the file, valid or not. */
+  ids_checked: number;
+  seat_written: string;
+  reseller_written: string;
+  /** The valid DIRECT lines, as written. */
+  direct_written: string[];
+  file_url: string;
+  found_in: string;
+};
+
 export type SchainPreview = {
   funnel: SchainFunnel;
   /** `valid_ids`: the publisher accounts at the SDK that passed step 3;
@@ -1449,6 +1466,7 @@ export type SchainPreview = {
   page_size: number;
   /** Rows matching `q`, for the pager. */
   total: number;
-  rows: SchainRow[];
+  /** App rows, or publisher rows when asked with ``view=publishers``. */
+  rows: SchainRow[] | SchainPublisherRow[];
   trial?: TrialSlice | null;
 };
