@@ -418,7 +418,7 @@ function SdkStep({
               onClick={() => onPick(s)}
               aria-pressed={on}
               className={cn(
-                "flex w-full items-center gap-2.5 border-b border-border px-3 py-2.5 text-left transition-colors last:border-b-0",
+                "flex h-[68px] w-full items-center gap-2.5 border-b border-border px-3 text-left transition-colors last:border-b-0",
                 on ? "bg-primary/[0.06]" : "hover:bg-muted/40",
               )}
             >
@@ -886,13 +886,14 @@ function LineRow({
       onClick={onPick}
       aria-pressed={on}
       className={cn(
-        "flex w-full items-start gap-2.5 border-b border-border px-3 py-2 text-left transition-colors last:border-b-0",
+        // The SDK rows' height, so the hairlines line up across the panels.
+        "flex h-[68px] w-full items-center gap-2.5 border-b border-border px-3 text-left transition-colors last:border-b-0",
         on ? "bg-primary/[0.06]" : !disabled && "hover:bg-muted/40",
         disabled && "cursor-not-allowed",
         faded && "opacity-50",
       )}
     >
-      <span className="mt-[2px]">
+      <span>
         <Radio on={on} />
       </span>
       <span className="flex min-w-0 flex-1 flex-col gap-[2px]">
