@@ -59,7 +59,7 @@ const SDKS: SchainSdk[] = [
   { domain: "pubnative.net", name: "Verve", seller_type: "BOTH", seller_ids: ["30044", "30045"] },
   { domain: "vungle.com", name: "Liftoff Monetize", seller_type: "INTERMEDIARY", seller_ids: ["30052"] },
   { domain: "chartboost.com", name: "Chartboost", seller_type: "INTERMEDIARY", seller_ids: ["30058"] },
-  { domain: "digitalturbine.com", name: "Digital Turbine", seller_type: "INTERMEDIARY", seller_ids: ["30063"] },
+  { domain: "digitalturbine.com", name: "Digital Turbine Exchange, formerly the Fyber Marketplace", seller_type: "INTERMEDIARY", seller_ids: ["30063"] },
 ];
 
 /** The popular SDKs we track: the list a customer's sellers.json is read
@@ -370,7 +370,16 @@ export function mockSchainOverview(trial: boolean): SchainOverview {
     crawled_at: new Date(now.getTime() - 5 * 3_600_000).toISOString(),
     sdks: SDKS,
     sdk_catalog_size: SDK_CATALOG.length,
-    seat_lines: CUSTOMER_SEATS,
+    // One deliberately long line, so the demo shows long values truncating
+    // with the full text on hover rather than stretching the grid.
+    seat_lines: [
+      ...CUSTOMER_SEATS,
+      {
+        ssp_domain: "averyveryverylongsupplysidepartner-exchange-madeupmedia.com",
+        publisher_id: "dm-0123456789abcdef0123456789abcdef0123456789",
+        relationship: "RESELLER",
+      },
+    ],
     downloads: {
       used: trial ? 0 : downloaded().length,
       limit: LIMIT,

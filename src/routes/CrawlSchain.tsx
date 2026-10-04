@@ -47,7 +47,7 @@ import { MatchedTile, MiniStat, SplitStat } from "./CrawlReport";
  */
 /** Every builder panel is this tall, whatever it holds; each scrolls
  *  inside itself rather than growing the row (David, 2026-10-04). */
-const PANEL = "flex h-[440px] min-h-0 flex-col p-4 sm:p-5";
+const PANEL = "flex h-[440px] min-h-0 min-w-0 flex-col overflow-hidden p-4 sm:p-5";
 
 export default function CrawlSchain() {
   const { token } = useReportScope();
@@ -175,7 +175,7 @@ export default function CrawlSchain() {
           <AsOf overview={overview} sdk={sdk} read={read} />
 
           <div className="rounded-2xl border border-border bg-white shadow-sm" data-tour="schain-builder">
-            <div className="grid divide-y divide-border lg:grid-cols-[1fr_1.15fr_1.15fr] lg:divide-x lg:divide-y-0">
+            <div className="grid divide-y divide-border lg:grid-cols-[minmax(0,1fr)_minmax(0,1.15fr)_minmax(0,1.15fr)] lg:divide-x lg:divide-y-0">
               <SdkStep
                 overview={overview}
                 selected={sdk}
@@ -286,8 +286,9 @@ function Kpis({ overview, trial }: { overview: SchainOverview; trial: boolean })
         <SplitStat
           tone={leftTone}
           number={left}
+          suffix={`/ ${overview.downloads.limit}`}
           label="Downloads left"
-          hint={trial ? "with the full report" : `of ${overview.downloads.limit} on this link`}
+          hint={trial ? "with the full report" : "on this link"}
         />
       </div>
     </div>
@@ -368,7 +369,11 @@ function ListSearch({ value, onChange, placeholder }: { value: string; onChange:
 
 /** The one-line footer both list panels carry, so their lists end level. */
 function ListFooter({ children }: { children?: ReactNode }) {
-  return <div className="mt-3 flex h-5 flex-shrink-0 items-center text-[11px] text-slate-500">{children}</div>;
+  return (
+    <div className="mt-3 flex h-5 min-w-0 flex-shrink-0 items-center overflow-hidden whitespace-nowrap text-[11px] text-slate-500">
+      {children}
+    </div>
+  );
 }
 
 function StepHead({ n, title, hint, done }: { n: number; title: string; hint: string; done: boolean }) {
@@ -434,12 +439,15 @@ function SdkStep({
             >
               <SdkAvatar name={s.name} tone={tones.get(s.domain) ?? AVATAR_HEX[0]} on={on} />
               <span className="min-w-0 flex-1">
-                <span className="block truncate text-[13px] font-medium text-slate-900">{s.name}</span>
-                <span className="block truncate font-mono text-[11px] text-slate-500">{s.domain}</span>
+                <span title={s.name} className="block truncate text-[13px] font-medium text-slate-900">{s.name}</span>
+                <span title={s.domain} className="block truncate font-mono text-[11px] text-slate-500">{s.domain}</span>
               </span>
-              <span className="flex-shrink-0 text-right text-[10px] text-slate-400">
+              <span className="min-w-0 max-w-[40%] flex-shrink-0 text-right text-[10px] text-slate-400">
                 Seller ID
-                <span className="block font-mono text-[11px] text-slate-600">
+                <span
+                  title={s.seller_ids.join(", ")}
+                  className="block truncate font-mono text-[11px] text-slate-600"
+                >
                   {s.seller_ids.length === 1 ? s.seller_ids[0] : `${s.seller_ids.length} to pick from`}
                 </span>
               </span>
@@ -745,10 +753,16 @@ function ChainStep({
             {sdk && sdkHex ? <SdkAvatar name={sdk.name} tone={sdkHex} on={false} size="lg" /> : <EmptyDisc />}
             <div className="min-w-0 flex-1">
               <div className="text-[10px] font-medium text-slate-500">Node 1, the SDK</div>
-              <div className={cn("truncate text-[13px] font-semibold", sdk ? "text-slate-900" : "text-slate-400")}>
+              <div
+                title={sdk ? `${sdk.name}, ${sdk.domain}` : undefined}
+                className={cn("truncate text-[13px] font-semibold", sdk ? "text-slate-900" : "text-slate-400")}
+              >
                 {sdk ? sdk.name : "Pick an SDK"}
               </div>
-              <div className="truncate font-mono text-[11px] text-slate-500">
+              <div
+                title={sdk ? `asi1 ${sdk.domain}, sid1 the publisher's id` : undefined}
+                className="min-w-0 truncate font-mono text-[11px] text-slate-500"
+              >
                 {sdk ? `asi1 ${sdk.domain}, sid1 the publisher's id` : "asi1, sid1"}
               </div>
             </div>
@@ -765,9 +779,14 @@ function ChainStep({
             </span>
             <div className="min-w-0 flex-1">
               <div className="text-[10px] font-medium text-slate-500">Node 2, you</div>
-              <div className="truncate text-[13px] font-semibold text-slate-900">{overview.customer_name}</div>
+              <div title={overview.customer_name} className="truncate text-[13px] font-semibold text-slate-900">
+                {overview.customer_name}
+              </div>
               {!many && (
-                <div className="truncate font-mono text-[11px] text-slate-500">
+                <div
+                  title={`asi2 ${overview.reseller_domain}, sid2 ${sdk && sid2 ? sid2 : "comes with the SDK"}`}
+                  className="min-w-0 truncate font-mono text-[11px] text-slate-500"
+                >
                   asi2 {overview.reseller_domain}, sid2 {sdk && sid2 ? sid2 : "comes with the SDK"}
                 </div>
               )}
@@ -820,10 +839,16 @@ function ChainStep({
             )}
             <div className="min-w-0 flex-1">
               <div className="text-[10px] font-medium text-slate-500">Your seat</div>
-              <div className={cn("truncate text-[13px] font-semibold", seatLine ? "text-slate-900" : "text-slate-400")}>
+              <div
+                title={seatLine ?? undefined}
+                className={cn("truncate text-[13px] font-semibold", seatLine ? "text-slate-900" : "text-slate-400")}
+              >
                 {seatLine ? ssp : "Pick a seat line"}
               </div>
-              <div className="truncate font-mono text-[11px] text-slate-500">
+              <div
+                title={seatLine ?? undefined}
+                className="min-w-0 truncate font-mono text-[11px] text-slate-500"
+              >
                 {seatLine ? `${seatId}, ${seatRel}` : "ssp, seller id, relationship"}
               </div>
             </div>
@@ -879,7 +904,7 @@ function FileLine({ hex, text }: { hex: string | null; text: string }) {
         className={cn("h-3 w-1 flex-shrink-0 rounded-full", !hex && "bg-slate-200")}
         style={hex ? { background: hex } : undefined}
       />
-      <span className={cn("truncate", hex ? "text-slate-800" : "text-slate-400")}>{text}</span>
+      <span title={text} className={cn("min-w-0 truncate", hex ? "text-slate-800" : "text-slate-400")}>{text}</span>
     </div>
   );
 }
@@ -926,11 +951,16 @@ function LineRow({
         <Radio on={on} />
       </span>
       <span className="flex min-w-0 flex-1 flex-col gap-[2px]">
-        <span className="truncate font-mono text-[12px] leading-[18px] text-slate-900">{line}</span>
+        <span title={line} className="truncate font-mono text-[12px] leading-[18px] text-slate-900">{line}</span>
         {hint === null ? (
           <span className="my-[3px] block h-2 w-32 animate-pulse rounded bg-muted" />
         ) : (
-          <span className="truncate text-[10.5px] leading-[14px] text-slate-400">{hint}</span>
+          <span
+            title={typeof hint === "string" ? hint : undefined}
+            className="truncate text-[10.5px] leading-[14px] text-slate-400"
+          >
+            {hint}
+          </span>
         )}
       </span>
     </button>
@@ -1016,7 +1046,10 @@ function Result({
     <div className="space-y-6" data-tour="schain-result">
       {/* What was run, and the one way out of the page: the file. */}
       <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-        <p className="min-w-0 truncate text-[12px] text-slate-500">
+        <p
+          title={`${seatLine} via ${sdk.domain}, resold as ${overview.reseller_domain}, ${selection.sid2}`}
+          className="min-w-0 truncate text-[12px] text-slate-500"
+        >
           <span className="font-mono text-slate-700">{seatLine}</span> via{" "}
           <span className="font-mono text-slate-700">{sdk.domain}</span>, resold as{" "}
           <span className="font-mono text-slate-700">
@@ -1159,7 +1192,7 @@ function CardLine({ label, line }: { label: string; line: string }) {
   return (
     <div className="flex flex-col gap-0.5 sm:flex-row sm:items-baseline sm:gap-3">
       <span className="w-40 flex-shrink-0 text-[11px] text-slate-500">{label}</span>
-      <code className="min-w-0 truncate font-mono text-[12px] text-slate-900">{line}</code>
+      <code title={line} className="min-w-0 truncate font-mono text-[12px] text-slate-900">{line}</code>
     </div>
   );
 }
@@ -1196,7 +1229,9 @@ function SchainPublisherCard({
           {initial}
         </div>
         <div className="min-w-0 flex-1">
-          <div className="truncate text-base font-semibold tracking-tight text-slate-900">{row.publisher_domain}</div>
+          <div title={row.publisher_domain} className="truncate text-base font-semibold tracking-tight text-slate-900">
+            {row.publisher_domain}
+          </div>
           <div className="truncate text-xs text-slate-500">{foundInLabel(row.found_in) ?? "Found in app-ads.txt"}</div>
         </div>
         <div className="hidden items-center gap-6 text-right sm:flex">
@@ -1256,7 +1291,9 @@ function SchainAppCard({ row, open, onToggle }: { row: SchainRow; open: boolean;
         </div>
         <div className="min-w-0 flex-1">
           <div className="flex min-w-0 items-center gap-2">
-            <span className="truncate text-base font-semibold tracking-tight text-slate-900">{row.app_name}</span>
+            <span title={row.app_name} className="truncate text-base font-semibold tracking-tight text-slate-900">
+              {row.app_name}
+            </span>
             <span className="flex-shrink-0 rounded-full border border-app-border bg-app-bg px-1.5 py-px text-[10px] font-medium text-app">
               {storeLabel(row.store)}
             </span>
