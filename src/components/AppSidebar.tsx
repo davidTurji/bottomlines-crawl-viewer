@@ -53,6 +53,26 @@ export function AppSidebar() {
   }, [token]);
 
 
+  // Does this report carry the schain export? Only when the customer has
+  // it switched on and their sellers.json names at least one SDK we can
+  // check (status "ok"). Hidden by default, like Discovery.
+  const [hasSchain, setHasSchain] = useState(false);
+  useEffect(() => {
+    if (!token) return;
+    let alive = true;
+    api
+      .schain(token)
+      .then((o) => {
+        if (alive) setHasSchain(o?.status === "ok");
+      })
+      .catch(() => {
+        if (alive) setHasSchain(false);
+      });
+    return () => {
+      alive = false;
+    };
+  }, [token]);
+
   /* Active nav state is signalled by a solid accent-tile fill (elevation),
      not by recoloring the text, the teal is reserved for the brand mark. */
   const getNavCls = ({ isActive }: { isActive: boolean }) =>
@@ -88,6 +108,9 @@ export function AppSidebar() {
     // is itself the answer a customer came for, and it is said plainly on
     // the page rather than hidden behind a missing entry.
     { to: `${basePath}/declarations`, label: "Declarations", tour: "nav-declarations" },
+    ...(hasSchain
+      ? [{ to: `${basePath}/schain`, label: "Schain", tour: "nav-schain" }]
+      : []),
   ];
 
   return (

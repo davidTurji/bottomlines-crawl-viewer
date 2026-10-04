@@ -526,6 +526,7 @@ export function SplitStat({
   label,
   hint,
   prefix,
+  suffix,
   tone,
   linkTo,
   delta,
@@ -535,6 +536,8 @@ export function SplitStat({
   label: string;
   hint?: string;
   prefix?: string;
+  /** Said after the number, smaller and muted: "/ 3" in "2 / 3". */
+  suffix?: string;
   tone?: StatTone;
   linkTo?: string;
   delta?: Delta | null;
@@ -566,6 +569,9 @@ export function SplitStat({
         >
           {number.toLocaleString()}
         </span>
+        {suffix && (
+          <span className="font-mono text-lg font-medium tabular-nums text-slate-400 sm:text-xl">{suffix}</span>
+        )}
       </div>
       <div className="mt-2 text-[12px] font-medium text-slate-700">{label}</div>
       {/* ONE SLOT, ALWAYS THE SAME HEIGHT. A delta, a hint, a note, or
@@ -604,7 +610,7 @@ export function SplitStat({
  * baseline across both panels), then the delta. The selected tile carries a
  * toned ring and a deeper tint; the idle one is plain white and hoverable.
  */
-function MatchedTile({
+export function MatchedTile({
   tone,
   icon: Icon,
   number,

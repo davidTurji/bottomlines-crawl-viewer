@@ -2024,3 +2024,13 @@ export async function* mockChatStream(
   await new Promise((r) => setTimeout(r, 100));
   yield { type: "done" };
 }
+
+/**
+ * The matched roster and its app bundles, for the schain fixture
+ * (src/lib/mockSchain.ts). Read off the same lists the overview pages, so
+ * a publisher in the schain preview is one the reader can also find under
+ * Matched publishers, carrying the same seat lines.
+ */
+export function mockSchainSource() {
+  return { developers: MATCHED_DEVS, bundles: MATCHED_BUNDLES };
+}

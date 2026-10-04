@@ -28,7 +28,7 @@
 import type { TourStep } from "./TourOverlay";
 
 /** The report page a step is about, relative to the report's base path. */
-export type ReportPage = "" | "changes" | "discovery" | "declarations";
+export type ReportPage = "" | "changes" | "discovery" | "declarations" | "schain";
 
 export interface ReportTourStep extends TourStep {
   /** The runner navigates here when the step opens. */
@@ -45,11 +45,19 @@ export interface ReportFeatures {
   canExport: boolean;
   /** A trial report: first rows of every list, full counts. */
   trial: boolean;
+  /** The report carries the Schain builder, so the rail lists Schain. */
+  hasSchain: boolean;
 }
 
 /** Every step this report can show, in reading order. */
 export function reportTourSteps(f: ReportFeatures): ReportTourStep[] {
-  const pages = ["Overview", "Changes", ...(f.hasDiscovery ? ["Discovery"] : []), "Declarations"];
+  const pages = [
+    "Overview",
+    "Changes",
+    ...(f.hasDiscovery ? ["Discovery"] : []),
+    "Declarations",
+    ...(f.hasSchain ? ["Schain"] : []),
+  ];
   const pageList = `${pages.slice(0, -1).join(", ")} and ${pages[pages.length - 1]}`;
 
   const steps: (ReportTourStep | false)[] = [
@@ -186,6 +194,42 @@ export function reportTourSteps(f: ReportFeatures): ReportTourStep[] {
       body: (
         <p>
           Files naming your domain as <strong>partner</strong>, <strong>owner</strong> or <strong>manager</strong>.
+        </p>
+      ),
+    },
+    f.hasSchain && {
+      id: "schain-builder",
+      page: "schain",
+      anchor: "schain-builder",
+      eyebrow: "Schain",
+      title: "Build a schain file",
+      body: (
+        <p>
+          Pick an <strong>SDK</strong> and a <strong>seat line</strong>, then <strong>Run report</strong>. The chain fills in on the right.
+        </p>
+      ),
+    },
+    f.hasSchain && {
+      id: "schain-asof",
+      page: "schain",
+      anchor: "schain-asof",
+      eyebrow: "Schain",
+      title: "True as of these dates",
+      body: (
+        <p>
+          This week&apos;s <strong>crawl</strong> and the saved <strong>sellers.json</strong>. Refresh an SDK any time.
+        </p>
+      ),
+    },
+    f.hasSchain && {
+      id: "schain-how",
+      page: "schain",
+      anchor: "schain-how",
+      eyebrow: "Schain",
+      title: "What we check",
+      body: (
+        <p>
+          <strong>How it works</strong> shows all four checks, with your own lines.
         </p>
       ),
     },

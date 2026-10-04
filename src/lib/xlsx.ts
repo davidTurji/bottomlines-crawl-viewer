@@ -14,7 +14,16 @@
  */
 
 export type XlsxCell = string | number;
-export type XlsxSheet = { name: string; rows: XlsxCell[][] };
+export type XlsxSheet = {
+  name: string;
+  rows: XlsxCell[][];
+  /** Row 1 is a header: bold, frozen above the rows. */
+  header?: boolean;
+  /** Row 1 is a title: bold, a size up (13pt), not frozen. */
+  title?: boolean;
+  /** Column widths, in Excel's character units, left to right. */
+  widths?: number[];
+};
 
 const XLSX_MIME =
   "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet";
@@ -41,17 +50,20 @@ function colName(i: number): string {
 
 /** One worksheet's XML. Numbers write as numeric cells; everything else as an
  *  inline string, so there is no shared-strings table to keep in sync. */
-function sheetXml(rows: XlsxCell[][]): string {
+function sheetXml(sheet: XlsxSheet): string {
+  const { rows, header = false, title = false, widths } = sheet;
   const body = rows
     .map((cells, r) => {
       const rowNo = r + 1;
+      // Style 1 is the header cell, 2 the title (see STYLES); 0 the default.
+      const style = r === 0 && header ? ` s="1"` : r === 0 && title ? ` s="2"` : "";
       const cs = cells
         .map((cell, c) => {
           const ref = `${colName(c)}${rowNo}`;
           if (typeof cell === "number" && Number.isFinite(cell)) {
-            return `<c r="${ref}"><v>${cell}</v></c>`;
+            return `<c r="${ref}"${style}><v>${cell}</v></c>`;
           }
-          return `<c r="${ref}" t="inlineStr"><is><t xml:space="preserve">${xmlEscape(
+          return `<c r="${ref}"${style} t="inlineStr"><is><t xml:space="preserve">${xmlEscape(
             String(cell),
           )}</t></is></c>`;
         })
@@ -59,8 +71,31 @@ function sheetXml(rows: XlsxCell[][]): string {
       return `<row r="${rowNo}">${cs}</row>`;
     })
     .join("");
-  return `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>\n<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"><sheetData>${body}</sheetData></worksheet>`;
+  const views = header
+    ? `<sheetViews><sheetView workbookViewId="0"><pane ySplit="1" topLeftCell="A2" activePane="bottomLeft" state="frozen"/></sheetView></sheetViews>`
+    : "";
+  const cols = widths?.length
+    ? `<cols>${widths
+        .map((w, i) => `<col min="${i + 1}" max="${i + 1}" width="${w}" customWidth="1"/>`)
+        .join("")}</cols>`
+    : "";
+  return `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>\n<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">${views}${cols}<sheetData>${body}</sheetData></worksheet>`;
 }
+
+/** Three cell styles: 0 plain, 1 a bold header, 2 a bold 13pt title. */
+const STYLES =
+  `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>\n` +
+  `<styleSheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">` +
+  `<fonts count="3"><font><sz val="11"/><name val="Calibri"/></font>` +
+  `<font><b/><sz val="11"/><name val="Calibri"/></font>` +
+  `<font><b/><sz val="13"/><name val="Calibri"/></font></fonts>` +
+  `<fills count="2"><fill><patternFill patternType="none"/></fill><fill><patternFill patternType="gray125"/></fill></fills>` +
+  `<borders count="1"><border><left/><right/><top/><bottom/><diagonal/></border></borders>` +
+  `<cellStyleXfs count="1"><xf numFmtId="0" fontId="0" fillId="0" borderId="0"/></cellStyleXfs>` +
+  `<cellXfs count="3"><xf numFmtId="0" fontId="0" fillId="0" borderId="0" xfId="0"/>` +
+  `<xf numFmtId="0" fontId="1" fillId="0" borderId="0" xfId="0" applyFont="1"/>` +
+  `<xf numFmtId="0" fontId="2" fillId="0" borderId="0" xfId="0" applyFont="1"/></cellXfs>` +
+  `</styleSheet>`;
 
 /* ── ZIP (store method) ─────────────────────────────────────────────── */
 
@@ -175,6 +210,7 @@ export function buildXlsxBlob(sheets: XlsxSheet[]): Blob {
     `<Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/>` +
     `<Default Extension="xml" ContentType="application/xml"/>` +
     `<Override PartName="/xl/workbook.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml"/>` +
+    `<Override PartName="/xl/styles.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.styles+xml"/>` +
     list
       .map(
         (_, i) =>
@@ -217,6 +253,9 @@ export function buildXlsxBlob(sheets: XlsxSheet[]): Blob {
           }.xml"/>`,
       )
       .join("") +
+    `<Relationship Id="rId${
+      list.length + 1
+    }" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/styles" Target="styles.xml"/>` +
     `</Relationships>`;
 
   const entries: ZipEntry[] = [
@@ -224,9 +263,10 @@ export function buildXlsxBlob(sheets: XlsxSheet[]): Blob {
     { name: "_rels/.rels", data: enc.encode(rootRels) },
     { name: "xl/workbook.xml", data: enc.encode(workbook) },
     { name: "xl/_rels/workbook.xml.rels", data: enc.encode(workbookRels) },
+    { name: "xl/styles.xml", data: enc.encode(STYLES) },
     ...list.map((s, i) => ({
       name: `xl/worksheets/sheet${i + 1}.xml`,
-      data: enc.encode(sheetXml(s.rows)),
+      data: enc.encode(sheetXml(s)),
     })),
   ];
 
