@@ -1044,36 +1044,48 @@ function Result({
 
   return (
     <div className="space-y-6" data-tour="schain-result">
-      {/* What was run, and the one way out of the page: the file. */}
-      <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-        <p
-          title={`${seatLine} via ${sdk.domain}, resold as ${overview.reseller_domain}, ${selection.sid2}`}
-          className="min-w-0 truncate text-[12px] text-slate-500"
-        >
-          <span className="font-mono text-slate-700">{seatLine}</span> via{" "}
-          <span className="font-mono text-slate-700">{sdk.domain}</span>, resold as{" "}
-          <span className="font-mono text-slate-700">
-            {overview.reseller_domain}, {selection.sid2}
-          </span>
-        </p>
-        <Download3
-          token={token}
-          selection={selection}
-          overview={overview}
-          trial={trial}
-          empty={t.apps === 0}
-          seatLine={seatLine}
-          sdk={sdk}
-          asOf={asOf}
-          onDownloaded={onDownloaded}
-        />
-      </div>
+      {/* All the KPIs first, in one card: what was run, the file, and the
+          four checks. The publishers and apps that close the chain follow
+          underneath (David, 2026-10-04: the stacked layout reads better). */}
+      <div className="rounded-2xl border border-border bg-white p-5 shadow-sm">
+        <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
+          <div className="min-w-0">
+            <p className="font-display text-[17px] font-semibold leading-snug tracking-tight text-slate-900">
+              {t.apps > 0 ? (
+                <>
+                  <span className="font-mono tabular-nums">{t.apps.toLocaleString()}</span> apps from{" "}
+                  <span className="font-mono tabular-nums">{t.publishers.toLocaleString()}</span> publishers close the
+                  chain
+                </>
+              ) : (
+                "No app closes this chain"
+              )}
+            </p>
+            <p
+              title={`${seatLine} via ${sdk.domain}, resold as ${overview.reseller_domain}, ${selection.sid2}`}
+              className="mt-1 truncate text-[12px] text-slate-500"
+            >
+              <span className="font-mono text-slate-700">{seatLine}</span> via{" "}
+              <span className="font-mono text-slate-700">{sdk.domain}</span>, resold as{" "}
+              <span className="font-mono text-slate-700">
+                {overview.reseller_domain}, {selection.sid2}
+              </span>
+            </p>
+          </div>
+          <Download3
+            token={token}
+            selection={selection}
+            overview={overview}
+            trial={trial}
+            empty={t.apps === 0}
+            seatLine={seatLine}
+            sdk={sdk}
+            asOf={asOf}
+            onDownloaded={onDownloaded}
+          />
+        </div>
 
-      {/* The overview's two KPI cards, in its own grammar: the checks as
-          split stats on the left, the answer as the two tiles that switch
-          the list on the right. */}
-      <div className="grid gap-4 lg:grid-cols-[minmax(0,1.6fr)_minmax(0,1fr)]">
-        <div className="rounded-2xl border border-border bg-white p-5 shadow-sm">
+        <div className="mt-4">
           <div className="mb-3">
             <div className="font-display text-sm font-medium text-slate-700">The four checks</div>
             <div className="text-[11px] text-slate-500">Publishers left after each one</div>
@@ -1085,12 +1097,11 @@ function Result({
             <SplitStat tone="publisher" number={f.reseller_authorised} label="Carry your reseller line" hint="Step 4 of 4" />
           </div>
         </div>
+      </div>
 
-        <div className="rounded-2xl border border-border bg-white p-5 shadow-sm">
-          <div className="mb-3">
-            <div className="font-display text-sm font-medium text-slate-700">In your file</div>
-            <div className="text-[11px] text-slate-500">Click one to switch the list below</div>
-          </div>
+      {t.apps > 0 && (
+        <div className="space-y-4">
+          {/* The overview's own tiles, switching the list below. */}
           <div className="grid grid-cols-2 gap-3">
             <MatchedTile
               tone="publisher"
@@ -1109,11 +1120,7 @@ function Result({
               onClick={() => setView("apps")}
             />
           </div>
-        </div>
-      </div>
 
-      {t.apps > 0 && (
-        <div className="space-y-4">
           <div>
             <h2 className="font-display text-base font-semibold tracking-tight text-slate-900">
               {view === "publishers" ? "Publishers that close the chain" : "Apps that close the chain"}
