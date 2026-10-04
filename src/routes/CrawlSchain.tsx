@@ -408,7 +408,7 @@ function SdkStep({
           />
         </label>
       )}
-      <div className="scroll-y min-h-0 flex-1 space-y-1 overflow-y-auto pr-0.5">
+      <div className="scroll-y min-h-0 flex-1 overflow-y-auto rounded-xl border border-border bg-white">
         {list.map((s) => {
           const on = selected?.domain === s.domain;
           return (
@@ -418,8 +418,8 @@ function SdkStep({
               onClick={() => onPick(s)}
               aria-pressed={on}
               className={cn(
-                "flex w-full items-center gap-2.5 rounded-lg border px-2.5 py-2 text-left transition-colors",
-                on ? "border-primary/40 bg-primary/[0.06]" : "border-transparent hover:bg-muted/50",
+                "flex w-full items-center gap-2.5 border-b border-border px-3 py-2.5 text-left transition-colors last:border-b-0",
+                on ? "bg-primary/[0.06]" : "hover:bg-muted/40",
               )}
             >
               <SdkAvatar name={s.name} tone={tones.get(s.domain) ?? AVATAR_HEX[0]} on={on} />
@@ -984,61 +984,56 @@ function Result({
 
   return (
     <div className="space-y-6" data-tour="schain-result">
-      <div className="rounded-2xl border border-border bg-white p-5 shadow-sm">
-        <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
-          <div className="min-w-0">
-            <p className="font-display text-[17px] font-semibold leading-snug tracking-tight text-slate-900">
-              {t.apps > 0 ? (
-                <>
-                  <span className="font-mono tabular-nums">{t.apps.toLocaleString()}</span> apps from{" "}
-                  <span className="font-mono tabular-nums">{t.publishers.toLocaleString()}</span> publishers close the
-                  chain
-                </>
-              ) : (
-                "No app closes this chain"
-              )}
-            </p>
-            <p className="mt-1 truncate text-[12px] text-slate-500">
-              <span className="font-mono">{seatLine}</span> via <span className="font-mono">{sdk.domain}</span>,
-              resold as{" "}
-              <span className="font-mono">
-                {overview.reseller_domain}, {selection.sid2}
-              </span>
-            </p>
-          </div>
-          <Download3
-            token={token}
-            selection={selection}
-            overview={overview}
-            trial={trial}
-            empty={t.apps === 0}
-            seatLine={seatLine}
-            sdk={sdk}
-            asOf={asOf}
-            onDownloaded={onDownloaded}
-          />
-        </div>
-
-        {/* The four checks: small versions of the KPI tiles above, one per
-            check, each saying in words what it counted. The last is the
-            answer and wears the brand colour. */}
-        <div className="mt-4 grid grid-cols-2 gap-3 lg:grid-cols-4">
-          <CheckTile step={1} value={f.seat_publishers} label="Carry your seat line" />
-          <CheckTile step={2} value={f.with_sdk_direct} label={`Sell ${sdk.name} directly`} />
-          <CheckTile step={3} value={f.owned_by_them} label={`${sdk.name} vouches for them`} />
-          <CheckTile step={4} value={f.reseller_authorised} label="Carry your reseller line" last />
-        </div>
+      {/* What was run, and the one way out of the page: the file. */}
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+        <p className="min-w-0 truncate text-[12px] text-slate-500">
+          <span className="font-mono text-slate-700">{seatLine}</span> via{" "}
+          <span className="font-mono text-slate-700">{sdk.domain}</span>, resold as{" "}
+          <span className="font-mono text-slate-700">
+            {overview.reseller_domain}, {selection.sid2}
+          </span>
+        </p>
+        <Download3
+          token={token}
+          selection={selection}
+          overview={overview}
+          trial={trial}
+          empty={t.apps === 0}
+          seatLine={seatLine}
+          sdk={sdk}
+          asOf={asOf}
+          onDownloaded={onDownloaded}
+        />
       </div>
 
-      {t.apps > 0 && (
-        <div className="space-y-4">
-          {/* The overview's own tiles, switching the list below. */}
+      {/* The overview's two KPI cards, in its own grammar: the checks as
+          split stats on the left, the answer as the two tiles that switch
+          the list on the right. */}
+      <div className="grid gap-4 lg:grid-cols-[minmax(0,1.6fr)_minmax(0,1fr)]">
+        <div className="rounded-2xl border border-border bg-white p-5 shadow-sm">
+          <div className="mb-3">
+            <div className="font-display text-sm font-medium text-slate-700">The four checks</div>
+            <div className="text-[11px] text-slate-500">Publishers left after each one</div>
+          </div>
+          <div className="grid grid-cols-2 divide-x divide-y divide-border overflow-hidden rounded-xl border border-border lg:grid-cols-4 lg:divide-y-0">
+            <SplitStat tone="info" number={f.seat_publishers} label="Carry your seat line" hint="Step 1 of 4" />
+            <SplitStat tone="special" number={f.with_sdk_direct} label={`Sell ${sdk.name} directly`} hint="Step 2 of 4" />
+            <SplitStat tone="warn" number={f.owned_by_them} label={`${sdk.name} vouches for them`} hint="Step 3 of 4" />
+            <SplitStat tone="publisher" number={f.reseller_authorised} label="Carry your reseller line" hint="Step 4 of 4" />
+          </div>
+        </div>
+
+        <div className="rounded-2xl border border-border bg-white p-5 shadow-sm">
+          <div className="mb-3">
+            <div className="font-display text-sm font-medium text-slate-700">In your file</div>
+            <div className="text-[11px] text-slate-500">Click one to switch the list below</div>
+          </div>
           <div className="grid grid-cols-2 gap-3">
             <MatchedTile
               tone="publisher"
               icon={Globe}
               number={t.publishers}
-              label="Publishers in the file"
+              label="Publishers close the chain"
               active={view === "publishers"}
               onClick={() => setView("publishers")}
             />
@@ -1046,10 +1041,25 @@ function Result({
               tone="app"
               icon={Smartphone}
               number={t.apps}
-              label="Apps in the file"
+              label="Apps close the chain"
               active={view === "apps"}
               onClick={() => setView("apps")}
             />
+          </div>
+        </div>
+      </div>
+
+      {t.apps > 0 && (
+        <div className="space-y-4">
+          <div>
+            <h2 className="font-display text-base font-semibold tracking-tight text-slate-900">
+              {view === "publishers" ? "Publishers that close the chain" : "Apps that close the chain"}
+            </h2>
+            <p className="text-sm text-slate-500">
+              {view === "publishers"
+                ? "Click a row to see the exact lines its file carries."
+                : "Click a row to see the chain the app sells through."}
+            </p>
           </div>
 
           {!trial && preview.total > PAGE_SIZE && (
@@ -1108,30 +1118,6 @@ function Result({
           )}
         </div>
       )}
-    </div>
-  );
-}
-
-/** A check's count, drawn as a small KPI tile: the KPI card's number and label
- *  rhythm at a smaller size. */
-function CheckTile({ step, value, label, last }: { step: number; value: number; label: string; last?: boolean }) {
-  return (
-    <div
-      className={cn(
-        "rounded-xl border px-4 py-3.5 shadow-sm",
-        last ? "border-ok-border bg-ok-bg/60" : "border-border bg-white",
-      )}
-    >
-      <div
-        className={cn(
-          "font-mono text-2xl font-semibold leading-none tabular-nums tracking-tight",
-          last ? "text-primary" : "text-slate-900",
-        )}
-      >
-        {value.toLocaleString()}
-      </div>
-      <div className="mt-2 truncate text-[12px] font-medium text-slate-700">{label}</div>
-      <div className="text-[11px] leading-[17px] text-slate-500">Step {step} of 4</div>
     </div>
   );
 }
