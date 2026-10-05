@@ -840,6 +840,9 @@ export type ExportInfo = {
   apps_rows?: number | null;
 };
 
+export type MatchedMove = { found: number; lost: number };
+export type MatchedMoves = { developers: MatchedMove; apps: MatchedMove | null };
+
 export type Summary = {
   crawl_id: number;
   /** Set on a trial report (see ``TrialCaps``); null or absent on a full one. */
@@ -862,6 +865,12 @@ export type Summary = {
     unreadable_count: number;
     developers_with_lines: number;
     matched: { lines: number; developers: number; apps: number };
+    /** How many matched publishers and apps STARTED and STOPPED matching
+     *  since the baseline. Optional: links baked before it lack the key.
+     *  Null = not computed (no baseline, or under a line filter); `apps`
+     *  alone is null when the bake had to cap an app list. A publisher the
+     *  crawl did not reach is never counted as lost. */
+    matched_moves?: MatchedMoves | null;
   };
   hero_diff: {
     line_totals: LineEventCounts;
