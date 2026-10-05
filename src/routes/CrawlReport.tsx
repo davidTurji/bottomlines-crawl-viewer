@@ -28,6 +28,8 @@ import {
   type MatchedApp,
   type MatchedSeatLine,
   type LineEvent,
+  type MatchedMove,
+  type MatchedMoves,
 } from "../lib/api";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import {
@@ -191,6 +193,9 @@ export default function CrawlReport() {
   const filtered = lines.length > 0;
   const prevMatchedDevs = filtered ? null : (previous?.counters.matched.developers ?? null);
   const prevMatchedApps = filtered ? null : (previous?.counters.matched.apps ?? null);
+  // Found and lost behind the net, when the report carries them (David,
+  // 2026-10-05: "+351" alone hides the 380 we found). Never under a filter.
+  const moves = filtered ? null : (summary.counters.matched_moves ?? null);
 
   // Last week's OWN added/removed totals, so "+32 lines added" can say
   // whether 32 is a busy week or a quiet one. Comparing this week's added
@@ -239,6 +244,7 @@ export default function CrawlReport() {
             apps={matchedApps}
             publishersDelta={matchedDevsDelta}
             appsDelta={matchedAppsDelta}
+            moves={moves}
             firstCrawl={isFirstCrawl}
             filtered={filtered}
           />
@@ -400,6 +406,7 @@ export default function CrawlReport() {
               delayMs={secondBeat}
               delta={matchedDevsDelta}
               previous={prevMatchedDevs}
+              move={moves?.developers ?? null}
               note={filtered ? "under the selected lines" : undefined}
               active={matchedView === "publishers"}
               onClick={() => {
@@ -415,6 +422,7 @@ export default function CrawlReport() {
               delayMs={secondBeat}
               delta={matchedAppsDelta}
               previous={prevMatchedApps}
+              move={moves?.apps ?? null}
               note={filtered ? "under the selected lines" : undefined}
               active={matchedView === "apps"}
               onClick={() => {
@@ -505,6 +513,7 @@ function WeeklyWin({
   apps,
   publishersDelta,
   appsDelta,
+  moves,
   firstCrawl,
   filtered,
 }: {
@@ -512,6 +521,9 @@ function WeeklyWin({
   apps: number;
   publishersDelta: Delta | null;
   appsDelta: Delta | null;
+  /** Found / lost from the report, when it carries them: the headline then
+   *  says how many we FOUND, not the net. */
+  moves: MatchedMoves | null;
   firstCrawl: boolean;
   filtered: boolean;
 }) {
@@ -523,6 +535,8 @@ function WeeklyWin({
   const plural = (n: number, one: string, many: string) => (n === 1 ? one : many);
   const morePubs = publishersDelta && publishersDelta.abs > 0 ? publishersDelta.abs : 0;
   const moreApps = appsDelta && appsDelta.abs > 0 ? appsDelta.abs : 0;
+  const foundPubs = moves?.developers.found ?? 0;
+  const foundApps = moves?.apps?.found ?? null;
 
   let line: ReactNode;
   if (filtered) {
@@ -539,6 +553,20 @@ function WeeklyWin({
         {app(apps)} {plural(apps, "app", "apps")} carrying your seats.
       </>
     );
+  } else if (moves && foundPubs > 0) {
+    // What we FOUND, not the net: the value of the week (David, 2026-10-05).
+    line =
+      foundApps != null && foundApps > 0 ? (
+        <>
+          This week we found {pub(foundPubs)} new {plural(foundPubs, "publisher", "publishers")} and{" "}
+          {app(foundApps)} new {plural(foundApps, "app", "apps")} carrying your seats.
+        </>
+      ) : (
+        <>
+          This week we found {pub(foundPubs)} new {plural(foundPubs, "publisher", "publishers")}{" "}
+          carrying your seats, {app(apps)} {plural(apps, "app", "apps")} in all.
+        </>
+      );
   } else if (morePubs > 0 && moreApps > 0) {
     line = (
       <>
@@ -801,11 +829,14 @@ export function MatchedTile({
   delta,
   previous,
   note,
+  move,
   active,
   onClick,
   delayMs = 0,
 }: {
   tone: "publisher" | "app";
+  /** Found / lost behind the net, said under it when the report has them. */
+  move?: MatchedMove | null;
   icon: typeof Globe;
   number: number;
   label: string;
@@ -897,6 +928,24 @@ export function MatchedTile({
             )}
             <span>{delta.abs === 0 ? "no change" : "vs last week"}</span>
           </span>
+          {move && (move.found > 0 || move.lost > 0) && (
+            // Behind the net, in plain words: what we found and what went.
+            <span className="whitespace-nowrap text-[11px] leading-[15px] text-slate-500">
+              <span className="font-mono font-medium tabular-nums text-ok">
+                {move.found.toLocaleString()}
+              </span>{" "}
+              found,{" "}
+              <span
+                className={cn(
+                  "font-mono font-medium tabular-nums",
+                  move.lost > 0 ? "text-critical" : "text-slate-500",
+                )}
+              >
+                {move.lost.toLocaleString()}
+              </span>{" "}
+              lost
+            </span>
+          )}
         </span>
       )}
     </button>
