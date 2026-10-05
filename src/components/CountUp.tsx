@@ -56,8 +56,12 @@ export function CountUp({ value, delayMs = 0 }: { value: number; delayMs?: numbe
     const wait = window.setTimeout(() => {
       frame = requestAnimationFrame(tick);
     }, delayMs);
+    // A page that never paints (a background tab, a capture) runs no
+    // frames: the figure still lands on its number, never stays at 0.
+    const land = window.setTimeout(() => setShown(value), delayMs + DURATION_MS + 150);
     return () => {
       window.clearTimeout(wait);
+      window.clearTimeout(land);
       cancelAnimationFrame(frame);
     };
   }, [value, delayMs, still]);
@@ -68,7 +72,9 @@ export function CountUp({ value, delayMs = 0 }: { value: number; delayMs?: numbe
       // Dimmed while it waits its turn, full strength as it starts.
       style={delayMs > 0 ? { animation: `kpi-wake 260ms ease-out ${delayMs}ms both` } : undefined}
     >
-      {Number.isFinite(shown) ? shown.toLocaleString() : shown}
+      {/* A screen reader hears the number, not the count passing through. */}
+      <span aria-hidden>{Number.isFinite(shown) ? shown.toLocaleString() : shown}</span>
+      <span className="sr-only">{Number.isFinite(value) ? value.toLocaleString() : value}</span>
     </span>
   );
 }
