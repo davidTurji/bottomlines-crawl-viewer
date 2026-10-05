@@ -16,6 +16,7 @@ import CrawlChanges from "./routes/CrawlChanges";
 import CrawlDiscovered from "./routes/CrawlDiscovered";
 import CrawlDeclarations from "./routes/CrawlDeclarations";
 import CrawlSchain from "./routes/CrawlSchain";
+import CrawlSellers from "./routes/CrawlSellers";
 import { installViewportLock } from "./lib/viewportLock";
 import "./index.css";
 
@@ -56,6 +57,7 @@ const reportPages = (
     <Route path="discovery" element={<CrawlDiscovered />} />
     <Route path="declarations" element={<CrawlDeclarations />} />
     <Route path="schain" element={<CrawlSchain />} />
+    <Route path="sellers" element={<CrawlSellers />} />
     {/* The page was called "Discovered lines" and lived at /discovered
         until it was renamed. Kept as a redirect rather than dropped: a
         share link a customer already has in their inbox must not break

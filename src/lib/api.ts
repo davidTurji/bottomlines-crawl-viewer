@@ -649,6 +649,25 @@ export const api = {
     return req<DeclarationsPayload>("GET", `/v1/viewer/${token}/declarations`);
   },
   /**
+   * SELLERS.JSON FIX: the customer's own sellers.json as it stands, and
+   * every seller ID publishers list under the customer's domain. The page
+   * works out the suggestions itself (lib/sellersFix.ts) and never changes
+   * the live file; it only builds the file the reader exports.
+   *
+   * Mock only for now. A live report answers 404 until the crawler freezes
+   * these two with the report, and the page then stays off the rail.
+   */
+  sellersFix: async (token: string): Promise<SellersFixPayload> => {
+    if (MOCK) {
+      const { MOCK_SELLERS_DOMAIN, mockSellersFile, mockSellerSightings } = await import("./mockSellers");
+      // `?nofile=1` shows a customer with no sellers.json yet: the page
+      // then builds one from scratch.
+      const noFile = new URLSearchParams(window.location.search).has("nofile");
+      return { domain: MOCK_SELLERS_DOMAIN, file: noFile ? null : mockSellersFile, sightings: mockSellerSightings };
+    }
+    return req<SellersFixPayload>("GET", `/v1/viewer/${token}/sellers-fix`);
+  },
+  /**
    * SCHAIN EXPORT: what the page opens on.
    *
    * Frozen at bake time from the customer's own sellers.json: the SDKs in
@@ -1478,4 +1497,13 @@ export type SchainPreview = {
   /** App rows, or publisher rows when asked with ``view=publishers``. */
   rows: SchainRow[] | SchainPublisherRow[];
   trial?: TrialSlice | null;
+};
+
+/** GET /v1/viewer/{token}/sellers-fix (not on the backend yet). */
+export type SellersFixPayload = {
+  /** The customer domain the sellers.json is published on. */
+  domain: string;
+  /** Null when the customer publishes no sellers.json yet. */
+  file: import("./sellersFix").SellersFile | null;
+  sightings: import("./sellersFix").Sighting[];
 };
