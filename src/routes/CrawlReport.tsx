@@ -234,14 +234,20 @@ export default function CrawlReport() {
             Week of {weekLabel}
             {prevWeekLabel && `, compared with ${prevWeekLabel}`}.
           </p>
-          <WeeklyWin
-            publishers={matchedDevs}
-            apps={matchedApps}
-            publishersDelta={matchedDevsDelta}
-            appsDelta={matchedAppsDelta}
-            firstCrawl={isFirstCrawl}
-            filtered={filtered}
-          />
+          {refreshing ? (
+            // The figures below are reloading for a new line selection;
+            // a sentence about the old one would be wrong for a moment.
+            <div aria-hidden className="mt-3 h-5 w-full max-w-md animate-pulse rounded bg-muted" />
+          ) : (
+            <WeeklyWin
+              publishers={matchedDevs}
+              apps={matchedApps}
+              publishersDelta={matchedDevsDelta}
+              appsDelta={matchedAppsDelta}
+              firstCrawl={isFirstCrawl}
+              filtered={filtered}
+            />
+          )}
         </div>
         <div className="flex flex-wrap items-center gap-2">
           <LineFilter
@@ -838,7 +844,7 @@ export function MatchedTile({
       onClick={onClick}
       aria-pressed={active}
       className={cn(
-        "flex flex-wrap items-start justify-between gap-x-4 gap-y-3 rounded-xl border px-5 py-4 text-left shadow-sm transition-colors sm:flex-nowrap",
+        "flex flex-wrap items-start justify-between gap-x-4 gap-y-3 rounded-xl border px-5 py-4 text-left shadow-sm transition-colors xl:flex-nowrap",
         active ? activeGround : idleGround,
       )}
     >
@@ -876,7 +882,7 @@ export function MatchedTile({
       {wordy && (
         <span
           key={number}
-          className="flex w-full flex-col items-start gap-1 sm:w-auto sm:items-end sm:text-right"
+          className="flex w-full flex-col items-start gap-1 xl:w-auto xl:items-end xl:text-right"
           // The week's move is the payoff: it rises in once the count lands.
           style={payoffStyle(delayMs + landsAfterMs())}
         >
@@ -889,7 +895,7 @@ export function MatchedTile({
             {delta.abs > 0 ? "+" : delta.abs < 0 ? "-" : ""}
             {Math.abs(delta.abs).toLocaleString()}
           </span>
-          <span className="flex items-baseline gap-1 whitespace-nowrap text-[11px] leading-[15px] text-slate-500 sm:flex-col sm:items-end sm:gap-0">
+          <span className="flex items-baseline gap-1 whitespace-nowrap text-[11px] leading-[15px] text-slate-500 xl:flex-col xl:items-end xl:gap-0">
             {delta.abs !== 0 && (
               <span className={cn("font-mono font-medium tabular-nums", moveCls)}>
                 {pctText(delta.pct)}
