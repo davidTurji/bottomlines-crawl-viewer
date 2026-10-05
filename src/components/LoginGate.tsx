@@ -1,5 +1,5 @@
 import { FormEvent, useEffect, useState } from "react";
-import { Lock } from "lucide-react";
+import { Eye, EyeOff, Lock } from "lucide-react";
 import AuthHero3D from "@/components/AuthHero3D";
 import { api, ApiError, MOCK, onDeadLink, onUnauthorized } from "@/lib/api";
 import { useReportScope } from "@/lib/reportScope";
@@ -7,12 +7,7 @@ import {
   EXPIRED_LINK_MESSAGE,
   ReportNoticeCard,
 } from "@/components/ReportNoticeCard";
-import {
-  type LinkSignin,
-  hasLinkSignin,
-  peekLinkSignin,
-  signInFromLink,
-} from "@/lib/linkSignin";
+import { type LinkSignin, peekLinkSignin } from "@/lib/linkSignin";
 
 /** Remember who signed in, for the account menu (keyed by token). */
 function rememberUser(token: string, username: string) {
@@ -51,49 +46,17 @@ export default function LoginGate({ children }: { children: React.ReactNode }) {
   const [locked, setLocked] = useState(false);
   const [dead, setDead] = useState(false);
   const [epoch, setEpoch] = useState(0);
-  /* The weekly email's button signed the reader in through the link: sign
-     in first, render the report after, so no page asks for data (and gets
-     a 401) while the sign-in is still on its way. */
-  const [autoSigning, setAutoSigning] = useState(() => hasLinkSignin() && !MOCK);
-  const [prefill, setPrefill] = useState<(LinkSignin & { error: string }) | null>(null);
-
+  /* The weekly email's button carries the reader's sign-in (David,
+     2026-10-05): the sign-in form opens already FILLED IN, password shown,
+     so they see their username and password and sign in with one press,
+     and their browser can offer to keep them. Never a silent sign-in. */
+  const [prefill] = useState<(LinkSignin & { error: string }) | null>(() => {
+    const creds = MOCK ? null : peekLinkSignin();
+    return creds ? { ...creds, error: "" } : null;
+  });
   useEffect(() => {
-    const creds = peekLinkSignin();
-    const signing = MOCK
-      ? null
-      : signInFromLink(async (c) => {
-          await api.auth(token, c.username.trim(), c.password);
-        });
-    if (!creds || !signing) {
-      setAutoSigning(false);
-      return;
-    }
-    void signing
-      .then(() => {
-        rememberUser(token, creds.username.trim());
-        setEpoch((e) => e + 1);
-      })
-      .catch((err) => {
-        const status = err instanceof ApiError ? err.status : 0;
-        if (status === 404 || status === 410 || status === 403) {
-          setDead(true);
-        } else {
-          // The password was changed since the email went out, or the
-          // server was unreachable: the form, filled in, says which.
-          setPrefill({
-            ...creds,
-            error:
-              status === 401
-                ? "The sign-in in your email no longer opens this report. Ask us for a new one."
-                : "Could not reach the server. Please try again in a moment.",
-          });
-          setLocked(true);
-        }
-      })
-      .finally(() => setAutoSigning(false));
-    // Once, on arrival; signInFromLink makes a second run share the first.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+    if (prefill) setLocked(true);
+  }, [prefill]);
 
   useEffect(() => {
     onUnauthorized(() => setLocked(true));
@@ -106,14 +69,6 @@ export default function LoginGate({ children }: { children: React.ReactNode }) {
 
   if (dead && !MOCK) {
     return <ReportNoticeCard message={EXPIRED_LINK_MESSAGE} />;
-  }
-
-  if (autoSigning) {
-    return (
-      <div className="flex min-h-[100svh] items-center justify-center bg-background text-[13px] text-slate-500">
-        Signing you in
-      </div>
-    );
   }
 
   if (locked && !MOCK) {
@@ -156,6 +111,8 @@ function LoginCard({
   const [password, setPassword] = useState(prefill?.password ?? "");
   const [error, setError] = useState<string | null>(prefill?.error ?? null);
   const [busy, setBusy] = useState(false);
+  /** Filled in from the email: shown, so the reader sees their password. */
+  const [showPassword, setShowPassword] = useState(Boolean(prefill?.password));
 
   const submit = async (e: FormEvent) => {
     e.preventDefault();
@@ -275,14 +232,29 @@ function LoginCard({
                 <span className="mb-1.5 block text-xs font-medium text-slate-700">
                   Password
                 </span>
-                <input
-                  type="password"
-                  value={password}
-                  onChange={(e) => setPassword(e.target.value)}
-                  autoComplete="current-password"
-                  className="h-11 w-full rounded-md border border-border bg-card px-3.5 text-sm text-slate-900 outline-none transition-colors placeholder:text-slate-400 focus:border-primary/50 focus:ring-2 focus:ring-ring/30"
-                />
+                <span className="relative block">
+                  <input
+                    type={showPassword ? "text" : "password"}
+                    value={password}
+                    onChange={(e) => setPassword(e.target.value)}
+                    autoComplete="current-password"
+                    className="h-11 w-full rounded-md border border-border bg-card px-3.5 pr-11 text-sm text-slate-900 outline-none transition-colors placeholder:text-slate-400 focus:border-primary/50 focus:ring-2 focus:ring-ring/30"
+                  />
+                  <button
+                    type="button"
+                    onClick={() => setShowPassword((v) => !v)}
+                    aria-label={showPassword ? "Hide password" : "Show password"}
+                    className="absolute inset-y-0 right-0 flex w-11 items-center justify-center text-slate-400 hover:text-slate-700"
+                  >
+                    {showPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+                  </button>
+                </span>
               </label>
+              {prefill && !prefill.error && (
+                <p className="text-xs text-slate-500">
+                  Filled in from your email. Sign in to open the report.
+                </p>
+              )}
 
               {error && (
                 <p
