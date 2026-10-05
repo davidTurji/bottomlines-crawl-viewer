@@ -18,6 +18,7 @@
  * report simply has no tab.
  */
 
+import { foundInLabel } from "./utils";
 import type {
   TrialSlice,
   DeclarationRow,
@@ -62,13 +63,25 @@ export const KIND_COPY: Record<
   },
 };
 
-/** One file that named the subject. */
+/**
+ * One publisher that made a declaration. ONE PER PUBLISHER, whichever of
+ * its files said it: a publisher naming you in both ads.txt and app-ads.txt
+ * made one declaration in two places, not two declarations, so the rows
+ * the sheet carries per file are merged here and the files listed.
+ */
 export type Declarer = {
   domain: string;
-  /** Display-ready: "ads.txt" or "app-ads.txt". */
+  /** Which of the publisher's files said it, in ads.txt, app-ads.txt order. */
+  files: string[];
+  /** Display-ready, the overview's wording: "Found in ads.txt",
+   *  "Found in app-ads.txt" or "Found in ads.txt + app-ads.txt". */
   found_in: string;
-  /** ISO 3166-1 alpha-2 for a country-scoped manager domain, else "". */
+  /** ISO 3166-1 alpha-2 for a country-scoped manager domain, joined with
+   *  ", " when the files scope it to more than one; else "". */
   country: string;
+  /** Not named by this publisher last week. False when the report does not
+   *  say (see `NormalizedDeclarations.new_total`). */
+  is_new: boolean;
 };
 
 /** One declared domain and everyone who declared it. */
@@ -76,11 +89,17 @@ export type DeclarationSubject = {
   kind: DeclarationKind;
   domain: string;
   declarers: Declarer[];
-  /** The honest count; `declarers` may be capped on the legacy shape. */
+  /** Publishers that named it, the honest count; `declarers` may be capped
+   *  on the legacy shape. */
   total: number;
-  /** How many distinct files, split by kind, for the card's right column. */
+  /** How many of those publishers said it in each file. A publisher saying
+   *  it in both counts in both, so these two can add up past `total`. */
   ads_txt: number;
   app_ads_txt: number;
+  /** Publishers naming it this week that did not last week. */
+  new_count: number;
+  /** Nobody named it last week: the whole domain is new. */
+  is_new: boolean;
   /** Distinct countries named, manager domains only. */
   countries: string[];
 };
@@ -88,13 +107,19 @@ export type DeclarationSubject = {
 export type DeclarationSection = {
   kind: DeclarationKind;
   subjects: DeclarationSubject[];
-  /** Individual declarations (rows), the number the Excel sheet has. */
+  /** Declarations, one per publisher per declared domain. */
   declarations: number;
+  /** Of those, the ones new this week. */
+  new_declarations: number;
 };
 
 export type NormalizedDeclarations = {
   /** Every declaration counted once. Zero hides the sidebar entry. */
   total: number;
+  /** Declarations new this week, or null when the report does not say
+   *  (older reports, and every live one until the crawler marks rows):
+   *  the page then shows no "new" anywhere rather than a false zero. */
+  new_total: number | null;
   sections: DeclarationSection[];
   /** Only the legacy grouped shape carries these. */
   mismatches: RelationshipMismatch[];
@@ -106,7 +131,10 @@ export type NormalizedDeclarations = {
 
 export const EMPTY_DECLARATIONS: NormalizedDeclarations = {
   total: 0,
-  sections: DECLARATION_KINDS.map((kind) => ({ kind, subjects: [], declarations: 0 })),
+  new_total: null,
+  sections: DECLARATION_KINDS.map((kind) => ({
+    kind, subjects: [], declarations: 0, new_declarations: 0,
+  })),
   mismatches: [],
   legacy: false,
 };
@@ -136,96 +164,159 @@ function sortSubjects(subjects: DeclarationSubject[]): DeclarationSubject[] {
   );
 }
 
-function finish(subject: DeclarationSubject): DeclarationSubject {
+/** One file's raw row, before publishers are merged. */
+type RawDeclarer = { domain: string; file: string; country: string; is_new: boolean };
+
+const FILE_ORDER = ["ads.txt", "app-ads.txt"];
+
+/** The overview's wording: "Found in ads.txt + app-ads.txt", or one file. */
+function foundInText(files: string[]): string {
+  return foundInLabel(files.length > 1 ? "both" : files[0]) ?? "";
+}
+
+/** One Declarer per publisher, the publisher's rows merged. */
+function mergeDeclarers(raw: RawDeclarer[]): Declarer[] {
+  const by = new Map<string, { files: Set<string>; countries: Set<string>; is_new: boolean }>();
+  for (const r of raw) {
+    let d = by.get(r.domain);
+    if (!d) {
+      d = { files: new Set(), countries: new Set(), is_new: true };
+      by.set(r.domain, d);
+    }
+    if (r.file) d.files.add(r.file);
+    if (r.country) d.countries.add(r.country);
+    // New only if every file's row is new: a publisher that already named
+    // you in ads.txt and now also does in app-ads.txt is not a new name.
+    d.is_new = d.is_new && r.is_new;
+  }
+  const out = Array.from(by, ([domain, d]) => {
+    const files = Array.from(d.files).sort(
+      (a, b) => FILE_ORDER.indexOf(a) - FILE_ORDER.indexOf(b),
+    );
+    return {
+      domain,
+      files,
+      found_in: foundInText(files),
+      country: Array.from(d.countries).sort().join(", "),
+      is_new: d.is_new,
+    };
+  });
+  // New names first: they are what a weekly reader came to see.
+  return out.sort((a, b) => Number(b.is_new) - Number(a.is_new));
+}
+
+function finish(
+  kind: DeclarationKind,
+  domain: string,
+  raw: RawDeclarer[],
+  /** Legacy only: the server's row count when `raw` was capped. */
+  rowTotal?: number,
+): DeclarationSubject {
+  const declarers = mergeDeclarers(raw);
   const countries = Array.from(
-    new Set(subject.declarers.map((d) => d.country).filter(Boolean)),
+    new Set(raw.map((d) => d.country).filter(Boolean)),
   ).sort();
+  // A capped legacy roster: the rows not shown cannot be merged, so the
+  // count drops only by the doubles actually seen.
+  const total = rowTotal != null
+    ? Math.max(declarers.length, rowTotal - (raw.length - declarers.length))
+    : declarers.length;
+  const new_count = declarers.filter((d) => d.is_new).length;
   return {
-    ...subject,
-    ads_txt: subject.declarers.filter((d) => d.found_in === "ads.txt").length,
-    app_ads_txt: subject.declarers.filter((d) => d.found_in === "app-ads.txt").length,
+    kind,
+    domain,
+    declarers,
+    total,
+    ads_txt: declarers.filter((d) => d.files.includes("ads.txt")).length,
+    app_ads_txt: declarers.filter((d) => d.files.includes("app-ads.txt")).length,
     countries,
+    new_count,
+    is_new: declarers.length > 0 && new_count === declarers.length,
+  };
+}
+
+function sectionOf(kind: DeclarationKind, subjects: DeclarationSubject[]): DeclarationSection {
+  return {
+    kind,
+    subjects: sortSubjects(subjects),
+    declarations: subjects.reduce((n, s) => n + s.total, 0),
+    new_declarations: subjects.reduce((n, s) => n + s.new_count, 0),
   };
 }
 
 function fromRows(rows: DeclarationRow[]): NormalizedDeclarations {
-  const byKind = new Map<DeclarationKind, Map<string, DeclarationSubject>>();
-  let total = 0;
+  const byKind = new Map<DeclarationKind, Map<string, RawDeclarer[]>>();
+  // Whether the report marks new rows at all. A report that never says
+  // shows no "new" anywhere; a false "0 new" would read as a quiet week.
+  let marked = false;
   for (const row of rows) {
     const kind = kindOf(row?.declaration);
     const domain = String(row?.declared_domain ?? "").trim().toLowerCase();
     const by = String(row?.declared_by ?? "").trim().toLowerCase();
     if (!kind || !domain || !by) continue;
-    total += 1;
+    if (typeof row.is_new === "boolean") marked = true;
     let subjects = byKind.get(kind);
     if (!subjects) {
       subjects = new Map();
       byKind.set(kind, subjects);
     }
-    let subject = subjects.get(domain);
-    if (!subject) {
-      subject = {
-        kind, domain, declarers: [], total: 0, ads_txt: 0, app_ads_txt: 0, countries: [],
-      };
-      subjects.set(domain, subject);
+    let raw = subjects.get(domain);
+    if (!raw) {
+      raw = [];
+      subjects.set(domain, raw);
     }
-    subject.declarers.push({
+    raw.push({
       domain: by,
-      found_in: fileLabelOf(row.found_in),
+      file: fileLabelOf(row.found_in),
       country: String(row.country ?? "").trim().toUpperCase(),
+      is_new: row.is_new === true,
     });
-    subject.total += 1;
   }
+  const sections = DECLARATION_KINDS.map((kind) =>
+    sectionOf(
+      kind,
+      Array.from(byKind.get(kind) ?? [], ([domain, raw]) => finish(kind, domain, raw)),
+    ),
+  );
   return {
-    total,
+    total: sections.reduce((n, s) => n + s.declarations, 0),
+    new_total: marked ? sections.reduce((n, s) => n + s.new_declarations, 0) : null,
     legacy: false,
     mismatches: [],
-    sections: DECLARATION_KINDS.map((kind) => {
-      const subjects = sortSubjects(
-        Array.from(byKind.get(kind)?.values() ?? []).map(finish),
-      );
-      return {
-        kind,
-        subjects,
-        declarations: subjects.reduce((n, s) => n + s.total, 0),
-      };
-    }),
+    sections,
   };
 }
 
 function fromLegacy(d: Declarations): NormalizedDeclarations {
-  const ipd: DeclarationSubject[] = (d.ipd ?? []).map((p) =>
-    finish({
-      kind: "inventory partner",
-      domain: p.partner_domain,
-      declarers: (p.declared_by ?? []).map((s) => ({
-        domain: s.domain, found_in: fileLabelOf(s.file_kind), country: "",
-      })),
-      total: p.declarer_total ?? (p.declared_by ?? []).length,
-      ads_txt: 0, app_ads_txt: 0, countries: [],
-    }),
+  const rawOf = (sources: { domain: string; file_kind: string }[] | undefined) =>
+    (sources ?? []).map((src) => ({
+      domain: src.domain, file: fileLabelOf(src.file_kind), country: "", is_new: false,
+    }));
+  const ipd = (d.ipd ?? []).map((p) =>
+    finish(
+      "inventory partner",
+      p.partner_domain,
+      rawOf(p.declared_by),
+      p.declarer_total ?? (p.declared_by ?? []).length,
+    ),
   );
-  const owners: DeclarationSubject[] = (d.owner_claims ?? []).map((c) =>
-    finish({
-      kind: "owner domain",
-      domain: c.owner_domain,
-      declarers: (c.claimed_by ?? []).map((s) => ({
-        domain: s.domain, found_in: fileLabelOf(s.file_kind), country: "",
-      })),
-      total: c.claimant_total ?? (c.claimed_by ?? []).length,
-      ads_txt: 0, app_ads_txt: 0, countries: [],
-    }),
+  const owners = (d.owner_claims ?? []).map((c) =>
+    finish(
+      "owner domain",
+      c.owner_domain,
+      rawOf(c.claimed_by),
+      c.claimant_total ?? (c.claimed_by ?? []).length,
+    ),
   );
   const sections: DeclarationSection[] = [
-    { kind: "inventory partner", subjects: sortSubjects(ipd),
-      declarations: ipd.reduce((n, s) => n + s.total, 0) },
-    { kind: "owner domain", subjects: sortSubjects(owners),
-      declarations: owners.reduce((n, s) => n + s.total, 0) },
-    { kind: "manager domain", subjects: [], declarations: 0 },
+    sectionOf("inventory partner", ipd),
+    sectionOf("owner domain", owners),
+    sectionOf("manager domain", []),
   ];
   const mismatches = d.relationship_mismatches ?? [];
   return {
     total: sections.reduce((n, s) => n + s.declarations, 0) + mismatches.length,
+    new_total: null,
     sections,
     mismatches,
     legacy: true,
@@ -263,7 +354,9 @@ export function subjectCsv(subject: DeclarationSubject): string {
   const lines = ["Declaration,Domain declared,Declared by,Country,Found in"];
   for (const d of subject.declarers) {
     lines.push(
-      [subject.kind, subject.domain, d.domain, d.country, d.found_in].map(esc).join(","),
+      [subject.kind, subject.domain, d.domain, d.country, d.files.join(" + ")]
+        .map(esc)
+        .join(","),
     );
   }
   return lines.join("\n") + "\n";

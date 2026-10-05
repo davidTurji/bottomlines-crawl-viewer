@@ -1,4 +1,6 @@
 import { Pager, usePaging } from "@/components/ListControls";
+import { Collapse, Settle } from "@/components/Motion";
+import { usePageCache } from "@/lib/pageCache";
 import LockedTail from "@/components/LockedTail";
 import TrialBanner from "@/components/TrialBanner";
 import {
@@ -74,6 +76,7 @@ export default function CrawlDiscovered() {
   const [summarySettled, setSummarySettled] = useState(false);
   const [previous, setPrevious] = useState<Summary | null>(null);
   const [rows, setRows] = useState<DiscoveredLine[]>([]);
+  const cache = usePageCache<unknown>();
   const [total, setTotal] = useState(0);
   const [totals, setTotals] = useState<DiscoveredTotals | null>(null);
   /** The cut this trial report made to the list, or null on a full report. */
@@ -118,34 +121,56 @@ export default function CrawlDiscovered() {
 
   useEffect(() => {
     let cancelled = false;
-    setLoading(true);
-    setError(null);
-    api
-      .discoveredLines(token, {
-        page,
+    const load = (pg: number) =>
+      api.discoveredLines(token, {
+        page: pg,
         page_size: PAGE_SIZE,
         ssp_domain: filter || undefined,
-      })
+      });
+    type Loaded = Awaited<ReturnType<typeof load>>;
+    const keyFor = (pg: number) => `${pg}|${filter}`;
+    // Read the next page while this one is on screen, so "next" is
+    // instant. Not while an SSP filter is being typed.
+    const readAhead = (r: Loaded) => {
+      if (!filter && page * PAGE_SIZE < r.total) {
+        cache.prefetch(keyFor(page + 1), () => load(page + 1));
+      }
+    };
+    const apply = (r: Loaded) => {
+      setRows(r.rows);
+      setTotal(r.total);
+      setTotals(r.totals);
+      setTrial(r.trial ?? null);
+      // Changing page or filter re-renders a different set of cards, so
+      // an expansion held open from the previous set would either vanish
+      // or, worse, appear to belong to a line it does not.
+      setOpen(new Set());
+      // An unfiltered answer settles the question for the whole crawl.
+      if (!filter) setAnyDiscovered(r.total > 0);
+      else if (r.total > 0) setAnyDiscovered(true);
+    };
+    setError(null);
+    const kept = cache.get(keyFor(page)) as Loaded | undefined;
+    if (kept) {
+      apply(kept);
+      setLoading(false);
+      readAhead(kept);
+      return;
+    }
+    setLoading(true);
+    load(page)
       .then((r) => {
+        cache.put(keyFor(page), r);
         if (cancelled) return;
-        setRows(r.rows);
-        setTotal(r.total);
-        setTotals(r.totals);
-        setTrial(r.trial ?? null);
-        // Changing page or filter re-renders a different set of cards, so
-        // an expansion held open from the previous set would either vanish
-        // or, worse, appear to belong to a line it does not.
-        setOpen(new Set());
-        // An unfiltered answer settles the question for the whole crawl.
-        if (!filter) setAnyDiscovered(r.total > 0);
-        else if (r.total > 0) setAnyDiscovered(true);
+        apply(r);
+        readAhead(r);
       })
       .catch((e: Error) => !cancelled && setError(e.message))
       .finally(() => !cancelled && setLoading(false));
     return () => {
       cancelled = true;
     };
-  }, [token, page, filter]);
+  }, [token, page, filter, cache]);
 
   const toggle = useCallback((key: string) => {
     setOpen((prev) => {
@@ -203,6 +228,9 @@ export default function CrawlDiscovered() {
   // would hide a true answer to "did carambola grow this week".
   const prevLines = totals?.previous_lines ?? null;
   const prevPlacements = totals?.previous_placements ?? null;
+  // Absent on reports frozen before the crawler counted it, and null on a
+  // first crawl, where every line is "new" and saying so would be noise.
+  const newLines = prevLines != null ? (totals?.new_lines ?? null) : null;
 
   return (
     <PageShell>
@@ -253,10 +281,34 @@ export default function CrawlDiscovered() {
               <span className="text-xs text-slate-500">this filter</span>
             )}
           </div>
-          <div className="grid grid-cols-2 divide-x divide-border overflow-hidden rounded-xl border border-border">
+          {/* NEW THIS WEEK LEADS, wider, in the info blue the page's new
+              cards wear (on white, not a tinted ground), because "what
+              appeared" is what a weekly reader opens Discovery for. Only
+              when the report says: an older one, or a first crawl, has no
+              such count and shows the two totals alone. Each label carries
+              a caption, since "Distinct lines" and "Publisher placements"
+              did not say what they count. */}
+          <div
+            className={cn(
+              "grid grid-cols-1 gap-px overflow-hidden rounded-xl border border-border bg-border",
+              newLines != null ? "sm:grid-cols-[1.4fr_1fr_1fr]" : "sm:grid-cols-2",
+            )}
+          >
+            {newLines != null && (
+              <SplitStat
+                tone="info"
+                prefix={newLines > 0 ? "+" : undefined}
+                number={newLines}
+                label="New this week"
+                caption="Lines no publisher carried last week"
+                className="bg-white"
+              />
+            )}
             <SplitStat
               number={totals.lines}
-              label="Distinct lines"
+              label="Lines with your domain"
+              caption="Each different ads.txt line, counted once"
+              className="bg-white"
               delta={
                 prevLines != null
                   ? computeDelta(totals.lines, prevLines)
@@ -265,7 +317,9 @@ export default function CrawlDiscovered() {
             />
             <SplitStat
               number={totals.placements}
-              label="Publisher placements"
+              label="Publisher listings"
+              caption="One per publisher file carrying a line"
+              className="bg-white"
               delta={
                 prevPlacements != null
                   ? computeDelta(totals.placements, prevPlacements)
@@ -348,16 +402,17 @@ export default function CrawlDiscovered() {
 
       {!loading && !error && sorted.length > 0 && (
         <div className="space-y-3">
-          {sorted.map((line) => {
+          {sorted.map((line, i) => {
             const key = lineKey(line);
             return (
-              <LineCard
-                key={key}
-                token={token}
-                line={line}
-                open={open.has(key)}
-                onToggle={() => toggle(key)}
-              />
+              <Settle key={key} index={i}>
+                <LineCard
+                  token={token}
+                  line={line}
+                  open={open.has(key)}
+                  onToggle={() => toggle(key)}
+                />
+              </Settle>
             );
           })}
         </div>
@@ -613,7 +668,7 @@ function LineCard({
         />
       </button>
 
-      {open && (
+      <Collapse open={open}>
         <div
           className={cn(
             "border-t px-4 pb-4 pt-3 sm:px-5",
@@ -691,7 +746,7 @@ function LineCard({
             </div>
           )}
         </div>
-      )}
+      </Collapse>
     </div>
   );
 }

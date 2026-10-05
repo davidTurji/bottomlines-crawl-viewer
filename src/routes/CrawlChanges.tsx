@@ -1,4 +1,5 @@
 import { Pager, usePaging } from "@/components/ListControls";
+import { Collapse, Settle } from "@/components/Motion";
 import LockedTail from "@/components/LockedTail";
 import TrialBanner from "@/components/TrialBanner";
 import { SkeletonRows, SkeletonStatCards } from "@/components/Skeleton";
@@ -27,6 +28,7 @@ import { PageShell } from "@/components/PageShell";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { cn, foundInLabel } from "@/lib/utils";
 import { computeDelta, MiniStat, SplitStat } from "./CrawlReport";
+import { BEAT_PAUSE_MS, landsAfterMs } from "@/components/CountUp";
 
 /**
  * LINE CHANGES.
@@ -516,12 +518,16 @@ export default function CrawlChanges() {
                         ? "ok"
                         : bucket === "removed"
                           ? "critical"
-                          : isScopeKind(bucket)
-                            // Neutral, matching the cards. Amber here would
-                            // reintroduce at the top of the page the alarm
-                            // the card tones were chosen to avoid.
-                            ? undefined
-                            : "warn"
+                          : bucket === "newly_monitored"
+                            ? "info"
+                            : bucket === "monitoring_stopped"
+                              ? "warn"
+                              // First appearance stays neutral, matching
+                              // its cards: news about our crawl, not the
+                              // market.
+                              : isScopeKind(bucket)
+                                ? undefined
+                                : "warn"
                     }
                     number={kpi.placements}
                     label={TONES[bucket].label}
@@ -575,6 +581,8 @@ export default function CrawlChanges() {
                 tone="publisher"
                 number={kpi.publishers}
                 label="Publishers affected"
+                // Second beat: a second after the left card has landed.
+                delayMs={landsAfterMs() + BEAT_PAUSE_MS}
                 delta={publishersAffectedDelta}
                 note={lines.length ? "under the selected lines" : undefined}
               />
@@ -582,6 +590,8 @@ export default function CrawlChanges() {
                 tone="app"
                 number={kpi.apps}
                 label="Apps affected"
+                // Second beat: a second after the left card has landed.
+                delayMs={landsAfterMs() + BEAT_PAUSE_MS}
                 delta={appsAffectedDelta}
                 note={lines.length ? "under the selected lines" : undefined}
               />
@@ -711,13 +721,14 @@ export default function CrawlChanges() {
             loading && "opacity-60",
           )}
         >
-          {shown.map((g) => (
-            <ChangeCard
-              key={g.key}
-              group={g}
-              open={open.has(g.key)}
-              onToggle={() => toggle(g.key)}
-            />
+          {shown.map((g, i) => (
+            <Settle key={g.key} index={i}>
+              <ChangeCard
+                group={g}
+                open={open.has(g.key)}
+                onToggle={() => toggle(g.key)}
+              />
+            </Settle>
           ))}
         </div>
       )}
@@ -917,7 +928,7 @@ function ChangeCard({
         />
       </button>
 
-      {open && (
+      <Collapse open={open}>
         <div
           className={cn(
             "border-t border-border px-4 pb-4 pt-3 sm:px-5",
@@ -978,7 +989,7 @@ function ChangeCard({
             </ul>
           </div>
         </div>
-      )}
+      </Collapse>
     </div>
   );
 }
@@ -1031,16 +1042,20 @@ const TONES: Record<
     label: "Started watching",
     preposition: "on",
     expandedTitle: "Publishers carrying this line in its first week",
-    disc: "bg-muted text-muted-foreground",
-    tint: "bg-muted/40",
+    // Blue, not the green of "added" (David, 2026-10-05): a change to
+    // the customer's own list, kept visibly apart from market news.
+    disc: "bg-info-bg text-info",
+    tint: "bg-info-bg/40",
     icon: Eye,
   },
   monitoring_stopped: {
     label: "Stopped watching",
     preposition: "on",
     expandedTitle: "Publishers that carried this line when we last looked",
-    disc: "bg-muted text-muted-foreground",
-    tint: "bg-muted/40",
+    // Amber, not the red of "removed" (David, 2026-10-05): worth noticing,
+    // but the publishers still carry these lines.
+    disc: "bg-warn-bg text-warn",
+    tint: "bg-warn-bg/40",
     icon: EyeOff,
   },
   // Neutral for the same reason as the two above: this is news about our
