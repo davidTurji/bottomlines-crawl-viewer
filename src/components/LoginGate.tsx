@@ -7,6 +7,21 @@ import {
   EXPIRED_LINK_MESSAGE,
   ReportNoticeCard,
 } from "@/components/ReportNoticeCard";
+import {
+  type LinkSignin,
+  hasLinkSignin,
+  peekLinkSignin,
+  signInFromLink,
+} from "@/lib/linkSignin";
+
+/** Remember who signed in, for the account menu (keyed by token). */
+function rememberUser(token: string, username: string) {
+  try {
+    sessionStorage.setItem(`pf.username.${token}`, username);
+  } catch {
+    // Storage blocked: the menu shows no identity line, never a fake.
+  }
+}
 
 /**
  * Username + password gate in front of the viewer.
@@ -36,6 +51,49 @@ export default function LoginGate({ children }: { children: React.ReactNode }) {
   const [locked, setLocked] = useState(false);
   const [dead, setDead] = useState(false);
   const [epoch, setEpoch] = useState(0);
+  /* The weekly email's button signed the reader in through the link: sign
+     in first, render the report after, so no page asks for data (and gets
+     a 401) while the sign-in is still on its way. */
+  const [autoSigning, setAutoSigning] = useState(() => hasLinkSignin() && !MOCK);
+  const [prefill, setPrefill] = useState<(LinkSignin & { error: string }) | null>(null);
+
+  useEffect(() => {
+    const creds = peekLinkSignin();
+    const signing = MOCK
+      ? null
+      : signInFromLink(async (c) => {
+          await api.auth(token, c.username.trim(), c.password);
+        });
+    if (!creds || !signing) {
+      setAutoSigning(false);
+      return;
+    }
+    void signing
+      .then(() => {
+        rememberUser(token, creds.username.trim());
+        setEpoch((e) => e + 1);
+      })
+      .catch((err) => {
+        const status = err instanceof ApiError ? err.status : 0;
+        if (status === 404 || status === 410 || status === 403) {
+          setDead(true);
+        } else {
+          // The password was changed since the email went out, or the
+          // server was unreachable: the form, filled in, says which.
+          setPrefill({
+            ...creds,
+            error:
+              status === 401
+                ? "The sign-in in your email no longer opens this report. Ask us for a new one."
+                : "Could not reach the server. Please try again in a moment.",
+          });
+          setLocked(true);
+        }
+      })
+      .finally(() => setAutoSigning(false));
+    // Once, on arrival; signInFromLink makes a second run share the first.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   useEffect(() => {
     onUnauthorized(() => setLocked(true));
@@ -50,10 +108,19 @@ export default function LoginGate({ children }: { children: React.ReactNode }) {
     return <ReportNoticeCard message={EXPIRED_LINK_MESSAGE} />;
   }
 
+  if (autoSigning) {
+    return (
+      <div className="flex min-h-[100svh] items-center justify-center bg-background text-[13px] text-slate-500">
+        Signing you in
+      </div>
+    );
+  }
+
   if (locked && !MOCK) {
     return (
       <LoginCard
         token={token}
+        prefill={prefill}
         onAuthed={() => {
           setLocked(false);
           setEpoch((e) => e + 1);
@@ -75,16 +142,19 @@ export default function LoginGate({ children }: { children: React.ReactNode }) {
  */
 function LoginCard({
   token,
+  prefill,
   onAuthed,
   onDeadLink: onDead,
 }: {
   token: string;
+  /** The email's sign-in, when it did not open the report: shown filled in. */
+  prefill?: (LinkSignin & { error: string }) | null;
   onAuthed: () => void;
   onDeadLink: () => void;
 }) {
-  const [username, setUsername] = useState("");
-  const [password, setPassword] = useState("");
-  const [error, setError] = useState<string | null>(null);
+  const [username, setUsername] = useState(prefill?.username ?? "");
+  const [password, setPassword] = useState(prefill?.password ?? "");
+  const [error, setError] = useState<string | null>(prefill?.error ?? null);
   const [busy, setBusy] = useState(false);
 
   const submit = async (e: FormEvent) => {
@@ -94,14 +164,10 @@ function LoginCard({
     setError(null);
     try {
       await api.auth(token, username.trim(), password);
-      try {
-        // The account menu shows WHO signed in; this is its only source.
-        // Session-scoped and keyed by token, so two reports in two tabs
-        // never borrow each other's identity.
-        sessionStorage.setItem(`pf.username.${token}`, username.trim());
-      } catch {
-        // Storage blocked: the menu shows no identity line, never a fake.
-      }
+      // The account menu shows WHO signed in; this is its only source.
+      // Session-scoped and keyed by token, so two reports in two tabs
+      // never borrow each other's identity.
+      rememberUser(token, username.trim());
       onAuthed();
     } catch (err) {
       const status = err instanceof ApiError ? err.status : 0;
