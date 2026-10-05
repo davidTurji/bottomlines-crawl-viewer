@@ -1,14 +1,17 @@
 import LockedTail from "@/components/LockedTail";
+import { Collapse, Settle, glideTo } from "@/components/Motion";
 import TrialBanner from "@/components/TrialBanner";
 import {
   OverviewSkeleton,
   SkeletonRows,
   SkeletonStatCards,
 } from "@/components/Skeleton";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { BEAT_PAUSE_MS, CountUp, landsAfterMs, payoffStyle } from "@/components/CountUp";
 import { LineFilter } from "@/components/LineFilter";
 import { Dots } from "@/components/Dots";
 import { PAGE_SIZE } from "@/lib/paging";
+import { usePageCache } from "@/lib/pageCache";
 import { useLineFilter } from "@/lib/lineFilter";
 import { Link } from "react-router-dom";
 import { ChevronDown, Download, Globe, Search, Smartphone } from "lucide-react";
@@ -77,6 +80,18 @@ export default function CrawlReport() {
   const [matchedView, setMatchedView] = useState<"publishers" | "apps">(
     "publishers",
   );
+  // The list's tab lives here, not in the list, so the "Lines added" and
+  // "Lines removed" cards can open it on Added or Removed.
+  const [drillTab, setDrillTab] = useState<DrillTab>("all");
+  // Bumped by those two cards: the list opens its first row once it has
+  // landed, so the reader sees the lines the card counted, not just names.
+  const [openFirst, setOpenFirst] = useState(0);
+  const listRef = useRef<HTMLDivElement>(null);
+  const showLinesOf = (tab: DrillTab) => {
+    setDrillTab(tab);
+    setOpenFirst((n) => n + 1);
+    glideTo(listRef.current);
+  };
   /* THE SEAT-LINE FILTER. In the URL, so it survives a refresh and follows
      the reader to the Changes page. When set, the summary's matched
      counters, the publisher list and the app list are all re-read under
@@ -200,6 +215,11 @@ export default function CrawlReport() {
   // a pair of zeros presented as this week's result.
   const isFirstCrawl = summary.previous_job_id === null;
 
+  // TWO BEATS (David, 2026-10-05): the left card's line figures count up
+  // first, and the matched publishers and apps start a second after those
+  // have landed, so the first pair is seen settled. A first crawl has no line figures, so they go straight away.
+  const secondBeat = isFirstCrawl ? 0 : landsAfterMs() + BEAT_PAUSE_MS;
+
   return (
     <PageShell className="space-y-5">
       {/* Page header. One line summary of what got scanned, no floating
@@ -214,6 +234,20 @@ export default function CrawlReport() {
             Week of {weekLabel}
             {prevWeekLabel && `, compared with ${prevWeekLabel}`}.
           </p>
+          {refreshing ? (
+            // The figures below are reloading for a new line selection;
+            // a sentence about the old one would be wrong for a moment.
+            <div aria-hidden className="mt-3 h-5 w-full max-w-md animate-pulse rounded bg-muted" />
+          ) : (
+            <WeeklyWin
+              publishers={matchedDevs}
+              apps={matchedApps}
+              publishersDelta={matchedDevsDelta}
+              appsDelta={matchedAppsDelta}
+              firstCrawl={isFirstCrawl}
+              filtered={filtered}
+            />
+          )}
         </div>
         <div className="flex flex-wrap items-center gap-2">
           <LineFilter
@@ -318,6 +352,8 @@ export default function CrawlReport() {
               label="Lines added"
               delta={prevAdded != null ? computeDelta(added, prevAdded) : null}
               note={filtered ? "under the selected lines" : undefined}
+              active={drillTab === "added"}
+              onClick={() => showLinesOf("added")}
             />
             <SplitStat
               tone="critical"
@@ -328,6 +364,8 @@ export default function CrawlReport() {
                 prevRemoved != null ? computeDelta(removed, prevRemoved) : null
               }
               note={filtered ? "under the selected lines" : undefined}
+              active={drillTab === "removed"}
+              onClick={() => showLinesOf("removed")}
             />
           </div>
           )}
@@ -365,20 +403,30 @@ export default function CrawlReport() {
               icon={Globe}
               number={matchedDevs}
               label="Matched publishers"
+              delayMs={secondBeat}
               delta={matchedDevsDelta}
+              previous={prevMatchedDevs}
               note={filtered ? "under the selected lines" : undefined}
               active={matchedView === "publishers"}
-              onClick={() => setMatchedView("publishers")}
+              onClick={() => {
+                setMatchedView("publishers");
+                setDrillTab("all");
+              }}
             />
             <MatchedTile
               tone="app"
               icon={Smartphone}
               number={matchedApps}
               label="Matched apps"
+              delayMs={secondBeat}
               delta={matchedAppsDelta}
+              previous={prevMatchedApps}
               note={filtered ? "under the selected lines" : undefined}
               active={matchedView === "apps"}
-              onClick={() => setMatchedView("apps")}
+              onClick={() => {
+                setMatchedView("apps");
+                setDrillTab("all");
+              }}
             />
           </div>
         </div>
@@ -405,7 +453,7 @@ export default function CrawlReport() {
           HierarchyCard: colored disc, generous padding, right-aligned stats,
           tinted expansion. Publishers are green, apps are pink. */}
       {matchedView === "publishers" ? (
-        <div data-tour="overview-list">
+        <div data-tour="overview-list" ref={listRef} className="scroll-mt-6">
           <div className="mb-3" data-tour="overview-list-head">
             <h2 className="font-display text-base font-semibold tracking-tight text-slate-900">
               Matched publishers
@@ -415,10 +463,17 @@ export default function CrawlReport() {
               see the exact seat lines it carried, and what moved this week.
             </p>
           </div>
-          <DrilldownList token={token} lines={lines} caps={summary.trial ?? null} />
+          <DrilldownList
+            token={token}
+            lines={lines}
+            caps={summary.trial ?? null}
+            tab={drillTab}
+            setTab={setDrillTab}
+            openFirst={openFirst}
+          />
         </div>
       ) : (
-        <div data-tour="overview-list">
+        <div data-tour="overview-list" ref={listRef} className="scroll-mt-6">
           <div className="mb-3" data-tour="overview-list-head">
             <h2 className="font-display text-base font-semibold tracking-tight text-slate-900">
               Matched apps
@@ -429,10 +484,98 @@ export default function CrawlReport() {
               it carried, and what moved this week.
             </p>
           </div>
-          <MatchedAppsList token={token} lines={lines} caps={summary.trial ?? null} />
+          <MatchedAppsList
+            token={token}
+            lines={lines}
+            caps={summary.trial ?? null}
+            tab={drillTab}
+            setTab={setDrillTab}
+            openFirst={openFirst}
+          />
         </div>
       )}
     </PageShell>
+  );
+}
+
+/**
+ * THE WEEK'S WIN, IN ONE SENTENCE, under the page title: what the crawl
+ * found for the customer, said before any card asks them to read a number.
+ * Leads with growth when there is growth ("we found 351 more publishers"),
+ * and otherwise says plainly how much carries their seats, so it is never
+ * a boast the figures below contradict. The figures wear their tiles'
+ * colours, publishers green and apps pink.
+ */
+function WeeklyWin({
+  publishers,
+  apps,
+  publishersDelta,
+  appsDelta,
+  firstCrawl,
+  filtered,
+}: {
+  publishers: number;
+  apps: number;
+  publishersDelta: Delta | null;
+  appsDelta: Delta | null;
+  firstCrawl: boolean;
+  filtered: boolean;
+}) {
+  const fig = (n: number, cls: string) => (
+    <span className={cn("font-semibold tabular-nums", cls)}>{n.toLocaleString()}</span>
+  );
+  const pub = (n: number) => fig(n, "text-primary");
+  const app = (n: number) => fig(n, "text-app");
+  const plural = (n: number, one: string, many: string) => (n === 1 ? one : many);
+  const morePubs = publishersDelta && publishersDelta.abs > 0 ? publishersDelta.abs : 0;
+  const moreApps = appsDelta && appsDelta.abs > 0 ? appsDelta.abs : 0;
+
+  let line: ReactNode;
+  if (filtered) {
+    line = (
+      <>
+        {pub(publishers)} {plural(publishers, "publisher", "publishers")} and {app(apps)}{" "}
+        {plural(apps, "app", "apps")} carry the selected lines.
+      </>
+    );
+  } else if (firstCrawl) {
+    line = (
+      <>
+        Your first crawl found {pub(publishers)} {plural(publishers, "publisher", "publishers")} and{" "}
+        {app(apps)} {plural(apps, "app", "apps")} carrying your seats.
+      </>
+    );
+  } else if (morePubs > 0 && moreApps > 0) {
+    line = (
+      <>
+        This week we found {pub(morePubs)} more {plural(morePubs, "publisher", "publishers")} and{" "}
+        {app(moreApps)} more {plural(moreApps, "app", "apps")} carrying your seats.
+      </>
+    );
+  } else if (morePubs > 0 || moreApps > 0) {
+    line = morePubs > 0 ? (
+      <>
+        This week we found {pub(morePubs)} more {plural(morePubs, "publisher", "publishers")}{" "}
+        carrying your seats, {app(apps)} {plural(apps, "app", "apps")} in all.
+      </>
+    ) : (
+      <>
+        This week we found {app(moreApps)} more {plural(moreApps, "app", "apps")} carrying your
+        seats, across {pub(publishers)} {plural(publishers, "publisher", "publishers")}.
+      </>
+    );
+  } else {
+    line = (
+      <>
+        {pub(publishers)} {plural(publishers, "publisher", "publishers")} and {app(apps)}{" "}
+        {plural(apps, "app", "apps")} carry your seats this week.
+      </>
+    );
+  }
+  return (
+    <p className="mt-3 max-w-3xl text-[15px] leading-snug text-slate-700 sm:text-base">
+      {line}
+    </p>
   );
 }
 
@@ -531,10 +674,25 @@ export function SplitStat({
   linkTo,
   delta,
   note,
+  active,
+  onClick,
+  caption,
+  className,
+  hintClassName,
+  delayMs = 0,
 }: {
   number: number;
   label: string;
   hint?: string;
+  /** One short muted line under the label saying what the number counts,
+   *  for a label that cannot say it alone. */
+  caption?: string;
+  /** Colour for the hint, when the hint is news rather than a footnote. */
+  hintClassName?: string;
+  /** When this figure starts rolling, so a page can land its KPIs in beats. */
+  delayMs?: number;
+  /** Ground for a stat that leads its row, e.g. a tinted "New this week". */
+  className?: string;
   prefix?: string;
   /** Said after the number, smaller and muted: "/ 3" in "2 / 3". */
   suffix?: string;
@@ -544,6 +702,10 @@ export function SplitStat({
   /** What the delta slot says when there is no delta to say, e.g. under
    *  a seat-line filter. The slot keeps its height either way. */
   note?: string;
+  /** Set with onClick: the list below is showing what this stat counts. */
+  active?: boolean;
+  /** Makes the stat a button that opens the list below on its lines. */
+  onClick?: () => void;
 }) {
   const numberCls = tone ? STAT_TONE_TEXT[tone] : "text-slate-900";
   const body = (
@@ -560,34 +722,61 @@ export function SplitStat({
           </span>
         )}
         <span
-          // Keyed on the value: a new figure eases in instead of snapping.
+          // Keyed on the value: a new figure counts up again.
           key={number}
           className={cn(
-            "animate-in fade-in font-mono text-3xl font-semibold leading-none tabular-nums tracking-tight duration-500 sm:text-4xl",
+            "font-mono text-3xl font-semibold leading-none tabular-nums tracking-tight sm:text-4xl",
             numberCls,
           )}
         >
-          {number.toLocaleString()}
+          <CountUp value={number} delayMs={delayMs} />
         </span>
         {suffix && (
           <span className="font-mono text-lg font-medium tabular-nums text-slate-400 sm:text-xl">{suffix}</span>
         )}
       </div>
       <div className="mt-2 text-[12px] font-medium text-slate-700">{label}</div>
+      {caption && (
+        <div className="text-[11px] leading-[15px] text-slate-500">{caption}</div>
+      )}
       {/* ONE SLOT, ALWAYS THE SAME HEIGHT. A delta, a hint, a note, or
           nothing: the tile never grows or shrinks when the filter changes,
           so the page above the list does not move. */}
-      <div className="min-h-[17px] text-[11px] leading-[17px]">
+      <div
+        key={number}
+        className="min-h-[17px] text-[11px] leading-[17px]"
+        // The change line is the payoff: it rises in once the figure lands.
+        style={payoffStyle(delayMs + landsAfterMs())}
+      >
         {delta ? (
           <DeltaChip delta={delta} />
         ) : hint ? (
-          <span className="text-slate-500">{hint}</span>
+          <span className={hintClassName ?? "text-slate-500"}>{hint}</span>
         ) : note ? (
           <span className="text-slate-400">{note}</span>
         ) : null}
       </div>
     </>
   );
+  if (onClick) {
+    // Toned to the stat when its lines are the ones listed below, so the
+    // card and the tab it opened read as one selection.
+    const activeGround =
+      tone === "critical" ? "bg-critical-bg/60" : tone === "ok" ? "bg-ok-bg/60" : "bg-muted/50";
+    return (
+      <button
+        type="button"
+        onClick={onClick}
+        aria-pressed={active}
+        className={cn(
+          "group block w-full px-5 py-4 text-left transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring",
+          active ? activeGround : "hover:bg-muted/40",
+        )}
+      >
+        {body}
+      </button>
+    );
+  }
   if (linkTo) {
     return (
       <Link
@@ -598,7 +787,7 @@ export function SplitStat({
       </Link>
     );
   }
-  return <div className="px-5 py-4">{body}</div>;
+  return <div className={cn("px-5 py-4", className)}>{body}</div>;
 }
 
 /**
@@ -616,15 +805,22 @@ export function MatchedTile({
   number,
   label,
   delta,
+  previous,
   note,
   active,
   onClick,
+  delayMs = 0,
 }: {
   tone: "publisher" | "app";
   icon: typeof Globe;
   number: number;
   label: string;
   delta?: Delta | null;
+  /** When this figure starts rolling (the overview's second beat). */
+  delayMs?: number;
+  /** Last week's count. With it the week's change stands as its own figure
+   *  ("+351", "+4.4%") at the tile's right edge instead of a chip. */
+  previous?: number | null;
   /** Said in the delta's slot when there is no delta; the slot keeps its
    *  height either way so the tile never moves. */
   note?: string;
@@ -632,6 +828,9 @@ export function MatchedTile({
   onClick: () => void;
 }) {
   const isApp = tone === "app";
+  const wordy = delta != null && previous != null;
+  const moveCls =
+    delta == null || delta.abs === 0 ? "text-slate-400" : delta.abs > 0 ? "text-ok" : "text-critical";
   const numberCls = isApp ? "text-app" : "text-primary";
   const iconCls = isApp ? "text-app" : "text-primary";
   const activeGround = isApp
@@ -645,28 +844,76 @@ export function MatchedTile({
       onClick={onClick}
       aria-pressed={active}
       className={cn(
-        "flex flex-col rounded-xl border px-5 py-4 text-left shadow-sm transition-colors",
+        "flex flex-wrap items-start justify-between gap-x-4 gap-y-3 rounded-xl border px-5 py-4 text-left shadow-sm transition-colors xl:flex-nowrap",
         active ? activeGround : idleGround,
       )}
     >
-      <span
-        key={number}
-        className={cn(
-          "animate-in fade-in font-mono text-3xl font-semibold leading-none tabular-nums tracking-tight duration-500 sm:text-4xl",
-          numberCls,
-        )}
-      >
-        {number.toLocaleString()}
+      <span className="flex min-w-0 flex-col">
+        <span
+          key={number}
+          className={cn(
+            "font-mono text-3xl font-semibold leading-none tabular-nums tracking-tight sm:text-4xl",
+            numberCls,
+          )}
+        >
+          <CountUp value={number} delayMs={delayMs} />
+        </span>
+        <span className="mt-2 flex items-center gap-1.5 text-[12px] font-medium text-slate-700">
+          <Icon aria-hidden className={cn("h-3.5 w-3.5 flex-shrink-0", iconCls)} />
+          {label}
+        </span>
+        <span className="block min-h-[17px] text-[11px] leading-[17px]">
+          {wordy ? (
+            <span className="text-slate-500">
+              {previous.toLocaleString()} last week
+            </span>
+          ) : delta ? (
+            <DeltaChip delta={delta} />
+          ) : note ? (
+            <span className="text-slate-400">{note}</span>
+          ) : null}
+        </span>
       </span>
-      <span className="mt-2 flex items-center gap-1.5 text-[12px] font-medium text-slate-700">
-        <Icon aria-hidden className={cn("h-3.5 w-3.5 flex-shrink-0", iconCls)} />
-        {label}
-      </span>
-      <span className="block min-h-[17px] text-[11px] leading-[17px]">
-        {delta ? <DeltaChip delta={delta} /> : note ? <span className="text-slate-400">{note}</span> : null}
-      </span>
+      {/* THE WEEK'S MOVE, AS ITS OWN FIGURE. How many more publishers or
+          apps matched this week is the point of the tile, so the count and
+          the percentage stand at the tile's right edge at reading size,
+          not as a footnote under the label. Below sm the tile is too
+          narrow for two columns and the block drops under the count. */}
+      {wordy && (
+        <span
+          key={number}
+          className="flex w-full flex-col items-start gap-1 xl:w-auto xl:items-end xl:text-right"
+          // The week's move is the payoff: it rises in once the count lands.
+          style={payoffStyle(delayMs + landsAfterMs())}
+        >
+          <span
+            className={cn(
+              "font-mono text-lg font-semibold leading-none tabular-nums sm:text-2xl",
+              moveCls,
+            )}
+          >
+            {delta.abs > 0 ? "+" : delta.abs < 0 ? "-" : ""}
+            {Math.abs(delta.abs).toLocaleString()}
+          </span>
+          <span className="flex items-baseline gap-1 whitespace-nowrap text-[11px] leading-[15px] text-slate-500 xl:flex-col xl:items-end xl:gap-0">
+            {delta.abs !== 0 && (
+              <span className={cn("font-mono font-medium tabular-nums", moveCls)}>
+                {pctText(delta.pct)}
+              </span>
+            )}
+            <span>{delta.abs === 0 ? "no change" : "vs last week"}</span>
+          </span>
+        </span>
+      )}
     </button>
   );
+}
+
+/** "+4.4%", "-0.03%": one decimal, two when one would round to zero. */
+function pctText(pct: number): string {
+  const sign = pct > 0 ? "+" : pct < 0 ? "-" : "";
+  const abs = Math.abs(pct);
+  return `${sign}${abs >= 0.1 ? abs.toFixed(1) : abs.toFixed(2)}%`;
 }
 
 /**
@@ -801,6 +1048,35 @@ function ExportResultsButton({
 
 type DrillTab = "all" | "added" | "removed" | "changed";
 
+/**
+ * Opens a list's first row after `nonce` bumps, as soon as the list is
+ * `ready` (its rows are the ones the bump asked for). A list mounted with
+ * a non-zero nonce does not open anything: only a new bump does.
+ */
+function useOpenFirst<K>(
+  nonce: number,
+  ready: boolean,
+  firstKey: K | null,
+  open: (key: K) => void,
+) {
+  const seen = useRef(nonce);
+  const pending = useRef(false);
+  useEffect(() => {
+    if (nonce !== seen.current) {
+      seen.current = nonce;
+      pending.current = true;
+    }
+  }, [nonce]);
+  useEffect(() => {
+    // An empty list spends the bump too, or it would open a row in
+    // whatever list lands next.
+    if (pending.current && ready) {
+      pending.current = false;
+      if (firstKey != null) open(firstKey);
+    }
+  }, [nonce, ready, firstKey, open]);
+}
+
 /** Uniform shape both tabs render into. */
 type Row = {
   developer_id: number;
@@ -827,14 +1103,25 @@ function DrilldownList({
   token,
   lines,
   caps,
+  tab,
+  setTab,
+  openFirst,
 }: {
   token: string;
   lines: string[];
   /** The trial's caps, on a trial: the unlock card stands on every tab. */
   caps: TrialCaps | null;
+  /** Owned by the page, so the line cards above can pick the tab. */
+  tab: DrillTab;
+  setTab: (tab: DrillTab) => void;
+  /** Each bump opens the first row of the next list to land. */
+  openFirst: number;
 }) {
-  const [tab, setTab] = useState<DrillTab>("all");
   const [rows, setRows] = useState<Row[]>([]);
+  const cache = usePageCache<unknown>();
+  // The tab the rows on screen were read for. Lags `tab` until a new tab's
+  // list lands, so a freshly picked tab never opens last tab's first row.
+  const [rowsTab, setRowsTab] = useState<DrillTab>(tab);
   const [total, setTotal] = useState(0);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -872,12 +1159,9 @@ function DrilldownList({
 
   useEffect(() => {
     let cancelled = false;
-    setLoading(true);
-    setError(null);
-    setExpanded(null);
-    const p =
+    const load = (pg: number) =>
       tab === "all"
-        ? api.matchedDevelopers(token, page, query, lines).then((r) => ({
+        ? api.matchedDevelopers(token, pg, query, lines).then((r) => ({
             rows: r.rows.map(
               (d: MatchedDeveloper): Row => ({
                 developer_id: d.developer_id,
@@ -899,7 +1183,7 @@ function DrilldownList({
             truncated: r.truncated ?? false,
             trial: r.trial ?? null,
           }))
-        : api.developerEvents(token, tab, page, query, lines).then((r) => ({
+        : api.developerEvents(token, tab, pg, query, lines).then((r) => ({
             rows: r.rows.map(
               (d: DeveloperEvent): Row => ({
                 developer_id: d.developer_id,
@@ -921,20 +1205,54 @@ function DrilldownList({
             truncated: false,
             trial: r.trial ?? null,
           }));
-    p.then((data) => {
-      if (cancelled) return;
+    type Loaded = Awaited<ReturnType<typeof load>>;
+    const keyFor = (pg: number) => [tab, pg, query, lines.join(",")].join("|");
+    const apply = (data: Loaded) => {
       setRows(data.rows);
+      setRowsTab(tab);
       setTotal(data.total);
       setTruncated(data.truncated);
       setTrial(data.trial);
       setSettled((n) => n + 1);
-    })
+    };
+    // Read the next page while this one is on screen. Not while a search
+    // is being typed: every keystroke is a new list, and reading ahead of
+    // each would double the requests for pages nobody opens.
+    const readAhead = (data: Loaded) => {
+      if (!query && page * PAGE_SIZE < data.total) {
+        cache.prefetch(keyFor(page + 1), () => load(page + 1));
+      }
+    };
+    setError(null);
+    setExpanded(null);
+    const kept = cache.get(keyFor(page)) as Loaded | undefined;
+    if (kept) {
+      apply(kept);
+      setLoading(false);
+      readAhead(kept);
+      return;
+    }
+    setLoading(true);
+    load(page)
+      .then((data) => {
+        cache.put(keyFor(page), data);
+        if (cancelled) return;
+        apply(data);
+        readAhead(data);
+      })
       .catch((e: Error) => !cancelled && setError(e.message))
       .finally(() => !cancelled && setLoading(false));
     return () => {
       cancelled = true;
     };
-  }, [token, tab, page, query, lines]);
+  }, [token, tab, page, query, lines, cache]);
+
+  useOpenFirst(
+    openFirst,
+    !loading && settled > 0 && rowsTab === tab,
+    rows[0]?.developer_id ?? null,
+    setExpanded,
+  );
 
   return (
     <div>
@@ -1020,16 +1338,17 @@ function DrilldownList({
               loading && "opacity-60",
             )}
           >
-            {rows.map((r) => (
-              <PublisherCard
-                key={r.developer_id}
-                row={r}
-                token={token}
-                open={expanded === r.developer_id}
-                onToggle={() =>
-                  setExpanded(expanded === r.developer_id ? null : r.developer_id)
-                }
-              />
+            {rows.map((r, i) => (
+              <Settle key={r.developer_id} index={i}>
+                <PublisherCard
+                  row={r}
+                  token={token}
+                  open={expanded === r.developer_id}
+                  onToggle={() =>
+                    setExpanded(expanded === r.developer_id ? null : r.developer_id)
+                  }
+                />
+              </Settle>
             ))}
           </div>
         )}
@@ -1197,7 +1516,7 @@ function PublisherCard({
           )}
         />
       </button>
-      {open && (
+      <Collapse open={open}>
         <div className="border-t border-border bg-accent/30 px-4 pb-4 pt-3 sm:px-5">
           {hasEmbeddedLines ? (
             <ChangeExpansion
@@ -1210,7 +1529,7 @@ function PublisherCard({
             <LazyMatchedSeatLines token={token} developerId={row.developer_id} />
           )}
         </div>
-      )}
+      </Collapse>
     </div>
   );
 }
@@ -1572,12 +1891,19 @@ function MatchedAppsList({
   token,
   lines,
   caps,
+  tab,
+  setTab,
+  openFirst,
 }: {
   token: string;
   lines: string[];
   caps: TrialCaps | null;
+  /** Owned by the page, so the line cards above can pick the tab. */
+  tab: DrillTab;
+  setTab: (tab: DrillTab) => void;
+  /** Each bump opens the first row of the next list to land. */
+  openFirst: number;
 }) {
-  const [tab, setTab] = useState<DrillTab>("all");
   const [allRows, setAllRows] = useState<MatchedApp[]>([]);
   const [loading, setLoading] = useState(true);
   const [failed, setFailed] = useState(false);
@@ -1591,6 +1917,7 @@ function MatchedAppsList({
   const [trial, setTrial] = useState<TrialSlice | null>(null);
 
   const keyOf = (a: MatchedApp) => `${a.store}:${a.bundle_id}`;
+  const appCache = usePageCache<unknown>();
   const [settled, setSettled] = useState(0);
 
   // A new search or a new line selection is a new list and starts at its
@@ -1607,18 +1934,39 @@ function MatchedAppsList({
 
   useEffect(() => {
     let cancelled = false;
-    setLoading(true);
+    const load = (pg: number) => api.matchedApps(token, pg, query, lines);
+    type Loaded = Awaited<ReturnType<typeof load>>;
+    const keyFor = (pg: number) => [pg, query, lines.join(",")].join("|");
+    const apply = (r: Loaded) => {
+      setAllRows(r.rows ?? []);
+      setTotal(r.total ?? 0);
+      setTruncated(r.truncated ?? false);
+      setTrial(r.trial ?? null);
+      setSettled((n) => n + 1);
+    };
+    // Same read-ahead as the publishers list, and the same pause while a
+    // search is being typed.
+    const readAhead = (r: Loaded) => {
+      if (!query && page * PAGE_SIZE < (r.total ?? 0)) {
+        appCache.prefetch(keyFor(page + 1), () => load(page + 1));
+      }
+    };
     setFailed(false);
     setExpanded(null);
-    api
-      .matchedApps(token, page, query, lines)
+    const kept = appCache.get(keyFor(page)) as Loaded | undefined;
+    if (kept) {
+      apply(kept);
+      setLoading(false);
+      readAhead(kept);
+      return;
+    }
+    setLoading(true);
+    load(page)
       .then((r) => {
+        appCache.put(keyFor(page), r);
         if (!cancelled) {
-          setAllRows(r.rows ?? []);
-          setTotal(r.total ?? 0);
-          setTruncated(r.truncated ?? false);
-          setTrial(r.trial ?? null);
-          setSettled((n) => n + 1);
+          apply(r);
+          readAhead(r);
         }
       })
       .catch(() => {
@@ -1638,7 +1986,7 @@ function MatchedAppsList({
     return () => {
       cancelled = true;
     };
-  }, [token, page, query, lines]);
+  }, [token, page, query, lines, appCache]);
 
   // A card held open from one tab must not appear under another.
   useEffect(() => setExpanded(null), [tab]);
@@ -1651,6 +1999,13 @@ function MatchedAppsList({
       return allRows.filter((a) => (a.lines_cert_changed ?? 0) > 0);
     return allRows;
   }, [allRows, tab]);
+
+  useOpenFirst(
+    openFirst,
+    !loading && settled > 0,
+    rows[0] ? keyOf(rows[0]) : null,
+    setExpanded,
+  );
 
   return (
     <div>
@@ -1720,16 +2075,17 @@ function MatchedAppsList({
             loading && "opacity-60",
           )}
         >
-          {rows.map((a) => (
-            <MatchedAppCard
-              key={keyOf(a)}
-              app={a}
-              open={expanded === keyOf(a)}
-              onToggle={() =>
-                setExpanded(expanded === keyOf(a) ? null : keyOf(a))
-              }
-              token={token}
-            />
+          {rows.map((a, i) => (
+            <Settle key={keyOf(a)} index={i}>
+              <MatchedAppCard
+                app={a}
+                open={expanded === keyOf(a)}
+                onToggle={() =>
+                  setExpanded(expanded === keyOf(a) ? null : keyOf(a))
+                }
+                token={token}
+              />
+            </Settle>
           ))}
         </div>
       )}
@@ -1841,7 +2197,7 @@ function MatchedAppCard({
           )}
         />
       </button>
-      {open && (
+      <Collapse open={open}>
         <div className="border-t border-app-border bg-app-bg/30 px-4 pb-4 pt-3 sm:px-5">
           {!hasEmbeddedLines && app.developer_id != null ? (
             <LazyMatchedSeatLines token={token} developerId={app.developer_id} />
@@ -1854,7 +2210,7 @@ function MatchedAppCard({
             />
           )}
         </div>
-      )}
+      </Collapse>
     </div>
   );
 }

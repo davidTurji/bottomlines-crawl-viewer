@@ -853,3 +853,19 @@ All colors MUST be HSL.
     opacity: 1 !important;
   }
 }
+
+/* A KPI figure waiting its turn to count sits dimmed, then wakes (CountUp). */
+@keyframes kpi-wake {
+  from { opacity: 0.28; }
+  to { opacity: 1; }
+}
+
+/* A KPI's change line (delta, "+351 / +4.4%") arriving once its figure has
+   landed: the payoff, a soft rise into place. Delay set inline. */
+@keyframes kpi-payoff {
+  from { opacity: 0; transform: translate3d(0, 4px, 0); }
+  to { opacity: 1; transform: translate3d(0, 0, 0); }
+}
+@media (prefers-reduced-motion: reduce) {
+  [style*="kpi-payoff"], [style*="kpi-wake"] { animation: none !important; }
+}

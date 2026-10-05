@@ -1742,6 +1742,7 @@ function discoveredTotals(pool: DiscoveredLine[]): DiscoveredTotals {
   let placements = 0;
   let previous_lines = 0;
   let previous_placements = 0;
+  let new_lines = 0;
   const ssps = new Set<string>();
   for (const l of pool) {
     placements += l.placements_count;
@@ -1749,6 +1750,8 @@ function discoveredTotals(pool: DiscoveredLine[]): DiscoveredTotals {
     if (l.previous_placements_count != null) {
       previous_lines += 1;
       previous_placements += l.previous_placements_count;
+    } else {
+      new_lines += 1;
     }
   }
   for (const ssp of ssps) {
@@ -1762,6 +1765,7 @@ function discoveredTotals(pool: DiscoveredLine[]): DiscoveredTotals {
     placements,
     previous_lines: pool.length === 0 ? null : previous_lines,
     previous_placements: pool.length === 0 ? null : previous_placements,
+    new_lines: pool.length === 0 ? null : new_lines,
   };
 }
 
@@ -1883,14 +1887,29 @@ const DECLARATION_ROWS_SEED: [string, string, string[], string][] = [
   ["manager domain", "madeupmedia.com", ["tidepoolarcade.com"], "BR"],
 ];
 
+/** Declarations first made this week, as "kind|declared_by": the last
+ *  four inventory partners, and both owner-domain publishers, so the owner
+ *  card shows a domain nobody named last week. */
+const NEW_DECLARATIONS = new Set([
+  "inventory partner|mesaridge-news.com",
+  "inventory partner|northfold-tv.com",
+  "inventory partner|ambermile-news9.com",
+  "inventory partner|cobaltriver15.com",
+  "owner domain|quokkaplay-games.com",
+  "owner domain|tidepoolarcade.com",
+]);
+
 export const mockDeclarationRows: DeclarationRowsPayload = (() => {
   const rows: DeclarationRow[] = [];
   DECLARATION_ROWS_SEED.forEach(([declaration, declared_domain, declarers, country]) => {
     declarers.forEach((declared_by, i) => {
-      rows.push({ declaration, declared_domain, declared_by, country, found_in: "ads.txt" });
+      const is_new = NEW_DECLARATIONS.has(`${declaration}|${declared_by}`);
+      rows.push({ declaration, declared_domain, declared_by, country, found_in: "ads.txt", is_new });
       // Most publishers carry both files; every third one is web-only.
       if (i % 3 !== 2) {
-        rows.push({ declaration, declared_domain, declared_by, country, found_in: "app-ads.txt" });
+        rows.push({
+          declaration, declared_domain, declared_by, country, found_in: "app-ads.txt", is_new,
+        });
       }
     });
   });

@@ -1237,6 +1237,10 @@ export type DiscoveredTotals = {
   /** Both null when there is no previous crawl to compare against. */
   previous_lines: number | null;
   previous_placements: number | null;
+  /** Lines that did not exist last week (previous_placements_count null),
+   *  over the whole filtered set. OPTIONAL: seeded in mock today; absent on
+   *  live until the crawler sends it, and the page then leaves it out. */
+  new_lines?: number | null;
 };
 
 export type DiscoveredLinesPage = {
@@ -1323,6 +1327,11 @@ export type DeclarationRow = {
   declared_by: string;
   country?: string | null;
   found_in: string;
+  /** This publisher did not make this declaration in this file last week.
+   *  OPTIONAL: seeded in mock today; live reports omit it until the crawler
+   *  diffs declarations against the previous crawl, and the page then shows
+   *  no "new" at all. */
+  is_new?: boolean | null;
 };
 
 export type DeclarationRowsPayload = {
