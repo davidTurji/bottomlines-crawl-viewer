@@ -1,4 +1,5 @@
 import { Pager, usePaging } from "@/components/ListControls";
+import { Collapse, Settle } from "@/components/Motion";
 import LockedTail from "@/components/LockedTail";
 import TrialBanner from "@/components/TrialBanner";
 import { DeclarationsSkeleton } from "@/components/Skeleton";
@@ -258,26 +259,42 @@ export default function CrawlDeclarations() {
                 Declared this crawl
               </div>
               <div className="text-[11px] text-slate-500">
-                {data.total.toLocaleString()} declarations
+                {data.total.toLocaleString()} declarations. A publisher naming
+                you in both files counts once.
               </div>
             </div>
           </div>
-          <div className="grid grid-cols-3 divide-x divide-border overflow-hidden rounded-xl border border-border">
+          {/* NEW THIS WEEK LEADS, in the brand green every "added" figure
+              in the report wears; each kind below says its own share of it
+              in its own yellow. Publishers naming the customer for the
+              first time are the week's news on this page. Only when the report marks new
+              rows; otherwise the three kinds stand alone. */}
+          <div
+            className={cn(
+              "grid gap-px overflow-hidden rounded-xl border border-border bg-border",
+              data.new_total != null
+                ? "grid-cols-2 sm:grid-cols-[1.3fr_1fr_1fr_1fr]"
+                : "grid-cols-3",
+            )}
+          >
+            {data.new_total != null && (
+              <SplitStat
+                tone="ok"
+                prefix={data.new_total > 0 ? "+" : undefined}
+                number={data.new_total}
+                label="New this week"
+                caption="Declarations no publisher made last week"
+                className="bg-white"
+              />
+            )}
             {data.sections.map((s) => (
               <SplitStat
                 key={s.kind}
+                className="bg-white"
                 tone={s.declarations > 0 ? KIND_TONE[s.kind].stat : undefined}
                 number={s.declarations}
                 label={KIND_COPY[s.kind].title}
-                hint={
-                  s.subjects.length > 0
-                    ? `${s.subjects.length.toLocaleString()} ${
-                        s.subjects.length === 1 ? "domain" : "domains"
-                      } named`
-                    : data.legacy && s.kind === "manager domain"
-                      ? "not captured for this report"
-                      : "none named"
-                }
+                {...kindHint(s, data.legacy, data.new_total != null)}
               />
             ))}
           </div>
@@ -383,6 +400,35 @@ export default function CrawlDeclarations() {
   );
 }
 
+/**
+ * What a kind's stat says under its label. With "new" marked on the
+ * report: how many domains it names as the caption, and this kind's share
+ * of the week's new declarations as the hint, in the kind's own yellow.
+ * Without: the domain count alone, as before.
+ */
+function kindHint(
+  s: DeclarationSection,
+  legacy: boolean,
+  marked: boolean,
+): { hint: string; caption?: string; hintClassName?: string } {
+  const named =
+    s.subjects.length > 0
+      ? `${s.subjects.length.toLocaleString()} ${
+          s.subjects.length === 1 ? "domain" : "domains"
+        } named`
+      : legacy && s.kind === "manager domain"
+        ? "not captured for this report"
+        : "none named";
+  if (!marked) return { hint: named };
+  return s.new_declarations > 0
+    ? {
+        caption: named,
+        hint: `+${s.new_declarations.toLocaleString()} new this week`,
+        hintClassName: cn("font-medium", KIND_TONE[s.kind].text),
+      }
+    : { caption: named, hint: "none new this week" };
+}
+
 /* ── One kind: heading, cards, pager ───────────────────────────────── */
 
 function KindSection({
@@ -458,15 +504,16 @@ function KindSection({
         </SectionEmpty>
       ) : (
         <div className="space-y-3">
-          {slice.map((s) => (
-            <SubjectCard
-              key={`${s.kind}|${s.domain}`}
-              subject={s}
-              fileDate={fileDate}
-              capped={capped}
-              open={open.has(`${s.kind}|${s.domain}`)}
-              onToggle={() => onToggle(`${s.kind}|${s.domain}`)}
-            />
+          {slice.map((s, i) => (
+            <Settle key={`${s.kind}|${s.domain}`} index={i}>
+              <SubjectCard
+                subject={s}
+                fileDate={fileDate}
+                capped={capped}
+                open={open.has(`${s.kind}|${s.domain}`)}
+                onToggle={() => onToggle(`${s.kind}|${s.domain}`)}
+              />
+            </Settle>
           ))}
         </div>
       )}
@@ -513,7 +560,6 @@ function SubjectCard({
   const tone = KIND_TONE[subject.kind];
   const initial = (subject.domain.replace(/^www\./i, "").charAt(0) || "?")
     .toUpperCase();
-  const files = new Set(subject.declarers.map((d) => d.domain)).size;
   const notShown = Math.max(0, subject.total - subject.declarers.length);
   const both = subject.ads_txt > 0 && subject.app_ads_txt > 0;
 
@@ -545,11 +591,22 @@ function SubjectCard({
             {subject.domain}
           </code>
           <div className="mt-0.5 flex flex-wrap items-center gap-x-2 gap-y-0.5 text-xs text-slate-500">
-            <span>
+            {/* What's new on this domain, in words: the whole domain when
+                nobody named it last week, else how many publishers are new
+                to naming it. */}
+            {subject.is_new ? (
+              <NewMark className={tone.text}>new this week</NewMark>
+            ) : subject.new_count > 0 ? (
+              <NewMark className={tone.text}>
+                +{subject.new_count.toLocaleString()} new this week
+              </NewMark>
+            ) : null}
+            {/* The count lives in the Declarations column from sm up. */}
+            <span className="sm:hidden">
               <span className="font-mono tabular-nums text-slate-700">
-                {files.toLocaleString()}
+                {subject.total.toLocaleString()}
               </span>{" "}
-              {files === 1 ? "publisher" : "publishers"}
+              {subject.total === 1 ? "publisher" : "publishers"}
             </span>
             <span className="text-slate-400">
               {both ? "ads.txt, app-ads.txt" : subject.app_ads_txt > 0 ? "app-ads.txt" : "ads.txt"}
@@ -597,14 +654,15 @@ function SubjectCard({
         />
       </button>
 
-      {open && (
+      <Collapse open={open}>
         <div className={cn("border-t px-4 pb-4 pt-3 sm:px-5", tone.border)}>
           <div className="mb-1 flex items-center justify-between gap-3">
             <span className="text-xs font-medium text-slate-700">
               Named by{" "}
               <span className="font-mono tabular-nums text-slate-500">
                 {subject.total.toLocaleString()}
-              </span>
+              </span>{" "}
+              {subject.total === 1 ? "publisher" : "publishers"}
             </span>
             {/* Every publisher that named this domain, which file, and the
                 country: the workbook's Declarations sheet, for this one
@@ -633,12 +691,17 @@ function SubjectCard({
               the next section off screen. */}
           <div className="scroll-y max-h-[6.6rem] overflow-y-auto rounded-md border border-border bg-white">
             <ul className="divide-y divide-border">
+              {/* One row per publisher, its files on the right in the
+                  overview's wording ("Found in ads.txt + app-ads.txt"): the
+                  same declaration in two files is one declaration, said in
+                  two places. */}
               {subject.declarers.map((d, i) => (
                 <li
-                  key={`${d.domain}|${d.found_in}|${d.country}|${i}`}
-                  className="flex items-baseline gap-3 px-3 py-1.5 font-mono text-[11px] tabular-nums"
+                  key={`${d.domain}|${i}`}
+                  className="flex items-center gap-3 px-3 py-1.5 font-mono text-[11px] tabular-nums"
                 >
                   <span className="truncate text-slate-800">{d.domain}</span>
+                  {d.is_new && <NewMark className={tone.text}>new</NewMark>}
                   {d.country && (
                     <span
                       className={cn("flex-shrink-0 text-[10px]", tone.text)}
@@ -647,7 +710,7 @@ function SubjectCard({
                       {d.country}
                     </span>
                   )}
-                  <span className="ml-auto flex-shrink-0 text-[10px] text-slate-400">
+                  <span className="ml-auto flex-shrink-0 font-sans text-[10px] text-slate-400">
                     {d.found_in}
                   </span>
                 </li>
@@ -660,7 +723,7 @@ function SubjectCard({
             </p>
           )}
         </div>
-      )}
+      </Collapse>
     </div>
   );
 }
@@ -702,6 +765,16 @@ function MismatchCard({ row }: { row: RelationshipMismatch }) {
         </div>
       </div>
     </div>
+  );
+}
+
+/** The "new" marker: words in the card's own yellow, no pill, no fill,
+ *  so "new" reads as part of the card rather than a sticker on it. */
+function NewMark({ children, className }: { children: ReactNode; className: string }) {
+  return (
+    <span className={cn("flex-shrink-0 font-sans text-[11px] font-semibold", className)}>
+      {children}
+    </span>
   );
 }
 

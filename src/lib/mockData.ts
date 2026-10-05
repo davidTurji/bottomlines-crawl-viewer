@@ -2193,6 +2193,7 @@ function discoveredTotals(pool: DiscoveredLine[]): DiscoveredTotals {
   let placements = 0;
   let previous_lines = 0;
   let previous_placements = 0;
+  let new_lines = 0;
   const ssps = new Set<string>();
   for (const l of pool) {
     placements += l.placements_count;
@@ -2200,6 +2201,8 @@ function discoveredTotals(pool: DiscoveredLine[]): DiscoveredTotals {
     if (l.previous_placements_count != null) {
       previous_lines += 1;
       previous_placements += l.previous_placements_count;
+    } else {
+      new_lines += 1;
     }
   }
   for (const ssp of ssps) {
@@ -2213,6 +2216,7 @@ function discoveredTotals(pool: DiscoveredLine[]): DiscoveredTotals {
     placements,
     previous_lines: pool.length === 0 ? null : previous_lines,
     previous_placements: pool.length === 0 ? null : previous_placements,
+    new_lines: pool.length === 0 ? null : new_lines,
   };
 }
 
@@ -2334,14 +2338,29 @@ const DECLARATION_ROWS_SEED: [string, string, string[], string][] = [
   ["manager domain", "madeupmedia.com", ["cobbletonstudios.com"], "BR"],
 ];
 
+/** Declarations first made this week, as "kind|declared_by": the last
+ *  four inventory partners, and both owner-domain publishers, so the owner
+ *  card shows a domain nobody named last week. */
+const NEW_DECLARATIONS = new Set([
+  "inventory partner|barrowgatemedia.com",
+  "inventory partner|pennyfieldnetworks.com",
+  "inventory partner|sablebroadcasting.com",
+  "inventory partner|iversleystudios.com",
+  "owner domain|thistlewoodpublishers.com",
+  "owner domain|cobbletonstudios.com",
+]);
+
 export const mockDeclarationRows: DeclarationRowsPayload = (() => {
   const rows: DeclarationRow[] = [];
   DECLARATION_ROWS_SEED.forEach(([declaration, declared_domain, declarers, country]) => {
     declarers.forEach((declared_by, i) => {
-      rows.push({ declaration, declared_domain, declared_by, country, found_in: "ads.txt" });
+      const is_new = NEW_DECLARATIONS.has(`${declaration}|${declared_by}`);
+      rows.push({ declaration, declared_domain, declared_by, country, found_in: "ads.txt", is_new });
       // Most publishers carry both files; every third one is web-only.
       if (i % 3 !== 2) {
-        rows.push({ declaration, declared_domain, declared_by, country, found_in: "app-ads.txt" });
+        rows.push({
+          declaration, declared_domain, declared_by, country, found_in: "app-ads.txt", is_new,
+        });
       }
     });
   });
@@ -2680,4 +2699,14 @@ export async function* mockChatStream(
   }
   await new Promise((r) => setTimeout(r, 100));
   yield { type: "done" };
+}
+
+/**
+ * The matched roster and its app bundles, for the schain fixture
+ * (src/lib/mockSchain.ts). Read off the same lists the overview pages, so
+ * a publisher in the schain preview is one the reader can also find under
+ * Matched publishers, carrying the same seat lines.
+ */
+export function mockSchainSource() {
+  return { developers: MATCHED_DEVS, bundles: MATCHED_BUNDLES };
 }

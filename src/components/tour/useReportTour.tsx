@@ -63,8 +63,9 @@ const READY_ANCHOR = '[data-tour="overview-header"], [data-report-ready]';
 const READY_POLL_MS = 250;
 const READY_ATTEMPTS = 240;
 
-/** A beat after the numbers land, so the prompt opens over a finished page. */
-const PROMPT_DELAY_MS = 700;
+/** Six seconds after the page is ready (David, 2026-10-05): the numbers
+ *  finish counting and the reader takes the page in before being asked. */
+const PROMPT_DELAY_MS = 6000;
 
 export function ReportTourProvider({ children }: { children: React.ReactNode }) {
   const [progress, setProgress] = useState<TourProgress>(loadTourProgress);
