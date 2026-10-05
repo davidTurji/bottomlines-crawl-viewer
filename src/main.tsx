@@ -17,6 +17,7 @@ import CrawlDiscovered from "./routes/CrawlDiscovered";
 import CrawlDeclarations from "./routes/CrawlDeclarations";
 import CrawlSchain from "./routes/CrawlSchain";
 import { installViewportLock } from "./lib/viewportLock";
+import { captureLinkSignin } from "./lib/linkSignin";
 import "./index.css";
 
 /**
@@ -95,6 +96,10 @@ const tree = (
 // Before first paint: a report that can be pinched or force-zoomed by a
 // focused input pans out from under the reader and never recovers.
 installViewportLock();
+
+// The weekly email's button carries the sign-in after "#": read it and wipe
+// it from the address before anything renders (lib/linkSignin.ts).
+captureLinkSignin();
 
 ReactDOM.createRoot(document.getElementById("root")!).render(
   <React.StrictMode>{tree}</React.StrictMode>,
