@@ -1,7 +1,7 @@
 import { FormEvent, useEffect, useState } from "react";
 import { Eye, EyeOff, Lock } from "lucide-react";
 import AuthHero3D from "@/components/AuthHero3D";
-import { api, ApiError, MOCK, onDeadLink, onUnauthorized } from "@/lib/api";
+import { api, ApiError, MOCK, onUnauthorized } from "@/lib/api";
 import { useReportScope } from "@/lib/reportScope";
 import {
   EXPIRED_LINK_MESSAGE,
@@ -32,7 +32,11 @@ function rememberUser(token: string, username: string) {
  * whole point of the dead-link branch:
  *
  *   401  the report exists, these credentials do not open it   -> form
- *   404  there is no report behind this token any more         -> card
+ *   403  sign-in refused: the link expired or was revoked      -> card
+ *
+ * Only sign-in decides the card. A data call that answers 404 never
+ * does: that 404 means an optional part is not in this report, and
+ * reading it as a dead link took every report down (2026-10-06).
  *
  * A revoked or expired report used to reach the form and be told the
  * username and password did not match, which sent the reader off to
@@ -60,10 +64,8 @@ export default function LoginGate({ children }: { children: React.ReactNode }) {
 
   useEffect(() => {
     onUnauthorized(() => setLocked(true));
-    onDeadLink(() => setDead(true));
     return () => {
       onUnauthorized(null);
-      onDeadLink(null);
     };
   }, []);
 

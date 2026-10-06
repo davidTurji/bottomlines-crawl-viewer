@@ -1,0 +1,51 @@
+name: Checks
+
+# Typecheck, build and the browser tests, on every pull request and as the
+# first job of every deploy (deploy.yml calls this workflow), so the same
+# gate guards both doors.
+#
+# The browser tests (e2e/) run the PRODUCTION build against a fake API that
+# answers what the crawler really answers, report shapes included: no
+# Sellers.json page, no Schain, nothing discovered, trial, signed out,
+# expired, an older API. On 2026-10-06 a 404 from /sellers-fix took every
+# report without that page down; these tests fail on that code.
+
+on:
+  pull_request:
+  workflow_call:
+  workflow_dispatch:
+
+concurrency:
+  group: checks-${{ github.workflow }}-${{ github.ref }}-${{ github.event_name }}
+  # A newer push to a PR replaces the older run; a deploy's run is never cut.
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  checks:
+    name: typecheck, build, browser tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: npm
+      - run: npm ci --no-audit --no-fund
+      - run: npm run typecheck
+      - run: npx playwright install --with-deps chromium
+      # playwright.config.ts builds the app itself (npm run build, mock
+      # off) and serves it with vite preview before the tests start.
+      - run: npx playwright test
+        env:
+          CI: "true"
+      - uses: actions/upload-artifact@v4
+        if: failure()
+        with:
+          name: playwright-report
+          path: |
+            playwright-report/
+            test-results/
+          retention-days: 7
