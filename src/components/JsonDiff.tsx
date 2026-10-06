@@ -319,7 +319,7 @@ export function JsonView({
           {note}
         </span>
         <span className="text-[12px] text-[#59636e]">
-          {file.sellers.length.toLocaleString()} sellers · {lines.length.toLocaleString()} lines
+          {file.sellers.length.toLocaleString()} sellers, {lines.length.toLocaleString()} lines
         </span>
         <FileActions text={text} onDownload={onDownload} />
       </div>

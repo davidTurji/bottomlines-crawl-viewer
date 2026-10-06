@@ -7,6 +7,7 @@ import {
   Minus,
   Plus,
   RefreshCw,
+  RotateCcw,
   ShieldCheck,
   X,
 } from "lucide-react";
@@ -131,9 +132,36 @@ export default function CrawlSellers() {
 
   // The ticks start where the suggestions say: fixes and clear adds on,
   // removals and unsure adds off.
+  const defaults = useMemo(
+    () => new Set(plain.filter((r) => r.defaultOn).map((r) => r.seller_id)),
+    [plain],
+  );
   useEffect(() => {
-    setTicked(new Set(plain.filter((r) => r.defaultOn).map((r) => r.seller_id)));
-  }, [plain]);
+    setTicked(new Set(defaults));
+  }, [defaults]);
+
+  /** Whether a suggestion moved from where it started: its tick, or a name
+   *  or domain typed into it. */
+  const changed = (id: string) => ticked.has(id) !== defaults.has(id) || Boolean(edits[id]);
+  /** Back to where the suggestions started, for these sellers (David,
+   *  2026-10-06: a reset everywhere a choice is made). */
+  const reset = (ids: string[]) => {
+    setTicked((prev) => {
+      const next = new Set(prev);
+      for (const id of ids) {
+        if (defaults.has(id)) next.add(id);
+        else next.delete(id);
+      }
+      return next;
+    });
+    setEdits((prev) => {
+      const next = { ...prev };
+      for (const id of ids) delete next[id];
+      return next;
+    });
+  };
+  const allIds = plain.map((r) => r.seller_id);
+  const anyChanged = allIds.some(changed);
 
   const groupOf = (r: SellerRow): GroupKey | null =>
     r.kind === "keep" ? null : creating ? (needsFillIn(r) ? "name" : "ready") : r.kind;
@@ -370,47 +398,39 @@ export default function CrawlSellers() {
               diff, then the final file whole. Rebuilt on every tick and
               every fill-in below. */}
           <div className="rounded-2xl border border-border bg-white p-5 shadow-sm">
-            {/* WHAT YOU ARE EXPORTING, said plainly (David, 2026-10-05: it
-                was not clear). The title names the file, the lead says what
-                it is, and the chips count exactly what went into it. */}
+            {/* WHAT YOU ARE EXPORTING, in one plain line (David, 2026-10-06:
+                the chips and the verdict were clutter). Copy and Download
+                sit at the top of the page; Reset puts every pick back. */}
             <div className="mb-4 flex flex-wrap items-start justify-between gap-3">
               <div className="min-w-0">
                 <div className="font-display text-base font-semibold tracking-tight text-slate-900">
                   {creating ? "Your new sellers.json" : "Your fixed sellers.json"}
                 </div>
-                <div className="mt-0.5 text-[12px] text-slate-600">
-                  {creating
-                    ? "A new file for " + data.domain + ", built from the sellers you took."
-                    : "Your live file at " + data.domain + " with the fixes you took. This is what you download or copy."}
-                </div>
-                <div className="mt-2 flex flex-wrap items-center gap-1.5 text-[12px]">
-                  {taken.add > 0 && <Chip tone="ok">+{taken.add} added</Chip>}
-                  {taken.fix > 0 && <Chip tone="warn">↻ {taken.fix} fixed</Chip>}
-                  {taken.remove > 0 && <Chip tone="critical">− {taken.remove} removed</Chip>}
-                  {!creating && <Chip>{taken.unchanged} unchanged</Chip>}
-                  <span className="pl-1 font-medium text-slate-700">
-                    = {exportFile.sellers.length.toLocaleString()} sellers
-                  </span>
-                  <span className="pl-1">
-                    {issues.length === 0 ? (
-                      <span className="font-medium text-ok">Passes every sellers.json check.</span>
-                    ) : (
-                      <span className="font-medium text-warn">
-                        {issues.length} {issues.length === 1 ? "thing" : "things"} to resolve first.
-                      </span>
-                    )}
-                  </span>
+                <div className="mt-0.5 text-[12.5px] text-slate-500">
+                  {exportFile.sellers.length.toLocaleString()}{" "}
+                  {exportFile.sellers.length === 1 ? "seller" : "sellers"}
+                  {(() => {
+                    const parts = [
+                      taken.add > 0 ? `${taken.add} added` : null,
+                      taken.fix > 0 ? `${taken.fix} fixed` : null,
+                      taken.remove > 0 ? `${taken.remove} removed` : null,
+                    ].filter(Boolean);
+                    return creating ? "" : parts.length ? `: ${parts.join(", ")}` : ", nothing changed";
+                  })()}
+                  {issues.length > 0 && (
+                    <span className="text-warn">
+                      {". "}
+                      {issues.length} {issues.length === 1 ? "thing" : "things"} to resolve first
+                    </span>
+                  )}
                 </div>
               </div>
-              <div className="flex flex-wrap items-center gap-2">
-                <CopyButton text={exportText} label={creating ? "Copy new file" : "Copy fixed file"} />
-                <ExportButton onClick={download} label={creating ? "Download new sellers.json" : "Download fixed sellers.json"} />
-              </div>
+              <ResetButton disabled={!anyChanged} onClick={() => reset(allIds)} label="Reset all" />
             </div>
             {/* The toggle only changes what the comparison shows; the file
                 you take away is always the one with your picks. */}
             <div className="mb-2 flex flex-wrap items-center gap-2 text-[12px] text-slate-500">
-              <span>Compare your live file with</span>
+              <span>Compare with</span>
               <div className="inline-flex rounded-full border border-border bg-muted/40 p-0.5">
                 {(["picks", "all"] as const).map((v) => (
                   <button
@@ -423,7 +443,7 @@ export default function CrawlSellers() {
                       view === v ? "bg-white text-slate-900 shadow-sm" : "text-slate-500 hover:text-slate-700",
                     )}
                   >
-                    {v === "picks" ? "the fixes you took" : "every fix we suggest"}
+                    {v === "picks" ? "Your picks" : "Every suggestion"}
                   </button>
                 ))}
               </div>
@@ -441,15 +461,11 @@ export default function CrawlSellers() {
               <JsonView
                 file={exportFile}
                 path={`${data.domain}/sellers.json`}
-                note={creating ? "New file, ready to publish" : "Fixed file, ready to publish"}
+                note={creating ? "New file" : "Fixed file"}
                 text={exportText}
                 onDownload={download}
               />
             </div>
-            <p className="mt-2 text-[11px] text-slate-500">
-              Copy and Download give exactly this file. Publish it at {data.domain}/sellers.json to replace
-              the live one.
-            </p>
           </div>
           {/* THE SUGGESTIONS, as thin cards in their groups. */}
           <div className="space-y-5">
@@ -465,6 +481,8 @@ export default function CrawlSellers() {
                 onOpen={(id) => setOpenCards((prev) => flip(prev, id))}
                 onSet={setOn}
                 onEdit={edit}
+                changed={changed}
+                onReset={reset}
                 flagged={new Set(issues.map((x) => x.sellerId).filter(Boolean) as string[])}
                 domain={data.domain}
               />
@@ -491,6 +509,8 @@ function SuggestionGroup({
   onOpen,
   onSet,
   onEdit,
+  changed,
+  onReset,
   flagged,
   domain,
 }: {
@@ -504,6 +524,8 @@ function SuggestionGroup({
   onOpen: (id: string) => void;
   onSet: (ids: string[], on: boolean) => void;
   onEdit: (id: string, field: "name" | "domain", value: string) => void;
+  changed: (id: string) => boolean;
+  onReset: (ids: string[]) => void;
   flagged: Set<string>;
 }) {
   const g = GROUP[group];
@@ -531,6 +553,7 @@ function SuggestionGroup({
           <button type="button" onClick={() => onSet(ids, false)} className="font-medium text-slate-700 hover:text-primary">
             Skip all
           </button>
+          <ResetButton disabled={!ids.some(changed)} onClick={() => onReset(ids)} label="Reset" quiet />
         </div>
       </div>
       <div className="space-y-2">
@@ -545,6 +568,8 @@ function SuggestionGroup({
               onOpen={() => onOpen(r.seller_id)}
               onSet={(on) => onSet([r.seller_id], on)}
               onEdit={(field, value) => onEdit(r.seller_id, field, value)}
+              changed={changed(r.seller_id)}
+              onReset={() => onReset([r.seller_id])}
               domain={domain}
             />
           </Settle>
@@ -569,7 +594,7 @@ function summaryOf(r: SellerRow): string {
   if (r.kind === "fix") return r.changes.map((c) => `${c.field}: ${c.from ?? "none"} → ${c.to}`).join(", ");
   const s = r.kind === "remove" ? r.current : r.suggested;
   if (!s) return "";
-  return [s.name || null, s.domain || null, s.seller_type].filter(Boolean).join(" · ");
+  return [s.name || null, s.domain || null, s.seller_type].filter(Boolean).join(", ");
 }
 
 /**
@@ -586,6 +611,8 @@ function SuggestionCard({
   onOpen,
   onSet,
   onEdit,
+  changed,
+  onReset,
   domain,
 }: {
   row: SellerRow;
@@ -597,6 +624,8 @@ function SuggestionCard({
   onOpen: () => void;
   onSet: (on: boolean) => void;
   onEdit: (field: "name" | "domain", value: string) => void;
+  changed: boolean;
+  onReset: () => void;
 }) {
   const g = GROUP[group];
   const Icon = g.icon;
@@ -636,7 +665,8 @@ function SuggestionCard({
         </button>
         {/* On a phone the worded choice takes its own row under the seller,
             so neither squeezes the other. */}
-        <div className="order-last basis-full pl-10 sm:order-none sm:basis-auto sm:pl-0">
+        <div className="order-last flex basis-full items-center gap-2 pl-10 sm:order-none sm:basis-auto sm:pl-0">
+          {changed && <ResetButton onClick={onReset} label="Reset" quiet />}
           <Decision on={on} onSet={onSet} id={row.seller_id} group={group} />
         </div>
         <button
@@ -733,7 +763,7 @@ function ListingWindow({ row, domain, group }: { row: SellerRow; domain: string;
               </code>
               <span className="min-w-0 flex-shrink truncate text-[10px] text-slate-400">
                 on {l.publisher}
-                {foundInLabel(l.found_in) ? ` · ${foundInLabel(l.found_in)}` : ""}
+                {foundInLabel(l.found_in) ? `, ${foundInLabel(l.found_in)}` : ""}
               </span>
             </li>
           ))}
@@ -760,6 +790,38 @@ const DECISION: Record<GroupKey, { take: string; skip: string; solid: string }> 
   fix: { take: "Apply fix", skip: "Don't fix", solid: "bg-warn text-white" },
   remove: { take: "Remove from file", skip: "Don't remove", solid: "bg-critical text-white" },
 };
+
+/** Puts picks back where the suggestions started. Quiet in a group or a
+ *  card; a pill for the whole file. */
+function ResetButton({
+  onClick,
+  label,
+  disabled = false,
+  quiet = false,
+}: {
+  onClick: () => void;
+  label: string;
+  disabled?: boolean;
+  quiet?: boolean;
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      disabled={disabled}
+      title="Back to the suggested choices"
+      className={cn(
+        "inline-flex items-center gap-1 font-medium transition-colors disabled:pointer-events-none disabled:opacity-40",
+        quiet
+          ? "text-[12px] text-slate-500 hover:text-primary"
+          : "h-9 rounded-full border border-border bg-white px-3.5 text-[12.5px] text-slate-700 hover:bg-slate-50",
+      )}
+    >
+      <RotateCcw aria-hidden className="h-3.5 w-3.5" />
+      {label}
+    </button>
+  );
+}
 
 function Decision({
   on,
@@ -837,22 +899,6 @@ function CopyButton({ text, label }: { text: string; label: string }) {
   );
 }
 
-/** A count of what went into the file, in its kind's ink. */
-function Chip({ tone, children }: { tone?: "ok" | "warn" | "critical"; children: React.ReactNode }) {
-  return (
-    <span
-      className={cn(
-        "rounded-full border px-2 py-0.5 font-medium tabular-nums",
-        tone === "ok" && "border-ok-border bg-ok-bg/60 text-ok",
-        tone === "warn" && "border-warn-border bg-warn-bg/60 text-warn",
-        tone === "critical" && "border-critical-border bg-critical-bg/60 text-critical",
-        !tone && "border-border bg-muted/40 text-slate-600",
-      )}
-    >
-      {children}
-    </span>
-  );
-}
 
 const INPUT =
   "h-9 w-full rounded-lg border border-border bg-white px-3 text-[13px] text-slate-800 placeholder:text-slate-400 focus:border-primary/40 focus:outline-none focus:ring-2 focus:ring-primary/15";
