@@ -162,6 +162,34 @@ test.describe("sign-in", () => {
     await expectOverview(page);
   });
 
+  test("still signed in when the link expires: the expired card, on every page", async ({ page }) => {
+    // The API answers 403 on every data route for a session whose link
+    // expired or was revoked. Before 2026-10-06 the reader saw "Could not
+    // load this report" and the raw JSON instead.
+    const errors = watchErrors(page);
+    await open(page, { refusedWhileSignedIn: true });
+    for (const path of ["", "/changes", "/discovery", "/declarations", "/sellers", "/schain"]) {
+      if (path) await page.goto(`${BASE}${path}`);
+      await expect(page.getByText(EXPIRED), path || "/").toBeVisible();
+      await expect(page.getByText("Could not load this report")).toHaveCount(0);
+      await expect(page.getByText(CRASHED)).toHaveCount(0);
+    }
+    expect(errors).toEqual([]);
+  });
+
+  test("a 403 from anything but the summary never shows the expired card", async ({ page }) => {
+    // Some routes answer 403 for reasons that are not the link (schain
+    // downloads on a trial). Only the summary's 403 means a dead link.
+    const errors = watchErrors(page);
+    await open(page, {
+      sellers: "page",
+      schain: "ok",
+      forbidden: ["sellers-fix", "schain", "export-info", "discovered-lines", "declarations", "matched-developers"],
+    });
+    await expectOverview(page);
+    expect(errors).toEqual([]);
+  });
+
   test("an expired link shows the expired card at sign-in", async ({ page }) => {
     await open(page, { expired: true });
     await page.locator('input[autocomplete="username"]').fill("andres");

@@ -57,10 +57,18 @@ export type Scenario = {
   trial?: boolean;
   /** Not signed in: data answers 401 until a sign-in succeeds. */
   signedOut?: boolean;
-  /** Sign-in refused because the link expired or was revoked (403). */
+  /** Not signed in, and sign-in refused: the link expired or was revoked (403). */
   expired?: boolean;
+  /** Still signed in (cookie under 24h old) when the link expired or was
+   *  revoked: every data route answers 403 with the link's sentence, as
+   *  viewer_v2.require_viewer_session does. */
+  refusedWhileSignedIn?: boolean;
+  /** Data routes that answer 403 for reasons that are not the link (as
+   *  schain downloads do on a trial). Tails like "declarations". */
+  forbidden?: string[];
   /** Data routes this API does not have (answered 404), e.g. a newer SPA
-   *  shipped before its crawler. Tails like "declarations". */
+   *  shipped before its crawler. Tails like "declarations". (An older
+   *  snapshot on a current API answers 503 instead; see "hiccup" cases.) */
   missing?: string[];
   /** Last week's summary: "none" answers 503 (erased), "error" 500. */
   previousWeek?: "ok" | "none" | "error";
@@ -72,7 +80,7 @@ function cut<T>(rows: T[], cap: number, total: number) {
   return { rows: rows.slice(0, cap), trial: { cap, shown: Math.min(cap, rows.length, total), full_total: total } };
 }
 
-function schainOverview(status: "ok" | "no_sdks") {
+function schainOverview(status: "ok") {
   return {
     customer_name: "Made Up Media",
     status,
@@ -80,10 +88,7 @@ function schainOverview(status: "ok" | "no_sdks") {
     sellers_json_url: "https://madeupmedia.com/sellers.json",
     sellers_json_read_at: "2026-10-05T03:12:00+00:00",
     crawled_at: "2026-10-04T03:00:00+00:00",
-    sdks:
-      status === "ok"
-        ? [{ domain: "madeupsdk.com", name: "Made Up SDK", seller_type: "PUBLISHER", seller_ids: ["100231"] }]
-        : [],
+    sdks: [{ domain: "madeupsdk.com", name: "Made Up SDK", seller_type: "PUBLISHER", seller_ids: ["100231"] }],
     sdk_catalog_size: 60,
     seat_lines: [],
     downloads: { used: 0, limit: 5, selections: [] },
@@ -102,6 +107,8 @@ export async function installFakeApi(page: Page, scenario: Scenario = {}): Promi
     trial: false,
     signedOut: false,
     expired: false,
+    refusedWhileSignedIn: false,
+    forbidden: [],
     previousWeek: "ok",
     missing: [],
     ...scenario,
@@ -144,7 +151,10 @@ export async function installFakeApi(page: Page, scenario: Scenario = {}): Promi
       return reply(200, { ok: true });
     }
     if (!signedIn) return reply(401, { detail: "viewer session missing or expired" });
+    if (s.refusedWhileSignedIn)
+      return reply(403, { detail: "This link has expired. Please contact your admin for a new one." });
     if (s.missing.includes(tail)) return notFound();
+    if (s.forbidden.includes(tail)) return reply(403, { detail: "Not part of this link." });
 
     switch (tail) {
       case "summary": {
@@ -229,7 +239,8 @@ export async function installFakeApi(page: Page, scenario: Scenario = {}): Promi
       case "schain":
         if (s.schain === "none") return reply(200, { status: "off" });
         if (s.schain === "error") return reply(503, { detail: "not available yet" });
-        return reply(200, schainOverview(s.schain));
+        if (s.schain === "no_sdks") return reply(200, { status: "no_sdks" });
+        return reply(200, schainOverview("ok"));
       default:
         // A route this API does not have: exactly what an older crawler
         // answers to a newer SPA.
