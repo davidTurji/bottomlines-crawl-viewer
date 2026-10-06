@@ -655,10 +655,10 @@ export const api = {
    * the live file; it only builds the file the reader exports.
    *
    * A report without the page (no validator on the plan, a trial, an older
-   * report, a file that could not be read) answers 404, and the page then
-   * stays off the rail.
+   * report, a file that could not be read) answers 404: null here, and the
+   * page stays off the rail. Never the dead-link card.
    */
-  sellersFix: async (token: string): Promise<SellersFixPayload> => {
+  sellersFix: async (token: string): Promise<SellersFixPayload | null> => {
     if (MOCK) {
       const m = await import("./mockSellers");
       // `?nofile=1` shows a customer with no sellers.json yet: the page
@@ -681,7 +681,17 @@ export const api = {
         file_warnings: q.has("warnings") ? m.MOCK_FILE_WARNINGS : [],
       };
     }
-    return req<SellersFixPayload>("GET", `/v1/viewer/${token}/sellers-fix`);
+    // A plain fetch, never req(): most reports have no Sellers.json page,
+    // and their 404 means exactly that. req() reads a 404 on a token path
+    // as "this link is dead" and swaps the whole report for the expired-link
+    // card, which took every report without the page down (2026-10-06).
+    const res = await fetch(`${BASE}/v1/viewer/${token}/sellers-fix`, { credentials: "include" });
+    if (res.status === 404) return null;
+    if (!res.ok) {
+      const detail = await res.text().catch(() => "");
+      throw new ApiError(res.status, detail || `GET sellers-fix → ${res.status}`);
+    }
+    return (await res.json()) as SellersFixPayload;
   },
   /**
    * SCHAIN EXPORT: what the page opens on.

@@ -113,7 +113,12 @@ export default function CrawlSellers() {
       .catch(() => {});
     api
       .sellersFix(token)
-      .then((d) => !cancelled && setData(d))
+      .then((d) => {
+        if (cancelled) return;
+        // No page for this report: say so, never wait forever.
+        if (d) setData(d);
+        else setFailed(true);
+      })
       .catch(() => !cancelled && setFailed(true));
     return () => {
       cancelled = true;
