@@ -43,6 +43,7 @@ import InlineAskAI from "@/components/InlineAskAI";
 import { PageShell } from "@/components/PageShell";
 import { formatWeek } from "@/components/WeekLine";
 import { cn, foundInLabel, storeLabel } from "@/lib/utils";
+import { ActionableLine, PublisherAvatarLink, PublisherDomainLink } from "@/components/PublisherLinks";
 import { useReportScope } from "@/lib/reportScope";
 
 const OVERVIEW_SUGGESTIONS = [
@@ -1511,6 +1512,9 @@ function PublisherCard({
   // fall back to the lazy per-publisher fetch the shipped viewer used, which
   // restores the flat matched-seat-lines list. The check is on the ARRAYS, not
   // the change counts: absent arrays are the real-data signal.
+  // The circle, the name and the domain are one link to the publisher's
+  // site: hovering any of them lights the circle and the name together.
+  const [siteHover, setSiteHover] = useState(false);
   const hasEmbeddedLines =
     row.matched_lines.length > 0 ||
     row.added_lines.length > 0 ||
@@ -1523,21 +1527,52 @@ function PublisherCard({
         open && "shadow-md",
       )}
     >
-      <button
-        type="button"
-        onClick={onToggle}
-        className="flex w-full items-center gap-4 px-4 py-4 text-left sm:px-5"
-      >
-        <div className="flex h-11 w-11 flex-shrink-0 items-center justify-center rounded-full bg-accent text-base font-semibold text-primary">
-          {initial}
-        </div>
+      {/* The header is a real button laid over the row, with the
+          publisher's links above it: a link may not sit inside a button,
+          for the browser or for a screen reader. The content lets clicks
+          through to the button; the links (NESTED) keep theirs. */}
+      <div className="relative">
+        <button
+          type="button"
+          onClick={onToggle}
+          aria-expanded={open}
+          aria-label={`${open ? "Hide" : "Show"} the seat lines of ${row.developer_name || row.developer_domain || "this publisher"}`}
+          className="absolute inset-0 z-0 rounded-t-3xl focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-primary/30"
+        />
+      <div className="pointer-events-none flex w-full items-center gap-4 px-4 py-4 text-left sm:px-5">
+        {row.developer_domain ? (
+          <PublisherAvatarLink
+            domain={row.developer_domain}
+            name={row.developer_name || row.developer_domain}
+            hover={siteHover}
+            onHoverChange={setSiteHover}
+          >
+            <div className="flex h-11 w-11 items-center justify-center rounded-full bg-accent text-base font-semibold text-primary">
+              {initial}
+            </div>
+          </PublisherAvatarLink>
+        ) : (
+          <div className="flex h-11 w-11 flex-shrink-0 items-center justify-center rounded-full bg-accent text-base font-semibold text-primary">
+            {initial}
+          </div>
+        )}
         <div className="min-w-0 flex-1">
           <div className="flex min-w-0 items-baseline gap-2">
             <span className="truncate text-base font-semibold tracking-tight text-slate-900">
               {/* Never the internal id (David, 2026-10-06: a customer read
                   "Publisher #567486"): the name, else the domain, else a
                   plain word. The API names every row it can. */}
-              {row.developer_name || row.developer_domain || "Unnamed publisher"}
+              {row.developer_domain ? (
+                // The name links to the publisher's site, like the domain.
+                <PublisherDomainLink
+                  domain={row.developer_domain}
+                  label={row.developer_name || row.developer_domain}
+                  active={siteHover}
+                  onHoverChange={setSiteHover}
+                />
+              ) : (
+                row.developer_name || "Unnamed publisher"
+              )}
             </span>
             {row.developer_platform && (
               <span className="flex-shrink-0 text-[11px] text-slate-400">
@@ -1546,8 +1581,11 @@ function PublisherCard({
             )}
           </div>
           {row.developer_domain && row.developer_name && (
-            <div className="truncate text-xs text-slate-500">
-              {row.developer_domain}
+            <div className="flex min-w-0 text-xs text-slate-500">
+              <PublisherDomainLink
+                domain={row.developer_domain}
+                onHoverChange={setSiteHover}
+              />
             </div>
           )}
         </div>
@@ -1572,7 +1610,8 @@ function PublisherCard({
             open && "rotate-180",
           )}
         />
-      </button>
+      </div>
+      </div>
       <Collapse open={open}>
         <div className="border-t border-border bg-accent/30 px-4 pb-4 pt-3 sm:px-5">
           {hasEmbeddedLines ? (
@@ -1581,9 +1620,14 @@ function PublisherCard({
               removed={row.removed_lines}
               certChanged={row.cert_changed_lines}
               matched={row.matched_lines}
+              publisherDomain={row.developer_domain}
             />
           ) : (
-            <LazyMatchedSeatLines token={token} developerId={row.developer_id} />
+            <LazyMatchedSeatLines
+              token={token}
+              developerId={row.developer_id}
+              publisherDomain={row.developer_domain}
+            />
           )}
         </div>
       </Collapse>
@@ -1644,15 +1688,34 @@ const CHANGE_WINDOW: Record<
  * Shared by the change windows and the flat matched-seat-lines list so a line
  * looks identical wherever it appears.
  */
-function SeatLineRow({ line, muted }: { line: MatchedSeatLine; muted?: boolean }) {
+function SeatLineRow({
+  line,
+  muted,
+  gone,
+  publisherDomain,
+}: {
+  line: MatchedSeatLine;
+  muted?: boolean;
+  /** The line has left the publisher's file: its link opens the file, not the line. */
+  gone?: boolean;
+  /** Whose line this is: with it, the line opens their file at it. */
+  publisherDomain?: string | null;
+}) {
   return (
     // THE FILE GOES TO THE RIGHT MARGIN (David, 2026-09-26). Trailing the
     // line, it read as a fourth field of the ads.txt record, which it is
     // not, and it moved with the length of the cert so no two rows agreed
     // on where it sat. At the margin it forms a column the eye can run
     // down. The cert stays inline, because that one IS part of the line.
-    <li className="flex items-baseline gap-3 px-3 py-1.5">
+    <ActionableLine
+      line={line}
+      publisherDomain={publisherDomain}
+      foundIn={line.found_in}
+      gone={gone}
+      className="flex items-baseline gap-3 px-3 py-1.5"
+    >
       <code
+        data-line-text
         className={cn(
           "min-w-0 flex-1 truncate font-mono text-[11px] tabular-nums",
           muted ? "text-slate-500" : "text-slate-800",
@@ -1664,11 +1727,11 @@ function SeatLineRow({ line, muted }: { line: MatchedSeatLine; muted?: boolean }
         )}
       </code>
       {foundInLabel(line.found_in) && (
-        <span className="flex-shrink-0 text-[10px] text-slate-400">
+        <span className={"flex-shrink-0 text-[10px] text-slate-400"}>
           {foundInLabel(line.found_in)}
         </span>
       )}
-    </li>
+    </ActionableLine>
   );
 }
 
@@ -1681,9 +1744,11 @@ function SeatLineRow({ line, muted }: { line: MatchedSeatLine; muted?: boolean }
 function ChangeWindow({
   kind,
   lines,
+  publisherDomain,
 }: {
   kind: ChangeKind;
   lines: MatchedSeatLine[];
+  publisherDomain?: string | null;
 }) {
   const s = CHANGE_WINDOW[kind];
   const shown = lines.slice(0, CHANGE_LINE_CAP);
@@ -1723,6 +1788,8 @@ function ChangeWindow({
             key={`${l.ssp_domain}:${l.publisher_id}:${l.relationship}:${l.cert_id ?? ""}:${i}`}
             line={l}
             muted={s.muted}
+            gone={kind === "removed"}
+            publisherDomain={publisherDomain}
           />
         ))}
       </ul>
@@ -1754,11 +1821,14 @@ function ChangeExpansion({
   removed,
   certChanged,
   matched,
+  publisherDomain,
 }: {
   added: MatchedSeatLine[];
   removed: MatchedSeatLine[];
   certChanged: MatchedSeatLine[];
   matched: MatchedSeatLine[];
+  /** Whose lines these are, so each copies and opens their file. */
+  publisherDomain?: string | null;
 }) {
   const sections: { kind: ChangeKind; lines: MatchedSeatLine[] }[] = [];
   if (added.length) sections.push({ kind: "added", lines: added });
@@ -1767,7 +1837,8 @@ function ChangeExpansion({
 
   // Nothing moved this week: keep the standing matched-seat-lines list as-is.
   if (sections.length === 0) {
-    if (matched.length > 0) return <MatchedSeatLines lines={matched} />;
+    if (matched.length > 0)
+      return <MatchedSeatLines lines={matched} publisherDomain={publisherDomain} />;
     return (
       <p className="text-xs text-slate-500">
         No matched seat lines on record for this row.
@@ -1777,7 +1848,13 @@ function ChangeExpansion({
 
   // A single kind of change: one full-width window.
   if (sections.length === 1) {
-    return <ChangeWindow kind={sections[0].kind} lines={sections[0].lines} />;
+    return (
+      <ChangeWindow
+        kind={sections[0].kind}
+        lines={sections[0].lines}
+        publisherDomain={publisherDomain}
+      />
+    );
   }
 
   // A mixed change: windows side by side on desktop, stacked on mobile. With
@@ -1790,7 +1867,7 @@ function ChangeExpansion({
           key={sec.kind}
           className={cn(sections.length === 3 && i === 2 && "sm:col-span-2")}
         >
-          <ChangeWindow kind={sec.kind} lines={sec.lines} />
+          <ChangeWindow kind={sec.kind} lines={sec.lines} publisherDomain={publisherDomain} />
         </div>
       ))}
     </div>
@@ -1838,7 +1915,13 @@ export function MiniStat({
  * expansion so a line reads identically wherever it appears. Renders nothing
  * when there are no lines, so callers can drop it in unconditionally.
  */
-function MatchedSeatLines({ lines }: { lines: MatchedSeatLine[] }) {
+function MatchedSeatLines({
+  lines,
+  publisherDomain,
+}: {
+  lines: MatchedSeatLine[];
+  publisherDomain?: string | null;
+}) {
   if (lines.length === 0) return null;
   return (
     <div>
@@ -1855,6 +1938,7 @@ function MatchedSeatLines({ lines }: { lines: MatchedSeatLine[] }) {
           <SeatLineRow
             key={`${l.ssp_domain}:${l.publisher_id}:${l.relationship}:${l.cert_id ?? ""}:${i}`}
             line={l}
+            publisherDomain={publisherDomain}
           />
         ))}
       </ul>
@@ -1878,9 +1962,11 @@ function MatchedSeatLines({ lines }: { lines: MatchedSeatLine[] }) {
 function LazyMatchedSeatLines({
   token,
   developerId,
+  publisherDomain,
 }: {
   token: string;
   developerId: number;
+  publisherDomain?: string | null;
 }) {
   const [lines, setLines] = useState<MatchedSeatLine[] | null>(null);
   const [failed, setFailed] = useState(false);
@@ -1919,7 +2005,7 @@ function LazyMatchedSeatLines({
       </p>
     );
   }
-  return <MatchedSeatLines lines={lines} />;
+  return <MatchedSeatLines lines={lines} publisherDomain={publisherDomain} />;
 }
 
 /**
@@ -2214,12 +2300,17 @@ function MatchedAppCard({
         open ? "border-app-border bg-app-bg/40 shadow-md" : "border-border bg-white",
       )}
     >
-      <button
-        type="button"
-        onClick={onToggle}
-        aria-expanded={open}
-        className="flex w-full items-center gap-4 px-4 py-4 text-left sm:px-5"
-      >
+      {/* A real button laid over the row, the publisher's links above it
+          (see PublisherCard). */}
+      <div className="relative">
+        <button
+          type="button"
+          onClick={onToggle}
+          aria-expanded={open}
+          aria-label={`${open ? "Hide" : "Show"} the seat lines of ${app.app_name}`}
+          className="absolute inset-0 z-0 rounded-t-3xl focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-app/30"
+        />
+      <div className="pointer-events-none flex w-full items-center gap-4 px-4 py-4 text-left sm:px-5">
         <div className="flex h-11 w-11 flex-shrink-0 items-center justify-center rounded-full bg-app-bg text-app">
           <Smartphone aria-hidden className="h-5 w-5" />
         </div>
@@ -2234,7 +2325,9 @@ function MatchedAppCard({
           </div>
           <div className="truncate text-xs text-slate-500">
             publisher:{" "}
-            <span className="text-slate-600">{app.owner_domain}</span>
+            {app.owner_domain ? (
+              <PublisherDomainLink domain={app.owner_domain} className="text-slate-600" />
+            ) : null}
             {app.owner_name ? (
               <span className="text-slate-400">, {app.owner_name}</span>
             ) : null}
@@ -2253,17 +2346,23 @@ function MatchedAppCard({
             open && "rotate-180",
           )}
         />
-      </button>
+      </div>
+      </div>
       <Collapse open={open}>
         <div className="border-t border-app-border bg-app-bg/30 px-4 pb-4 pt-3 sm:px-5">
           {!hasEmbeddedLines && app.developer_id != null ? (
-            <LazyMatchedSeatLines token={token} developerId={app.developer_id} />
+            <LazyMatchedSeatLines
+              token={token}
+              developerId={app.developer_id}
+              publisherDomain={app.owner_domain}
+            />
           ) : (
             <ChangeExpansion
               added={app.added_lines ?? []}
               removed={app.removed_lines ?? []}
               certChanged={app.cert_changed_lines ?? []}
               matched={lines}
+              publisherDomain={app.owner_domain}
             />
           )}
         </div>
