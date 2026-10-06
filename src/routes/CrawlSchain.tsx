@@ -142,7 +142,8 @@ export default function CrawlSchain() {
     seatLine,
     sid2,
     crawledOn: overview?.crawled_at ? shortDate(overview.crawled_at) : null,
-    limit: overview?.downloads.limit ?? 3,
+    // Optional: a report without schain answers only {status: "off"}.
+    limit: overview?.downloads?.limit ?? 3,
   };
 
   return (
@@ -1522,13 +1523,17 @@ function NotAvailable({ overview }: { overview: SchainOverview }) {
   return (
     <div className="rounded-2xl border border-dashed border-border bg-muted/20 px-6 py-12 text-center">
       <h2 className="text-sm font-semibold text-slate-900">
-        {overview.status === "no_sellers_json"
-          ? "We could not read your sellers.json"
-          : "Your sellers.json names no SDK we can check"}
+        {overview.status === "off"
+          ? "Schain is not part of this report yet."
+          : overview.status === "no_sellers_json"
+            ? "We could not read your sellers.json"
+            : "Your sellers.json names no SDK we can check"}
       </h2>
-      <p className="mx-auto mt-2 max-w-xl text-sm leading-relaxed text-slate-500">
-        The SDK list comes from <span className="font-mono">{overview.sellers_json_url}</span>.
-      </p>
+      {overview.sellers_json_url && (
+        <p className="mx-auto mt-2 max-w-xl text-sm leading-relaxed text-slate-500">
+          The SDK list comes from <span className="font-mono">{overview.sellers_json_url}</span>.
+        </p>
+      )}
       <div className="mt-4 flex justify-center">
         <ContactUs compact label="Ask us" />
       </div>

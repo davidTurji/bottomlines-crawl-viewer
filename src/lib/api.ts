@@ -1415,7 +1415,9 @@ export type SchainSdk = {
 export type SchainOverview = {
   /** The customer's name as their reports say it, for the file's title. */
   customer_name: string;
-  status: "ok" | "no_sellers_json" | "no_sdks";
+  /** "off": this report has no schain page; the API then sends only
+   *  `status`, every other field is absent. */
+  status: "ok" | "no_sellers_json" | "no_sdks" | "off";
   /** The customer's domain: asi2 in every chain, and the first field of
    *  the reseller line. */
   reseller_domain: string;

@@ -39,26 +39,19 @@ env:
   SERVICE: bl-crawl-viewer
 
 jobs:
+  # The same gate as every pull request (typecheck, build, browser tests).
+  # Nothing ships unless it passes, even a push that skipped the PR.
+  checks:
+    uses: ./.github/workflows/checks.yml
+
   deploy:
+    needs: checks
     runs-on: ubuntu-latest
     permissions:
       contents: read
       id-token: write
     steps:
       - uses: actions/checkout@v4
-
-      # Typecheck and build before anything is deployed. The Dockerfile
-      # runs `npm run build` too, so a broken build would fail the deploy
-      # anyway — but it would fail it slowly, inside Cloud Build, after
-      # the source upload, with the error buried in build logs. Failing
-      # here costs a minute and says exactly what is wrong.
-      - uses: actions/setup-node@v4
-        with:
-          node-version: '20'
-          cache: npm
-      - run: npm ci --no-audit --no-fund
-      - run: npm run typecheck
-      - run: npm run build
 
       - name: Authenticate to GCP
         uses: google-github-actions/auth@v2
