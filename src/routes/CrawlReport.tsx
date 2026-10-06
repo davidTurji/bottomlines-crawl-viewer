@@ -1527,22 +1527,19 @@ function PublisherCard({
         open && "shadow-md",
       )}
     >
-      {/* A div acting as the button: the domain inside is a real link, and
-          a link may not sit inside a <button>. */}
-      <div
-        role="button"
-        tabIndex={0}
-        aria-expanded={open}
-        onClick={onToggle}
-        onKeyDown={(e) => {
-          if (e.target !== e.currentTarget) return;
-          if (e.key === "Enter" || e.key === " ") {
-            e.preventDefault();
-            onToggle();
-          }
-        }}
-        className="flex w-full cursor-pointer items-center gap-4 px-4 py-4 text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-primary/30 sm:px-5"
-      >
+      {/* The header is a real button laid over the row, with the
+          publisher's links above it: a link may not sit inside a button,
+          for the browser or for a screen reader. The content lets clicks
+          through to the button; the links (NESTED) keep theirs. */}
+      <div className="relative">
+        <button
+          type="button"
+          onClick={onToggle}
+          aria-expanded={open}
+          aria-label={`${open ? "Hide" : "Show"} the seat lines of ${row.developer_name || row.developer_domain || "this publisher"}`}
+          className="absolute inset-0 z-0 rounded-t-3xl focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-primary/30"
+        />
+      <div className="pointer-events-none flex w-full items-center gap-4 px-4 py-4 text-left sm:px-5">
         {row.developer_domain ? (
           <PublisherAvatarLink
             domain={row.developer_domain}
@@ -1585,7 +1582,10 @@ function PublisherCard({
           </div>
           {row.developer_domain && row.developer_name && (
             <div className="flex min-w-0 text-xs text-slate-500">
-              <PublisherDomainLink domain={row.developer_domain} />
+              <PublisherDomainLink
+                domain={row.developer_domain}
+                onHoverChange={setSiteHover}
+              />
             </div>
           )}
         </div>
@@ -1610,6 +1610,7 @@ function PublisherCard({
             open && "rotate-180",
           )}
         />
+      </div>
       </div>
       <Collapse open={open}>
         <div className="border-t border-border bg-accent/30 px-4 pb-4 pt-3 sm:px-5">
@@ -1690,11 +1691,14 @@ const CHANGE_WINDOW: Record<
 function SeatLineRow({
   line,
   muted,
+  gone,
   publisherDomain,
 }: {
   line: MatchedSeatLine;
   muted?: boolean;
-  /** Whose line this is: with it, the line copies and opens their file. */
+  /** The line has left the publisher's file: its link opens the file, not the line. */
+  gone?: boolean;
+  /** Whose line this is: with it, the line opens their file at it. */
   publisherDomain?: string | null;
 }) {
   return (
@@ -1707,9 +1711,11 @@ function SeatLineRow({
       line={line}
       publisherDomain={publisherDomain}
       foundIn={line.found_in}
+      gone={gone}
       className="flex items-baseline gap-3 px-3 py-1.5"
     >
       <code
+        data-line-text
         className={cn(
           "min-w-0 flex-1 truncate font-mono text-[11px] tabular-nums",
           muted ? "text-slate-500" : "text-slate-800",
@@ -1782,6 +1788,7 @@ function ChangeWindow({
             key={`${l.ssp_domain}:${l.publisher_id}:${l.relationship}:${l.cert_id ?? ""}:${i}`}
             line={l}
             muted={s.muted}
+            gone={kind === "removed"}
             publisherDomain={publisherDomain}
           />
         ))}
@@ -2293,20 +2300,17 @@ function MatchedAppCard({
         open ? "border-app-border bg-app-bg/40 shadow-md" : "border-border bg-white",
       )}
     >
-      <div
-        role="button"
-        tabIndex={0}
-        onClick={onToggle}
-        onKeyDown={(e) => {
-          if (e.target !== e.currentTarget) return;
-          if (e.key === "Enter" || e.key === " ") {
-            e.preventDefault();
-            onToggle();
-          }
-        }}
-        aria-expanded={open}
-        className="flex w-full cursor-pointer items-center gap-4 px-4 py-4 text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-app/30 sm:px-5"
-      >
+      {/* A real button laid over the row, the publisher's links above it
+          (see PublisherCard). */}
+      <div className="relative">
+        <button
+          type="button"
+          onClick={onToggle}
+          aria-expanded={open}
+          aria-label={`${open ? "Hide" : "Show"} the seat lines of ${app.app_name}`}
+          className="absolute inset-0 z-0 rounded-t-3xl focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-app/30"
+        />
+      <div className="pointer-events-none flex w-full items-center gap-4 px-4 py-4 text-left sm:px-5">
         <div className="flex h-11 w-11 flex-shrink-0 items-center justify-center rounded-full bg-app-bg text-app">
           <Smartphone aria-hidden className="h-5 w-5" />
         </div>
@@ -2325,14 +2329,7 @@ function MatchedAppCard({
               <PublisherDomainLink domain={app.owner_domain} className="text-slate-600" />
             ) : null}
             {app.owner_name ? (
-              <span className="text-slate-400">
-                ,{" "}
-                {app.owner_domain ? (
-                  <PublisherDomainLink domain={app.owner_domain} label={app.owner_name} />
-                ) : (
-                  app.owner_name
-                )}
-              </span>
+              <span className="text-slate-400">, {app.owner_name}</span>
             ) : null}
           </div>
         </div>
@@ -2349,6 +2346,7 @@ function MatchedAppCard({
             open && "rotate-180",
           )}
         />
+      </div>
       </div>
       <Collapse open={open}>
         <div className="border-t border-app-border bg-app-bg/30 px-4 pb-4 pt-3 sm:px-5">

@@ -973,9 +973,10 @@ function ChangeCard({
                 // links to their site.
                 <ActionableLine
                   key={`${p.developer_id}|${p.file_kind}|${i}`}
-                  line={group}
+                  line={{ ...group, cert_id: inlineCert ?? undefined }}
                   publisherDomain={p.developer_domain}
                   foundIn={fileLabel(p.file_kind)}
+                  gone={group.event === "removed" || group.event === "monitoring_stopped"}
                   className="flex items-baseline gap-3 px-3 py-1.5 text-[11px]"
                 >
                   {/* Never the internal id (David, 2026-10-06): the domain,
@@ -996,7 +997,8 @@ function ChangeCard({
                       screen, and "APP_ADS_TXT" is not a file name. Said as
                       a sentence, the same one every other surface uses, so
                       a bare filename is never left to explain itself. */}
-                  <span className={"ml-auto flex-shrink-0 text-[10px] text-slate-400"}>
+                  {/* The file this row opens, so it is what reads as the link. */}
+                  <span data-line-text className="ml-auto flex-shrink-0 text-[10px] text-slate-400">
                     {foundInLabel(fileLabel(p.file_kind))}
                   </span>
                 </ActionableLine>
