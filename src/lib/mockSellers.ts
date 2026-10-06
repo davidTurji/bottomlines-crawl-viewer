@@ -10,8 +10,12 @@
  *   - 3 PUBLISHER entries only ever listed as RESELLER, 1 INTERMEDIARY also
  *     listed as DIRECT (seller_type fixes);
  *   - 2 entries whose domain is not the publisher listing them DIRECT, and
- *     1 whose domain is written as a URL rather than a plain domain;
- *   - 1 confidential entry (its domain stays out of the file);
+ *     3 whose domain is written wrong (a URL, a trailing dot, "N/A");
+ *   - 2 duplicated IDs: one copied twice exactly, one listed twice with
+ *     different details;
+ *   - a seller_type in lowercase, a seller_id written as a number, an
+ *     entry with no name;
+ *   - 1 confidential entry that still carries its name and domain;
  *   - 4 entries no crawled file lists (suggested removals);
  *   - 5 IDs publishers list that the file lacks (adds: three clear, one
  *     listed DIRECT by two publishers, one RESELLER only).
@@ -84,8 +88,19 @@ export const mockSellersFile: SellersFile = {
     // Domain wrong: the publisher listing it DIRECT is someone else.
     { seller_id: "300256", name: "Wrenmoor Media", domain: "oldsite-quokka.com", seller_type: "PUBLISHER" },
     { seller_id: "300263", name: "Quillbrook Games", domain: "tidepool-legacy.net", seller_type: "PUBLISHER" },
-    // Confidential: the file keeps its identity out on purpose.
-    { seller_id: "300271", seller_type: "PUBLISHER", is_confidential: 1 },
+    // Confidential, yet its name and domain are still in the file.
+    { seller_id: "300271", name: "Glimmerdale TV", domain: "glimmerdale-tv.com", seller_type: "PUBLISHER", is_confidential: 1 },
+    // Duplicated: the same entry pasted twice.
+    { seller_id: "100245", name: "Tidepool Arcade", domain: "tidepoolarcade.com", seller_type: "PUBLISHER" },
+    // Duplicated with different details: the second copy is the right one.
+    { seller_id: "300282", name: "Harrowgate Old", domain: "harrowgate-old.com", seller_type: "PUBLISHER" },
+    { seller_id: "300282", name: "Harrowgate Games", domain: "harrowgate-games.com", seller_type: "PUBLISHER" },
+    // Written wrong: a trailing dot and capitals, lowercase seller_type, a
+    // numeric seller_id, no name, and "N/A" where the domain goes.
+    { seller_id: "300295", name: "Pinewhistle Radio", domain: "Pinewhistle-Radio.com.", seller_type: "publisher" },
+    { seller_id: 300301, name: "Stonebridge Apps", domain: "stonebridge-apps.com", seller_type: "PUBLISHER" },
+    { seller_id: "300318", domain: "foxglen-tv.com", seller_type: "PUBLISHER" },
+    { seller_id: "300324", name: "Duskhollow Media", domain: "N/A", seller_type: "PUBLISHER" },
     // Listed nowhere we crawled: suggested removals.
     { seller_id: "400105", name: "Fogharbor News", domain: "fogharbor-news7.com", seller_type: "PUBLISHER" },
     { seller_id: "400112", name: "Bramblemist TV", domain: "bramblemist-tv.tv", seller_type: "PUBLISHER" },
@@ -113,6 +128,12 @@ export const mockSellerSightings: Sighting[] = [
   { seller_id: "300256", relationship: "DIRECT", publishers: pubs(["wrenmoor-media.com"]) },
   { seller_id: "300263", relationship: "DIRECT", publishers: pubs(["quillbrook-games.com"], "app-ads.txt") },
   { seller_id: "300271", relationship: "DIRECT", publishers: pubs(["glimmerdale-tv.com"]) },
+  { seller_id: "300282", relationship: "DIRECT", publishers: pubs(["harrowgate-games.com"]) },
+  { seller_id: "300295", relationship: "DIRECT", publishers: pubs(["pinewhistle-radio.com"], "app-ads.txt") },
+  { seller_id: "300301", relationship: "DIRECT", publishers: pubs(["stonebridge-apps.com"]) },
+  { seller_id: "300318", relationship: "DIRECT", publishers: [{ domain: "foxglen-tv.com", name: "Foxglen TV", found_in: "ads.txt" }] },
+  { seller_id: "300324", relationship: "RESELLER", publishers: pubs(["quokkaplay-games.com", "tidepoolarcade.com"]) },
+  { seller_id: "300324", relationship: "DIRECT", publishers: pubs(["duskhollow-media.com", "duskhollow-kids.com"]) },
   // In publishers' files, missing from the sellers.json.
   { seller_id: "500301", relationship: "DIRECT", publishers: [{ domain: "saltmarsh-radio9.com", name: "Saltmarsh Radio 9", found_in: "ads.txt" }] },
   { seller_id: "500318", relationship: "DIRECT", publishers: [{ domain: "kettlebrook-games.com", name: "Kettlebrook Games", found_in: "app-ads.txt" }] },

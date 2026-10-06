@@ -21,6 +21,7 @@ import { formatWeek, WeekLine } from "@/components/WeekLine";
 import { useReportScope } from "@/lib/reportScope";
 import {
   buildExport,
+  fillInFields,
   needsFillIn,
   suggest,
   validate,
@@ -190,8 +191,13 @@ export default function CrawlSellers() {
     const add = on("add");
     const fix = on("fix");
     const remove = on("remove");
-    return { add, fix, remove, unchanged: (data?.file?.sellers.length ?? 0) - fix - remove };
-  }, [rows, ticked, data]);
+    // A taken duplicate fix keeps one entry and takes its other copies out,
+    // so the count before and after adds up.
+    const copies = rows
+      .filter((r) => r.kind !== "add" && ticked.has(r.seller_id))
+      .reduce((n, r) => n + (r.dropped?.length ?? 0), 0);
+    return { add, fix, remove, copies };
+  }, [rows, ticked]);
 
   const exportFile = useMemo(
     () => (base ? buildExport(base, rows, ticked) : null),
@@ -362,7 +368,7 @@ export default function CrawlSellers() {
                   tone="warn"
                   number={counts.fix}
                   label="To fix"
-                  caption="Type or domain disagrees"
+                  caption="Duplicate, or wrong type or domain"
                 />
                 <SplitStat
                   className="bg-white"
@@ -403,6 +409,7 @@ export default function CrawlSellers() {
                 onOpen={(id) => setOpenCards((prev) => flip(prev, id))}
                 onSet={setOn}
                 onEdit={edit}
+                edits={edits}
                 changed={changed}
                 onReset={reset}
                 flagged={new Set(issues.map((x) => x.sellerId).filter(Boolean) as string[])}
@@ -431,6 +438,7 @@ export default function CrawlSellers() {
                       taken.add > 0 ? `${taken.add} added` : null,
                       taken.fix > 0 ? `${taken.fix} fixed` : null,
                       taken.remove > 0 ? `${taken.remove} removed` : null,
+                      taken.copies > 0 ? `${taken.copies} duplicate ${taken.copies === 1 ? "copy" : "copies"} taken out` : null,
                     ].filter(Boolean);
                     return creating ? "" : parts.length ? `: ${parts.join(", ")}` : ", nothing changed";
                   })()}
@@ -454,6 +462,12 @@ export default function CrawlSellers() {
               nextLabel={creating ? "New file" : "With your changes"}
               nextNote="what you download or copy"
             />
+            {/* Take it away from where it was just read (David, 2026-10-06:
+                Copy and Download at the bottom too). */}
+            <div className="mt-4 flex flex-wrap items-center justify-end gap-2">
+              <CopyButton text={exportText} label={creating ? "Copy new file" : "Copy fixed file"} />
+              <ExportButton onClick={download} label={creating ? "Download new sellers.json" : "Download fixed sellers.json"} />
+            </div>
           </div>
         </>
       )}
@@ -475,6 +489,7 @@ function SuggestionGroup({
   onOpen,
   onSet,
   onEdit,
+  edits,
   changed,
   onReset,
   flagged,
@@ -482,6 +497,7 @@ function SuggestionGroup({
 }: {
   group: GroupKey;
   domain: string;
+  edits: Record<string, { name?: string; domain?: string }>;
   rows: SellerRow[];
   ticked: Set<string>;
   showAll: boolean;
@@ -499,9 +515,11 @@ function SuggestionGroup({
   const taken = rows.filter((r) => ticked.has(r.seller_id)).length;
   const shown = showAll ? rows : rows.slice(0, PEEK);
   const ids = rows.map((r) => r.seller_id);
+  // Each group in its own card (David, 2026-10-06: Add, Fix and Remove
+  // apart, each in a wrapper), its controls in the card's head.
   return (
-    <section>
-      <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
+    <section className="overflow-hidden rounded-2xl border border-border bg-white shadow-sm">
+      <div className="flex flex-wrap items-center justify-between gap-2 border-b border-border px-4 py-3">
         <h2 className="flex items-center gap-2 font-display text-[15px] font-semibold tracking-tight text-slate-900">
           <span className={cn("flex h-5 w-5 items-center justify-center rounded-full", g.disc)}>
             <Icon aria-hidden className="h-3 w-3" strokeWidth={2.5} />
@@ -522,7 +540,7 @@ function SuggestionGroup({
           <ResetButton disabled={!ids.some(changed)} onClick={() => onReset(ids)} label="Reset" quiet />
         </div>
       </div>
-      <div className="space-y-2">
+      <div className="space-y-2 bg-slate-50/60 p-3">
         {shown.map((r, i) => (
           <Settle key={r.seller_id} index={i}>
             <SuggestionCard
@@ -534,33 +552,53 @@ function SuggestionGroup({
               onOpen={() => onOpen(r.seller_id)}
               onSet={(on) => onSet([r.seller_id], on)}
               onEdit={(field, value) => onEdit(r.seller_id, field, value)}
+              typed={edits[r.seller_id]}
               changed={changed(r.seller_id)}
               onReset={() => onReset([r.seller_id])}
               domain={domain}
             />
           </Settle>
         ))}
+        {rows.length > PEEK && (
+          <button
+            type="button"
+            onClick={onShowAll}
+            className="inline-flex items-center gap-1 px-1 pt-0.5 text-[12px] font-medium text-slate-600 hover:text-primary"
+          >
+            {showAll ? "Show fewer" : `Show all ${rows.length}`}
+            <ChevronDown aria-hidden className={cn("h-3.5 w-3.5 transition-transform", showAll && "rotate-180")} />
+          </button>
+        )}
       </div>
-      {rows.length > PEEK && (
-        <button
-          type="button"
-          onClick={onShowAll}
-          className="mt-2 inline-flex items-center gap-1 text-[12px] font-medium text-slate-600 hover:text-primary"
-        >
-          {showAll ? "Show fewer" : `Show all ${rows.length}`}
-          <ChevronDown aria-hidden className={cn("h-3.5 w-3.5 transition-transform", showAll && "rotate-180")} />
-        </button>
-      )}
     </section>
   );
 }
 
-/** What a card says on its one line: who the seller is, or what changes. */
+/** A value as the summary line prints it: quoted where the quotes are the
+ *  point (spaces around it, a number written as text). */
+function shown(v: unknown, quote: boolean): string {
+  if (v === undefined || v === "") return "none";
+  const t = String(v);
+  return quote || t !== t.trim() ? JSON.stringify(v) : t;
+}
+
+/** What a card says on its one line: who the seller is, or what changes
+ *  (read off the entry itself, so a typed-in name or domain shows too). */
 function summaryOf(r: SellerRow): string {
-  if (r.kind === "fix") return r.changes.map((c) => `${c.field}: ${c.from ?? "none"} → ${c.to}`).join(", ");
-  const s = r.kind === "remove" ? r.current : r.suggested;
-  if (!s) return "";
-  return [s.name || null, s.domain || null, s.seller_type].filter(Boolean).join(", ");
+  const who = (s: SellerRow["current"]) =>
+    s ? [s.name || null, s.domain || null, s.seller_type || null].filter(Boolean).join(", ") : "";
+  if (r.kind === "fix" && r.current && r.suggested) {
+    const parts: string[] = [];
+    if (r.dropped?.length) parts.push(`listed ${r.dropped.length + 1} times, kept once`);
+    for (const f of ["seller_id", "name", "domain", "seller_type"] as const) {
+      const a = r.current[f];
+      const b = r.suggested[f];
+      if (JSON.stringify(a) === JSON.stringify(b)) continue;
+      parts.push(`${f}: ${shown(a, f === "seller_id")} → ${b === undefined ? "taken out" : shown(b, f === "seller_id")}`);
+    }
+    return parts.join(", ") || who(r.current);
+  }
+  return who(r.kind === "remove" ? r.current : r.suggested);
 }
 
 /**
@@ -577,6 +615,7 @@ function SuggestionCard({
   onOpen,
   onSet,
   onEdit,
+  typed,
   changed,
   onReset,
   domain,
@@ -584,6 +623,9 @@ function SuggestionCard({
   row: SellerRow;
   group: GroupKey;
   domain: string;
+  /** What the reader typed into this card, as typed (the file gets it
+   *  cleaned: trimmed, a domain made plain). */
+  typed?: { name?: string; domain?: string };
   on: boolean;
   open: boolean;
   flagged: boolean;
@@ -595,7 +637,11 @@ function SuggestionCard({
 }) {
   const g = GROUP[group];
   const Icon = g.icon;
-  const fillIn = needsFillIn(row);
+  const fields = fillInFields(row);
+  // What is still missing: an add needs at least a name; a fix needs what
+  // it asks for.
+  const wanted = row.kind === "add" ? fields.filter((f) => f === "name") : fields;
+  const missing = wanted.filter((f) => !String(typed?.[f] ?? "").trim());
   return (
     <div
       id={`seller-${row.seller_id}`}
@@ -615,13 +661,13 @@ function SuggestionCard({
         <button type="button" onClick={onOpen} aria-expanded={open} className="min-w-0 flex-1 text-left">
           <span className="flex min-w-0 items-baseline gap-2">
             <code className={cn("flex-shrink-0 font-mono text-[12.5px] font-semibold", on ? "text-slate-900" : "text-slate-500")}>
-              {row.seller_id}
+              {row.seller_id || "no seller_id"}
             </code>
             <span className={cn("truncate text-[12px]", on ? "text-slate-600" : "text-slate-400", row.kind === "remove" && on && "line-through")}>
               {summaryOf(row)}
             </span>
-            {fillIn && !String(row.suggested?.name ?? "").trim() && (
-              <span className="flex-shrink-0 text-[11px] font-medium text-warn">needs a name</span>
+            {missing.length > 0 && (
+              <span className="flex-shrink-0 text-[11px] font-medium text-warn">needs a {missing.join(" and a ")}</span>
             )}
             {!on && <span className="flex-shrink-0 rounded-full bg-slate-200/70 px-1.5 py-px text-[10px] font-medium text-slate-500">Skipped</span>}
           </span>
@@ -650,32 +696,40 @@ function SuggestionCard({
           {/* The entry as it changes in the file, and the ads.txt lines
               behind it, side by side. */}
           <div className="grid grid-cols-1 gap-3 lg:grid-cols-2">
-            <div className="min-w-0">
-              <div className="mb-1 text-[11px] font-medium text-slate-500">In your sellers.json</div>
+            <div className="min-w-0 space-y-1.5">
+              <div className="text-[11px] font-medium text-slate-500">In your sellers.json</div>
               <EntryDiff before={row.current} after={row.kind === "remove" ? null : row.suggested} />
+              {/* A duplicate's other copies, which the change takes out. */}
+              {row.dropped && row.dropped.length > 0 && (
+                <>
+                  <div className="pt-1 text-[11px] font-medium text-slate-500">
+                    {row.dropped.length === 1 ? "Its other copy, taken out" : `Its other ${row.dropped.length} copies, taken out`}
+                  </div>
+                  {row.dropped.map((d, i) => (
+                    <EntryDiff key={i} before={d} after={null} />
+                  ))}
+                </>
+              )}
             </div>
             <div className="min-w-0">
               <div className="mb-1 text-[11px] font-medium text-slate-500">In publishers' files</div>
               <ListingWindow row={row} domain={domain} group={group} />
             </div>
           </div>
-          {/* Who this seller is, when only the reader can say. */}
-          {fillIn && (
-            <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
-              <input
-                value={String(row.suggested?.name ?? "")}
-                onChange={(e) => onEdit("name", e.target.value)}
-                placeholder="Seller name"
-                aria-label={`Name for seller ${row.seller_id}`}
-                className={cn(INPUT, "h-8 text-[12px]")}
-              />
-              <input
-                value={String(row.suggested?.domain ?? "")}
-                onChange={(e) => onEdit("domain", e.target.value)}
-                placeholder="their-domain.com"
-                aria-label={`Domain for seller ${row.seller_id}`}
-                className={cn(INPUT, "h-8 font-mono text-[12px]")}
-              />
+          {/* What only the reader can say: who an add is, or the name or
+              domain a fix needs. */}
+          {fields.length > 0 && (
+            <div className={cn("grid grid-cols-1 gap-2", fields.length > 1 && "sm:grid-cols-2")}>
+              {fields.map((f) => (
+                <input
+                  key={f}
+                  value={typed?.[f] ?? ""}
+                  onChange={(e) => onEdit(f, e.target.value)}
+                  placeholder={f === "name" ? "Seller name" : "their-domain.com"}
+                  aria-label={`${f === "name" ? "Name" : "Domain"} for seller ${row.seller_id}`}
+                  className={cn(INPUT, "h-8 text-[12px]", f === "domain" && "font-mono", fields.length === 1 && "sm:max-w-xs")}
+                />
+              ))}
             </div>
           )}
         </div>

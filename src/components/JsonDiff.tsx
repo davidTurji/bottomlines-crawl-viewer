@@ -96,25 +96,56 @@ export function JsonDiff({
     const sellersOpen = [{ t: "  " }, { t: '"sellers"', c: C.key }, { t: ": [", c: C.punct }];
     push(live ? "same" : "add", live ? sellersOpen : undefined, sellersOpen);
 
+    // Each entry pairs with ONE entry of the same ID on the other side: the
+    // identical one first, else the most alike. So a duplicate the fix
+    // keeps once lines up with the copy kept, and the other copies show as
+    // removed. IDs match trimmed and as text (a file's 42 and "42 " are the
+    // fixed file's "42").
+    const idOf = (s: Seller) => String(s.seller_id ?? "").trim();
     const liveSellers = live?.sellers ?? [];
-    const nextById = new Map(next.sellers.map((s) => [String(s.seller_id), s]));
-    const liveIds = new Set(liveSellers.map((s) => String(s.seller_id)));
+    const group = (list: Seller[]) => {
+      const m = new Map<string, Seller[]>();
+      for (const s of list) m.set(idOf(s), [...(m.get(idOf(s)) ?? []), s]);
+      return m;
+    };
+    const liveById = group(liveSellers);
+    const pairOf = new Map<Seller, Seller>();
+    const alike = (a: Seller, b: Seller) =>
+      [...new Set([...Object.keys(a), ...Object.keys(b)])].filter((k) => JSON.stringify(a[k]) === JSON.stringify(b[k])).length;
+    for (const [id, bs] of group(next.sellers)) {
+      const as = liveById.get(id) ?? [];
+      const free = (a: Seller) => !pairOf.has(a);
+      const left: Seller[] = [];
+      for (const b of bs) {
+        const a = as.find((x) => free(x) && JSON.stringify(x) === JSON.stringify(b));
+        if (a) pairOf.set(a, b);
+        else left.push(b);
+      }
+      for (const b of left) {
+        let best: Seller | undefined;
+        for (const a of as) if (free(a) && (!best || alike(a, b) > alike(best, b))) best = a;
+        if (best) pairOf.set(best, b);
+      }
+    }
+    const paired = new Set(pairOf.values());
     const order: { id: string; a?: Seller; b?: Seller }[] = [
-      ...liveSellers.map((a) => ({ id: String(a.seller_id), a, b: nextById.get(String(a.seller_id)) })),
-      ...next.sellers.filter((b) => !liveIds.has(String(b.seller_id))).map((b) => ({ id: String(b.seller_id), b })),
+      ...liveSellers.map((a) => ({ id: idOf(a), a, b: pairOf.get(a) })),
+      ...next.sellers.filter((b) => !paired.has(b)).map((b) => ({ id: idOf(b), b })),
     ];
-    const lastA = liveSellers.length ? String(liveSellers[liveSellers.length - 1].seller_id) : "";
-    const lastB = next.sellers.length ? String(next.sellers[next.sellers.length - 1].seller_id) : "";
+    const lastA = liveSellers[liveSellers.length - 1];
+    const lastB = next.sellers[next.sellers.length - 1];
 
     let changedEntries = 0;
-    for (const { id, a, b } of order) {
+    order.forEach(({ id, a, b }, at) => {
+      // Rows of one entry share a key, so the fold counts entries, not IDs.
+      const entry = `${at}:${id}`;
       const same = a && b && JSON.stringify(a) === JSON.stringify(b);
       const kind: Kind = same ? "same" : !a ? "add" : !b ? "del" : "mod";
       if (kind !== "same") changedEntries++;
       const openTok = [{ t: "    {", c: C.punct }];
-      const closeA = [{ t: id === lastA ? "    }" : "    },", c: C.punct }];
-      const closeB = [{ t: id === lastB ? "    }" : "    },", c: C.punct }];
-      push(kind === "mod" ? "same" : kind, a ? openTok : undefined, b ? openTok : undefined, id);
+      const closeA = [{ t: a === lastA ? "    }" : "    },", c: C.punct }];
+      const closeB = [{ t: b === lastB ? "    }" : "    },", c: C.punct }];
+      push(kind === "mod" ? "same" : kind, a ? openTok : undefined, b ? openTok : undefined, entry);
       const keys = [...new Set([...(a ? keysOf(a) : []), ...(b ? keysOf(b) : [])])];
       keys.forEach((k) => {
         const ka = a ? keysOf(a) : [];
@@ -125,10 +156,10 @@ export function JsonDiff({
         if (kind === "mod") {
           fk = ta && tb && JSON.stringify(a![k]) === JSON.stringify(b![k]) ? "same" : !ta ? "add" : !tb ? "del" : "mod";
         }
-        push(fk, ta, tb, id);
+        push(fk, ta, tb, entry);
       });
-      push(kind === "mod" ? "same" : kind, a ? closeA : undefined, b ? closeB : undefined, id);
-    }
+      push(kind === "mod" ? "same" : kind, a ? closeA : undefined, b ? closeB : undefined, entry);
+    });
     push(live ? "same" : "add", live ? [{ t: "  ]", c: C.punct }] : undefined, [{ t: "  ]", c: C.punct }]);
     push(live ? "same" : "add", live ? [{ t: "}", c: C.punct }] : undefined, [{ t: "}", c: C.punct }]);
 
