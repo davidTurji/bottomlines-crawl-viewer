@@ -43,6 +43,7 @@ import InlineAskAI from "@/components/InlineAskAI";
 import { PageShell } from "@/components/PageShell";
 import { formatWeek } from "@/components/WeekLine";
 import { cn, foundInLabel, storeLabel } from "@/lib/utils";
+import { ActionableLine, PublisherAvatarLink, PublisherDomainLink } from "@/components/PublisherLinks";
 import { useReportScope } from "@/lib/reportScope";
 
 const OVERVIEW_SUGGESTIONS = [
@@ -880,85 +881,95 @@ export function MatchedTile({
       onClick={onClick}
       aria-pressed={active}
       className={cn(
-        "flex flex-wrap items-start justify-between gap-x-4 gap-y-3 rounded-xl border px-5 py-4 text-left shadow-sm transition-colors xl:flex-nowrap",
+        "kpi-tile flex flex-col gap-3 rounded-xl border px-5 py-4 text-left shadow-sm transition-colors",
         active ? activeGround : idleGround,
       )}
     >
-      <span className="flex min-w-0 flex-col">
-        <span
-          key={number}
-          className={cn(
-            "font-mono text-3xl font-semibold leading-none tabular-nums tracking-tight sm:text-4xl",
-            numberCls,
-          )}
-        >
-          <CountUp value={number} delayMs={delayMs} />
+      {/* TWO ROWS, so what pairs up lines up (David, 2026-10-06). The top
+          row holds the count and its label beside the week's move; the
+          bottom row holds last week's figure beside found and lost, on one
+          baseline, so the two small lines never sit at different heights. */}
+      <span className="kpi-tile-top">
+        <span className="flex min-w-0 flex-col">
+          <span
+            key={number}
+            className={cn(
+              "kpi-tile-num font-mono font-semibold leading-none tabular-nums tracking-tight",
+              numberCls,
+            )}
+          >
+            <CountUp value={number} delayMs={delayMs} />
+          </span>
+          <span className="mt-2 flex items-center gap-1.5 text-[12px] font-medium text-slate-700">
+            <Icon aria-hidden className={cn("h-3.5 w-3.5 flex-shrink-0", iconCls)} />
+            {label}
+          </span>
         </span>
-        <span className="mt-2 flex items-center gap-1.5 text-[12px] font-medium text-slate-700">
-          <Icon aria-hidden className={cn("h-3.5 w-3.5 flex-shrink-0", iconCls)} />
-          {label}
-        </span>
-        <span className="block min-h-[17px] text-[11px] leading-[17px]">
-          {wordy ? (
-            <span className="text-slate-500">
-              {previous.toLocaleString()} last week
+        {/* THE WEEK'S MOVE, AS ITS OWN FIGURE. How many more publishers or
+            apps matched this week is the point of the tile, so the count and
+            the percentage stand at the tile's right edge at reading size,
+            not as a footnote under the label. A narrow tile stacks it under
+            the count (index.css, .kpi-tile). */}
+        {wordy && (
+          <span
+            key={number}
+            className="kpi-tile-move"
+            // The week's move is the payoff: it rises in once the count lands.
+            style={payoffStyle(delayMs + landsAfterMs())}
+          >
+            <span
+              className={cn(
+                "kpi-tile-move-num font-mono font-semibold leading-none tabular-nums",
+                moveCls,
+              )}
+            >
+              {delta.abs > 0 ? "+" : delta.abs < 0 ? "-" : ""}
+              {Math.abs(delta.abs).toLocaleString()}
             </span>
+            <span className="kpi-tile-move-sub text-[11px] leading-[15px] text-slate-500">
+              {delta.abs !== 0 && (
+                <span className={cn("font-mono font-medium tabular-nums", moveCls)}>
+                  {pctText(delta.pct)}
+                </span>
+              )}
+              <span>{delta.abs === 0 ? "no change" : "vs last week"}</span>
+            </span>
+          </span>
+        )}
+      </span>
+      <span className="kpi-tile-foot min-h-[15px] text-[11px] leading-[15px]">
+        <span className="min-w-0">
+          {wordy ? (
+            <span className="text-slate-500">{previous.toLocaleString()} last week</span>
           ) : delta ? (
             <DeltaChip delta={delta} />
           ) : note ? (
             <span className="text-slate-400">{note}</span>
           ) : null}
         </span>
-      </span>
-      {/* THE WEEK'S MOVE, AS ITS OWN FIGURE. How many more publishers or
-          apps matched this week is the point of the tile, so the count and
-          the percentage stand at the tile's right edge at reading size,
-          not as a footnote under the label. Below sm the tile is too
-          narrow for two columns and the block drops under the count. */}
-      {wordy && (
-        <span
-          key={number}
-          className="flex w-full flex-col items-start gap-1 xl:w-auto xl:items-end xl:text-right"
-          // The week's move is the payoff: it rises in once the count lands.
-          style={payoffStyle(delayMs + landsAfterMs())}
-        >
+        {wordy && move && (move.found > 0 || move.lost > 0) && (
+          // Behind the net, in plain words: what we found and what went.
           <span
-            className={cn(
-              "font-mono text-lg font-semibold leading-none tabular-nums sm:text-2xl",
-              moveCls,
-            )}
+            key={number}
+            className="kpi-tile-fl text-slate-500"
+            style={payoffStyle(delayMs + landsAfterMs())}
           >
-            {delta.abs > 0 ? "+" : delta.abs < 0 ? "-" : ""}
-            {Math.abs(delta.abs).toLocaleString()}
+            <span className="font-mono font-medium tabular-nums text-ok">
+              {move.found.toLocaleString()}
+            </span>{" "}
+            found,{" "}
+            <span
+              className={cn(
+                "font-mono font-medium tabular-nums",
+                move.lost > 0 ? "text-critical" : "text-slate-500",
+              )}
+            >
+              {move.lost.toLocaleString()}
+            </span>{" "}
+            lost
           </span>
-          <span className="flex items-baseline gap-1 whitespace-nowrap text-[11px] leading-[15px] text-slate-500 xl:flex-col xl:items-end xl:gap-0">
-            {delta.abs !== 0 && (
-              <span className={cn("font-mono font-medium tabular-nums", moveCls)}>
-                {pctText(delta.pct)}
-              </span>
-            )}
-            <span>{delta.abs === 0 ? "no change" : "vs last week"}</span>
-          </span>
-          {move && (move.found > 0 || move.lost > 0) && (
-            // Behind the net, in plain words: what we found and what went.
-            <span className="text-[11px] leading-[15px] text-slate-500">
-              <span className="font-mono font-medium tabular-nums text-ok">
-                {move.found.toLocaleString()}
-              </span>{" "}
-              found,{" "}
-              <span
-                className={cn(
-                  "font-mono font-medium tabular-nums",
-                  move.lost > 0 ? "text-critical" : "text-slate-500",
-                )}
-              >
-                {move.lost.toLocaleString()}
-              </span>{" "}
-              lost
-            </span>
-          )}
-        </span>
-      )}
+        )}
+      </span>
     </button>
   );
 }
@@ -1511,6 +1522,9 @@ function PublisherCard({
   // fall back to the lazy per-publisher fetch the shipped viewer used, which
   // restores the flat matched-seat-lines list. The check is on the ARRAYS, not
   // the change counts: absent arrays are the real-data signal.
+  // The circle, the name and the domain are one link to the publisher's
+  // site: hovering any of them lights the circle and the name together.
+  const [siteHover, setSiteHover] = useState(false);
   const hasEmbeddedLines =
     row.matched_lines.length > 0 ||
     row.added_lines.length > 0 ||
@@ -1523,21 +1537,52 @@ function PublisherCard({
         open && "shadow-md",
       )}
     >
-      <button
-        type="button"
-        onClick={onToggle}
-        className="flex w-full items-center gap-4 px-4 py-4 text-left sm:px-5"
-      >
-        <div className="flex h-11 w-11 flex-shrink-0 items-center justify-center rounded-full bg-accent text-base font-semibold text-primary">
-          {initial}
-        </div>
+      {/* The header is a real button laid over the row, with the
+          publisher's links above it: a link may not sit inside a button,
+          for the browser or for a screen reader. The content lets clicks
+          through to the button; the links (NESTED) keep theirs. */}
+      <div className="relative">
+        <button
+          type="button"
+          onClick={onToggle}
+          aria-expanded={open}
+          aria-label={`${open ? "Hide" : "Show"} the seat lines of ${row.developer_name || row.developer_domain || "this publisher"}`}
+          className="absolute inset-0 z-0 rounded-t-3xl focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-primary/30"
+        />
+      <div className="pointer-events-none flex w-full items-center gap-4 px-4 py-4 text-left sm:px-5">
+        {row.developer_domain ? (
+          <PublisherAvatarLink
+            domain={row.developer_domain}
+            name={row.developer_name || row.developer_domain}
+            hover={siteHover}
+            onHoverChange={setSiteHover}
+          >
+            <div className="flex h-11 w-11 items-center justify-center rounded-full bg-accent text-base font-semibold text-primary">
+              {initial}
+            </div>
+          </PublisherAvatarLink>
+        ) : (
+          <div className="flex h-11 w-11 flex-shrink-0 items-center justify-center rounded-full bg-accent text-base font-semibold text-primary">
+            {initial}
+          </div>
+        )}
         <div className="min-w-0 flex-1">
           <div className="flex min-w-0 items-baseline gap-2">
             <span className="truncate text-base font-semibold tracking-tight text-slate-900">
               {/* Never the internal id (David, 2026-10-06: a customer read
                   "Publisher #567486"): the name, else the domain, else a
                   plain word. The API names every row it can. */}
-              {row.developer_name || row.developer_domain || "Unnamed publisher"}
+              {row.developer_domain ? (
+                // The name links to the publisher's site, like the domain.
+                <PublisherDomainLink
+                  domain={row.developer_domain}
+                  label={row.developer_name || row.developer_domain}
+                  active={siteHover}
+                  onHoverChange={setSiteHover}
+                />
+              ) : (
+                row.developer_name || "Unnamed publisher"
+              )}
             </span>
             {row.developer_platform && (
               <span className="flex-shrink-0 text-[11px] text-slate-400">
@@ -1546,8 +1591,11 @@ function PublisherCard({
             )}
           </div>
           {row.developer_domain && row.developer_name && (
-            <div className="truncate text-xs text-slate-500">
-              {row.developer_domain}
+            <div className="flex min-w-0 text-xs text-slate-500">
+              <PublisherDomainLink
+                domain={row.developer_domain}
+                onHoverChange={setSiteHover}
+              />
             </div>
           )}
         </div>
@@ -1572,7 +1620,8 @@ function PublisherCard({
             open && "rotate-180",
           )}
         />
-      </button>
+      </div>
+      </div>
       <Collapse open={open}>
         <div className="border-t border-border bg-accent/30 px-4 pb-4 pt-3 sm:px-5">
           {hasEmbeddedLines ? (
@@ -1581,9 +1630,14 @@ function PublisherCard({
               removed={row.removed_lines}
               certChanged={row.cert_changed_lines}
               matched={row.matched_lines}
+              publisherDomain={row.developer_domain}
             />
           ) : (
-            <LazyMatchedSeatLines token={token} developerId={row.developer_id} />
+            <LazyMatchedSeatLines
+              token={token}
+              developerId={row.developer_id}
+              publisherDomain={row.developer_domain}
+            />
           )}
         </div>
       </Collapse>
@@ -1644,15 +1698,34 @@ const CHANGE_WINDOW: Record<
  * Shared by the change windows and the flat matched-seat-lines list so a line
  * looks identical wherever it appears.
  */
-function SeatLineRow({ line, muted }: { line: MatchedSeatLine; muted?: boolean }) {
+function SeatLineRow({
+  line,
+  muted,
+  gone,
+  publisherDomain,
+}: {
+  line: MatchedSeatLine;
+  muted?: boolean;
+  /** The line has left the publisher's file: its link opens the file, not the line. */
+  gone?: boolean;
+  /** Whose line this is: with it, the line opens their file at it. */
+  publisherDomain?: string | null;
+}) {
   return (
     // THE FILE GOES TO THE RIGHT MARGIN (David, 2026-09-26). Trailing the
     // line, it read as a fourth field of the ads.txt record, which it is
     // not, and it moved with the length of the cert so no two rows agreed
     // on where it sat. At the margin it forms a column the eye can run
     // down. The cert stays inline, because that one IS part of the line.
-    <li className="flex items-baseline gap-3 px-3 py-1.5">
+    <ActionableLine
+      line={line}
+      publisherDomain={publisherDomain}
+      foundIn={line.found_in}
+      gone={gone}
+      className="flex items-baseline gap-3 px-3 py-1.5"
+    >
       <code
+        data-line-text
         className={cn(
           "min-w-0 flex-1 truncate font-mono text-[11px] tabular-nums",
           muted ? "text-slate-500" : "text-slate-800",
@@ -1664,11 +1737,11 @@ function SeatLineRow({ line, muted }: { line: MatchedSeatLine; muted?: boolean }
         )}
       </code>
       {foundInLabel(line.found_in) && (
-        <span className="flex-shrink-0 text-[10px] text-slate-400">
+        <span className={"flex-shrink-0 text-[10px] text-slate-400"}>
           {foundInLabel(line.found_in)}
         </span>
       )}
-    </li>
+    </ActionableLine>
   );
 }
 
@@ -1681,9 +1754,11 @@ function SeatLineRow({ line, muted }: { line: MatchedSeatLine; muted?: boolean }
 function ChangeWindow({
   kind,
   lines,
+  publisherDomain,
 }: {
   kind: ChangeKind;
   lines: MatchedSeatLine[];
+  publisherDomain?: string | null;
 }) {
   const s = CHANGE_WINDOW[kind];
   const shown = lines.slice(0, CHANGE_LINE_CAP);
@@ -1723,6 +1798,8 @@ function ChangeWindow({
             key={`${l.ssp_domain}:${l.publisher_id}:${l.relationship}:${l.cert_id ?? ""}:${i}`}
             line={l}
             muted={s.muted}
+            gone={kind === "removed"}
+            publisherDomain={publisherDomain}
           />
         ))}
       </ul>
@@ -1754,11 +1831,14 @@ function ChangeExpansion({
   removed,
   certChanged,
   matched,
+  publisherDomain,
 }: {
   added: MatchedSeatLine[];
   removed: MatchedSeatLine[];
   certChanged: MatchedSeatLine[];
   matched: MatchedSeatLine[];
+  /** Whose lines these are, so each copies and opens their file. */
+  publisherDomain?: string | null;
 }) {
   const sections: { kind: ChangeKind; lines: MatchedSeatLine[] }[] = [];
   if (added.length) sections.push({ kind: "added", lines: added });
@@ -1767,7 +1847,8 @@ function ChangeExpansion({
 
   // Nothing moved this week: keep the standing matched-seat-lines list as-is.
   if (sections.length === 0) {
-    if (matched.length > 0) return <MatchedSeatLines lines={matched} />;
+    if (matched.length > 0)
+      return <MatchedSeatLines lines={matched} publisherDomain={publisherDomain} />;
     return (
       <p className="text-xs text-slate-500">
         No matched seat lines on record for this row.
@@ -1777,7 +1858,13 @@ function ChangeExpansion({
 
   // A single kind of change: one full-width window.
   if (sections.length === 1) {
-    return <ChangeWindow kind={sections[0].kind} lines={sections[0].lines} />;
+    return (
+      <ChangeWindow
+        kind={sections[0].kind}
+        lines={sections[0].lines}
+        publisherDomain={publisherDomain}
+      />
+    );
   }
 
   // A mixed change: windows side by side on desktop, stacked on mobile. With
@@ -1790,7 +1877,7 @@ function ChangeExpansion({
           key={sec.kind}
           className={cn(sections.length === 3 && i === 2 && "sm:col-span-2")}
         >
-          <ChangeWindow kind={sec.kind} lines={sec.lines} />
+          <ChangeWindow kind={sec.kind} lines={sec.lines} publisherDomain={publisherDomain} />
         </div>
       ))}
     </div>
@@ -1838,7 +1925,13 @@ export function MiniStat({
  * expansion so a line reads identically wherever it appears. Renders nothing
  * when there are no lines, so callers can drop it in unconditionally.
  */
-function MatchedSeatLines({ lines }: { lines: MatchedSeatLine[] }) {
+function MatchedSeatLines({
+  lines,
+  publisherDomain,
+}: {
+  lines: MatchedSeatLine[];
+  publisherDomain?: string | null;
+}) {
   if (lines.length === 0) return null;
   return (
     <div>
@@ -1855,6 +1948,7 @@ function MatchedSeatLines({ lines }: { lines: MatchedSeatLine[] }) {
           <SeatLineRow
             key={`${l.ssp_domain}:${l.publisher_id}:${l.relationship}:${l.cert_id ?? ""}:${i}`}
             line={l}
+            publisherDomain={publisherDomain}
           />
         ))}
       </ul>
@@ -1878,9 +1972,11 @@ function MatchedSeatLines({ lines }: { lines: MatchedSeatLine[] }) {
 function LazyMatchedSeatLines({
   token,
   developerId,
+  publisherDomain,
 }: {
   token: string;
   developerId: number;
+  publisherDomain?: string | null;
 }) {
   const [lines, setLines] = useState<MatchedSeatLine[] | null>(null);
   const [failed, setFailed] = useState(false);
@@ -1919,7 +2015,7 @@ function LazyMatchedSeatLines({
       </p>
     );
   }
-  return <MatchedSeatLines lines={lines} />;
+  return <MatchedSeatLines lines={lines} publisherDomain={publisherDomain} />;
 }
 
 /**
@@ -2214,12 +2310,17 @@ function MatchedAppCard({
         open ? "border-app-border bg-app-bg/40 shadow-md" : "border-border bg-white",
       )}
     >
-      <button
-        type="button"
-        onClick={onToggle}
-        aria-expanded={open}
-        className="flex w-full items-center gap-4 px-4 py-4 text-left sm:px-5"
-      >
+      {/* A real button laid over the row, the publisher's links above it
+          (see PublisherCard). */}
+      <div className="relative">
+        <button
+          type="button"
+          onClick={onToggle}
+          aria-expanded={open}
+          aria-label={`${open ? "Hide" : "Show"} the seat lines of ${app.app_name}`}
+          className="absolute inset-0 z-0 rounded-t-3xl focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-app/30"
+        />
+      <div className="pointer-events-none flex w-full items-center gap-4 px-4 py-4 text-left sm:px-5">
         <div className="flex h-11 w-11 flex-shrink-0 items-center justify-center rounded-full bg-app-bg text-app">
           <Smartphone aria-hidden className="h-5 w-5" />
         </div>
@@ -2234,7 +2335,9 @@ function MatchedAppCard({
           </div>
           <div className="truncate text-xs text-slate-500">
             publisher:{" "}
-            <span className="text-slate-600">{app.owner_domain}</span>
+            {app.owner_domain ? (
+              <PublisherDomainLink domain={app.owner_domain} className="text-slate-600" />
+            ) : null}
             {app.owner_name ? (
               <span className="text-slate-400">, {app.owner_name}</span>
             ) : null}
@@ -2253,17 +2356,23 @@ function MatchedAppCard({
             open && "rotate-180",
           )}
         />
-      </button>
+      </div>
+      </div>
       <Collapse open={open}>
         <div className="border-t border-app-border bg-app-bg/30 px-4 pb-4 pt-3 sm:px-5">
           {!hasEmbeddedLines && app.developer_id != null ? (
-            <LazyMatchedSeatLines token={token} developerId={app.developer_id} />
+            <LazyMatchedSeatLines
+              token={token}
+              developerId={app.developer_id}
+              publisherDomain={app.owner_domain}
+            />
           ) : (
             <ChangeExpansion
               added={app.added_lines ?? []}
               removed={app.removed_lines ?? []}
               certChanged={app.cert_changed_lines ?? []}
               matched={lines}
+              publisherDomain={app.owner_domain}
             />
           )}
         </div>
