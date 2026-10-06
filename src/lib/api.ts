@@ -662,11 +662,16 @@ export const api = {
     if (MOCK) {
       const m = await import("./mockSellers");
       // `?nofile=1` shows a customer with no sellers.json yet: the page
-      // then builds one from scratch. `?warnings=1` and `?broken=1` show the
+      // then builds one from scratch. `?noversion=1`, `?warnings=1` and `?broken=1` show the
       // notes about a live file that is not strict JSON, or that holds a
       // null and a number too long for a browser.
       const q = new URLSearchParams(window.location.search);
-      const file = q.has("nofile") ? null : q.has("broken") ? m.brokenFile(m.mockSellersFile) : m.mockSellersFile;
+      let file = q.has("nofile") ? null : q.has("broken") ? m.brokenFile(m.mockSellersFile) : m.mockSellersFile;
+      // `?noversion=1`: a file whose header has no version.
+      if (file && q.has("noversion")) {
+        const { version: _drop, ...rest } = file;
+        file = rest as typeof file;
+      }
       return {
         domain: m.MOCK_SELLERS_DOMAIN,
         file,

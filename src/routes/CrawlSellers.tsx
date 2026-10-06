@@ -30,6 +30,7 @@ import {
   withEdits,
   type Edit,
   type FillField,
+  type Issue,
   type Seller,
   type SellerRow,
   type SellersFile,
@@ -92,6 +93,8 @@ export default function CrawlSellers() {
   const [edits, setEdits] = useState<Record<string, Edit>>({});
   // Header fields the reader adds to an existing file (a missing version).
   const [headerPatch, setHeaderPatch] = useState<{ version?: string }>({});
+  /** The list of what is still wrong in the file, open under its line. */
+  const [problemsOpen, setProblemsOpen] = useState(false);
   const [openCards, setOpenCards] = useState<Set<string>>(new Set());
   const [openGroups, setOpenGroups] = useState<Set<GroupKey>>(new Set());
   // Only asked for when there is no file yet; an existing file keeps its own.
@@ -173,24 +176,27 @@ export default function CrawlSellers() {
 
   const groupOf = (r: SellerRow): GroupKey | null => (r.kind === "keep" ? null : r.kind);
 
+  /** An existing file with no version: fixed by a card of its own in Fix. */
+  const versionMissing = !creating && data?.file != null && !String(data.file.version ?? "").trim();
+
   const groups = useMemo(() => {
     const keys: GroupKey[] = ["add", "fix", "remove"];
     return keys
       .map((key) => ({ key, rows: rows.filter((r) => r.kind === key) }))
-      .filter((g) => g.rows.length > 0);
-  }, [rows]);
+      .filter((g) => g.rows.length > 0 || (g.key === "fix" && versionMissing));
+  }, [rows, versionMissing]);
 
   const counts = useMemo(
     () => ({
       add: rows.filter((r) => r.kind === "add").length,
-      fix: rows.filter((r) => r.kind === "fix").length,
+      fix: rows.filter((r) => r.kind === "fix").length + (versionMissing ? 1 : 0),
       remove: rows.filter((r) => r.kind === "remove").length,
       // Added sellers still waiting for the name only the reader knows.
       unnamed: rows.filter((r) => r.kind === "add" && !String(r.suggested?.name ?? "").trim()).length,
     }),
-    [rows],
+    [rows, versionMissing],
   );
-  const applied = rows.filter((r) => r.kind !== "keep" && ticked.has(r.seller_id)).length;
+  const applied = (headerPatch.version ? 1 : 0) + rows.filter((r) => r.kind !== "keep" && ticked.has(r.seller_id)).length;
   /** What went into the file you take away, by kind. */
   const taken = useMemo(() => {
     const on = (k: SellerRow["kind"]) => rows.filter((r) => r.kind === k && ticked.has(r.seller_id)).length;
@@ -273,9 +279,10 @@ export default function CrawlSellers() {
 
   /** Take the reader to what an issue is about: open its group and its
    *  card, then glide there. */
-  const goTo = (sellerId?: string, field?: string) => {
+  const goTo = (sellerId?: string, field?: string, fill = false) => {
     if (field === "version") {
-      setHeaderPatch({ version: "1.0" });
+      setOpenGroups((prev) => new Set(prev).add("fix"));
+      window.setTimeout(() => glideTo(document.getElementById("file-version"), 140), 60);
       return;
     }
     if (field) {
@@ -290,6 +297,22 @@ export default function CrawlSellers() {
     setOpenGroups((prev) => new Set(prev).add(g));
     setOpenCards((prev) => new Set(prev).add(r.seller_id));
     window.setTimeout(() => glideTo(document.getElementById(`seller-${r.seller_id}`), 140), 60);
+    if (fill) {
+      // The card opens (and its group may unfold) first: try until its
+      // input is there, for a second and a half at most.
+      let tries = 0;
+      const focusInput = () => {
+        const input = document
+          .getElementById(`seller-${r.seller_id}`)
+          ?.querySelector<HTMLElement>("input, select");
+        if (input && input.offsetParent !== null) {
+          input.focus({ preventScroll: true });
+        } else if (tries++ < 12) {
+          window.setTimeout(focusInput, 125);
+        }
+      };
+      window.setTimeout(focusInput, 400);
+    }
   };
 
   const weekLabel = summary?.finished_at ? formatWeek(new Date(summary.finished_at)) : null;
@@ -440,8 +463,6 @@ export default function CrawlSellers() {
             </div>
           )}
 
-          <IssuesCard issues={issues} onGo={goTo} />
-
           {/* The promise the page rests on, said where the reader decides. */}
           <p className="flex items-start gap-2 text-[12px] leading-relaxed text-slate-500">
             <ShieldCheck aria-hidden className="mt-0.5 h-3.5 w-3.5 flex-shrink-0 text-primary" />
@@ -471,6 +492,14 @@ export default function CrawlSellers() {
                 onReset={reset}
                 flagged={new Set(issues.map((x) => x.sellerId).filter(Boolean) as string[])}
                 domain={data.domain}
+                headerFix={
+                  g.key === "fix" && versionMissing
+                    ? {
+                        on: Boolean(headerPatch.version),
+                        onSet: (on: boolean) => setHeaderPatch(on ? { version: "1.0" } : {}),
+                      }
+                    : undefined
+                }
               />
             ))}
           </div>
@@ -499,12 +528,6 @@ export default function CrawlSellers() {
                     ].filter(Boolean);
                     return creating ? "" : parts.length ? `: ${parts.join(", ")}` : ", nothing changed";
                   })()}
-                  {issues.length > 0 && (
-                    <span className="text-warn">
-                      {". "}
-                      {issues.length} {issues.length === 1 ? "thing" : "things"} to resolve first
-                    </span>
-                  )}
                 </div>
               </div>
               <ResetButton disabled={!anyChanged} onClick={resetAll} label="Reset all" />
@@ -523,17 +546,33 @@ export default function CrawlSellers() {
             />
             {/* Take it away from where it was just read (David, 2026-10-06:
                 Copy and Download at the bottom too). */}
+            {/* WHAT IS STILL WRONG IN THE FILE YOU TAKE AWAY, one line that
+                opens into the list, each problem fixable from where it is
+                (David, 2026-10-06: the box on top only repeated the cards). */}
             <div className="mt-4 flex flex-wrap items-center justify-between gap-3">
-              <p className="min-w-0 text-[12px] text-slate-500">
-                {!creating && readOn
-                  ? `Built on your file as read on ${readOn}. If you changed it since, check those changes are still in this one before you publish it.`
-                  : ""}
-              </p>
+              <ProblemsLine issues={issues} open={problemsOpen} onToggle={() => setProblemsOpen((v) => !v)} />
               <div className="flex flex-wrap items-center gap-2">
                 <CopyButton text={exportText} label={creating ? "Copy new file" : "Copy fixed file"} disabled={blocked} />
                 <ExportButton onClick={download} label={creating ? "Download new sellers.json" : "Download fixed sellers.json"} disabled={blocked} />
               </div>
             </div>
+            <Collapse open={problemsOpen && issues.length > 0}>
+              <ProblemsList
+                issues={issues}
+                rows={rows}
+                ticked={ticked}
+                versionOn={Boolean(headerPatch.version)}
+                onApply={(id) => setOn([id], true)}
+                onAddVersion={() => setHeaderPatch({ version: "1.0" })}
+                onGo={goTo}
+              />
+            </Collapse>
+            {!creating && readOn && (
+              <p className="mt-3 text-[12px] text-slate-500">
+                Built on your file as read on {readOn}. If you changed it since, check those changes are
+                still in this one before you publish it.
+              </p>
+            )}
           </div>
         </>
       )}
@@ -560,9 +599,12 @@ function SuggestionGroup({
   onReset,
   flagged,
   domain,
+  headerFix,
 }: {
   group: GroupKey;
   domain: string;
+  /** A fix to the file's header (a missing version), shown first. */
+  headerFix?: { on: boolean; onSet: (on: boolean) => void };
   edits: Record<string, Edit>;
   rows: SellerRow[];
   ticked: Set<string>;
@@ -578,7 +620,8 @@ function SuggestionGroup({
 }) {
   const g = GROUP[group];
   const Icon = g.icon;
-  const taken = rows.filter((r) => ticked.has(r.seller_id)).length;
+  const taken = rows.filter((r) => ticked.has(r.seller_id)).length + (headerFix?.on ? 1 : 0);
+  const total = rows.length + (headerFix ? 1 : 0);
   const shown = showAll ? rows : rows.slice(0, PEEK);
   const ids = rows.map((r) => r.seller_id);
   // Each group in its own card (David, 2026-10-06: Add, Fix and Remove
@@ -591,22 +634,45 @@ function SuggestionGroup({
             <Icon aria-hidden className="h-3 w-3" strokeWidth={2.5} />
           </span>
           {g.title}
-          <span className="font-mono text-[13px] font-medium tabular-nums text-slate-400">{rows.length}</span>
+          <span className="font-mono text-[13px] font-medium tabular-nums text-slate-400">{total}</span>
         </h2>
         <div className="flex items-center gap-3 text-[12px] text-slate-500">
           <span>
-            {taken} of {rows.length} going into your file
+            {taken} of {total} going into your file
           </span>
-          <button type="button" onClick={() => onSet(ids, true)} className="font-medium text-slate-700 hover:text-primary">
+          <button
+            type="button"
+            onClick={() => {
+              onSet(ids, true);
+              headerFix?.onSet(true);
+            }}
+            className="font-medium text-slate-700 hover:text-primary"
+          >
             Take all
           </button>
-          <button type="button" onClick={() => onSet(ids, false)} className="font-medium text-slate-700 hover:text-primary">
+          <button
+            type="button"
+            onClick={() => {
+              onSet(ids, false);
+              headerFix?.onSet(false);
+            }}
+            className="font-medium text-slate-700 hover:text-primary"
+          >
             Skip all
           </button>
-          <ResetButton disabled={!ids.some(changed)} onClick={() => onReset(ids)} label="Reset" quiet />
+          <ResetButton
+            disabled={!ids.some(changed) && !headerFix?.on}
+            onClick={() => {
+              onReset(ids);
+              headerFix?.onSet(false);
+            }}
+            label="Reset"
+            quiet
+          />
         </div>
       </div>
       <div className="space-y-2 bg-slate-50/60 p-3">
+        {headerFix && <VersionCard on={headerFix.on} onSet={headerFix.onSet} />}
         {shown.map((r, i) => (
           <Settle key={r.seller_id} index={i}>
             <SuggestionCard
@@ -1060,41 +1126,159 @@ function HeaderForm({ header, onChange }: { header: Header; onChange: (h: Header
   );
 }
 
-/** What stands between the export and a compliant sellers.json. */
-function IssuesCard({
+/** The file's header has no version: a fix of its own, first in Fix. */
+function VersionCard({ on, onSet }: { on: boolean; onSet: (on: boolean) => void }) {
+  const g = GROUP.fix;
+  const Icon = g.icon;
+  return (
+    <div id="file-version" className="scroll-mt-24 overflow-hidden rounded-xl border border-border bg-white shadow-sm">
+      <div className="flex flex-wrap items-center gap-x-3 gap-y-2 px-3.5 py-2.5 sm:flex-nowrap">
+        <span className={cn("flex h-7 w-7 flex-shrink-0 items-center justify-center rounded-full", g.disc)}>
+          <Icon aria-hidden className="h-3.5 w-3.5" strokeWidth={2.5} />
+        </span>
+        <div className="min-w-0 flex-1">
+          <span className="flex min-w-0 items-baseline gap-2">
+            <code className="flex-shrink-0 font-mono text-[12.5px] font-semibold text-slate-900">version</code>
+            <span className="truncate text-[12px] text-slate-600">version: none → "1.0"</span>
+          </span>
+          <span className="block truncate text-[11px] text-slate-400">
+            The top of your file has no version. sellers.json is version 1.0.
+          </span>
+        </div>
+        <div className="order-last flex basis-full items-center gap-2 pl-10 sm:order-none sm:basis-auto sm:pl-0">
+          {on && <ResetButton onClick={() => onSet(false)} label="Reset" quiet />}
+          <Decision on={on} onSet={onSet} id="version" group="fix" />
+        </div>
+        {/* Nothing to open: the space of the other cards' arrow, so the
+            choices line up. */}
+        <span aria-hidden className="hidden h-6 w-6 flex-shrink-0 sm:block" />
+      </div>
+    </div>
+  );
+}
+
+/** One line under the file: how many problems the file you take away still
+ *  has, opening into their list; or that it has none. */
+function ProblemsLine({
   issues,
+  open,
+  onToggle,
+}: {
+  issues: Issue[];
+  open: boolean;
+  onToggle: () => void;
+}) {
+  if (issues.length === 0) {
+    return (
+      <p className="flex min-w-0 items-center gap-2 text-[12.5px] text-slate-600">
+        <Check aria-hidden className="h-4 w-4 flex-shrink-0 text-ok" />
+        No known problems in the file you download.
+      </p>
+    );
+  }
+  return (
+    <button
+      type="button"
+      onClick={onToggle}
+      aria-expanded={open}
+      className="flex min-w-0 items-center gap-2 rounded-full text-left text-[12.5px] text-slate-700 hover:text-slate-900"
+    >
+      <CircleAlert aria-hidden className="h-4 w-4 flex-shrink-0 text-warn" />
+      <span>
+        {issues.length} {issues.length === 1 ? "thing is" : "things are"} still wrong in the file you download.
+      </span>
+      <span className="inline-flex flex-shrink-0 items-center gap-0.5 font-medium text-primary">
+        {open ? "Hide" : "Show them"}
+        <ChevronDown aria-hidden className={cn("h-3.5 w-3.5 transition-transform", open && "rotate-180")} />
+      </span>
+    </button>
+  );
+}
+
+/**
+ * Everything still wrong in the file you take away, each fixable from here:
+ * switch its fix on, open its card at the input only you can fill, or add
+ * the version. A problem leaves the list the moment the file no longer has
+ * it. Nothing here is switched on by itself (David, 2026-10-06).
+ */
+function ProblemsList({
+  issues,
+  rows,
+  ticked,
+  versionOn,
+  onApply,
+  onAddVersion,
   onGo,
 }: {
-  issues: ReturnType<typeof validate>;
-  onGo: (sellerId?: string, field?: string) => void;
+  issues: Issue[];
+  rows: SellerRow[];
+  ticked: Set<string>;
+  versionOn: boolean;
+  onApply: (sellerId: string) => void;
+  onAddVersion: () => void;
+  onGo: (sellerId?: string, field?: string, fill?: boolean) => void;
 }) {
-  // Nothing to resolve: say nothing here. The file card already says the
-  // file passes, and a green banner on top only repeated it.
-  if (issues.length === 0) return null;
+  const byId = new Map(rows.map((r) => [r.seller_id, r]));
+  const pill =
+    "flex-shrink-0 rounded-full border px-3 py-1 text-[11px] font-medium transition-colors";
   return (
-    <div className="rounded-2xl border border-warn-border bg-warn-bg/30 p-5">
-      <div className="mb-2 flex items-center gap-2">
-        <CircleAlert aria-hidden className="h-4 w-4 flex-shrink-0 text-warn" />
-        <span className="font-display text-sm font-medium text-slate-800">Needs your input</span>
-        <span className="text-[12px] text-slate-500">
-          {issues.length} {issues.length === 1 ? "thing stands" : "things stand"} between this file and a
-          compliant sellers.json
-        </span>
-      </div>
-      <ul className="divide-y divide-warn-border/60">
-        {issues.map((x) => (
-          <li key={x.key} className="flex items-center justify-between gap-3 py-2 text-[13px] text-slate-700">
-            <span className="min-w-0">{x.text}</span>
-            <button
-              type="button"
-              onClick={() => onGo(x.sellerId, x.field)}
-              className="flex-shrink-0 rounded-full border border-border bg-white px-3 py-1 text-[11px] font-medium text-slate-700 transition-colors hover:border-primary/30"
-            >
-              {x.field ? "Fill in" : "Show me"}
-            </button>
+    <ul className="mt-3 divide-y divide-border overflow-hidden rounded-xl border border-border bg-white">
+      {issues.map((x) => {
+        const row = x.sellerId !== undefined ? byId.get(x.sellerId) : undefined;
+        const needsInput = Boolean(row?.ask?.length);
+        // What the row's fix does, said on hover before it is switched on.
+        const what = row && row.kind !== "keep" ? summaryOf(row) || row.reason : "";
+        return (
+          <li key={x.key} className="flex flex-wrap items-center justify-between gap-x-3 gap-y-2 px-4 py-2.5">
+            <span className="min-w-0 flex-1 text-[12.5px] text-slate-700">{x.text}</span>
+            <span className="flex flex-shrink-0 items-center gap-2">
+              {x.field === "version" ? (
+                !versionOn && (
+                  <button type="button" onClick={onAddVersion} className={cn(pill, "border-warn bg-warn text-white hover:brightness-110")}>
+                    Add version 1.0
+                  </button>
+                )
+              ) : x.field === "contact_email" ? (
+                <button type="button" onClick={() => onGo(undefined, x.field)} className={cn(pill, "border-border bg-white text-slate-700 hover:border-primary/30")}>
+                  Fill in
+                </button>
+              ) : row && needsInput ? (
+                <button
+                  type="button"
+                  onClick={() => onGo(x.sellerId, undefined, true)}
+                  className={cn(pill, "border-border bg-white text-slate-700 hover:border-primary/30")}
+                >
+                  Fill in
+                </button>
+              ) : row && row.kind !== "keep" && !ticked.has(row.seller_id) ? (
+                <button
+                  type="button"
+                  title={what}
+                  onClick={() => onApply(row.seller_id)}
+                  className={cn(
+                    pill,
+                    row.kind === "remove"
+                      ? "border-critical bg-critical text-white hover:brightness-110"
+                      : "border-warn bg-warn text-white hover:brightness-110",
+                  )}
+                >
+                  {row.kind === "remove" ? "Remove" : "Apply fix"}
+                </button>
+              ) : null}
+              {x.sellerId !== undefined && row && (
+                <button type="button" onClick={() => onGo(x.sellerId)} className="text-[11px] font-medium text-slate-500 hover:text-primary">
+                  Show me
+                </button>
+              )}
+              {x.field === "version" && (
+                <button type="button" onClick={() => onGo(undefined, "version")} className="text-[11px] font-medium text-slate-500 hover:text-primary">
+                  Show me
+                </button>
+              )}
+            </span>
           </li>
-        ))}
-      </ul>
-    </div>
+        );
+      })}
+    </ul>
   );
 }
