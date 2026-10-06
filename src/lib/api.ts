@@ -68,22 +68,18 @@ export function onUnauthorized(handler: (() => void) | null) {
   unauthorizedHandler = handler;
 }
 
-// ── 404 fan-out (dead share token) ───────────────────────────────
-// A revoked, deleted or expired report answers 404, not 401: there is
-// no report behind the token, so there are no credentials that would
-// open it. Sending that reader to the sign-in card would have them
-// retype a password that can never work, so it trips its own handler
-// and the gate shows the expired-link card instead.
-//
-// Only the token-scoped endpoints (/v1/viewer/{token}/...) count. The
-// resolve endpoint is deliberately excluded: it has no token yet, and
-// the readable scope route already renders the expired card itself.
-let deadLinkHandler: (() => void) | null = null;
-export function onDeadLink(handler: (() => void) | null) {
-  deadLinkHandler = handler;
-}
-
-const TOKEN_SCOPED = /^\/v1\/viewer\/[^/]+\/.+$/;
+// ── No 404 fan-out, on purpose ───────────────────────────────────
+// A data call that answers 404 never swaps the report for the
+// expired-link card. The API never answers a dead link with 404 on a
+// data route: an expired or revoked token answers 401 (the session gate
+// re-resolves the token row), the reader drops back to sign-in, and
+// sign-in answers 403, which LoginCard turns into the expired-link card.
+// So a 404 here is only ever "this optional part is not in this report"
+// (sellers-fix) or "this API is older than this SPA" (a route not
+// deployed yet). Reading those as a dead link took every report down
+// twice: /export-info on 2026-09-29 and /sellers-fix on 2026-10-06.
+// A page that gets a 404 shows its own empty or error state; the gate
+// is decided by 401 and by sign-in alone. tests/no-404-trap locks it.
 
 // ── Auth epoch ───────────────────────────────────────────────────
 // Guards against a stale-401 re-lock race: a data request fired
@@ -114,11 +110,6 @@ async function req<T>(
     signal,
   });
   if (!res.ok) {
-    // A dead token: no report to sign in to, so the gate shows the
-    // expired-link card rather than the password form.
-    if (res.status === 404 && TOKEN_SCOPED.test(endpoint)) {
-      deadLinkHandler?.();
-    }
     // The auth endpoint's own 401 means "wrong credentials", not
     // "session expired": it must not re-trip the gate, only surface
     // as the form's error state.
@@ -575,9 +566,9 @@ export const api = {
    *   Discovered sheet.
    *
    *   404 is NOT the answer for an unknown line key; an empty rows array
-   *   with total 0 is, because 404 on a token-scoped path trips the
-   *   dead-share-link handler above and would throw the reader out of a
-   *   report that is perfectly alive.
+   *   with total 0 is: an unknown key is an empty answer, not a missing
+   *   route. (A 404 here no longer throws the reader out of the report;
+   *   see "No 404 fan-out" above.)
    */
   discoveredLines: async (
     token: string,
