@@ -649,6 +649,41 @@ export const api = {
     return req<DeclarationsPayload>("GET", `/v1/viewer/${token}/declarations`);
   },
   /**
+   * SELLERS.JSON FIX: the customer's own sellers.json as it stands, and
+   * every seller ID publishers list under the customer's domain. The page
+   * works out the suggestions itself (lib/sellersFix.ts) and never changes
+   * the live file; it only builds the file the reader exports.
+   *
+   * A report without the page (no validator on the plan, a trial, an older
+   * report, a file that could not be read) answers 404, and the page then
+   * stays off the rail.
+   */
+  sellersFix: async (token: string): Promise<SellersFixPayload> => {
+    if (MOCK) {
+      const m = await import("./mockSellers");
+      // `?nofile=1` shows a customer with no sellers.json yet: the page
+      // then builds one from scratch. `?noversion=1`, `?warnings=1` and `?broken=1` show the
+      // notes about a live file that is not strict JSON, or that holds a
+      // null and a number too long for a browser.
+      const q = new URLSearchParams(window.location.search);
+      let file = q.has("nofile") ? null : q.has("broken") ? m.brokenFile(m.mockSellersFile) : m.mockSellersFile;
+      // `?noversion=1`: a file whose header has no version.
+      if (file && q.has("noversion")) {
+        const { version: _drop, ...rest } = file;
+        file = rest as typeof file;
+      }
+      return {
+        domain: m.MOCK_SELLERS_DOMAIN,
+        file,
+        sightings: m.mockSellerSightings,
+        checked_at: m.MOCK_CHECKED_AT,
+        file_url: `https://${m.MOCK_SELLERS_DOMAIN}/sellers.json`,
+        file_warnings: q.has("warnings") ? m.MOCK_FILE_WARNINGS : [],
+      };
+    }
+    return req<SellersFixPayload>("GET", `/v1/viewer/${token}/sellers-fix`);
+  },
+  /**
    * SCHAIN EXPORT: what the page opens on.
    *
    * Frozen at bake time from the customer's own sellers.json: the SDKs in
@@ -1487,4 +1522,21 @@ export type SchainPreview = {
   /** App rows, or publisher rows when asked with ``view=publishers``. */
   rows: SchainRow[] | SchainPublisherRow[];
   trial?: TrialSlice | null;
+};
+
+/** GET /v1/viewer/{token}/sellers-fix: frozen with the report when the
+ *  customer's plan has the Sellers.json validator (never on a trial). */
+export type SellersFixPayload = {
+  /** The customer domain the sellers.json is published on. */
+  domain: string;
+  /** The file exactly as published; null when the domain serves none. */
+  file: import("./sellersFix").SellersFile | null;
+  /** Every line in the book naming the domain, one per seller ID and
+   *  relationship. */
+  sightings: import("./sellersFix").Sighting[];
+  /** When the file was read, and where from (after redirects). */
+  checked_at?: string | null;
+  file_url?: string | null;
+  /** What is wrong with the live file beyond its entries, in sentences. */
+  file_warnings?: string[];
 };
