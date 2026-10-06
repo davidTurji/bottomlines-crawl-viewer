@@ -27,7 +27,7 @@ import { useReportScope } from "@/lib/reportScope";
 import { PageShell } from "@/components/PageShell";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { cn, foundInLabel } from "@/lib/utils";
-import { ActionableLine, PublisherDomainLink, YIELDS_TO_PILL } from "@/components/PublisherLinks";
+import { ActionableLine, PublisherDomainLink } from "@/components/PublisherLinks";
 import { computeDelta, MiniStat, SplitStat } from "./CrawlReport";
 import { BEAT_PAUSE_MS, landsAfterMs } from "@/components/CountUp";
 
@@ -996,7 +996,7 @@ function ChangeCard({
                       screen, and "APP_ADS_TXT" is not a file name. Said as
                       a sentence, the same one every other surface uses, so
                       a bare filename is never left to explain itself. */}
-                  <span className={cn("ml-auto flex-shrink-0 text-[10px] text-slate-400", YIELDS_TO_PILL)}>
+                  <span className={"ml-auto flex-shrink-0 text-[10px] text-slate-400"}>
                     {foundInLabel(fileLabel(p.file_kind))}
                   </span>
                 </ActionableLine>
