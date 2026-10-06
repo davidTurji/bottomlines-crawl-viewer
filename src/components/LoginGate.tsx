@@ -1,12 +1,22 @@
 import { FormEvent, useEffect, useState } from "react";
-import { Lock } from "lucide-react";
+import { Eye, EyeOff, Lock } from "lucide-react";
 import AuthHero3D from "@/components/AuthHero3D";
-import { api, ApiError, MOCK, onDeadLink, onUnauthorized } from "@/lib/api";
+import { api, ApiError, MOCK, onLinkRefused, onUnauthorized } from "@/lib/api";
 import { useReportScope } from "@/lib/reportScope";
 import {
   EXPIRED_LINK_MESSAGE,
   ReportNoticeCard,
 } from "@/components/ReportNoticeCard";
+import { type LinkSignin, peekLinkSignin } from "@/lib/linkSignin";
+
+/** Remember who signed in, for the account menu (keyed by token). */
+function rememberUser(token: string, username: string) {
+  try {
+    sessionStorage.setItem(`pf.username.${token}`, username);
+  } catch {
+    // Storage blocked: the menu shows no identity line, never a fake.
+  }
+}
 
 /**
  * Username + password gate in front of the viewer.
@@ -22,7 +32,14 @@ import {
  * whole point of the dead-link branch:
  *
  *   401  the report exists, these credentials do not open it   -> form
- *   404  there is no report behind this token any more         -> card
+ *   403  the link expired, was revoked, or has no report       -> card
+ *        (404 and 410 at sign-in also lead to the card)
+ *
+ * The card is shown from two places only: sign-in refused (above), and
+ * the summary refused with 403 while still signed in (onLinkRefused in
+ * api.ts). A data call that answers 404 never does: that 404 means an
+ * optional part is not in this report, and reading it as a dead link
+ * took every report down (2026-10-06).
  *
  * A revoked or expired report used to reach the form and be told the
  * username and password did not match, which sent the reader off to
@@ -36,13 +53,24 @@ export default function LoginGate({ children }: { children: React.ReactNode }) {
   const [locked, setLocked] = useState(false);
   const [dead, setDead] = useState(false);
   const [epoch, setEpoch] = useState(0);
+  /* The weekly email's button carries the reader's sign-in (David,
+     2026-10-05): the sign-in form opens already FILLED IN, password shown,
+     so they see their username and password and sign in with one press,
+     and their browser can offer to keep them. Never a silent sign-in. */
+  const [prefill] = useState<(LinkSignin & { error: string }) | null>(() => {
+    const creds = MOCK ? null : peekLinkSignin();
+    return creds ? { ...creds, error: "" } : null;
+  });
+  useEffect(() => {
+    if (prefill) setLocked(true);
+  }, [prefill]);
 
   useEffect(() => {
     onUnauthorized(() => setLocked(true));
-    onDeadLink(() => setDead(true));
+    onLinkRefused(() => setDead(true));
     return () => {
       onUnauthorized(null);
-      onDeadLink(null);
+      onLinkRefused(null);
     };
   }, []);
 
@@ -54,6 +82,7 @@ export default function LoginGate({ children }: { children: React.ReactNode }) {
     return (
       <LoginCard
         token={token}
+        prefill={prefill}
         onAuthed={() => {
           setLocked(false);
           setEpoch((e) => e + 1);
@@ -75,17 +104,22 @@ export default function LoginGate({ children }: { children: React.ReactNode }) {
  */
 function LoginCard({
   token,
+  prefill,
   onAuthed,
   onDeadLink: onDead,
 }: {
   token: string;
+  /** The email's sign-in, when it did not open the report: shown filled in. */
+  prefill?: (LinkSignin & { error: string }) | null;
   onAuthed: () => void;
   onDeadLink: () => void;
 }) {
-  const [username, setUsername] = useState("");
-  const [password, setPassword] = useState("");
-  const [error, setError] = useState<string | null>(null);
+  const [username, setUsername] = useState(prefill?.username ?? "");
+  const [password, setPassword] = useState(prefill?.password ?? "");
+  const [error, setError] = useState<string | null>(prefill?.error ?? null);
   const [busy, setBusy] = useState(false);
+  /** Filled in from the email: shown, so the reader sees their password. */
+  const [showPassword, setShowPassword] = useState(Boolean(prefill?.password));
 
   const submit = async (e: FormEvent) => {
     e.preventDefault();
@@ -94,14 +128,10 @@ function LoginCard({
     setError(null);
     try {
       await api.auth(token, username.trim(), password);
-      try {
-        // The account menu shows WHO signed in; this is its only source.
-        // Session-scoped and keyed by token, so two reports in two tabs
-        // never borrow each other's identity.
-        sessionStorage.setItem(`pf.username.${token}`, username.trim());
-      } catch {
-        // Storage blocked: the menu shows no identity line, never a fake.
-      }
+      // The account menu shows WHO signed in; this is its only source.
+      // Session-scoped and keyed by token, so two reports in two tabs
+      // never borrow each other's identity.
+      rememberUser(token, username.trim());
       onAuthed();
     } catch (err) {
       const status = err instanceof ApiError ? err.status : 0;
@@ -209,14 +239,29 @@ function LoginCard({
                 <span className="mb-1.5 block text-xs font-medium text-slate-700">
                   Password
                 </span>
-                <input
-                  type="password"
-                  value={password}
-                  onChange={(e) => setPassword(e.target.value)}
-                  autoComplete="current-password"
-                  className="h-11 w-full rounded-md border border-border bg-card px-3.5 text-sm text-slate-900 outline-none transition-colors placeholder:text-slate-400 focus:border-primary/50 focus:ring-2 focus:ring-ring/30"
-                />
+                <span className="relative block">
+                  <input
+                    type={showPassword ? "text" : "password"}
+                    value={password}
+                    onChange={(e) => setPassword(e.target.value)}
+                    autoComplete="current-password"
+                    className="h-11 w-full rounded-md border border-border bg-card px-3.5 pr-11 text-sm text-slate-900 outline-none transition-colors placeholder:text-slate-400 focus:border-primary/50 focus:ring-2 focus:ring-ring/30"
+                  />
+                  <button
+                    type="button"
+                    onClick={() => setShowPassword((v) => !v)}
+                    aria-label={showPassword ? "Hide password" : "Show password"}
+                    className="absolute inset-y-0 right-0 flex w-11 items-center justify-center text-slate-400 hover:text-slate-700"
+                  >
+                    {showPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+                  </button>
+                </span>
               </label>
+              {prefill && !prefill.error && (
+                <p className="text-xs text-slate-500">
+                  Filled in from your email. Sign in to open the report.
+                </p>
+              )}
 
               {error && (
                 <p

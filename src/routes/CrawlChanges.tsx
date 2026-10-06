@@ -27,6 +27,7 @@ import { useReportScope } from "@/lib/reportScope";
 import { PageShell } from "@/components/PageShell";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { cn, foundInLabel } from "@/lib/utils";
+import { ActionableLine, PublisherDomainLink } from "@/components/PublisherLinks";
 import { computeDelta, MiniStat, SplitStat } from "./CrawlReport";
 import { BEAT_PAUSE_MS, landsAfterMs } from "@/components/CountUp";
 
@@ -967,24 +968,40 @@ function ChangeCard({
           <div className="scroll-y max-h-[320px] overflow-y-auto rounded-md border border-border bg-white">
             <ul className="divide-y divide-border">
               {group.publishers.map((p, i) => (
-                <li
+                // Click the row: the line is copied and this publisher's
+                // file opens at it (David, 2026-10-06). The domain itself
+                // links to their site.
+                <ActionableLine
                   key={`${p.developer_id}|${p.file_kind}|${i}`}
+                  line={{ ...group, cert_id: inlineCert ?? undefined }}
+                  publisherDomain={p.developer_domain}
+                  foundIn={fileLabel(p.file_kind)}
+                  gone={group.event === "removed" || group.event === "monitoring_stopped"}
                   className="flex items-baseline gap-3 px-3 py-1.5 text-[11px]"
                 >
-                  <span className="truncate font-mono tabular-nums text-slate-800">
-                    {p.developer_domain || `#${p.developer_id}`}
+                  {/* Never the internal id (David, 2026-10-06): the domain,
+                      else the name, else a plain word. */}
+                  <span className="min-w-0 truncate font-mono tabular-nums text-slate-800">
+                    {p.developer_domain ? (
+                      <PublisherDomainLink domain={p.developer_domain} />
+                    ) : (
+                      p.developer_name || "Unnamed publisher"
+                    )}
                   </span>
-                  <span className="hidden truncate text-slate-500 sm:inline">
-                    {p.developer_name ?? ""}
-                  </span>
+                  {p.developer_domain && p.developer_name && (
+                    <span className="hidden truncate text-slate-500 sm:inline">
+                      {p.developer_name}
+                    </span>
+                  )}
                   {/* Rendered, never the raw enum: this is a customer's
                       screen, and "APP_ADS_TXT" is not a file name. Said as
                       a sentence, the same one every other surface uses, so
                       a bare filename is never left to explain itself. */}
-                  <span className="ml-auto flex-shrink-0 text-[10px] text-slate-400">
+                  {/* The file this row opens, so it is what reads as the link. */}
+                  <span data-line-text className="ml-auto flex-shrink-0 text-[10px] text-slate-400">
                     {foundInLabel(fileLabel(p.file_kind))}
                   </span>
-                </li>
+                </ActionableLine>
               ))}
             </ul>
           </div>
@@ -1091,7 +1108,7 @@ function exportPublishers(group: ChangeGroup) {
     .join(", ");
   const header = ["publisher_domain", "publisher_name", "file", "change", "line"];
   const body = group.publishers.map((p) => [
-    p.developer_domain ?? `#${p.developer_id}`,
+    p.developer_domain ?? "",
     p.developer_name ?? "",
     fileLabel(p.file_kind),
     TONES[group.event].label,

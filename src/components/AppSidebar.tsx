@@ -73,6 +73,27 @@ export function AppSidebar() {
     };
   }, [token]);
 
+  // Does this report carry the sellers.json page? Only once the crawler
+  // freezes the customer's file (or, with none, the sellers found under
+  // their domain) with the report; until then the endpoint answers 404 and
+  // the entry stays off the rail.
+  const [hasSellers, setHasSellers] = useState(false);
+  useEffect(() => {
+    if (!token) return;
+    let alive = true;
+    api
+      .sellersFix(token)
+      .then((d) => {
+        if (alive) setHasSellers(!!d?.file || (d?.sightings?.length ?? 0) > 0);
+      })
+      .catch(() => {
+        if (alive) setHasSellers(false);
+      });
+    return () => {
+      alive = false;
+    };
+  }, [token]);
+
   /* Active nav state is signalled by a solid accent-tile fill (elevation),
      not by recoloring the text, the teal is reserved for the brand mark. */
   const getNavCls = ({ isActive }: { isActive: boolean }) =>
@@ -102,6 +123,9 @@ export function AppSidebar() {
     // resolves; this only governs the rail.
     ...(hasDiscovered
       ? [{ to: `${basePath}/discovery`, label: "Discovery", tour: "nav-discovery" }]
+      : []),
+    ...(hasSellers
+      ? [{ to: `${basePath}/sellers`, label: "Sellers.json", tour: "nav-sellers" }]
       : []),
     // Always listed (David, 2026-09-15: "by default on any crawl"). The
     // page is scoped to the customer's own domains, so "nobody names you"

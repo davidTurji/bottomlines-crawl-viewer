@@ -366,7 +366,9 @@ export default function CrawlDeclarations() {
             <LockedTail
               slice={data.trial ?? null}
               caps={summary?.trial ?? null}
-              noun="declarations"
+              // The cut is per file listing, the page groups per publisher:
+              // the tail names the unit it counts.
+              noun="file listings"
               detail="file that names your domain, who declared it and where"
             />
           )}

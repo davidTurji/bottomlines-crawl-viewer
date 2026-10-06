@@ -14,7 +14,10 @@ let moved = false;
 
 export function introMotion(): boolean {
   if (moved) return false;
-  const path = typeof window === "undefined" ? "" : window.location.pathname;
+  // The line filter lives in the query string: changing it is a move too,
+  // or every filter click would count the figures up from 0 again.
+  const path =
+    typeof window === "undefined" ? "" : window.location.pathname + window.location.search;
   if (firstPath === null) firstPath = path;
   if (path !== firstPath) moved = true;
   return !moved;

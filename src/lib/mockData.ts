@@ -319,6 +319,12 @@ export const mockSummary: Summary = {
       developers: 8_412,
       apps: 24_781,
     },
+    // Found and lost behind the net: 380 - 29 = +351 publishers,
+    // 1,702 - 61 = +1,641 apps.
+    matched_moves: {
+      developers: { found: 380, lost: 29 },
+      apps: { found: 1_702, lost: 61 },
+    },
   },
   hero_diff: {
     line_totals: { ...WEEK_TOTALS.lines },
@@ -1789,6 +1795,8 @@ export function mockSummaryFor(lines: string[]): Summary {
     counters: {
       ...base.counters,
       matched: { lines: lineTotal, developers: devs.length, apps: apps.length },
+      // Last week is never filtered, so the backend sends no found / lost.
+      matched_moves: null,
     },
     hero_diff: {
       ...base.hero_diff,

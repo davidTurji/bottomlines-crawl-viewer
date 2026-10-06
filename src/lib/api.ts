@@ -78,22 +78,27 @@ export function onUnauthorized(handler: (() => void) | null) {
   unauthorizedHandler = handler;
 }
 
-// ── 404 fan-out (dead share token) ───────────────────────────────
-// A revoked, deleted or expired report answers 404, not 401: there is
-// no report behind the token, so there are no credentials that would
-// open it. Sending that reader to the sign-in card would have them
-// retype a password that can never work, so it trips its own handler
-// and the gate shows the expired-link card instead.
+// ── Dead links: decided by the summary's 403, never by a 404 ─────
+// How the API answers a link that expired, was revoked, or has no
+// published report (viewer_v2.require_viewer_session):
+//   - no session cookie for this token: 401 on every data route; the
+//     reader drops back to sign-in, and sign-in answers 403, which
+//     LoginCard turns into the expired-link card;
+//   - still signed in (cookies last 24h): 403 on every data route.
+// Every page reads the summary, so the summary's own 403 is what shows
+// the expired-link card (see `summary` below). Only there: other routes
+// answer 403 for reasons that are not a dead link (schain downloads on a
+// trial), and that must stay the page's own error.
 //
-// Only the token-scoped endpoints (/v1/viewer/{token}/...) count. The
-// resolve endpoint is deliberately excluded: it has no token yet, and
-// the readable scope route already renders the expired card itself.
-let deadLinkHandler: (() => void) | null = null;
-export function onDeadLink(handler: (() => void) | null) {
-  deadLinkHandler = handler;
+// A 404 NEVER means a dead link. It is only ever "this optional part is
+// not in this report" (sellers-fix) or "this API is older than this SPA"
+// (a route not deployed yet). Reading those as a dead link took every
+// report down twice: /export-info on 2026-09-29 and /sellers-fix on
+// 2026-10-06. e2e/report.spec.ts locks both rules.
+let linkRefusedHandler: (() => void) | null = null;
+export function onLinkRefused(handler: (() => void) | null) {
+  linkRefusedHandler = handler;
 }
-
-const TOKEN_SCOPED = /^\/v1\/viewer\/[^/]+\/.+$/;
 
 // ── Auth epoch ───────────────────────────────────────────────────
 // Guards against a stale-401 re-lock race: a data request fired
@@ -124,11 +129,6 @@ async function req<T>(
     signal,
   });
   if (!res.ok) {
-    // A dead token: no report to sign in to, so the gate shows the
-    // expired-link card rather than the password form.
-    if (res.status === 404 && TOKEN_SCOPED.test(endpoint)) {
-      deadLinkHandler?.();
-    }
     // The auth endpoint's own 401 means "wrong credentials", not
     // "session expired": it must not re-trip the gate, only surface
     // as the form's error state.
@@ -211,9 +211,8 @@ export const api = {
     }
     const fallback: ExportInfo = { format: "xlsx", line_export: false };
     // A plain fetch, never req(): an API from before this endpoint answers
-    // 404, and req() reads a 404 on a token path as "this link is dead" and
-    // swaps the whole page for the expired-link card. Nothing that goes
-    // wrong here may touch the sign-in gate; the summary's own calls do that.
+    // 404, and whatever goes wrong here falls back to the defaults. Nothing
+    // here may touch the sign-in gate; the summary's own calls do that.
     try {
       const res = await fetch(`${BASE}/v1/viewer/${token}/export-info`, {
         credentials: "include",
@@ -254,7 +253,14 @@ export const api = {
       return trialMock() ? { ...s, trial: TRIAL_CAPS_MOCK } : s;
     }
     const q = linesQuery(lines);
-    return req<Summary>("GET", `/v1/viewer/${token}/summary${q ? `?${q.slice(1)}` : ""}`);
+    try {
+      return await req<Summary>("GET", `/v1/viewer/${token}/summary${q ? `?${q.slice(1)}` : ""}`);
+    } catch (e) {
+      // A signed-in reader whose link expired or was revoked: the API
+      // refuses the link itself with 403 (see "Dead links" above).
+      if (e instanceof ApiError && e.status === 403) linkRefusedHandler?.();
+      throw e;
+    }
   },
   /**
    * The previous week's summary for the same customer, which is what every
@@ -590,9 +596,9 @@ export const api = {
    *   Discovered sheet.
    *
    *   404 is NOT the answer for an unknown line key; an empty rows array
-   *   with total 0 is, because 404 on a token-scoped path trips the
-   *   dead-share-link handler above and would throw the reader out of a
-   *   report that is perfectly alive.
+   *   with total 0 is: an unknown key is an empty answer, not a missing
+   *   route. (A 404 here no longer throws the reader out of the report;
+   *   see "No 404 fan-out" above.)
    */
   discoveredLines: async (
     token: string,
@@ -664,6 +670,51 @@ export const api = {
       return legacy ? mockDeclarations : mockDeclarationRows;
     }
     return req<DeclarationsPayload>("GET", `/v1/viewer/${token}/declarations`);
+  },
+  /**
+   * SELLERS.JSON FIX: the customer's own sellers.json as it stands, and
+   * every seller ID publishers list under the customer's domain. The page
+   * works out the suggestions itself (lib/sellersFix.ts) and never changes
+   * the live file; it only builds the file the reader exports.
+   *
+   * A report without the page (no validator on the plan, a trial, an older
+   * report, a file that could not be read) answers 404: null here, and the
+   * page stays off the rail. Never the dead-link card.
+   */
+  sellersFix: async (token: string): Promise<SellersFixPayload | null> => {
+    if (MOCK) {
+      const m = await import("./mockSellers");
+      // `?nofile=1` shows a customer with no sellers.json yet: the page
+      // then builds one from scratch. `?noversion=1`, `?warnings=1` and `?broken=1` show the
+      // notes about a live file that is not strict JSON, or that holds a
+      // null and a number too long for a browser.
+      const q = new URLSearchParams(window.location.search);
+      let file = q.has("nofile") ? null : q.has("broken") ? m.brokenFile(m.mockSellersFile) : m.mockSellersFile;
+      // `?noversion=1`: a file whose header has no version.
+      if (file && q.has("noversion")) {
+        const { version: _drop, ...rest } = file;
+        file = rest as typeof file;
+      }
+      return {
+        domain: m.MOCK_SELLERS_DOMAIN,
+        file,
+        sightings: m.mockSellerSightings,
+        checked_at: m.MOCK_CHECKED_AT,
+        file_url: `https://${m.MOCK_SELLERS_DOMAIN}/sellers.json`,
+        file_warnings: q.has("warnings") ? m.MOCK_FILE_WARNINGS : [],
+      };
+    }
+    // A plain fetch: most reports have no Sellers.json page, and their 404
+    // means exactly that, so it is answered here as null. Before 2026-10-06
+    // req() read a 404 as a dead link, which took every report without the
+    // page down.
+    const res = await fetch(`${BASE}/v1/viewer/${token}/sellers-fix`, { credentials: "include" });
+    if (res.status === 404) return null;
+    if (!res.ok) {
+      const detail = await res.text().catch(() => "");
+      throw new ApiError(res.status, detail || `GET sellers-fix → ${res.status}`);
+    }
+    return (await res.json()) as SellersFixPayload;
   },
   /**
    * SCHAIN EXPORT: what the page opens on.
@@ -857,6 +908,9 @@ export type ExportInfo = {
   apps_rows?: number | null;
 };
 
+export type MatchedMove = { found: number; lost: number };
+export type MatchedMoves = { developers: MatchedMove; apps: MatchedMove | null };
+
 export type Summary = {
   crawl_id: number;
   /** Set on a trial report (see ``TrialCaps``); null or absent on a full one. */
@@ -879,6 +933,12 @@ export type Summary = {
     unreadable_count: number;
     developers_with_lines: number;
     matched: { lines: number; developers: number; apps: number };
+    /** How many matched publishers and apps STARTED and STOPPED matching
+     *  since the baseline. Optional: links baked before it lack the key.
+     *  Null = not computed (no baseline, or under a line filter); `apps`
+     *  alone is null when the bake had to cap an app list. A publisher the
+     *  crawl did not reach is never counted as lost. */
+    matched_moves?: MatchedMoves | null;
   };
   hero_diff: {
     line_totals: LineEventCounts;
@@ -1387,7 +1447,9 @@ export type SchainSdk = {
 export type SchainOverview = {
   /** The customer's name as their reports say it, for the file's title. */
   customer_name: string;
-  status: "ok" | "no_sellers_json" | "no_sdks";
+  /** "off": this report has no schain page; the API then sends only
+   *  `status`, every other field is absent. */
+  status: "ok" | "no_sellers_json" | "no_sdks" | "off";
   /** The customer's domain: asi2 in every chain, and the first field of
    *  the reseller line. */
   reseller_domain: string;
@@ -1495,4 +1557,21 @@ export type SchainPreview = {
   /** App rows, or publisher rows when asked with ``view=publishers``. */
   rows: SchainRow[] | SchainPublisherRow[];
   trial?: TrialSlice | null;
+};
+
+/** GET /v1/viewer/{token}/sellers-fix: frozen with the report when the
+ *  customer's plan has the Sellers.json validator (never on a trial). */
+export type SellersFixPayload = {
+  /** The customer domain the sellers.json is published on. */
+  domain: string;
+  /** The file exactly as published; null when the domain serves none. */
+  file: import("./sellersFix").SellersFile | null;
+  /** Every line in the book naming the domain, one per seller ID and
+   *  relationship. */
+  sightings: import("./sellersFix").Sighting[];
+  /** When the file was read, and where from (after redirects). */
+  checked_at?: string | null;
+  file_url?: string | null;
+  /** What is wrong with the live file beyond its entries, in sentences. */
+  file_warnings?: string[];
 };

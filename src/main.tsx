@@ -17,7 +17,9 @@ import CrawlDiscovered from "./routes/CrawlDiscovered";
 import CrawlDeclarations from "./routes/CrawlDeclarations";
 import { MOCK } from "./lib/api";
 import CrawlSchain from "./routes/CrawlSchain";
+import CrawlSellers from "./routes/CrawlSellers";
 import { installViewportLock } from "./lib/viewportLock";
+import { captureLinkSignin } from "./lib/linkSignin";
 import "./index.css";
 
 /**
@@ -57,6 +59,7 @@ const reportPages = (
     <Route path="discovery" element={<CrawlDiscovered />} />
     <Route path="declarations" element={<CrawlDeclarations />} />
     <Route path="schain" element={<CrawlSchain />} />
+    <Route path="sellers" element={<CrawlSellers />} />
     {/* The page was called "Discovered lines" and lived at /discovered
         until it was renamed. Kept as a redirect rather than dropped: a
         share link a customer already has in their inbox must not break
@@ -114,6 +117,10 @@ const tree = (
 // Before first paint: a report that can be pinched or force-zoomed by a
 // focused input pans out from under the reader and never recovers.
 installViewportLock();
+
+// The weekly email's button carries the sign-in after "#": read it and wipe
+// it from the address before anything renders (lib/linkSignin.ts).
+captureLinkSignin();
 
 ReactDOM.createRoot(document.getElementById("root")!).render(
   <React.StrictMode>{tree}</React.StrictMode>,
