@@ -28,6 +28,8 @@ import {
   type MatchedApp,
   type MatchedSeatLine,
   type LineEvent,
+  type MatchedMove,
+  type MatchedMoves,
 } from "../lib/api";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import {
@@ -191,6 +193,9 @@ export default function CrawlReport() {
   const filtered = lines.length > 0;
   const prevMatchedDevs = filtered ? null : (previous?.counters.matched.developers ?? null);
   const prevMatchedApps = filtered ? null : (previous?.counters.matched.apps ?? null);
+  // Found and lost behind the net, when the report carries them (David,
+  // 2026-10-05: "+351" alone hides the 380 we found). Never under a filter.
+  const moves = filtered ? null : (summary.counters.matched_moves ?? null);
 
   // Last week's OWN added/removed totals, so "+32 lines added" can say
   // whether 32 is a busy week or a quiet one. Comparing this week's added
@@ -234,14 +239,21 @@ export default function CrawlReport() {
             Week of {weekLabel}
             {prevWeekLabel && `, compared with ${prevWeekLabel}`}.
           </p>
-          <WeeklyWin
-            publishers={matchedDevs}
-            apps={matchedApps}
-            publishersDelta={matchedDevsDelta}
-            appsDelta={matchedAppsDelta}
-            firstCrawl={isFirstCrawl}
-            filtered={filtered}
-          />
+          {refreshing ? (
+            // The figures below are reloading for a new line selection;
+            // a sentence about the old one would be wrong for a moment.
+            <div aria-hidden className="mt-3 h-5 w-full max-w-md animate-pulse rounded bg-muted" />
+          ) : (
+            <WeeklyWin
+              publishers={matchedDevs}
+              apps={matchedApps}
+              publishersDelta={matchedDevsDelta}
+              appsDelta={matchedAppsDelta}
+              moves={moves}
+              firstCrawl={isFirstCrawl}
+              filtered={filtered}
+            />
+          )}
         </div>
         <div className="flex flex-wrap items-center gap-2">
           <LineFilter
@@ -400,6 +412,7 @@ export default function CrawlReport() {
               delayMs={secondBeat}
               delta={matchedDevsDelta}
               previous={prevMatchedDevs}
+              move={moves?.developers ?? null}
               note={filtered ? "under the selected lines" : undefined}
               active={matchedView === "publishers"}
               onClick={() => {
@@ -415,6 +428,7 @@ export default function CrawlReport() {
               delayMs={secondBeat}
               delta={matchedAppsDelta}
               previous={prevMatchedApps}
+              move={moves?.apps ?? null}
               note={filtered ? "under the selected lines" : undefined}
               active={matchedView === "apps"}
               onClick={() => {
@@ -505,6 +519,7 @@ function WeeklyWin({
   apps,
   publishersDelta,
   appsDelta,
+  moves,
   firstCrawl,
   filtered,
 }: {
@@ -512,6 +527,9 @@ function WeeklyWin({
   apps: number;
   publishersDelta: Delta | null;
   appsDelta: Delta | null;
+  /** Found / lost from the report, when it carries them: the headline then
+   *  says how many we FOUND, not the net. */
+  moves: MatchedMoves | null;
   firstCrawl: boolean;
   filtered: boolean;
 }) {
@@ -523,6 +541,8 @@ function WeeklyWin({
   const plural = (n: number, one: string, many: string) => (n === 1 ? one : many);
   const morePubs = publishersDelta && publishersDelta.abs > 0 ? publishersDelta.abs : 0;
   const moreApps = appsDelta && appsDelta.abs > 0 ? appsDelta.abs : 0;
+  const foundPubs = moves?.developers?.found ?? 0;
+  const foundApps = moves?.apps?.found ?? null;
 
   let line: ReactNode;
   if (filtered) {
@@ -539,6 +559,25 @@ function WeeklyWin({
         {app(apps)} {plural(apps, "app", "apps")} carrying your seats.
       </>
     );
+  } else if (moves && (foundPubs > 0 || (foundApps ?? 0) > 0)) {
+    // What we FOUND, not the net: the value of the week (David, 2026-10-05).
+    line =
+      foundPubs === 0 ? (
+        <>
+          This week we found {app(foundApps ?? 0)} new {plural(foundApps ?? 0, "app", "apps")}{" "}
+          carrying your seats, across {pub(publishers)} {plural(publishers, "publisher", "publishers")}.
+        </>
+      ) : foundApps != null && foundApps > 0 ? (
+        <>
+          This week we found {pub(foundPubs)} new {plural(foundPubs, "publisher", "publishers")} and{" "}
+          {app(foundApps)} new {plural(foundApps, "app", "apps")} carrying your seats.
+        </>
+      ) : (
+        <>
+          This week we found {pub(foundPubs)} new {plural(foundPubs, "publisher", "publishers")}{" "}
+          carrying your seats, {app(apps)} {plural(apps, "app", "apps")} in all.
+        </>
+      );
   } else if (morePubs > 0 && moreApps > 0) {
     line = (
       <>
@@ -801,11 +840,14 @@ export function MatchedTile({
   delta,
   previous,
   note,
+  move,
   active,
   onClick,
   delayMs = 0,
 }: {
   tone: "publisher" | "app";
+  /** Found / lost behind the net, said under it when the report has them. */
+  move?: MatchedMove | null;
   icon: typeof Globe;
   number: number;
   label: string;
@@ -838,7 +880,7 @@ export function MatchedTile({
       onClick={onClick}
       aria-pressed={active}
       className={cn(
-        "flex flex-wrap items-start justify-between gap-x-4 gap-y-3 rounded-xl border px-5 py-4 text-left shadow-sm transition-colors sm:flex-nowrap",
+        "flex flex-wrap items-start justify-between gap-x-4 gap-y-3 rounded-xl border px-5 py-4 text-left shadow-sm transition-colors xl:flex-nowrap",
         active ? activeGround : idleGround,
       )}
     >
@@ -876,7 +918,7 @@ export function MatchedTile({
       {wordy && (
         <span
           key={number}
-          className="flex w-full flex-col items-start gap-1 sm:w-auto sm:items-end sm:text-right"
+          className="flex w-full flex-col items-start gap-1 xl:w-auto xl:items-end xl:text-right"
           // The week's move is the payoff: it rises in once the count lands.
           style={payoffStyle(delayMs + landsAfterMs())}
         >
@@ -889,7 +931,7 @@ export function MatchedTile({
             {delta.abs > 0 ? "+" : delta.abs < 0 ? "-" : ""}
             {Math.abs(delta.abs).toLocaleString()}
           </span>
-          <span className="flex items-baseline gap-1 whitespace-nowrap text-[11px] leading-[15px] text-slate-500 sm:flex-col sm:items-end sm:gap-0">
+          <span className="flex items-baseline gap-1 whitespace-nowrap text-[11px] leading-[15px] text-slate-500 xl:flex-col xl:items-end xl:gap-0">
             {delta.abs !== 0 && (
               <span className={cn("font-mono font-medium tabular-nums", moveCls)}>
                 {pctText(delta.pct)}
@@ -897,6 +939,24 @@ export function MatchedTile({
             )}
             <span>{delta.abs === 0 ? "no change" : "vs last week"}</span>
           </span>
+          {move && (move.found > 0 || move.lost > 0) && (
+            // Behind the net, in plain words: what we found and what went.
+            <span className="text-[11px] leading-[15px] text-slate-500">
+              <span className="font-mono font-medium tabular-nums text-ok">
+                {move.found.toLocaleString()}
+              </span>{" "}
+              found,{" "}
+              <span
+                className={cn(
+                  "font-mono font-medium tabular-nums",
+                  move.lost > 0 ? "text-critical" : "text-slate-500",
+                )}
+              >
+                {move.lost.toLocaleString()}
+              </span>{" "}
+              lost
+            </span>
+          )}
         </span>
       )}
     </button>
@@ -1440,7 +1500,7 @@ function PublisherCard({
   onToggle: () => void;
 }) {
   const initial = (
-    (row.developer_name ?? row.developer_domain ?? "?")
+    (row.developer_name || row.developer_domain || "?")
       .replace(/^www\./i, "")
       .charAt(0) || "?"
   ).toUpperCase();
@@ -1474,7 +1534,10 @@ function PublisherCard({
         <div className="min-w-0 flex-1">
           <div className="flex min-w-0 items-baseline gap-2">
             <span className="truncate text-base font-semibold tracking-tight text-slate-900">
-              {row.developer_name ?? `Publisher #${row.developer_id}`}
+              {/* Never the internal id (David, 2026-10-06: a customer read
+                  "Publisher #567486"): the name, else the domain, else a
+                  plain word. The API names every row it can. */}
+              {row.developer_name || row.developer_domain || "Unnamed publisher"}
             </span>
             {row.developer_platform && (
               <span className="flex-shrink-0 text-[11px] text-slate-400">
@@ -1482,7 +1545,7 @@ function PublisherCard({
               </span>
             )}
           </div>
-          {row.developer_domain && (
+          {row.developer_domain && row.developer_name && (
             <div className="truncate text-xs text-slate-500">
               {row.developer_domain}
             </div>

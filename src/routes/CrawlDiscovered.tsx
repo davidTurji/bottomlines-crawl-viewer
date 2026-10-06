@@ -290,8 +290,8 @@ export default function CrawlDiscovered() {
               did not say what they count. */}
           <div
             className={cn(
-              "grid grid-cols-1 gap-px overflow-hidden rounded-xl border border-border bg-border",
-              newLines != null ? "sm:grid-cols-[1.4fr_1fr_1fr]" : "sm:grid-cols-2",
+              "grid gap-px overflow-hidden rounded-xl border border-border bg-border",
+              newLines != null ? "grid-cols-1 sm:grid-cols-[1.4fr_1fr_1fr]" : "grid-cols-2",
             )}
           >
             {newLines != null && (
