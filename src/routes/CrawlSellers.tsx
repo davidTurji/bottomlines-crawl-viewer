@@ -757,17 +757,20 @@ function ListingWindow({ row, domain, group }: { row: SellerRow; domain: string;
   const w = WINDOW[group];
   const cap = 6;
   const shown = row.listings.slice(0, cap);
-  const extra = row.listings.length - shown.length;
+  // The whole count, not the list's length: the list may be the first of
+  // many.
+  const total = Math.max(row.listingsTotal ?? 0, row.listings.length);
+  const extra = total - shown.length;
   return (
     <section className={cn("overflow-hidden rounded-lg border bg-white shadow-sm", w.border)}>
       <div className={cn("flex items-baseline justify-between gap-2 border-b px-3 py-1.5", w.border, w.head)}>
         <span className={cn("flex items-baseline gap-1.5 text-xs font-medium", w.text)}>
           <span className="font-mono">{w.glyph}</span>
-          {row.listings.length ? "Lines naming this seller" : "No line names this seller"}
+          {total ? "Lines naming this seller" : "No line names this seller"}
         </span>
-        <span className={cn("font-mono text-[11px] font-semibold tabular-nums", w.text)}>{row.listings.length}</span>
+        <span className={cn("font-mono text-[11px] font-semibold tabular-nums", w.text)}>{total.toLocaleString()}</span>
       </div>
-      {row.listings.length === 0 ? (
+      {total === 0 ? (
         <p className="px-3 py-2 text-[11px] text-slate-500">
           No ads.txt or app-ads.txt we crawled carries{" "}
           <code className="font-mono text-slate-700">
@@ -789,7 +792,7 @@ function ListingWindow({ row, domain, group }: { row: SellerRow; domain: string;
           ))}
         </ul>
       )}
-      {extra > 0 && <p className="border-t border-border px-3 py-1 text-[10px] text-slate-500">Plus {extra} more.</p>}
+      {extra > 0 && <p className="border-t border-border px-3 py-1 text-[10px] text-slate-500">Plus {extra.toLocaleString()} more.</p>}
     </section>
   );
 }

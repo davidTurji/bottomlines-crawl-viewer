@@ -48,7 +48,10 @@ export type SellersFile = {
 export type Sighting = {
   seller_id: string;
   relationship: "DIRECT" | "RESELLER";
+  /** The first publishers carrying it (the backend keeps up to fifty). */
   publishers: { domain: string; name?: string | null; found_in: string }[];
+  /** How many publishers carry it, always whole; the list above may be cut. */
+  publishers_total?: number;
 };
 
 /** One field the fix changes. ``to: null`` drops the key from the entry. */
@@ -74,6 +77,8 @@ export type SellerRow = {
   /** Every ads.txt / app-ads.txt line naming this ID, one per publisher
    *  and relationship, so the page can print them as lines. */
   listings: Listing[];
+  /** How many lines name it in all; ``listings`` may be the first of them. */
+  listingsTotal?: number;
   /** A duplicate ID's other entries, which the fix takes out of the file
    *  (the kept one is ``current``). */
   dropped?: Seller[];
@@ -125,9 +130,10 @@ function plural(n: number, one: string, many: string) {
   return `${n.toLocaleString()} ${n === 1 ? one : many}`;
 }
 
-function names(list: string[], max = 2) {
-  if (list.length <= max) return list.join(" and ");
-  return `${list.slice(0, max).join(", ")} and ${plural(list.length - max, "more", "more")}`;
+/** The first publishers by name and how many more, out of ``total``. */
+function names(list: string[], total = list.length, max = 2) {
+  if (total <= max && list.length >= total) return list.join(" and ");
+  return `${list.slice(0, max).join(", ")} and ${plural(total - Math.min(max, list.length), "more", "more")}`;
 }
 
 function expectedType(direct: string[], reseller: string[]): SellerType {
@@ -146,14 +152,22 @@ function nameFrom(domain: string) {
 }
 
 export function suggest(file: SellersFile, sightings: Sighting[], ownDomain: string): SellerRow[] {
-  const seen = new Map<string, { direct: Set<string>; reseller: Set<string>; names: Map<string, string>; listings: Listing[] }>();
+  // Per ID: the publishers we were sent, and how many there are in all
+  // (the sent list may be the first of them; a count is never read off it).
+  const seen = new Map<
+    string,
+    { direct: Set<string>; reseller: Set<string>; dN: number; rN: number; names: Map<string, string>; listings: Listing[] }
+  >();
   for (const s of sightings) {
-    const id = String(s.seller_id);
+    const id = String(s.seller_id).trim();
     let e = seen.get(id);
     if (!e) {
-      e = { direct: new Set(), reseller: new Set(), names: new Map(), listings: [] };
+      e = { direct: new Set(), reseller: new Set(), dN: 0, rN: 0, names: new Map(), listings: [] };
       seen.set(id, e);
     }
+    const total = Math.max(Number(s.publishers_total ?? 0), s.publishers.length);
+    if (s.relationship === "DIRECT") e.dN += total;
+    else e.rN += total;
     for (const p of s.publishers) {
       const d = norm(p.domain);
       if (!d) continue;
@@ -200,6 +214,8 @@ export function suggest(file: SellersFile, sightings: Sighting[], ownDomain: str
     const e = seen.get(id);
     const direct = e ? [...e.direct].sort() : [];
     const reseller = e ? [...e.reseller].sort() : [];
+    const dN = e ? Math.max(e.dN, direct.length) : 0;
+    const rN = e ? Math.max(e.rN, reseller.length) : 0;
     // The entry kept: the one publishers agree with, else the most complete,
     // else the first.
     const complete = (x: Seller) =>
@@ -245,10 +261,10 @@ export function suggest(file: SellersFile, sightings: Sighting[], ownDomain: str
         "seller_type",
         want,
         want === "BOTH"
-          ? `Listed as DIRECT by ${plural(direct.length, "publisher", "publishers")} and as RESELLER by ${reseller.length.toLocaleString()}, so BOTH.`
+          ? `Listed as DIRECT by ${plural(dN, "publisher", "publishers")} and as RESELLER by ${rN.toLocaleString()}, so BOTH.`
           : want === "INTERMEDIARY"
-            ? `Only ever listed as RESELLER (by ${plural(reseller.length, "publisher", "publishers")}), so INTERMEDIARY.`
-            : `Only ever listed as DIRECT (by ${names(direct)}), so PUBLISHER.`,
+            ? `Only ever listed as RESELLER (by ${plural(rN, "publisher", "publishers")}), so INTERMEDIARY.`
+            : `Only ever listed as DIRECT (by ${names(direct, dN)}), so PUBLISHER.`,
       );
     } else if (!want && ADSTXT_TYPE[typed]) {
       change("seller_type", ADSTXT_TYPE[typed], `The seller_type is written ${cur.seller_type}, the ads.txt word; sellers.json says ${ADSTXT_TYPE[typed]}.`);
@@ -273,7 +289,7 @@ export function suggest(file: SellersFile, sightings: Sighting[], ownDomain: str
       const needsDomain = finalType !== "INTERMEDIARY";
       // The domain is only knowable for the seller who owns the inventory,
       // and only when exactly one publisher lists the ID as DIRECT.
-      if (needsDomain && direct.length === 1 && clean !== direct[0]) {
+      if (needsDomain && dN === 1 && direct.length === 1 && clean !== direct[0]) {
         change(
           "domain",
           direct[0],
@@ -304,7 +320,7 @@ export function suggest(file: SellersFile, sightings: Sighting[], ownDomain: str
 
       const name = String(cur.name ?? "");
       if (!name.trim()) {
-        const known = direct.length === 1 ? (e?.names.get(direct[0]) ?? null) : null;
+        const known = dN === 1 && direct.length === 1 ? (e?.names.get(direct[0]) ?? null) : null;
         if (known) {
           change("name", known, `Your file has no name for it; ${direct[0]} calls itself ${known}.`);
         } else {
@@ -344,6 +360,7 @@ export function suggest(file: SellersFile, sightings: Sighting[], ownDomain: str
         direct,
         reseller,
         listings: e?.listings ?? [],
+        listingsTotal: dN + rN,
       });
       continue;
     }
@@ -365,6 +382,7 @@ export function suggest(file: SellersFile, sightings: Sighting[], ownDomain: str
       direct,
       reseller,
       listings: e?.listings ?? [],
+      listingsTotal: dN + rN,
       ...(dropped.length ? { dropped } : {}),
       ...(ask.length ? { ask } : {}),
     });
@@ -375,8 +393,11 @@ export function suggest(file: SellersFile, sightings: Sighting[], ownDomain: str
     const e = seen.get(id)!;
     const direct = [...e.direct].sort();
     const reseller = [...e.reseller].sort();
+    const dN = Math.max(e.dN, direct.length);
+    const rN = Math.max(e.rN, reseller.length);
+    const listingsTotal = dN + rN;
     const type = expectedType(direct, reseller);
-    if (direct.length === 1) {
+    if (dN === 1 && direct.length === 1) {
       const domain = direct[0];
       rows.push({
         seller_id: id,
@@ -389,19 +410,21 @@ export function suggest(file: SellersFile, sightings: Sighting[], ownDomain: str
         direct,
         reseller,
         listings: e.listings,
+        listingsTotal,
       });
-    } else if (direct.length > 1) {
+    } else if (dN > 1) {
       rows.push({
         seller_id: id,
         kind: "add",
         current: null,
         suggested: { seller_id: id, name: "", seller_type: type },
         changes: [],
-        reason: `Listed as DIRECT by ${plural(direct.length, "publisher", "publishers")} (${names(direct)}), but missing from your file. Fill in who it is before adding.`,
+        reason: `Listed as DIRECT by ${plural(dN, "publisher", "publishers")} (${names(direct, dN)}), but missing from your file. Fill in who it is before adding.`,
         defaultOn: false,
         direct,
         reseller,
         listings: e.listings,
+        listingsTotal,
       });
     } else {
       rows.push({
@@ -410,11 +433,12 @@ export function suggest(file: SellersFile, sightings: Sighting[], ownDomain: str
         current: null,
         suggested: { seller_id: id, name: "", seller_type: "INTERMEDIARY" },
         changes: [],
-        reason: `Listed as RESELLER by ${plural(reseller.length, "publisher", "publishers")}, but missing from your file. We can't tell who the reseller is, so name and domain are left for you.`,
+        reason: `Listed as RESELLER by ${plural(rN, "publisher", "publishers")}, but missing from your file. We can't tell who the reseller is, so name and domain are left for you.`,
         defaultOn: false,
         direct,
         reseller,
         listings: e.listings,
+        listingsTotal,
       });
     }
   }

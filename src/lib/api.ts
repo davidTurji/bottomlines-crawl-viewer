@@ -654,8 +654,9 @@ export const api = {
    * works out the suggestions itself (lib/sellersFix.ts) and never changes
    * the live file; it only builds the file the reader exports.
    *
-   * Mock only for now. A live report answers 404 until the crawler freezes
-   * these two with the report, and the page then stays off the rail.
+   * A report without the page (no validator on the plan, a trial, an older
+   * report, a file that could not be read) answers 404, and the page then
+   * stays off the rail.
    */
   sellersFix: async (token: string): Promise<SellersFixPayload> => {
     if (MOCK) {
@@ -1508,11 +1509,16 @@ export type SchainPreview = {
   trial?: TrialSlice | null;
 };
 
-/** GET /v1/viewer/{token}/sellers-fix (not on the backend yet). */
+/** GET /v1/viewer/{token}/sellers-fix: frozen with the report when the
+ *  customer's plan has the Sellers.json validator (never on a trial). */
 export type SellersFixPayload = {
   /** The customer domain the sellers.json is published on. */
   domain: string;
-  /** Null when the customer publishes no sellers.json yet. */
+  /** The file exactly as published; null when the domain serves none. */
   file: import("./sellersFix").SellersFile | null;
+  /** Every line in the book naming the domain, one per seller ID and
+   *  relationship. */
   sightings: import("./sellersFix").Sighting[];
+  /** When the file was read. */
+  checked_at?: string | null;
 };
