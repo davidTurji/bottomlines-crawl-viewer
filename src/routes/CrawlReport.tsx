@@ -43,7 +43,7 @@ import InlineAskAI from "@/components/InlineAskAI";
 import { PageShell } from "@/components/PageShell";
 import { formatWeek } from "@/components/WeekLine";
 import { cn, foundInLabel, storeLabel } from "@/lib/utils";
-import { ActionableLine, PublisherDomainLink } from "@/components/PublisherLinks";
+import { ActionableLine, PublisherAvatarLink, PublisherDomainLink } from "@/components/PublisherLinks";
 import { useReportScope } from "@/lib/reportScope";
 
 const OVERVIEW_SUGGESTIONS = [
@@ -1512,6 +1512,9 @@ function PublisherCard({
   // fall back to the lazy per-publisher fetch the shipped viewer used, which
   // restores the flat matched-seat-lines list. The check is on the ARRAYS, not
   // the change counts: absent arrays are the real-data signal.
+  // The circle, the name and the domain are one link to the publisher's
+  // site: hovering any of them lights the circle and the name together.
+  const [siteHover, setSiteHover] = useState(false);
   const hasEmbeddedLines =
     row.matched_lines.length > 0 ||
     row.added_lines.length > 0 ||
@@ -1540,9 +1543,22 @@ function PublisherCard({
         }}
         className="flex w-full cursor-pointer items-center gap-4 px-4 py-4 text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-primary/30 sm:px-5"
       >
-        <div className="flex h-11 w-11 flex-shrink-0 items-center justify-center rounded-full bg-accent text-base font-semibold text-primary">
-          {initial}
-        </div>
+        {row.developer_domain ? (
+          <PublisherAvatarLink
+            domain={row.developer_domain}
+            name={row.developer_name || row.developer_domain}
+            hover={siteHover}
+            onHoverChange={setSiteHover}
+          >
+            <div className="flex h-11 w-11 items-center justify-center rounded-full bg-accent text-base font-semibold text-primary">
+              {initial}
+            </div>
+          </PublisherAvatarLink>
+        ) : (
+          <div className="flex h-11 w-11 flex-shrink-0 items-center justify-center rounded-full bg-accent text-base font-semibold text-primary">
+            {initial}
+          </div>
+        )}
         <div className="min-w-0 flex-1">
           <div className="flex min-w-0 items-baseline gap-2">
             <span className="truncate text-base font-semibold tracking-tight text-slate-900">
@@ -1554,6 +1570,8 @@ function PublisherCard({
                 <PublisherDomainLink
                   domain={row.developer_domain}
                   label={row.developer_name || row.developer_domain}
+                  active={siteHover}
+                  onHoverChange={setSiteHover}
                 />
               ) : (
                 row.developer_name || "Unnamed publisher"

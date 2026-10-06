@@ -99,11 +99,17 @@ export function PublisherDomainLink({
   domain,
   label,
   className,
+  active = false,
+  onHoverChange,
 }: {
   domain: string;
   /** What the link reads: the publisher's name, or by default the domain. */
   label?: string;
   className?: string;
+  /** Show the hover look without the pointer on it: the publisher's circle,
+   *  hovered, lights its name up as the link it is. */
+  active?: boolean;
+  onHoverChange?: (hovering: boolean) => void;
 }) {
   const stop = (e: MouseEvent | KeyboardEvent) => e.stopPropagation();
   return (
@@ -113,17 +119,75 @@ export function PublisherDomainLink({
       rel="noopener noreferrer"
       onClick={stop}
       onKeyDown={stop}
+      onMouseEnter={() => onHoverChange?.(true)}
+      onMouseLeave={() => onHoverChange?.(false)}
       title={`Open ${host(domain)} in a new tab`}
       className={cn(
         "group/domain inline-flex max-w-full items-center gap-0.5 truncate rounded-sm underline-offset-2 transition-colors hover:text-primary hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40",
+        active && "text-primary underline",
         className,
       )}
     >
       <span className="truncate">{label ?? domain}</span>
       <ArrowUpRight
         aria-hidden
-        className="h-3 w-3 flex-shrink-0 opacity-0 transition-opacity group-hover/domain:opacity-100 group-focus-visible/domain:opacity-100"
+        className={cn(
+          "h-3 w-3 flex-shrink-0 opacity-0 transition-opacity group-hover/domain:opacity-100 group-focus-visible/domain:opacity-100",
+          active && "opacity-100",
+        )}
       />
+    </a>
+  );
+}
+
+/**
+ * The publisher's circle as a link to their site. Hovering it (or their
+ * name) lights both up, so it reads as one link: `hover` is shared state
+ * the card holds.
+ */
+export function PublisherAvatarLink({
+  domain,
+  name,
+  hover,
+  onHoverChange,
+  children,
+  className,
+}: {
+  domain: string;
+  name: string;
+  hover: boolean;
+  onHoverChange: (hovering: boolean) => void;
+  children: React.ReactNode;
+  className?: string;
+}) {
+  const stop = (e: MouseEvent | KeyboardEvent) => e.stopPropagation();
+  return (
+    <a
+      href={siteUrl(domain)}
+      target="_blank"
+      rel="noopener noreferrer"
+      tabIndex={-1}
+      aria-label={`Open ${name}'s site, ${host(domain)}, in a new tab`}
+      onClick={stop}
+      onKeyDown={stop}
+      onMouseEnter={() => onHoverChange(true)}
+      onMouseLeave={() => onHoverChange(false)}
+      className={cn(
+        "relative flex-shrink-0 rounded-full transition-shadow",
+        hover && "ring-2 ring-primary/40 ring-offset-2 ring-offset-white",
+        className,
+      )}
+    >
+      {children}
+      <span
+        aria-hidden
+        className={cn(
+          "absolute -right-0.5 -top-0.5 flex h-4 w-4 items-center justify-center rounded-full bg-primary text-white shadow-sm transition-all duration-200",
+          hover ? "scale-100 opacity-100" : "scale-75 opacity-0",
+        )}
+      >
+        <ArrowUpRight className="h-2.5 w-2.5" />
+      </span>
     </a>
   );
 }
