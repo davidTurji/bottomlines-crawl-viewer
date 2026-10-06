@@ -1500,7 +1500,7 @@ function PublisherCard({
   onToggle: () => void;
 }) {
   const initial = (
-    (row.developer_name ?? row.developer_domain ?? "?")
+    (row.developer_name || row.developer_domain || "?")
       .replace(/^www\./i, "")
       .charAt(0) || "?"
   ).toUpperCase();
