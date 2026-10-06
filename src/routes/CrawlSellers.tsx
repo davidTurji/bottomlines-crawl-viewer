@@ -549,30 +549,36 @@ export default function CrawlSellers() {
             {/* WHAT IS STILL WRONG IN THE FILE YOU TAKE AWAY, one line that
                 opens into the list, each problem fixable from where it is
                 (David, 2026-10-06: the box on top only repeated the cards). */}
-            <div className="mt-4 flex flex-wrap items-center justify-between gap-3">
+            <div
+              className={cn(
+                "mt-4 overflow-hidden rounded-xl border",
+                issues.length ? "border-warn-border bg-warn-bg/40" : "border-ok-border bg-ok-bg/40",
+              )}
+            >
               <ProblemsLine issues={issues} open={problemsOpen} onToggle={() => setProblemsOpen((v) => !v)} />
+              <Collapse open={problemsOpen && issues.length > 0}>
+                <ProblemsList
+                  issues={issues}
+                  rows={rows}
+                  ticked={ticked}
+                  versionOn={Boolean(headerPatch.version)}
+                  onApply={(id) => setOn([id], true)}
+                  onAddVersion={() => setHeaderPatch({ version: "1.0" })}
+                  onGo={goTo}
+                />
+              </Collapse>
+            </div>
+            <div className="mt-3 flex flex-wrap items-center justify-between gap-3">
+              <p className="min-w-0 flex-1 text-[12px] text-slate-500">
+                {!creating && readOn
+                  ? `Built on your file as read on ${readOn}. If you changed it since, check those changes are still in this one before you publish it.`
+                  : ""}
+              </p>
               <div className="flex flex-wrap items-center gap-2">
                 <CopyButton text={exportText} label={creating ? "Copy new file" : "Copy fixed file"} disabled={blocked} />
                 <ExportButton onClick={download} label={creating ? "Download new sellers.json" : "Download fixed sellers.json"} disabled={blocked} />
               </div>
             </div>
-            <Collapse open={problemsOpen && issues.length > 0}>
-              <ProblemsList
-                issues={issues}
-                rows={rows}
-                ticked={ticked}
-                versionOn={Boolean(headerPatch.version)}
-                onApply={(id) => setOn([id], true)}
-                onAddVersion={() => setHeaderPatch({ version: "1.0" })}
-                onGo={goTo}
-              />
-            </Collapse>
-            {!creating && readOn && (
-              <p className="mt-3 text-[12px] text-slate-500">
-                Built on your file as read on {readOn}. If you changed it since, check those changes are
-                still in this one before you publish it.
-              </p>
-            )}
           </div>
         </>
       )}
@@ -625,21 +631,25 @@ function SuggestionGroup({
   const shown = showAll ? rows : rows.slice(0, PEEK);
   const ids = rows.map((r) => r.seller_id);
   // Each group in its own card (David, 2026-10-06: Add, Fix and Remove
-  // apart, each in a wrapper), its controls in the card's head.
+  // apart, each in a wrapper), in the report's own card grammar: the KPI
+  // card's head (a quiet title and a line under it) over one bordered
+  // list of plain rows, never boxes inside a box.
   return (
-    <section className="overflow-hidden rounded-2xl border border-border bg-white shadow-sm">
-      <div className="flex flex-wrap items-center justify-between gap-2 border-b border-border px-4 py-3">
-        <h2 className="flex items-center gap-2 font-display text-[15px] font-semibold tracking-tight text-slate-900">
-          <span className={cn("flex h-5 w-5 items-center justify-center rounded-full", g.disc)}>
-            <Icon aria-hidden className="h-3 w-3" strokeWidth={2.5} />
-          </span>
-          {g.title}
-          <span className="font-mono text-[13px] font-medium tabular-nums text-slate-400">{total}</span>
-        </h2>
-        <div className="flex items-center gap-3 text-[12px] text-slate-500">
-          <span>
+    <section className="rounded-2xl border border-border bg-white p-5 shadow-sm">
+      <div className="mb-3 flex flex-wrap items-start justify-between gap-3">
+        <div className="min-w-0">
+          <h2 className="flex items-center gap-2 font-display text-sm font-medium text-slate-700">
+            <span className={cn("flex h-4 w-4 items-center justify-center rounded-full", g.disc)}>
+              <Icon aria-hidden className="h-2.5 w-2.5" strokeWidth={3} />
+            </span>
+            {g.title}
+            <span className="font-mono text-[12px] font-normal tabular-nums text-slate-400">{total}</span>
+          </h2>
+          <div className="text-[11px] text-slate-500">
             {taken} of {total} going into your file
-          </span>
+          </div>
+        </div>
+        <div className="flex items-center gap-3 text-xs text-slate-500">
           <button
             type="button"
             onClick={() => {
@@ -671,7 +681,7 @@ function SuggestionGroup({
           />
         </div>
       </div>
-      <div className="space-y-2 bg-slate-50/60 p-3">
+      <div className="divide-y divide-border overflow-hidden rounded-xl border border-border">
         {headerFix && <VersionCard on={headerFix.on} onSet={headerFix.onSet} />}
         {shown.map((r, i) => (
           <Settle key={r.seller_id} index={i}>
@@ -691,17 +701,17 @@ function SuggestionGroup({
             />
           </Settle>
         ))}
-        {rows.length > PEEK && (
-          <button
-            type="button"
-            onClick={onShowAll}
-            className="inline-flex items-center gap-1 px-1 pt-0.5 text-[12px] font-medium text-slate-600 hover:text-primary"
-          >
-            {showAll ? "Show fewer" : `Show all ${rows.length}`}
-            <ChevronDown aria-hidden className={cn("h-3.5 w-3.5 transition-transform", showAll && "rotate-180")} />
-          </button>
-        )}
       </div>
+      {rows.length > PEEK && (
+        <button
+          type="button"
+          onClick={onShowAll}
+          className="mt-3 inline-flex items-center gap-1 text-xs font-medium text-slate-600 hover:text-primary"
+        >
+          {showAll ? "Show fewer" : `Show all ${rows.length}`}
+          <ChevronDown aria-hidden className={cn("h-3.5 w-3.5 transition-transform", showAll && "rotate-180")} />
+        </button>
+      )}
     </section>
   );
 }
@@ -782,16 +792,15 @@ function SuggestionCard({
     <div
       id={`seller-${row.seller_id}`}
       className={cn(
-        "relative scroll-mt-24 overflow-hidden rounded-xl border shadow-sm transition-colors",
-        // Plain hairline and white either way (David, 2026-10-05: the
-        // coloured outlines were too loud). Off is where every card starts
-        // (2026-10-06), so it is not dimmed or tagged; the filled choice on
-        // the right says which way it went. Taken, an issue warms the edge.
-        "border-border bg-white",
-        flagged && on && "border-warn-border",
+        // A row of the group's list, not a box of its own (David,
+        // 2026-10-06). Off is where every row starts, so it is not dimmed;
+        // the filled choice on the right says which way it went. Taken, a
+        // row whose problem is still in the file keeps a warm left edge.
+        "relative scroll-mt-24 bg-white transition-colors hover:bg-muted/30",
+        flagged && on && "shadow-[inset_3px_0_0_hsl(var(--tone-warn))]",
       )}
     >
-      <div className="flex flex-wrap items-center gap-x-3 gap-y-2 px-3.5 py-2.5 sm:flex-nowrap">
+      <div className="flex flex-wrap items-center gap-x-3 gap-y-2 px-4 py-2.5 sm:flex-nowrap">
         <span className={cn("flex h-7 w-7 flex-shrink-0 items-center justify-center rounded-full", g.disc)}>
           <Icon aria-hidden className="h-3.5 w-3.5" strokeWidth={2.5} />
         </span>
@@ -1131,8 +1140,8 @@ function VersionCard({ on, onSet }: { on: boolean; onSet: (on: boolean) => void 
   const g = GROUP.fix;
   const Icon = g.icon;
   return (
-    <div id="file-version" className="scroll-mt-24 overflow-hidden rounded-xl border border-border bg-white shadow-sm">
-      <div className="flex flex-wrap items-center gap-x-3 gap-y-2 px-3.5 py-2.5 sm:flex-nowrap">
+    <div id="file-version" className="scroll-mt-24 bg-white transition-colors hover:bg-muted/30">
+      <div className="flex flex-wrap items-center gap-x-3 gap-y-2 px-4 py-2.5 sm:flex-nowrap">
         <span className={cn("flex h-7 w-7 flex-shrink-0 items-center justify-center rounded-full", g.disc)}>
           <Icon aria-hidden className="h-3.5 w-3.5" strokeWidth={2.5} />
         </span>
@@ -1170,10 +1179,10 @@ function ProblemsLine({
 }) {
   if (issues.length === 0) {
     return (
-      <p className="flex min-w-0 items-center gap-2 text-[12.5px] text-slate-600">
+      <div className="flex items-center gap-2.5 px-4 py-3 text-[13px] font-medium text-slate-800">
         <Check aria-hidden className="h-4 w-4 flex-shrink-0 text-ok" />
-        No known problems in the file you download.
-      </p>
+        No known problems in the file you download
+      </div>
     );
   }
   return (
@@ -1181,13 +1190,13 @@ function ProblemsLine({
       type="button"
       onClick={onToggle}
       aria-expanded={open}
-      className="flex min-w-0 items-center gap-2 rounded-full text-left text-[12.5px] text-slate-700 hover:text-slate-900"
+      className="flex w-full items-center gap-2.5 px-4 py-3 text-left transition-colors hover:bg-warn-bg/60"
     >
       <CircleAlert aria-hidden className="h-4 w-4 flex-shrink-0 text-warn" />
-      <span>
-        {issues.length} {issues.length === 1 ? "thing is" : "things are"} still wrong in the file you download.
+      <span className="min-w-0 flex-1 text-[13px] font-medium text-slate-800">
+        {issues.length} {issues.length === 1 ? "thing is" : "things are"} still wrong in the file you download
       </span>
-      <span className="inline-flex flex-shrink-0 items-center gap-0.5 font-medium text-primary">
+      <span className="inline-flex flex-shrink-0 items-center gap-1 rounded-full border border-border bg-white px-3 py-1 text-[11.5px] font-medium text-slate-700 shadow-sm">
         {open ? "Hide" : "Show them"}
         <ChevronDown aria-hidden className={cn("h-3.5 w-3.5 transition-transform", open && "rotate-180")} />
       </span>
@@ -1222,7 +1231,7 @@ function ProblemsList({
   const pill =
     "flex-shrink-0 rounded-full border px-3 py-1 text-[11px] font-medium transition-colors";
   return (
-    <ul className="mt-3 divide-y divide-border overflow-hidden rounded-xl border border-border bg-white">
+    <ul className="divide-y divide-border border-t border-warn-border bg-white">
       {issues.map((x) => {
         const row = x.sellerId !== undefined ? byId.get(x.sellerId) : undefined;
         const needsInput = Boolean(row?.ask?.length);
