@@ -16,11 +16,13 @@
  *   - a seller_type in lowercase, a seller_id written as a number, an
  *     entry with no name;
  *   - 1 confidential entry that still carries its name and domain;
+ *   - an ID written in capitals where publishers write it in lowercase, and
+ *     an entry with no seller_type that nobody lists;
  *   - 4 entries no crawled file lists (suggested removals);
  *   - 5 IDs publishers list that the file lacks (adds: three clear, one
  *     listed DIRECT by two publishers, one RESELLER only).
  */
-import type { SellersFile, Sighting } from "./sellersFix";
+import type { Seller, SellersFile, Sighting } from "./sellersFix";
 
 export const MOCK_SELLERS_DOMAIN = "madeupmedia.com";
 
@@ -101,6 +103,10 @@ export const mockSellersFile: SellersFile = {
     { seller_id: 300301, name: "Stonebridge Apps", domain: "stonebridge-apps.com", seller_type: "PUBLISHER" },
     { seller_id: "300318", domain: "foxglen-tv.com", seller_type: "PUBLISHER" },
     { seller_id: "300324", name: "Duskhollow Media", domain: "N/A", seller_type: "PUBLISHER" },
+    // Publishers write this ID in lowercase.
+    { seller_id: "ABC778", name: "Hollowcrest Apps", domain: "hollowcrest-apps.com", seller_type: "PUBLISHER" },
+    // No seller_type, and no crawled file lists it.
+    { seller_id: "400133", name: "Quietfern Media", domain: "quietfern.tv" } as unknown as Seller,
     // Listed nowhere we crawled: suggested removals.
     { seller_id: "400105", name: "Fogharbor News", domain: "fogharbor-news7.com", seller_type: "PUBLISHER" },
     { seller_id: "400112", name: "Bramblemist TV", domain: "bramblemist-tv.tv", seller_type: "PUBLISHER" },
@@ -134,6 +140,7 @@ export const mockSellerSightings: Sighting[] = [
   { seller_id: "300318", relationship: "DIRECT", publishers: [{ domain: "foxglen-tv.com", name: "Foxglen TV", found_in: "ads.txt" }] },
   { seller_id: "300324", relationship: "RESELLER", publishers: pubs(["quokkaplay-games.com", "tidepoolarcade.com"]) },
   { seller_id: "300324", relationship: "DIRECT", publishers: pubs(["duskhollow-media.com", "duskhollow-kids.com"]) },
+  { seller_id: "abc778", relationship: "DIRECT", publishers: pubs(["hollowcrest-apps.com"]) },
   // In publishers' files, missing from the sellers.json.
   { seller_id: "500301", relationship: "DIRECT", publishers: [{ domain: "saltmarsh-radio9.com", name: "Saltmarsh Radio 9", found_in: "ads.txt" }] },
   { seller_id: "500318", relationship: "DIRECT", publishers: [{ domain: "kettlebrook-games.com", name: "Kettlebrook Games", found_in: "app-ads.txt" }] },
@@ -141,3 +148,23 @@ export const mockSellerSightings: Sighting[] = [
   { seller_id: "500339", relationship: "DIRECT", publishers: pubs(["driftwillow-tv.com", "hollowfinch-apps.com"]) },
   { seller_id: "500347", relationship: "RESELLER", publishers: pubs(["quokkaplay-games.com", "brambleloop-apps.com", "fernhollow-team.it", "velvetmoth-network.com", "silvergull-media.tv"]) },
 ];
+
+/** When the mock file was "read". */
+export const MOCK_CHECKED_AT = "2026-10-05T03:12:00+00:00";
+
+/** `?warnings=1`: what the bake says about a live file that is not strict JSON. */
+export const MOCK_FILE_WARNINGS = [
+  "Your live file is not strict JSON (for example a trailing comma or a comment). Some buyers' tools will not read it; the file you download here is strict JSON.",
+];
+
+/** `?broken=1`: a null in the list and a seller_id too long for a browser. */
+export function brokenFile(file: SellersFile): SellersFile {
+  return {
+    ...file,
+    sellers: [
+      ...file.sellers,
+      null as unknown as Seller,
+      { seller_id: 12345678901234567891, name: "Longid Media", domain: "longid-media.com", seller_type: "PUBLISHER" },
+    ],
+  };
+}

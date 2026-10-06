@@ -1,7 +1,7 @@
 import { Check, Copy, Download, FileText } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 
-import type { Seller, SellersFile } from "@/lib/sellersFix";
+import { idOf, isEntry, type Seller, type SellersFile } from "@/lib/sellersFix";
 import { cn } from "@/lib/utils";
 
 /**
@@ -59,12 +59,19 @@ export function JsonDiff({
   live,
   next,
   domain,
+  liveLabel,
   nextLabel,
   nextNote,
+  pairs,
 }: {
+  /** What the left pane is, e.g. "As read on 6 Oct 2026". */
+  liveLabel: string;
   /** What the right pane is, e.g. "Fixed file", and a few words on it. */
   nextLabel: string;
   nextNote: string;
+  /** Live entries and the entry each became, as the page decided (a taken
+   *  fix): lined up first, whatever the likeness says. */
+  pairs?: Map<Seller, Seller>;
   /** The file published today, or null when there is none yet. */
   live: SellersFile | null;
   next: SellersFile;
@@ -97,68 +104,105 @@ export function JsonDiff({
     push(live ? "same" : "add", live ? sellersOpen : undefined, sellersOpen);
 
     // Each entry pairs with ONE entry of the same ID on the other side: the
-    // identical one first, else the most alike. So a duplicate the fix
-    // keeps once lines up with the copy kept, and the other copies show as
-    // removed. IDs match trimmed and as text (a file's 42 and "42 " are the
-    // fixed file's "42").
-    const idOf = (s: Seller) => String(s.seller_id ?? "").trim();
-    const liveSellers = live?.sellers ?? [];
-    const group = (list: Seller[]) => {
-      const m = new Map<string, Seller[]>();
-      for (const s of list) m.set(idOf(s), [...(m.get(idOf(s)) ?? []), s]);
+    // page's own pairing first (a taken fix and the entry it keeps), then the
+    // identical one, else the most alike. So a duplicate the fix keeps once
+    // lines up with the copy kept, and the other copies show as removed. IDs
+    // match trimmed and as text (a file's 42 and "42 " are the fixed file's
+    // "42"). Worked on positions: a broken file can hold the same null twice.
+    const liveSellers = (live?.sellers ?? []) as unknown[];
+    const nextSellers = next.sellers as unknown[];
+    const pairOf = new Map<number, number>();
+    const taken = new Set<number>();
+    const pair = (ia: number, ib: number) => {
+      pairOf.set(ia, ib);
+      taken.add(ib);
+    };
+    if (pairs?.size) {
+      const at = new Map<unknown, number>();
+      liveSellers.forEach((a, i) => isEntry(a) && at.set(a, i));
+      const bt = new Map<unknown, number>();
+      nextSellers.forEach((b, i) => isEntry(b) && bt.set(b, i));
+      for (const [a, b] of pairs) {
+        const ia = at.get(a);
+        const ib = bt.get(b);
+        if (ia !== undefined && ib !== undefined && !pairOf.has(ia) && !taken.has(ib)) pair(ia, ib);
+      }
+    }
+    const group = (list: unknown[]) => {
+      const m = new Map<string, number[]>();
+      list.forEach((x, i) => m.set(idOf(x), [...(m.get(idOf(x)) ?? []), i]));
       return m;
     };
     const liveById = group(liveSellers);
-    const pairOf = new Map<Seller, Seller>();
-    const alike = (a: Seller, b: Seller) =>
-      [...new Set([...Object.keys(a), ...Object.keys(b)])].filter((k) => JSON.stringify(a[k]) === JSON.stringify(b[k])).length;
-    for (const [id, bs] of group(next.sellers)) {
+    const alike = (a: unknown, b: unknown) =>
+      isEntry(a) && isEntry(b)
+        ? [...new Set([...Object.keys(a), ...Object.keys(b)])].filter((k) => JSON.stringify(a[k]) === JSON.stringify(b[k])).length
+        : 0;
+    for (const [id, bs] of group(nextSellers)) {
       const as = liveById.get(id) ?? [];
-      const free = (a: Seller) => !pairOf.has(a);
-      const left: Seller[] = [];
-      for (const b of bs) {
-        const a = as.find((x) => free(x) && JSON.stringify(x) === JSON.stringify(b));
-        if (a) pairOf.set(a, b);
-        else left.push(b);
+      const free = (ia: number) => !pairOf.has(ia);
+      const left: number[] = [];
+      for (const ib of bs) {
+        if (taken.has(ib)) continue;
+        const ia = as.find((x) => free(x) && JSON.stringify(liveSellers[x]) === JSON.stringify(nextSellers[ib]));
+        if (ia !== undefined) pair(ia, ib);
+        else left.push(ib);
       }
-      for (const b of left) {
-        let best: Seller | undefined;
-        for (const a of as) if (free(a) && (!best || alike(a, b) > alike(best, b))) best = a;
-        if (best) pairOf.set(best, b);
+      for (const ib of left) {
+        let best: number | undefined;
+        for (const ia of as) {
+          if (free(ia) && (best === undefined || alike(liveSellers[ia], nextSellers[ib]) > alike(liveSellers[best], nextSellers[ib]))) best = ia;
+        }
+        if (best !== undefined) pair(best, ib);
       }
     }
-    const paired = new Set(pairOf.values());
-    const order: { id: string; a?: Seller; b?: Seller }[] = [
-      ...liveSellers.map((a) => ({ id: idOf(a), a, b: pairOf.get(a) })),
-      ...next.sellers.filter((b) => !paired.has(b)).map((b) => ({ id: idOf(b), b })),
+    const order: { id: string; ia?: number; ib?: number }[] = [
+      ...liveSellers.map((a, ia) => ({ id: idOf(a), ia, ib: pairOf.get(ia) })),
+      ...nextSellers.flatMap((b, ib) => (taken.has(ib) ? [] : [{ id: idOf(b), ib }])),
     ];
-    const lastA = liveSellers[liveSellers.length - 1];
-    const lastB = next.sellers[next.sellers.length - 1];
 
     let changedEntries = 0;
-    order.forEach(({ id, a, b }, at) => {
+    order.forEach(({ id, ia, ib }, at) => {
       // Rows of one entry share a key, so the fold counts entries, not IDs.
       const entry = `${at}:${id}`;
-      const same = a && b && JSON.stringify(a) === JSON.stringify(b);
-      const kind: Kind = same ? "same" : !a ? "add" : !b ? "del" : "mod";
+      const hasA = ia !== undefined;
+      const hasB = ib !== undefined;
+      const a = hasA ? liveSellers[ia] : undefined;
+      const b = hasB ? nextSellers[ib] : undefined;
+      const same = hasA && hasB && JSON.stringify(a) === JSON.stringify(b);
+      const kind: Kind = same ? "same" : !hasA ? "add" : !hasB ? "del" : "mod";
       if (kind !== "same") changedEntries++;
+      const lastA = ia === liveSellers.length - 1;
+      const lastB = ib === nextSellers.length - 1;
+      // Not an entry at all (a null or a number in the list): one line.
+      if ((hasA && !isEntry(a)) || (hasB && !isEntry(b))) {
+        const line = (v: unknown, last: boolean): Tok[] => [
+          { t: "    " },
+          ...valueToks(v),
+          ...(last ? [] : [{ t: ",", c: C.punct }]),
+        ];
+        push(kind, hasA ? line(a, lastA) : undefined, hasB ? line(b, lastB) : undefined, entry);
+        return;
+      }
+      const ea = a as Seller | undefined;
+      const eb = b as Seller | undefined;
       const openTok = [{ t: "    {", c: C.punct }];
-      const closeA = [{ t: a === lastA ? "    }" : "    },", c: C.punct }];
-      const closeB = [{ t: b === lastB ? "    }" : "    },", c: C.punct }];
-      push(kind === "mod" ? "same" : kind, a ? openTok : undefined, b ? openTok : undefined, entry);
-      const keys = [...new Set([...(a ? keysOf(a) : []), ...(b ? keysOf(b) : [])])];
+      const closeA = [{ t: lastA ? "    }" : "    },", c: C.punct }];
+      const closeB = [{ t: lastB ? "    }" : "    },", c: C.punct }];
+      push(kind === "mod" ? "same" : kind, ea ? openTok : undefined, eb ? openTok : undefined, entry);
+      const ka = ea ? keysOf(ea) : [];
+      const kb = eb ? keysOf(eb) : [];
+      const keys = [...new Set([...ka, ...kb])];
       keys.forEach((k) => {
-        const ka = a ? keysOf(a) : [];
-        const kb = b ? keysOf(b) : [];
-        const ta = a && a[k] !== undefined ? fieldToks(6, k, a[k], ka.indexOf(k) < ka.length - 1) : undefined;
-        const tb = b && b[k] !== undefined ? fieldToks(6, k, b[k], kb.indexOf(k) < kb.length - 1) : undefined;
+        const ta = ea && ea[k] !== undefined ? fieldToks(6, k, ea[k], ka.indexOf(k) < ka.length - 1) : undefined;
+        const tb = eb && eb[k] !== undefined ? fieldToks(6, k, eb[k], kb.indexOf(k) < kb.length - 1) : undefined;
         let fk: Kind = kind;
         if (kind === "mod") {
-          fk = ta && tb && JSON.stringify(a![k]) === JSON.stringify(b![k]) ? "same" : !ta ? "add" : !tb ? "del" : "mod";
+          fk = ta && tb && JSON.stringify(ea![k]) === JSON.stringify(eb![k]) ? "same" : !ta ? "add" : !tb ? "del" : "mod";
         }
         push(fk, ta, tb, entry);
       });
-      push(kind === "mod" ? "same" : kind, a ? closeA : undefined, b ? closeB : undefined, entry);
+      push(kind === "mod" ? "same" : kind, ea ? closeA : undefined, eb ? closeB : undefined, entry);
     });
     push(live ? "same" : "add", live ? [{ t: "  ]", c: C.punct }] : undefined, [{ t: "  ]", c: C.punct }]);
     push(live ? "same" : "add", live ? [{ t: "}", c: C.punct }] : undefined, [{ t: "}", c: C.punct }]);
@@ -195,7 +239,7 @@ export function JsonDiff({
       if (r.right && (r.kind === "add" || r.kind === "mod")) addedLines++;
     }
     return { rows: folded, stats: { changedEntries, removedLines, addedLines } };
-  }, [live, next, unfolded]);
+  }, [live, next, unfolded, pairs]);
 
   return (
     <div className="overflow-hidden rounded-xl border border-[#d1d9e0] bg-white shadow-sm">
@@ -219,8 +263,8 @@ export function JsonDiff({
       </div>
       <div className="grid grid-cols-2 border-b border-[#d1d9e0] text-[11px] text-[#59636e]">
         <div className="flex items-baseline gap-2 px-4 py-1.5">
-          <span className="font-semibold text-[#1f2328]">{live ? "Live today" : "No file yet"}</span>
-          <span>{live ? `what ${domain} serves now` : `nothing at ${domain}/sellers.json`}</span>
+          <span className="font-semibold text-[#1f2328]">{live ? liveLabel : "No file yet"}</span>
+          <span>{live ? `${domain}/sellers.json` : `nothing at ${domain}/sellers.json`}</span>
         </div>
         <div className="flex items-baseline gap-2 border-l border-[#d1d9e0] px-4 py-1.5">
           <span className="font-semibold text-[#1f2328]">{nextLabel}</span>

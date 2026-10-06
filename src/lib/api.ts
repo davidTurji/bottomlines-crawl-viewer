@@ -660,11 +660,21 @@ export const api = {
    */
   sellersFix: async (token: string): Promise<SellersFixPayload> => {
     if (MOCK) {
-      const { MOCK_SELLERS_DOMAIN, mockSellersFile, mockSellerSightings } = await import("./mockSellers");
+      const m = await import("./mockSellers");
       // `?nofile=1` shows a customer with no sellers.json yet: the page
-      // then builds one from scratch.
-      const noFile = new URLSearchParams(window.location.search).has("nofile");
-      return { domain: MOCK_SELLERS_DOMAIN, file: noFile ? null : mockSellersFile, sightings: mockSellerSightings };
+      // then builds one from scratch. `?warnings=1` and `?broken=1` show the
+      // notes about a live file that is not strict JSON, or that holds a
+      // null and a number too long for a browser.
+      const q = new URLSearchParams(window.location.search);
+      const file = q.has("nofile") ? null : q.has("broken") ? m.brokenFile(m.mockSellersFile) : m.mockSellersFile;
+      return {
+        domain: m.MOCK_SELLERS_DOMAIN,
+        file,
+        sightings: m.mockSellerSightings,
+        checked_at: m.MOCK_CHECKED_AT,
+        file_url: `https://${m.MOCK_SELLERS_DOMAIN}/sellers.json`,
+        file_warnings: q.has("warnings") ? m.MOCK_FILE_WARNINGS : [],
+      };
     }
     return req<SellersFixPayload>("GET", `/v1/viewer/${token}/sellers-fix`);
   },
@@ -1519,6 +1529,9 @@ export type SellersFixPayload = {
   /** Every line in the book naming the domain, one per seller ID and
    *  relationship. */
   sightings: import("./sellersFix").Sighting[];
-  /** When the file was read. */
+  /** When the file was read, and where from (after redirects). */
   checked_at?: string | null;
+  file_url?: string | null;
+  /** What is wrong with the live file beyond its entries, in sentences. */
+  file_warnings?: string[];
 };
