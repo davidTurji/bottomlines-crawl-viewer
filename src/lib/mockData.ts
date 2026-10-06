@@ -189,7 +189,7 @@ export const mockGone: NonNullable<Summary["gone"]> = {
   apps: [
     { name: "Hex World War", store: "android", bundle: "com.madeup.war.hex.world", publisher: "silvergull-media.tv", reason: "No longer on Google Play", since: goneDay(10) },
     { name: "Fighter Jam", store: "android", bundle: "io.madeup.fighterjam", publisher: "orchardtide-ads.com", reason: "No longer on Google Play", since: goneDay(4) },
-    { name: "Arrow Flow", store: "ios", bundle: "6762267809", publisher: "copperwren-hiphop.com", reason: "No longer on the App Store", since: goneDay(7) },
+    { name: "Lantern Bay Solitaire", store: "ios", bundle: "com.madeup.lanternbay.solitaire", publisher: "copperwren-hiphop.com", reason: "No longer on the App Store", since: goneDay(7) },
     { name: "Harbor News Live", store: "roku", bundle: "614512", publisher: "harborview7news.com", reason: "No longer on the Roku Channel Store", since: goneDay(12) },
     { name: "Puzzle Wool Sort", store: "android", bundle: "puzzle.madeup.wool.sort", publisher: "cobaltriver15.com", reason: "No longer on Google Play", since: goneDay(3) },
   ],
