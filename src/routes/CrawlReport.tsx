@@ -918,7 +918,7 @@ export function MatchedTile({
           >
             <span
               className={cn(
-                "font-mono text-lg font-semibold leading-none tabular-nums sm:text-2xl",
+                "kpi-tile-move-num font-mono font-semibold leading-none tabular-nums",
                 moveCls,
               )}
             >
@@ -950,7 +950,7 @@ export function MatchedTile({
           // Behind the net, in plain words: what we found and what went.
           <span
             key={number}
-            className="whitespace-nowrap text-slate-500"
+            className="kpi-tile-fl text-slate-500"
             style={payoffStyle(delayMs + landsAfterMs())}
           >
             <span className="font-mono font-medium tabular-nums text-ok">

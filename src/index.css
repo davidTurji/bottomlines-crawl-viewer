@@ -880,12 +880,17 @@ All colors MUST be HSL.
 .kpi-tile-top { display: flex; flex-direction: column; gap: 0.5rem; }
 .kpi-tile-num { font-size: 1.875rem; }
 .kpi-tile-move { display: flex; flex-direction: column; align-items: flex-start; gap: 0.25rem; }
-.kpi-tile-move-sub { display: flex; align-items: baseline; gap: 0.25rem; white-space: nowrap; }
+.kpi-tile-move-num { font-size: 1.125rem; }
+/* Narrow: these may wrap rather than run past the tile's edge. */
+.kpi-tile-move-sub { display: flex; flex-wrap: wrap; align-items: baseline; column-gap: 0.25rem; }
 .kpi-tile-foot { display: flex; flex-direction: column; gap: 0.125rem; }
+.kpi-tile-fl { white-space: normal; }
 @container (min-width: 220px) {
   .kpi-tile-top { flex-direction: row; align-items: flex-start; justify-content: space-between; gap: 1rem; }
   .kpi-tile-num { font-size: 2.25rem; }
   .kpi-tile-move { align-items: flex-end; text-align: right; }
-  .kpi-tile-move-sub { flex-direction: column; align-items: flex-end; gap: 0; }
+  .kpi-tile-move-num { font-size: 1.5rem; }
+  .kpi-tile-move-sub { flex-direction: column; flex-wrap: nowrap; align-items: flex-end; gap: 0; white-space: nowrap; }
+  .kpi-tile-fl { white-space: nowrap; }
   .kpi-tile-foot { flex-direction: row; align-items: baseline; justify-content: space-between; gap: 0.75rem; }
 }
