@@ -43,7 +43,7 @@ import InlineAskAI from "@/components/InlineAskAI";
 import { PageShell } from "@/components/PageShell";
 import { formatWeek } from "@/components/WeekLine";
 import { cn, foundInLabel, storeLabel } from "@/lib/utils";
-import { ActionableLine, PublisherDomainLink, YIELDS_TO_PILL } from "@/components/PublisherLinks";
+import { ActionableLine, PublisherDomainLink } from "@/components/PublisherLinks";
 import { useReportScope } from "@/lib/reportScope";
 
 const OVERVIEW_SUGGESTIONS = [
@@ -1549,12 +1549,14 @@ function PublisherCard({
               {/* Never the internal id (David, 2026-10-06: a customer read
                   "Publisher #567486"): the name, else the domain, else a
                   plain word. The API names every row it can. */}
-              {row.developer_name ? (
-                row.developer_name
-              ) : row.developer_domain ? (
-                <PublisherDomainLink domain={row.developer_domain} />
+              {row.developer_domain ? (
+                // The name links to the publisher's site, like the domain.
+                <PublisherDomainLink
+                  domain={row.developer_domain}
+                  label={row.developer_name || row.developer_domain}
+                />
               ) : (
-                "Unnamed publisher"
+                row.developer_name || "Unnamed publisher"
               )}
             </span>
             {row.developer_platform && (
@@ -1701,7 +1703,7 @@ function SeatLineRow({
         )}
       </code>
       {foundInLabel(line.found_in) && (
-        <span className={cn("flex-shrink-0 text-[10px] text-slate-400", YIELDS_TO_PILL)}>
+        <span className={"flex-shrink-0 text-[10px] text-slate-400"}>
           {foundInLabel(line.found_in)}
         </span>
       )}
@@ -2305,7 +2307,14 @@ function MatchedAppCard({
               <PublisherDomainLink domain={app.owner_domain} className="text-slate-600" />
             ) : null}
             {app.owner_name ? (
-              <span className="text-slate-400">, {app.owner_name}</span>
+              <span className="text-slate-400">
+                ,{" "}
+                {app.owner_domain ? (
+                  <PublisherDomainLink domain={app.owner_domain} label={app.owner_name} />
+                ) : (
+                  app.owner_name
+                )}
+              </span>
             ) : null}
           </div>
         </div>

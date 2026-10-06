@@ -12,7 +12,7 @@
  * file at the top.
  */
 import { useEffect, useRef, useState, type KeyboardEvent, type MouseEvent } from "react";
-import { ArrowUpRight, Check, Copy } from "lucide-react";
+import { ArrowUpRight } from "lucide-react";
 
 import {
   DropdownMenu,
@@ -26,10 +26,7 @@ import { cn } from "@/lib/utils";
 
 export type PublisherFile = "ads.txt" | "app-ads.txt";
 
-/** For the text at a line's right margin ("Found in ..."): it steps aside
- *  while the row's Copy / Copied pill shows in its place. */
-export const YIELDS_TO_PILL =
-  "transition-opacity duration-200 group-hover/line:opacity-0 group-focus-visible/line:opacity-0 group-data-[copied=true]/line:opacity-0";
+
 
 /** A domain as a URL host: no scheme, no path, no trailing dot. */
 function host(domain: string): string {
@@ -100,9 +97,12 @@ function openTab(url: string) {
  */
 export function PublisherDomainLink({
   domain,
+  label,
   className,
 }: {
   domain: string;
+  /** What the link reads: the publisher's name, or by default the domain. */
+  label?: string;
   className?: string;
 }) {
   const stop = (e: MouseEvent | KeyboardEvent) => e.stopPropagation();
@@ -119,7 +119,7 @@ export function PublisherDomainLink({
         className,
       )}
     >
-      <span className="truncate">{domain}</span>
+      <span className="truncate">{label ?? domain}</span>
       <ArrowUpRight
         aria-hidden
         className="h-3 w-3 flex-shrink-0 opacity-0 transition-opacity group-hover/domain:opacity-100 group-focus-visible/domain:opacity-100"
@@ -162,6 +162,8 @@ export function ActionableLine({
   /** The row's content: the line text and whatever sits at its margin. */
   children: React.ReactNode;
 }) {
+  // The line is also copied, quietly, so it can be found with the browser's
+  // own search when a file has no highlight (David, 2026-10-06: no pill).
   const [copied, flash] = useCopied();
   const [menu, setMenu] = useState(false);
   const domain = (publisherDomain ?? "").trim();
@@ -178,16 +180,15 @@ export function ActionableLine({
   };
   const label =
     files.length === 1
-      ? `Copy ${text} and open ${host(domain)}/${files[0]}`
-      : `Copy ${text} and choose ads.txt or app-ads.txt on ${host(domain)}`;
+      ? `Open ${text} in ${host(domain)}/${files[0]}`
+      : `Open ${text}: choose ads.txt or app-ads.txt on ${host(domain)}`;
 
   const row = (
     <li
-      role="button"
+      role="link"
       tabIndex={0}
-      data-copied={copied ? "true" : undefined}
       aria-label={label}
-      title={files.length === 1 ? `Copy the line and open ${files[0]}` : "Copy the line and open its file"}
+      title={files.length === 1 ? `Open ${host(domain)}/${files[0]} at this line` : `Open this line's file on ${host(domain)}`}
       onClick={(e) => {
         e.stopPropagation();
         void act();
@@ -200,23 +201,17 @@ export function ActionableLine({
         }
       }}
       className={cn(
-        "group/line relative cursor-pointer transition-colors hover:bg-accent/40 focus-visible:bg-accent/40 focus-visible:outline-none",
+        // A link, like every other link: the line underlines and takes the
+        // brand colour on hover, with the arrow every new-tab link wears.
+        "group/line cursor-pointer transition-colors hover:bg-accent/40 focus-visible:bg-accent/40 focus-visible:outline-none [&_code]:decoration-primary/40 [&_code]:underline-offset-2 hover:[&_code]:text-primary hover:[&_code]:underline focus-visible:[&_code]:underline",
         className,
       )}
     >
       {children}
-      <span
+      <ArrowUpRight
         aria-hidden
-        className={cn(
-          "pointer-events-none absolute right-2 top-1/2 flex -translate-y-1/2 items-center gap-1 rounded-full border bg-white px-2 py-0.5 text-[10px] font-medium shadow-sm transition-all duration-200",
-          copied
-            ? "border-ok-border text-ok opacity-100"
-            : "border-border text-slate-500 opacity-0 group-hover/line:opacity-100 group-focus-visible/line:opacity-100",
-        )}
-      >
-        {copied ? <Check className="h-3 w-3" /> : <Copy className="h-3 w-3" />}
-        {copied ? "Copied" : files.length === 1 ? `Copy, open ${files[0]}` : "Copy, open file"}
-      </span>
+        className="h-3 w-3 flex-shrink-0 self-center text-primary opacity-0 transition-opacity group-hover/line:opacity-100 group-focus-visible/line:opacity-100"
+      />
       <span role="status" className="sr-only">
         {copied ? "Line copied" : ""}
       </span>
