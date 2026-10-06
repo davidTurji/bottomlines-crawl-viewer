@@ -68,18 +68,27 @@ export function onUnauthorized(handler: (() => void) | null) {
   unauthorizedHandler = handler;
 }
 
-// ── No 404 fan-out, on purpose ───────────────────────────────────
-// A data call that answers 404 never swaps the report for the
-// expired-link card. The API never answers a dead link with 404 on a
-// data route: an expired or revoked token answers 401 (the session gate
-// re-resolves the token row), the reader drops back to sign-in, and
-// sign-in answers 403, which LoginCard turns into the expired-link card.
-// So a 404 here is only ever "this optional part is not in this report"
-// (sellers-fix) or "this API is older than this SPA" (a route not
-// deployed yet). Reading those as a dead link took every report down
-// twice: /export-info on 2026-09-29 and /sellers-fix on 2026-10-06.
-// A page that gets a 404 shows its own empty or error state; the gate
-// is decided by 401 and by sign-in alone. tests/no-404-trap locks it.
+// ── Dead links: decided by the summary's 403, never by a 404 ─────
+// How the API answers a link that expired, was revoked, or has no
+// published report (viewer_v2.require_viewer_session):
+//   - no session cookie for this token: 401 on every data route; the
+//     reader drops back to sign-in, and sign-in answers 403, which
+//     LoginCard turns into the expired-link card;
+//   - still signed in (cookies last 24h): 403 on every data route.
+// Every page reads the summary, so the summary's own 403 is what shows
+// the expired-link card (see `summary` below). Only there: other routes
+// answer 403 for reasons that are not a dead link (schain downloads on a
+// trial), and that must stay the page's own error.
+//
+// A 404 NEVER means a dead link. It is only ever "this optional part is
+// not in this report" (sellers-fix) or "this API is older than this SPA"
+// (a route not deployed yet). Reading those as a dead link took every
+// report down twice: /export-info on 2026-09-29 and /sellers-fix on
+// 2026-10-06. e2e/report.spec.ts locks both rules.
+let linkRefusedHandler: (() => void) | null = null;
+export function onLinkRefused(handler: (() => void) | null) {
+  linkRefusedHandler = handler;
+}
 
 // ── Auth epoch ───────────────────────────────────────────────────
 // Guards against a stale-401 re-lock race: a data request fired
@@ -192,9 +201,8 @@ export const api = {
     }
     const fallback: ExportInfo = { format: "xlsx", line_export: false };
     // A plain fetch, never req(): an API from before this endpoint answers
-    // 404, and req() reads a 404 on a token path as "this link is dead" and
-    // swaps the whole page for the expired-link card. Nothing that goes
-    // wrong here may touch the sign-in gate; the summary's own calls do that.
+    // 404, and whatever goes wrong here falls back to the defaults. Nothing
+    // here may touch the sign-in gate; the summary's own calls do that.
     try {
       const res = await fetch(`${BASE}/v1/viewer/${token}/export-info`, {
         credentials: "include",
@@ -234,7 +242,14 @@ export const api = {
       return trialMock() ? { ...s, trial: TRIAL_CAPS_MOCK } : s;
     }
     const q = linesQuery(lines);
-    return req<Summary>("GET", `/v1/viewer/${token}/summary${q ? `?${q.slice(1)}` : ""}`);
+    try {
+      return await req<Summary>("GET", `/v1/viewer/${token}/summary${q ? `?${q.slice(1)}` : ""}`);
+    } catch (e) {
+      // A signed-in reader whose link expired or was revoked: the API
+      // refuses the link itself with 403 (see "Dead links" above).
+      if (e instanceof ApiError && e.status === 403) linkRefusedHandler?.();
+      throw e;
+    }
   },
   /**
    * The previous week's summary for the same customer, which is what every
@@ -672,10 +687,10 @@ export const api = {
         file_warnings: q.has("warnings") ? m.MOCK_FILE_WARNINGS : [],
       };
     }
-    // A plain fetch, never req(): most reports have no Sellers.json page,
-    // and their 404 means exactly that. req() reads a 404 on a token path
-    // as "this link is dead" and swaps the whole report for the expired-link
-    // card, which took every report without the page down (2026-10-06).
+    // A plain fetch: most reports have no Sellers.json page, and their 404
+    // means exactly that, so it is answered here as null. Before 2026-10-06
+    // req() read a 404 as a dead link, which took every report without the
+    // page down.
     const res = await fetch(`${BASE}/v1/viewer/${token}/sellers-fix`, { credentials: "include" });
     if (res.status === 404) return null;
     if (!res.ok) {
