@@ -869,3 +869,28 @@ All colors MUST be HSL.
 @media (prefers-reduced-motion: reduce) {
   [style*="kpi-payoff"], [style*="kpi-wake"] { animation: none !important; }
 }
+
+/* MATCHED TILES pick their layout from their OWN width, not the screen's
+   (David, 2026-10-06): beside the sidebar and the changes card a tile runs
+   129-226px across laptop widths, so a screen breakpoint either squeezed two
+   columns into it or wrapped the bottom line. Narrow: one column, every line
+   left-aligned. Wide enough: the count beside the week's move, and last
+   week's figure beside found and lost on one baseline. */
+.kpi-tile { container-type: inline-size; }
+.kpi-tile-top { display: flex; flex-direction: column; gap: 0.5rem; }
+.kpi-tile-num { font-size: 1.875rem; }
+.kpi-tile-move { display: flex; flex-direction: column; align-items: flex-start; gap: 0.25rem; }
+.kpi-tile-move-num { font-size: 1.125rem; }
+/* Narrow: these may wrap rather than run past the tile's edge. */
+.kpi-tile-move-sub { display: flex; flex-wrap: wrap; align-items: baseline; column-gap: 0.25rem; }
+.kpi-tile-foot { display: flex; flex-direction: column; gap: 0.125rem; }
+.kpi-tile-fl { white-space: normal; }
+@container (min-width: 220px) {
+  .kpi-tile-top { flex-direction: row; align-items: flex-start; justify-content: space-between; gap: 1rem; }
+  .kpi-tile-num { font-size: 2.25rem; }
+  .kpi-tile-move { align-items: flex-end; text-align: right; }
+  .kpi-tile-move-num { font-size: 1.5rem; }
+  .kpi-tile-move-sub { flex-direction: column; flex-wrap: nowrap; align-items: flex-end; gap: 0; white-space: nowrap; }
+  .kpi-tile-fl { white-space: nowrap; }
+  .kpi-tile-foot { flex-direction: row; align-items: baseline; justify-content: space-between; gap: 0.75rem; }
+}

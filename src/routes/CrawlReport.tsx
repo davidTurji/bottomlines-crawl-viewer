@@ -881,85 +881,95 @@ export function MatchedTile({
       onClick={onClick}
       aria-pressed={active}
       className={cn(
-        "flex flex-wrap items-start justify-between gap-x-4 gap-y-3 rounded-xl border px-5 py-4 text-left shadow-sm transition-colors xl:flex-nowrap",
+        "kpi-tile flex flex-col gap-3 rounded-xl border px-5 py-4 text-left shadow-sm transition-colors",
         active ? activeGround : idleGround,
       )}
     >
-      <span className="flex min-w-0 flex-col">
-        <span
-          key={number}
-          className={cn(
-            "font-mono text-3xl font-semibold leading-none tabular-nums tracking-tight sm:text-4xl",
-            numberCls,
-          )}
-        >
-          <CountUp value={number} delayMs={delayMs} />
+      {/* TWO ROWS, so what pairs up lines up (David, 2026-10-06). The top
+          row holds the count and its label beside the week's move; the
+          bottom row holds last week's figure beside found and lost, on one
+          baseline, so the two small lines never sit at different heights. */}
+      <span className="kpi-tile-top">
+        <span className="flex min-w-0 flex-col">
+          <span
+            key={number}
+            className={cn(
+              "kpi-tile-num font-mono font-semibold leading-none tabular-nums tracking-tight",
+              numberCls,
+            )}
+          >
+            <CountUp value={number} delayMs={delayMs} />
+          </span>
+          <span className="mt-2 flex items-center gap-1.5 text-[12px] font-medium text-slate-700">
+            <Icon aria-hidden className={cn("h-3.5 w-3.5 flex-shrink-0", iconCls)} />
+            {label}
+          </span>
         </span>
-        <span className="mt-2 flex items-center gap-1.5 text-[12px] font-medium text-slate-700">
-          <Icon aria-hidden className={cn("h-3.5 w-3.5 flex-shrink-0", iconCls)} />
-          {label}
-        </span>
-        <span className="block min-h-[17px] text-[11px] leading-[17px]">
-          {wordy ? (
-            <span className="text-slate-500">
-              {previous.toLocaleString()} last week
+        {/* THE WEEK'S MOVE, AS ITS OWN FIGURE. How many more publishers or
+            apps matched this week is the point of the tile, so the count and
+            the percentage stand at the tile's right edge at reading size,
+            not as a footnote under the label. A narrow tile stacks it under
+            the count (index.css, .kpi-tile). */}
+        {wordy && (
+          <span
+            key={number}
+            className="kpi-tile-move"
+            // The week's move is the payoff: it rises in once the count lands.
+            style={payoffStyle(delayMs + landsAfterMs())}
+          >
+            <span
+              className={cn(
+                "kpi-tile-move-num font-mono font-semibold leading-none tabular-nums",
+                moveCls,
+              )}
+            >
+              {delta.abs > 0 ? "+" : delta.abs < 0 ? "-" : ""}
+              {Math.abs(delta.abs).toLocaleString()}
             </span>
+            <span className="kpi-tile-move-sub text-[11px] leading-[15px] text-slate-500">
+              {delta.abs !== 0 && (
+                <span className={cn("font-mono font-medium tabular-nums", moveCls)}>
+                  {pctText(delta.pct)}
+                </span>
+              )}
+              <span>{delta.abs === 0 ? "no change" : "vs last week"}</span>
+            </span>
+          </span>
+        )}
+      </span>
+      <span className="kpi-tile-foot min-h-[15px] text-[11px] leading-[15px]">
+        <span className="min-w-0">
+          {wordy ? (
+            <span className="text-slate-500">{previous.toLocaleString()} last week</span>
           ) : delta ? (
             <DeltaChip delta={delta} />
           ) : note ? (
             <span className="text-slate-400">{note}</span>
           ) : null}
         </span>
-      </span>
-      {/* THE WEEK'S MOVE, AS ITS OWN FIGURE. How many more publishers or
-          apps matched this week is the point of the tile, so the count and
-          the percentage stand at the tile's right edge at reading size,
-          not as a footnote under the label. Below sm the tile is too
-          narrow for two columns and the block drops under the count. */}
-      {wordy && (
-        <span
-          key={number}
-          className="flex w-full flex-col items-start gap-1 xl:w-auto xl:items-end xl:text-right"
-          // The week's move is the payoff: it rises in once the count lands.
-          style={payoffStyle(delayMs + landsAfterMs())}
-        >
+        {wordy && move && (move.found > 0 || move.lost > 0) && (
+          // Behind the net, in plain words: what we found and what went.
           <span
-            className={cn(
-              "font-mono text-lg font-semibold leading-none tabular-nums sm:text-2xl",
-              moveCls,
-            )}
+            key={number}
+            className="kpi-tile-fl text-slate-500"
+            style={payoffStyle(delayMs + landsAfterMs())}
           >
-            {delta.abs > 0 ? "+" : delta.abs < 0 ? "-" : ""}
-            {Math.abs(delta.abs).toLocaleString()}
+            <span className="font-mono font-medium tabular-nums text-ok">
+              {move.found.toLocaleString()}
+            </span>{" "}
+            found,{" "}
+            <span
+              className={cn(
+                "font-mono font-medium tabular-nums",
+                move.lost > 0 ? "text-critical" : "text-slate-500",
+              )}
+            >
+              {move.lost.toLocaleString()}
+            </span>{" "}
+            lost
           </span>
-          <span className="flex items-baseline gap-1 whitespace-nowrap text-[11px] leading-[15px] text-slate-500 xl:flex-col xl:items-end xl:gap-0">
-            {delta.abs !== 0 && (
-              <span className={cn("font-mono font-medium tabular-nums", moveCls)}>
-                {pctText(delta.pct)}
-              </span>
-            )}
-            <span>{delta.abs === 0 ? "no change" : "vs last week"}</span>
-          </span>
-          {move && (move.found > 0 || move.lost > 0) && (
-            // Behind the net, in plain words: what we found and what went.
-            <span className="text-[11px] leading-[15px] text-slate-500">
-              <span className="font-mono font-medium tabular-nums text-ok">
-                {move.found.toLocaleString()}
-              </span>{" "}
-              found,{" "}
-              <span
-                className={cn(
-                  "font-mono font-medium tabular-nums",
-                  move.lost > 0 ? "text-critical" : "text-slate-500",
-                )}
-              >
-                {move.lost.toLocaleString()}
-              </span>{" "}
-              lost
-            </span>
-          )}
-        </span>
-      )}
+        )}
+      </span>
     </button>
   );
 }
