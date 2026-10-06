@@ -1,3 +1,4 @@
+import GoneInventory from "@/components/GoneInventory";
 import LockedTail from "@/components/LockedTail";
 import { Collapse, Settle, glideTo } from "@/components/Motion";
 import TrialBanner from "@/components/TrialBanner";
@@ -441,6 +442,10 @@ export default function CrawlReport() {
         </div>
       </div>
       )}
+
+      {/* No longer live (David, 2026-10-06): gone publishers and store-gone
+          apps, frozen with the report and never counted. Hidden when none. */}
+      {!refreshing && <GoneInventory gone={summary.gone} />}
 
       {/* Ask AI, inline, between the KPIs and the drilldown. Same shape
           bottomlines-app uses on the "Your Bottom Line" page: pill input

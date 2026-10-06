@@ -176,7 +176,28 @@ export const mockPreviousSummary: Summary = {
 
 export const mockPreviousWeekOf = "Aug 18 2026";
 
+/** No longer live, invented rows on madeupmedia-style names (never real
+ *  companies). Dates derive from today so the demo never looks stale. */
+const goneDay = (daysAgo: number) =>
+  new Date(Date.now() - daysAgo * 86_400_000).toISOString().slice(0, 10);
+export const mockGone: NonNullable<Summary["gone"]> = {
+  publishers: [
+    { domain: "quokkaplay-legacy.com", name: "Quokkaplay Legacy", reason: "The domain no longer exists", since: goneDay(15), lines: ["madeupmedia.com, 100231, DIRECT"], apps: 4 },
+    { domain: "brambleloop-old.net", name: "", reason: "The website stopped answering", since: goneDay(8), lines: ["madeupmedia.com, 200118, RESELLER", "madeupmedia.com, 100262, DIRECT"], apps: 2 },
+    { domain: "lanternbay-apps.com", name: "", reason: "The domain no longer exists", since: goneDay(22), lines: ["madeupmedia.com, 200126, RESELLER"], apps: 7 },
+  ],
+  apps: [
+    { name: "Hex World War", store: "android", bundle: "com.madeup.war.hex.world", publisher: "silvergull-media.tv", reason: "No longer on Google Play", since: goneDay(10) },
+    { name: "Fighter Jam", store: "android", bundle: "io.madeup.fighterjam", publisher: "orchardtide-ads.com", reason: "No longer on Google Play", since: goneDay(4) },
+    { name: "Arrow Flow", store: "ios", bundle: "6762267809", publisher: "copperwren-hiphop.com", reason: "No longer on the App Store", since: goneDay(7) },
+    { name: "Harbor News Live", store: "roku", bundle: "614512", publisher: "harborview7news.com", reason: "No longer on the Roku Channel Store", since: goneDay(12) },
+    { name: "Puzzle Wool Sort", store: "android", bundle: "puzzle.madeup.wool.sort", publisher: "cobaltriver15.com", reason: "No longer on Google Play", since: goneDay(3) },
+  ],
+  totals: { publishers: 3, apps: 5 },
+};
+
 export const mockSummary: Summary = {
+  gone: mockGone,
   crawl_id: 47281,
   source: "weekly",
   status: "completed",

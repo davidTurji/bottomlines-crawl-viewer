@@ -894,8 +894,39 @@ export type ExportInfo = {
 export type MatchedMove = { found: number; lost: number };
 export type MatchedMoves = { developers: MatchedMove; apps: MatchedMove | null };
 
+/** A publisher that carried the reader's lines and is gone (dead domain,
+ *  site down for many crawls). Listed apart, never counted. */
+export type GonePublisher = {
+  domain: string;
+  name: string;
+  reason: string;
+  since: string | null;
+  lines: string[];
+  apps: number;
+};
+
+/** An app of a matched publisher that its store has twice said is gone. */
+export type GoneApp = {
+  name: string;
+  store: string;
+  bundle: string;
+  publisher: string;
+  reason: string;
+  since: string | null;
+};
+
+/** No longer live (FelixAds QA, 2026-10-06): frozen with the report, the
+ *  first rows of each list with the full totals. Absent on older links. */
+export type GoneInventory = {
+  publishers: GonePublisher[];
+  apps: GoneApp[];
+  totals: { publishers: number; apps: number };
+};
+
 export type Summary = {
   crawl_id: number;
+  /** What carried the reader's lines and is gone; never in the counts. */
+  gone?: GoneInventory | null;
   /** Set on a trial report (see ``TrialCaps``); null or absent on a full one. */
   trial?: TrialCaps | null;
   /** The watchlist this report was built from: what the seat-line filter

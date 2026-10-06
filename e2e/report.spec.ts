@@ -198,3 +198,24 @@ test.describe("sign-in", () => {
     await expect(page.getByText(EXPIRED)).toBeVisible();
   });
 });
+
+
+test.describe("no longer live", () => {
+  test("gone publishers and apps are listed apart", async ({ page }) => {
+    await open(page, {});
+    await expectOverview(page);
+    const card = page.getByTestId("no-longer-live");
+    await expect(card).toBeVisible();
+    await expect(card.getByText("Publishers gone")).toBeVisible();
+    await expect(card.getByText("Apps gone from their store")).toBeVisible();
+    await card.getByRole("button", { name: "Show them" }).click();
+    await expect(card.getByText("No longer on Google Play").first()).toBeVisible();
+  });
+
+  test("an older link without the block shows no card", async ({ page }) => {
+    await open(page, { gone: false });
+    await expectOverview(page);
+    await expect(page.getByTestId("no-longer-live")).toHaveCount(0);
+  });
+});
+
