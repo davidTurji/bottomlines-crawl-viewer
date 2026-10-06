@@ -1500,7 +1500,7 @@ function PublisherCard({
   onToggle: () => void;
 }) {
   const initial = (
-    (row.developer_name ?? row.developer_domain ?? "?")
+    (row.developer_name || row.developer_domain || "?")
       .replace(/^www\./i, "")
       .charAt(0) || "?"
   ).toUpperCase();
@@ -1534,7 +1534,10 @@ function PublisherCard({
         <div className="min-w-0 flex-1">
           <div className="flex min-w-0 items-baseline gap-2">
             <span className="truncate text-base font-semibold tracking-tight text-slate-900">
-              {row.developer_name ?? `Publisher #${row.developer_id}`}
+              {/* Never the internal id (David, 2026-10-06: a customer read
+                  "Publisher #567486"): the name, else the domain, else a
+                  plain word. The API names every row it can. */}
+              {row.developer_name || row.developer_domain || "Unnamed publisher"}
             </span>
             {row.developer_platform && (
               <span className="flex-shrink-0 text-[11px] text-slate-400">
@@ -1542,7 +1545,7 @@ function PublisherCard({
               </span>
             )}
           </div>
-          {row.developer_domain && (
+          {row.developer_domain && row.developer_name && (
             <div className="truncate text-xs text-slate-500">
               {row.developer_domain}
             </div>

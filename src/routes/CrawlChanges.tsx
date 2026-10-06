@@ -971,12 +971,16 @@ function ChangeCard({
                   key={`${p.developer_id}|${p.file_kind}|${i}`}
                   className="flex items-baseline gap-3 px-3 py-1.5 text-[11px]"
                 >
+                  {/* Never the internal id (David, 2026-10-06): the domain,
+                      else the name, else a plain word. */}
                   <span className="truncate font-mono tabular-nums text-slate-800">
-                    {p.developer_domain || `#${p.developer_id}`}
+                    {p.developer_domain || p.developer_name || "Unnamed publisher"}
                   </span>
-                  <span className="hidden truncate text-slate-500 sm:inline">
-                    {p.developer_name ?? ""}
-                  </span>
+                  {p.developer_domain && p.developer_name && (
+                    <span className="hidden truncate text-slate-500 sm:inline">
+                      {p.developer_name}
+                    </span>
+                  )}
                   {/* Rendered, never the raw enum: this is a customer's
                       screen, and "APP_ADS_TXT" is not a file name. Said as
                       a sentence, the same one every other surface uses, so
@@ -1091,7 +1095,7 @@ function exportPublishers(group: ChangeGroup) {
     .join(", ");
   const header = ["publisher_domain", "publisher_name", "file", "change", "line"];
   const body = group.publishers.map((p) => [
-    p.developer_domain ?? `#${p.developer_id}`,
+    p.developer_domain ?? "",
     p.developer_name ?? "",
     fileLabel(p.file_kind),
     TONES[group.event].label,
