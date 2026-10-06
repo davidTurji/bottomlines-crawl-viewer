@@ -13,7 +13,7 @@ import {
 } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 
-import { EntryDiff, JsonDiff, JsonView } from "@/components/JsonDiff";
+import { EntryDiff, JsonDiff } from "@/components/JsonDiff";
 import { Collapse, Settle, glideTo } from "@/components/Motion";
 import { PageShell } from "@/components/PageShell";
 import { SkeletonRows, SkeletonStatCards } from "@/components/Skeleton";
@@ -81,7 +81,6 @@ export default function CrawlSellers() {
   const [edits, setEdits] = useState<Record<string, { name?: string; domain?: string }>>({});
   const [openCards, setOpenCards] = useState<Set<string>>(new Set());
   const [openGroups, setOpenGroups] = useState<Set<GroupKey>>(new Set());
-  const [view, setView] = useState<"picks" | "all">("picks");
   // Only asked for when there is no file yet; an existing file keeps its own.
   const [header, setHeader] = useState<Header>({ contact_email: "", contact_address: "", tag_id: "" });
 
@@ -198,11 +197,6 @@ export default function CrawlSellers() {
     () => (base ? buildExport(base, rows, ticked) : null),
     [base, rows, ticked],
   );
-  /** Every suggestion taken, for the diff's "all our suggestions" view. */
-  const everyFile = useMemo(
-    () => (base ? buildExport(base, rows, new Set(rows.filter((r) => r.kind !== "keep").map((r) => r.seller_id))) : null),
-    [base, rows],
-  );
   const issues = useMemo(() => (exportFile ? validate(exportFile) : []), [exportFile]);
   const exportText = useMemo(
     () => (exportFile ? JSON.stringify(exportFile, null, 2) + "\n" : ""),
@@ -306,7 +300,7 @@ export default function CrawlSellers() {
         </>
       )}
 
-      {data && exportFile && everyFile && (
+      {data && exportFile && (
         <>
           <div className="rounded-2xl border border-border bg-white p-5 shadow-sm">
             <div className="mb-3 flex items-baseline justify-between gap-3">
@@ -394,9 +388,32 @@ export default function CrawlSellers() {
             </span>
           </p>
 
-          {/* THE FILE FIRST: live against the export, as GitHub shows a
-              diff, then the final file whole. Rebuilt on every tick and
-              every fill-in below. */}
+          {/* THE SUGGESTIONS FIRST, as thin cards in their groups: the only
+              place a change is made. */}
+          <div className="space-y-5">
+            {groups.map((g) => (
+              <SuggestionGroup
+                key={g.key}
+                group={g.key}
+                rows={g.rows}
+                ticked={ticked}
+                showAll={openGroups.has(g.key)}
+                onShowAll={() => setOpenGroups((prev) => flip(prev, g.key))}
+                openCards={openCards}
+                onOpen={(id) => setOpenCards((prev) => flip(prev, id))}
+                onSet={setOn}
+                onEdit={edit}
+                changed={changed}
+                onReset={reset}
+                flagged={new Set(issues.map((x) => x.sellerId).filter(Boolean) as string[])}
+                domain={data.domain}
+              />
+            ))}
+          </div>
+
+          {/* THE FILE, after the panels that change it: live against the
+              export, as GitHub shows a diff. Rebuilt on every tick and every
+              fill-in above. */}
           <div className="rounded-2xl border border-border bg-white p-5 shadow-sm">
             {/* WHAT YOU ARE EXPORTING, in one plain line (David, 2026-10-06:
                 the chips and the verdict were clutter). Copy and Download
@@ -427,68 +444,17 @@ export default function CrawlSellers() {
               </div>
               <ResetButton disabled={!anyChanged} onClick={() => reset(allIds)} label="Reset all" />
             </div>
-            {/* The toggle only changes what the comparison shows; the file
-                you take away is always the one with your picks. */}
-            <div className="mb-2 flex flex-wrap items-center gap-2 text-[12px] text-slate-500">
-              <span>Compare with</span>
-              <div className="inline-flex rounded-full border border-border bg-muted/40 p-0.5">
-                {(["picks", "all"] as const).map((v) => (
-                  <button
-                    key={v}
-                    type="button"
-                    onClick={() => setView(v)}
-                    aria-pressed={view === v}
-                    className={cn(
-                      "rounded-full px-3 py-1 font-medium transition-colors",
-                      view === v ? "bg-white text-slate-900 shadow-sm" : "text-slate-500 hover:text-slate-700",
-                    )}
-                  >
-                    {v === "picks" ? "Your picks" : "Every suggestion"}
-                  </button>
-                ))}
-              </div>
-            </div>
+            {/* One comparison, read only (David, 2026-10-06): the live file on
+                the left, the file with the changes taken above on the right.
+                Changes are made in the Add, Fix and Remove panels only. */}
             <JsonDiff
               live={data.file}
-              next={view === "picks" ? exportFile : everyFile}
+              next={exportFile}
               domain={data.domain}
-              nextLabel={view === "picks" ? (creating ? "New file" : "Fixed file") : "Every fix applied"}
-              nextNote={view === "picks" ? "what you download or copy" : "for comparison; not what you download"}
+              nextLabel={creating ? "New file" : "With your changes"}
+              nextNote="what you download or copy"
             />
-            {/* The final file whole, the full width of both panes: exactly
-                what Download and Copy hand over. */}
-            <div className="mt-3">
-              <JsonView
-                file={exportFile}
-                path={`${data.domain}/sellers.json`}
-                note={creating ? "New file" : "Fixed file"}
-                text={exportText}
-                onDownload={download}
-              />
-            </div>
           </div>
-          {/* THE SUGGESTIONS, as thin cards in their groups. */}
-          <div className="space-y-5">
-            {groups.map((g) => (
-              <SuggestionGroup
-                key={g.key}
-                group={g.key}
-                rows={g.rows}
-                ticked={ticked}
-                showAll={openGroups.has(g.key)}
-                onShowAll={() => setOpenGroups((prev) => flip(prev, g.key))}
-                openCards={openCards}
-                onOpen={(id) => setOpenCards((prev) => flip(prev, id))}
-                onSet={setOn}
-                onEdit={edit}
-                changed={changed}
-                onReset={reset}
-                flagged={new Set(issues.map((x) => x.sellerId).filter(Boolean) as string[])}
-                domain={data.domain}
-              />
-            ))}
-          </div>
-
         </>
       )}
     </PageShell>
