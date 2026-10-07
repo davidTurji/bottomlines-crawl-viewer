@@ -209,7 +209,7 @@ test.describe("no longer live", () => {
     await expect(tab).toBeVisible();
     await tab.click();
     const list = page.getByTestId("no-longer-live");
-    await expect(list.getByText("quokkaplay-legacy.com")).toBeVisible();
+    await expect(list.getByText("Quokkaplay Legacy")).toBeVisible();
     await expect(list.getByText(/The domain no longer exists/).first()).toBeVisible();
     // The apps view lists gone apps under the same tab.
     await page.getByRole("button", { name: /Matched apps/ }).click();

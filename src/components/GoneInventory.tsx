@@ -1,8 +1,10 @@
-import { ChevronDown, Globe, Smartphone } from "lucide-react";
-import { useState } from "react";
+import { ChevronDown, Smartphone } from "lucide-react";
+import { useState, type ReactNode } from "react";
 
-import type { GoneInventory as Gone } from "@/lib/api";
+import { Collapse, Settle } from "@/components/Motion";
+import type { GoneApp, GoneInventory as Gone, GonePublisher } from "@/lib/api";
 import { cn, storeLabel } from "@/lib/utils";
+import { MiniStat } from "@/routes/CrawlReport";
 
 /**
  * NO LONGER LIVE (David, 2026-10-06): publishers and apps that carried the
@@ -13,14 +15,15 @@ import { cn, storeLabel } from "@/lib/utils";
  *
  * Frozen with the report (``summary.gone``). A tab of the matched list, not
  * a card of its own (David, 2026-10-07: "a big KPI is overkill for that"):
- * the publishers view lists gone publishers, the apps view gone apps. The
- * tab exists only when something is gone; an older link has no tab.
+ * the publishers view lists gone publishers, the apps view gone apps, on the
+ * SAME cards as the matched rows (PublisherCard, MatchedAppCard), tinted red
+ * (David, 2026-10-07). The tab exists only when something is gone.
  */
 
 export type GoneKind = "publishers" | "apps";
 
-/** How many rows show before "Show all". */
-const PEEK = 10;
+/** How many cards show before "Show all". */
+const PEEK = 25;
 
 const day = (iso: string | null) =>
   iso ? new Date(`${iso}T00:00:00Z`).toLocaleDateString("en-GB", { day: "numeric", month: "short" }) : null;
@@ -33,10 +36,12 @@ export function goneCount(gone: Gone | null | undefined, kind: GoneKind): number
 
 export default function GoneList({ gone, kind }: { gone: Gone | null | undefined; kind: GoneKind }) {
   const [all, setAll] = useState(false);
+  const [expanded, setExpanded] = useState<string | null>(null);
   const pubs = gone?.publishers ?? [];
   const apps = gone?.apps ?? [];
   const rows = kind === "publishers" ? pubs.length : apps.length;
   const hidden = goneCount(gone, kind) - rows;
+  const toggle = (key: string) => setExpanded((k) => (k === key ? null : key));
 
   return (
     <div data-testid="no-longer-live">
@@ -51,54 +56,21 @@ export default function GoneList({ gone, kind }: { gone: Gone | null | undefined
           {kind === "publishers" ? "No publisher of yours is gone." : "No app of yours is gone from its store."}
         </p>
       ) : (
-        <div className="divide-y divide-border overflow-hidden rounded-2xl border border-border bg-white shadow-sm">
+        <div className="space-y-3">
           {kind === "publishers"
-            ? pubs.slice(0, all ? undefined : PEEK).map((p) => (
-                <div key={p.domain} className="flex items-center gap-3 px-4 py-3">
-                  <span className="flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-full bg-muted text-slate-500">
-                    <Globe aria-hidden className="h-4 w-4" />
-                  </span>
-                  <div className="min-w-0 flex-1">
-                    <div className="flex min-w-0 items-baseline gap-2">
-                      <span className="truncate font-mono text-[13px] font-semibold text-slate-900">{p.domain}</span>
-                      {p.name && p.name !== p.domain && (
-                        <span className="hidden truncate text-[12px] text-slate-500 sm:inline">{p.name}</span>
-                      )}
-                    </div>
-                    <div className="truncate text-[12px] text-slate-500">
-                      {p.reason}
-                      {day(p.since) ? `, since ${day(p.since)}` : ""}
-                      {p.apps > 0 ? `, ${p.apps} ${p.apps === 1 ? "app" : "apps"} with it` : ""}
-                    </div>
-                  </div>
-                  {p.lines[0] && (
-                    <code className="hidden flex-shrink-0 font-mono text-[11px] text-slate-500 md:block">
-                      {p.lines[0]}
-                      {p.lines.length > 1 ? ` +${p.lines.length - 1}` : ""}
-                    </code>
-                  )}
-                </div>
+            ? pubs.slice(0, all ? undefined : PEEK).map((p, i) => (
+                <Settle key={p.domain} index={i}>
+                  <GonePublisherCard pub={p} open={expanded === p.domain} onToggle={() => toggle(p.domain)} />
+                </Settle>
               ))
-            : apps.slice(0, all ? undefined : PEEK).map((a) => (
-                <div key={`${a.store}:${a.bundle}`} className="flex items-center gap-3 px-4 py-3">
-                  <span className="flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-full bg-muted text-slate-500">
-                    <Smartphone aria-hidden className="h-4 w-4" />
-                  </span>
-                  <div className="min-w-0 flex-1">
-                    <div className="flex min-w-0 items-baseline gap-2">
-                      <span className="truncate text-[13px] font-semibold text-slate-900">{a.name || a.bundle}</span>
-                      <span className="flex-shrink-0 text-[11px] text-slate-400">
-                        {storeLabel(a.store)}, <span className="font-mono">{a.bundle}</span>
-                      </span>
-                    </div>
-                    <div className="truncate text-[12px] text-slate-500">
-                      {a.reason}
-                      {day(a.since) ? `, since ${day(a.since)}` : ""}, from{" "}
-                      <span className="font-mono">{a.publisher}</span>
-                    </div>
-                  </div>
-                </div>
-              ))}
+            : apps.slice(0, all ? undefined : PEEK).map((a, i) => {
+                const key = `${a.store}:${a.bundle}`;
+                return (
+                  <Settle key={key} index={i}>
+                    <GoneAppCard app={a} open={expanded === key} onToggle={() => toggle(key)} />
+                  </Settle>
+                );
+              })}
         </div>
       )}
       {(rows > PEEK || hidden > 0) && (
@@ -119,5 +91,154 @@ export default function GoneList({ gone, kind }: { gone: Gone | null | undefined
         </div>
       )}
     </div>
+  );
+}
+
+/** The right-hand "Gone since" column, in ChangeCell's width and rhythm. */
+function GoneSince({ since }: { since: string | null }) {
+  return (
+    <div className="w-[112px]">
+      <div className="text-[10px] font-medium tracking-wide text-slate-500">Gone since</div>
+      <div className="font-mono text-sm tabular-nums text-critical">{day(since) ?? "—"}</div>
+    </div>
+  );
+}
+
+/** Shell shared by both cards: PublisherCard's shape, tinted red. */
+function GoneCard({
+  label,
+  open,
+  onToggle,
+  face,
+  children,
+}: {
+  label: string;
+  open: boolean;
+  onToggle: () => void;
+  face: ReactNode;
+  children: ReactNode;
+}) {
+  return (
+    <div
+      className={cn(
+        "overflow-hidden rounded-3xl border border-critical-border bg-critical-bg/40 shadow-sm transition-colors",
+        open && "bg-critical-bg/60 shadow-md",
+      )}
+    >
+      <button
+        type="button"
+        onClick={onToggle}
+        aria-expanded={open}
+        aria-label={`${open ? "Hide" : "Show"} details of ${label}`}
+        className="flex w-full items-center gap-4 rounded-t-3xl px-4 py-4 text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-critical/30 sm:px-5"
+      >
+        {face}
+        <ChevronDown
+          aria-hidden
+          className={cn("h-4 w-4 flex-shrink-0 text-slate-400 transition-transform", open && "rotate-180")}
+        />
+      </button>
+      <Collapse open={open}>
+        <div className="border-t border-critical-border bg-white/60 px-4 pb-4 pt-3 sm:px-5">{children}</div>
+      </Collapse>
+    </div>
+  );
+}
+
+function GonePublisherCard({ pub, open, onToggle }: { pub: GonePublisher; open: boolean; onToggle: () => void }) {
+  const named = pub.name && pub.name !== pub.domain;
+  const initial = (pub.name || pub.domain || "?").replace(/^www\./i, "").charAt(0).toUpperCase() || "?";
+  return (
+    <GoneCard
+      label={pub.name || pub.domain}
+      open={open}
+      onToggle={onToggle}
+      face={
+        <>
+          <div className="flex h-11 w-11 flex-shrink-0 items-center justify-center rounded-full bg-critical-bg text-base font-semibold text-critical ring-1 ring-critical-border">
+            {initial}
+          </div>
+          <div className="min-w-0 flex-1">
+            <div className="truncate text-base font-semibold tracking-tight text-slate-900">
+              {named ? pub.name : pub.domain}
+            </div>
+            <div className="truncate text-xs text-slate-500">
+              {named && <span className="font-mono">{pub.domain}, </span>}
+              <span className="text-critical">{pub.reason}</span>
+            </div>
+          </div>
+          <div className="hidden items-center gap-6 text-right sm:flex">
+            <div className="w-[84px]">
+              <MiniStat label="Your lines" value={pub.lines.length} emphasis />
+            </div>
+            <div className="w-[84px]">
+              <MiniStat label="Apps" value={pub.apps} />
+            </div>
+            <GoneSince since={pub.since} />
+          </div>
+        </>
+      }
+    >
+      <div className="mb-1 flex items-baseline justify-between">
+        <span className="text-xs font-medium text-slate-700">Your seat lines it carried</span>
+        <span className="font-mono text-[11px] tabular-nums text-slate-500">{pub.lines.length}</span>
+      </div>
+      <ul className="divide-y divide-border rounded-md border border-border bg-white">
+        {pub.lines.map((l) => (
+          <li key={l} className="px-3 py-1.5 font-mono text-[12px] text-slate-700">
+            {l}
+          </li>
+        ))}
+      </ul>
+    </GoneCard>
+  );
+}
+
+function GoneAppCard({ app, open, onToggle }: { app: GoneApp; open: boolean; onToggle: () => void }) {
+  return (
+    <GoneCard
+      label={app.name || app.bundle}
+      open={open}
+      onToggle={onToggle}
+      face={
+        <>
+          <div className="flex h-11 w-11 flex-shrink-0 items-center justify-center rounded-full bg-critical-bg text-critical ring-1 ring-critical-border">
+            <Smartphone aria-hidden className="h-5 w-5" />
+          </div>
+          <div className="min-w-0 flex-1">
+            <div className="flex min-w-0 items-center gap-2">
+              <span className="truncate text-base font-semibold tracking-tight text-slate-900">
+                {app.name || app.bundle}
+              </span>
+              <span className="flex-shrink-0 rounded-full border border-critical-border bg-critical-bg px-1.5 py-px text-[10px] font-medium text-critical">
+                {storeLabel(app.store)}
+              </span>
+            </div>
+            <div className="truncate text-xs text-slate-500">
+              publisher: <span className="text-slate-600">{app.publisher}</span>,{" "}
+              <span className="text-critical">{app.reason}</span>
+            </div>
+          </div>
+          <div className="hidden items-center gap-6 text-right sm:flex">
+            <GoneSince since={app.since} />
+          </div>
+        </>
+      }
+    >
+      <dl className="grid grid-cols-[auto_1fr] gap-x-4 gap-y-1 text-xs">
+        <dt className="text-slate-500">Why</dt>
+        <dd className="text-slate-700">{app.reason}, checked against the store twice</dd>
+        <dt className="text-slate-500">Store id</dt>
+        <dd className="font-mono text-slate-700">{app.bundle}</dd>
+        <dt className="text-slate-500">Publisher</dt>
+        <dd className="font-mono text-slate-700">{app.publisher}</dd>
+        {day(app.since) && (
+          <>
+            <dt className="text-slate-500">Gone since</dt>
+            <dd className="text-slate-700">{day(app.since)}</dd>
+          </>
+        )}
+      </dl>
+    </GoneCard>
   );
 }
