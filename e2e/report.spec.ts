@@ -201,21 +201,27 @@ test.describe("sign-in", () => {
 
 
 test.describe("no longer live", () => {
-  test("gone publishers and apps are listed apart", async ({ page }) => {
+  test("a tab in the matched list, publishers and apps apart", async ({ page }) => {
+    const errors = watchErrors(page);
     await open(page, {});
     await expectOverview(page);
-    const card = page.getByTestId("no-longer-live");
-    await expect(card).toBeVisible();
-    await expect(card.getByText("Publishers gone")).toBeVisible();
-    await expect(card.getByText("Apps gone from their store")).toBeVisible();
-    await card.getByRole("button", { name: "Show them" }).click();
-    await expect(card.getByText("No longer on Google Play").first()).toBeVisible();
+    const tab = page.getByRole("tab", { name: /No longer live/ });
+    await expect(tab).toBeVisible();
+    await tab.click();
+    const list = page.getByTestId("no-longer-live");
+    await expect(list.getByText("quokkaplay-legacy.com")).toBeVisible();
+    await expect(list.getByText(/The domain no longer exists/).first()).toBeVisible();
+    // The apps view lists gone apps under the same tab.
+    await page.getByRole("button", { name: /Matched apps/ }).click();
+    await page.getByRole("tab", { name: /No longer live/ }).click();
+    await expect(page.getByTestId("no-longer-live").getByText("No longer on Google Play").first()).toBeVisible();
+    expect(errors).toEqual([]);
   });
 
-  test("an older link without the block shows no card", async ({ page }) => {
+  test("an older link without the block has no tab", async ({ page }) => {
     await open(page, { gone: false });
     await expectOverview(page);
+    await expect(page.getByRole("tab", { name: /No longer live/ })).toHaveCount(0);
     await expect(page.getByTestId("no-longer-live")).toHaveCount(0);
   });
 });
-

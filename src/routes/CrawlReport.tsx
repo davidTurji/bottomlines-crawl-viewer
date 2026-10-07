@@ -1,4 +1,4 @@
-import GoneInventory from "@/components/GoneInventory";
+import GoneList, { goneCount } from "@/components/GoneInventory";
 import LockedTail from "@/components/LockedTail";
 import { Collapse, Settle, glideTo } from "@/components/Motion";
 import TrialBanner from "@/components/TrialBanner";
@@ -443,10 +443,6 @@ export default function CrawlReport() {
       </div>
       )}
 
-      {/* No longer live (David, 2026-10-06): gone publishers and store-gone
-          apps, frozen with the report and never counted. Hidden when none. */}
-      {!refreshing && <GoneInventory gone={summary.gone} />}
-
       {/* Ask AI, inline, between the KPIs and the drilldown. Same shape
           bottomlines-app uses on the "Your Bottom Line" page: pill input
           with a sparkle glyph + horizontal suggestion rail; answers grow
@@ -481,6 +477,7 @@ export default function CrawlReport() {
             token={token}
             lines={lines}
             caps={summary.trial ?? null}
+            gone={summary.gone}
             tab={drillTab}
             setTab={setDrillTab}
             openFirst={openFirst}
@@ -502,6 +499,7 @@ export default function CrawlReport() {
             token={token}
             lines={lines}
             caps={summary.trial ?? null}
+            gone={summary.gone}
             tab={drillTab}
             setTab={setDrillTab}
             openFirst={openFirst}
@@ -1116,7 +1114,8 @@ function ExportResultsButton({
   );
 }
 
-type DrillTab = "all" | "added" | "removed" | "changed";
+/** "gone" is No longer live: frozen with the summary, never fetched. */
+type DrillTab = "all" | "added" | "removed" | "changed" | "gone";
 
 /**
  * Opens a list's first row after `nonce` bumps, as soon as the list is
@@ -1173,6 +1172,7 @@ function DrilldownList({
   token,
   lines,
   caps,
+  gone,
   tab,
   setTab,
   openFirst,
@@ -1181,6 +1181,8 @@ function DrilldownList({
   lines: string[];
   /** The trial's caps, on a trial: the unlock card stands on every tab. */
   caps: TrialCaps | null;
+  /** No longer live, from the summary: a tab only when something is gone. */
+  gone: Summary["gone"];
   /** Owned by the page, so the line cards above can pick the tab. */
   tab: DrillTab;
   setTab: (tab: DrillTab) => void;
@@ -1205,6 +1207,14 @@ function DrilldownList({
   // Bumps each time a list lands, so the new rows ease in as one piece.
   const [settled, setSettled] = useState(0);
 
+  // No longer live is a tab only while something is gone in THIS view: the
+  // page's tab is shared by both views, so arriving on a view with nothing
+  // gone falls back to All matched instead of an empty, tab-less list.
+  const goneTotal = goneCount(gone, "publishers");
+  useEffect(() => {
+    if (tab === "gone" && goneTotal === 0) setTab("all");
+  }, [tab, goneTotal, setTab]);
+
   // A new search, a new tab or a new line selection is a new list, so it
   // starts at its first page. Without this, searching from page 7 asks
   // for page 7 of a result that may have one page, and the reader gets an
@@ -1228,9 +1238,12 @@ function DrilldownList({
   }, [tab, lines]);
 
   useEffect(() => {
+    // No longer live is frozen with the summary: nothing to read.
+    if (tab === "gone") return;
+    const event = tab;
     let cancelled = false;
     const load = (pg: number) =>
-      tab === "all"
+      event === "all"
         ? api.matchedDevelopers(token, pg, query, lines).then((r) => ({
             rows: r.rows.map(
               (d: MatchedDeveloper): Row => ({
@@ -1253,7 +1266,7 @@ function DrilldownList({
             truncated: r.truncated ?? false,
             trial: r.trial ?? null,
           }))
-        : api.developerEvents(token, tab, pg, query, lines).then((r) => ({
+        : api.developerEvents(token, event, pg, query, lines).then((r) => ({
             rows: r.rows.map(
               (d: DeveloperEvent): Row => ({
                 developer_id: d.developer_id,
@@ -1336,20 +1349,27 @@ function DrilldownList({
               <TabsTrigger value="added">Added</TabsTrigger>
               <TabsTrigger value="removed">Removed</TabsTrigger>
               <TabsTrigger value="changed">Changed</TabsTrigger>
+              {goneTotal > 0 && (
+                <TabsTrigger value="gone">
+                  No longer live
+                  <span className="ml-1.5 tabular-nums text-slate-400">{goneTotal.toLocaleString()}</span>
+                </TabsTrigger>
+              )}
             </TabsList>
           </Tabs>
           {/* Silent until a list has landed. While a new tab or filter is
               in flight this still holds the PREVIOUS total, and printing
               "260 matched" over a skeleton states a number for a question
               that is still being asked. */}
-          {settled > 0 && (
+          {settled > 0 && tab !== "gone" && (
             <span className="text-xs text-slate-500">
               {total.toLocaleString()}{" "}
               {tab === "all" ? "matched" : "with changes"}
             </span>
           )}
-          {loading && settled > 0 && <Dots />}
+          {loading && settled > 0 && tab !== "gone" && <Dots />}
         </div>
+        {tab !== "gone" && (
         <div className="relative w-full">
           <Search className="pointer-events-none absolute left-3.5 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
           <input
@@ -1360,6 +1380,7 @@ function DrilldownList({
             className="h-10 w-full rounded-full border border-border bg-white pl-10 pr-4 text-sm text-slate-900 outline-none transition-colors placeholder:text-slate-400 focus:border-primary/40"
           />
         </div>
+        )}
       </div>
       {/* TWO WEIGHTS OF RELOAD, and which one a change gets is the whole
           rule here.
@@ -1375,6 +1396,9 @@ function DrilldownList({
           still answering the question the reader just changed. Those reset
           `settled` to 0, which is the same "nothing has landed yet" state a
           cold open is in, and so draws the same skeleton. */}
+      {tab === "gone" ? (
+        <GoneList gone={gone} kind="publishers" />
+      ) : (
       <div>
         {loading && settled === 0 && (
           <SkeletonRows rows={5} label="Loading matched publishers" />
@@ -1445,6 +1469,7 @@ function DrilldownList({
           </div>
         )}
       </div>
+      )}
     </div>
   );
 }
@@ -2049,6 +2074,7 @@ function MatchedAppsList({
   token,
   lines,
   caps,
+  gone,
   tab,
   setTab,
   openFirst,
@@ -2056,6 +2082,8 @@ function MatchedAppsList({
   token: string;
   lines: string[];
   caps: TrialCaps | null;
+  /** No longer live, from the summary: a tab only when something is gone. */
+  gone: Summary["gone"];
   /** Owned by the page, so the line cards above can pick the tab. */
   tab: DrillTab;
   setTab: (tab: DrillTab) => void;
@@ -2077,6 +2105,14 @@ function MatchedAppsList({
   const keyOf = (a: MatchedApp) => `${a.store}:${a.bundle_id}`;
   const appCache = usePageCache<unknown>();
   const [settled, setSettled] = useState(0);
+
+  // No longer live is a tab only while something is gone in THIS view: the
+  // page's tab is shared by both views, so arriving on a view with nothing
+  // gone falls back to All matched instead of an empty, tab-less list.
+  const goneTotal = goneCount(gone, "apps");
+  useEffect(() => {
+    if (tab === "gone" && goneTotal === 0) setTab("all");
+  }, [tab, goneTotal, setTab]);
 
   // A new search or a new line selection is a new list and starts at its
   // first page.
@@ -2175,17 +2211,24 @@ function MatchedAppsList({
               <TabsTrigger value="added">Added</TabsTrigger>
               <TabsTrigger value="removed">Removed</TabsTrigger>
               <TabsTrigger value="changed">Changed</TabsTrigger>
+              {goneTotal > 0 && (
+                <TabsTrigger value="gone">
+                  No longer live
+                  <span className="ml-1.5 tabular-nums text-slate-400">{goneTotal.toLocaleString()}</span>
+                </TabsTrigger>
+              )}
             </TabsList>
           </Tabs>
           {/* Same rule as the publishers list: silent until one lands. */}
-          {settled > 0 && (
+          {settled > 0 && tab !== "gone" && (
             <span className="text-xs text-slate-500">
               {(tab === "all" ? total : rows.length).toLocaleString()}{" "}
               {tab === "all" ? "matched" : "with changes"}
             </span>
           )}
-          {loading && settled > 0 && <Dots />}
+          {loading && settled > 0 && tab !== "gone" && <Dots />}
         </div>
+        {tab !== "gone" && (
         <div className="relative w-full">
           <Search className="pointer-events-none absolute left-3.5 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
           <input
@@ -2196,7 +2239,12 @@ function MatchedAppsList({
             className="h-10 w-full rounded-full border border-border bg-white pl-10 pr-4 text-sm text-slate-900 outline-none transition-colors placeholder:text-slate-400 focus:border-primary/40"
           />
         </div>
+        )}
       </div>
+      {tab === "gone" ? (
+        <GoneList gone={gone} kind="apps" />
+      ) : (
+      <>
       {loading && settled === 0 && (
         <SkeletonRows rows={5} label="Loading matched apps" />
       )}
@@ -2270,6 +2318,8 @@ function MatchedAppsList({
           />
           {truncated && <TruncatedNotice shown={total} noun="apps" />}
         </div>
+      )}
+      </>
       )}
     </div>
   );
