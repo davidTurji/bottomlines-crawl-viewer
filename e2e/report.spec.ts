@@ -200,6 +200,24 @@ test.describe("sign-in", () => {
 });
 
 
+test.describe("the matched list", () => {
+  test("the tab stays when switching between publishers and apps", async ({ page }) => {
+    const errors = watchErrors(page);
+    await open(page, {});
+    await expectOverview(page);
+    await page.getByRole("tab", { name: "Added" }).click();
+    await expect(page.getByRole("tab", { name: "Added" })).toHaveAttribute("aria-selected", "true");
+    await page.getByRole("button", { name: /Matched apps/ }).click();
+    await expect(page.getByRole("heading", { name: "Matched apps" })).toBeVisible();
+    await expect(page.getByRole("tab", { name: "Added" })).toHaveAttribute("aria-selected", "true");
+    await page.getByRole("tab", { name: "Removed" }).click();
+    await page.getByRole("button", { name: /Matched publishers/ }).click();
+    await expect(page.getByRole("heading", { name: "Matched publishers" })).toBeVisible();
+    await expect(page.getByRole("tab", { name: "Removed" })).toHaveAttribute("aria-selected", "true");
+    expect(errors).toEqual([]);
+  });
+});
+
 test.describe("no longer live", () => {
   test("a tab in the matched list, publishers and apps apart", async ({ page }) => {
     const errors = watchErrors(page);

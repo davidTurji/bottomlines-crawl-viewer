@@ -417,10 +417,9 @@ export default function CrawlReport() {
               move={moves?.developers ?? null}
               note={filtered ? "under the selected lines" : undefined}
               active={matchedView === "publishers"}
-              onClick={() => {
-                setMatchedView("publishers");
-                setDrillTab("all");
-              }}
+              // The tab stays (David, 2026-10-07): Added on publishers
+              // is Added on apps, never a silent jump back to All matched.
+              onClick={() => setMatchedView("publishers")}
             />
             <MatchedTile
               tone="app"
@@ -433,10 +432,9 @@ export default function CrawlReport() {
               move={moves?.apps ?? null}
               note={filtered ? "under the selected lines" : undefined}
               active={matchedView === "apps"}
-              onClick={() => {
-                setMatchedView("apps");
-                setDrillTab("all");
-              }}
+              // The tab stays (David, 2026-10-07): Added on publishers
+              // is Added on apps, never a silent jump back to All matched.
+              onClick={() => setMatchedView("apps")}
             />
           </div>
         </div>
