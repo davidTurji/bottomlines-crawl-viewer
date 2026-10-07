@@ -1,5 +1,6 @@
 import GoneList, { goneCount } from "@/components/GoneInventory";
 import LockedTail from "@/components/LockedTail";
+import { MiniStat } from "@/components/MiniStat";
 import { Collapse, Settle, glideTo } from "@/components/Motion";
 import TrialBanner from "@/components/TrialBanner";
 import {
@@ -1395,7 +1396,7 @@ function DrilldownList({
           `settled` to 0, which is the same "nothing has landed yet" state a
           cold open is in, and so draws the same skeleton. */}
       {tab === "gone" ? (
-        <GoneList gone={gone} kind="publishers" />
+        <GoneList gone={gone} kind="publishers" filtered={lines.length > 0} />
       ) : (
       <div>
         {loading && settled === 0 && (
@@ -1912,40 +1913,9 @@ function ChangeExpansion({
   );
 }
 
-/**
- * Small right-aligned number pair used on the drilldown row header.
- *
- * Exported because the Discovered lines cards are deliberate siblings of
- * PublisherCard: same stat treatment, same label size, same tabular figures.
- * Copying it would let the two drift apart a pixel at a time.
- */
-export function MiniStat({
-  label,
-  value,
-  emphasis,
-}: {
-  label: string;
-  value: number;
-  emphasis?: boolean;
-}) {
-  return (
-    <div>
-      {/* Sentence case, never uppercase: the house rule is that labels read
-          as words, not as shouting. */}
-      <div className="text-[10px] font-medium tracking-wide text-slate-500">
-        {label}
-      </div>
-      <div
-        className={cn(
-          "font-mono text-sm tabular-nums",
-          emphasis ? "font-semibold text-slate-900" : "text-slate-700",
-        )}
-      >
-        {value.toLocaleString()}
-      </div>
-    </div>
-  );
-}
+// MiniStat lives in its own module so the No longer live cards can use it
+// without importing this route (no import cycle); re-exported for the pages.
+export { MiniStat };
 
 /**
  * The matched seat line(s) block, in the same mono line style the Changes and
@@ -2240,7 +2210,7 @@ function MatchedAppsList({
         )}
       </div>
       {tab === "gone" ? (
-        <GoneList gone={gone} kind="apps" />
+        <GoneList gone={gone} kind="apps" filtered={lines.length > 0} />
       ) : (
       <>
       {loading && settled === 0 && (

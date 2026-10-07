@@ -4,7 +4,7 @@ import { useState, type ReactNode } from "react";
 import { Collapse, Settle } from "@/components/Motion";
 import type { GoneApp, GoneInventory as Gone, GonePublisher } from "@/lib/api";
 import { cn, storeLabel } from "@/lib/utils";
-import { MiniStat } from "@/routes/CrawlReport";
+import { MiniStat } from "@/components/MiniStat";
 
 /**
  * NO LONGER LIVE (David, 2026-10-06): publishers and apps that carried the
@@ -34,7 +34,17 @@ export function goneCount(gone: Gone | null | undefined, kind: GoneKind): number
   return gone.totals?.[kind] ?? gone[kind]?.length ?? 0;
 }
 
-export default function GoneList({ gone, kind }: { gone: Gone | null | undefined; kind: GoneKind }) {
+export default function GoneList({
+  gone,
+  kind,
+  filtered = false,
+}: {
+  gone: Gone | null | undefined;
+  kind: GoneKind;
+  /** A seat-line filter is on. This list is frozen for the whole watchlist,
+   *  so it says so instead of passing for a filtered list (review). */
+  filtered?: boolean;
+}) {
   const [all, setAll] = useState(false);
   const [expanded, setExpanded] = useState<string | null>(null);
   const pubs = gone?.publishers ?? [];
@@ -50,6 +60,7 @@ export default function GoneList({ gone, kind }: { gone: Gone | null | undefined
           ? "Publishers that carried your seat lines and are gone: the domain no longer exists or the site stopped answering."
           : "Apps that carried your seat lines and their store no longer lists, checked twice."}{" "}
         Not counted in your matched totals.
+        {filtered && " Shown for all your seat lines, not only the selected ones."}
       </p>
       {rows === 0 ? (
         <p className="rounded-lg border border-dashed border-border bg-muted/20 p-6 text-center text-sm text-slate-500">
