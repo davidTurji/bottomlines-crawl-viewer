@@ -99,12 +99,43 @@ function GoneSince({ since }: { since: string | null }) {
   return (
     <div className="w-[112px]">
       <div className="text-[10px] font-medium tracking-wide text-slate-500">Gone since</div>
-      <div className="font-mono text-sm tabular-nums text-critical">{day(since) ?? "—"}</div>
+      <div className="font-mono text-sm tabular-nums text-critical">{day(since) ?? "\u2014"}</div>
     </div>
   );
 }
 
-/** Shell shared by both cards: PublisherCard's shape, tinted red. */
+/**
+ * One titled box inside an open card, the "Removed lines" window of the
+ * matched cards (CrawlReport ChangeWindow): toned header with its count,
+ * white rows underneath. Same look, so a gone card reads as one of ours.
+ */
+function GoneWindow({ title, count, children }: { title: string; count?: number; children: ReactNode }) {
+  return (
+    <section className="min-w-0 overflow-hidden rounded-lg border border-critical-border bg-white shadow-sm">
+      <div className="flex items-baseline justify-between gap-2 border-b border-critical-border bg-critical-bg/60 px-3 py-1.5">
+        <span className="text-xs font-medium text-critical">{title}</span>
+        {count != null && (
+          <span className="font-mono text-[11px] font-semibold tabular-nums text-critical">{count}</span>
+        )}
+      </div>
+      <ul className="divide-y divide-border">{children}</ul>
+    </section>
+  );
+}
+
+/** A label and its value on one row of a GoneWindow. */
+function Fact({ label, value, mono }: { label: string; value: ReactNode; mono?: boolean }) {
+  return (
+    <li className="flex items-baseline justify-between gap-3 px-3 py-1.5">
+      <span className="flex-shrink-0 text-[11px] text-slate-500">{label}</span>
+      <span className={cn("min-w-0 truncate text-right text-[11px] text-slate-800", mono && "font-mono tabular-nums")}>
+        {value}
+      </span>
+    </li>
+  );
+}
+
+/** Shell shared by both cards: PublisherCard's shape, with a red wash. */
 function GoneCard({
   label,
   open,
@@ -121,8 +152,8 @@ function GoneCard({
   return (
     <div
       className={cn(
-        "overflow-hidden rounded-3xl border border-critical-border bg-critical-bg/40 shadow-sm transition-colors",
-        open && "bg-critical-bg/60 shadow-md",
+        "overflow-hidden rounded-3xl border border-critical-border bg-gradient-to-r from-critical-bg/80 via-white to-white shadow-sm transition-shadow",
+        open && "shadow-md",
       )}
     >
       <button
@@ -139,7 +170,7 @@ function GoneCard({
         />
       </button>
       <Collapse open={open}>
-        <div className="border-t border-critical-border bg-white/60 px-4 pb-4 pt-3 sm:px-5">{children}</div>
+        <div className="border-t border-critical-border bg-critical-bg/20 px-4 pb-4 pt-3 sm:px-5">{children}</div>
       </Collapse>
     </div>
   );
@@ -163,7 +194,7 @@ function GonePublisherCard({ pub, open, onToggle }: { pub: GonePublisher; open: 
               {named ? pub.name : pub.domain}
             </div>
             <div className="truncate text-xs text-slate-500">
-              {named && <span className="font-mono">{pub.domain}, </span>}
+              {named && <span>{pub.domain}, </span>}
               <span className="text-critical">{pub.reason}</span>
             </div>
           </div>
@@ -179,17 +210,21 @@ function GonePublisherCard({ pub, open, onToggle }: { pub: GonePublisher; open: 
         </>
       }
     >
-      <div className="mb-1 flex items-baseline justify-between">
-        <span className="text-xs font-medium text-slate-700">Your seat lines it carried</span>
-        <span className="font-mono text-[11px] tabular-nums text-slate-500">{pub.lines.length}</span>
+      <div className="grid items-start gap-3 sm:grid-cols-2">
+        <GoneWindow title="Your seat lines it carried" count={pub.lines.length}>
+          {pub.lines.map((l) => (
+            <li key={l} className="px-3 py-1.5">
+              <code className="block truncate font-mono text-[11px] tabular-nums text-slate-800">{l}</code>
+            </li>
+          ))}
+        </GoneWindow>
+        <GoneWindow title="Why it is gone">
+          <Fact label="Reason" value={pub.reason} />
+          <Fact label="Publisher" value={pub.domain} mono />
+          <Fact label="Gone since" value={day(pub.since) ?? "\u2014"} />
+          <Fact label="Apps with it" value={pub.apps.toLocaleString()} mono />
+        </GoneWindow>
       </div>
-      <ul className="divide-y divide-border rounded-md border border-border bg-white">
-        {pub.lines.map((l) => (
-          <li key={l} className="px-3 py-1.5 font-mono text-[12px] text-slate-700">
-            {l}
-          </li>
-        ))}
-      </ul>
     </GoneCard>
   );
 }
@@ -225,20 +260,15 @@ function GoneAppCard({ app, open, onToggle }: { app: GoneApp; open: boolean; onT
         </>
       }
     >
-      <dl className="grid grid-cols-[auto_1fr] gap-x-4 gap-y-1 text-xs">
-        <dt className="text-slate-500">Why</dt>
-        <dd className="text-slate-700">{app.reason}, checked against the store twice</dd>
-        <dt className="text-slate-500">Store id</dt>
-        <dd className="font-mono text-slate-700">{app.bundle}</dd>
-        <dt className="text-slate-500">Publisher</dt>
-        <dd className="font-mono text-slate-700">{app.publisher}</dd>
-        {day(app.since) && (
-          <>
-            <dt className="text-slate-500">Gone since</dt>
-            <dd className="text-slate-700">{day(app.since)}</dd>
-          </>
-        )}
-      </dl>
+      <div className="sm:max-w-[50%]">
+        <GoneWindow title="Why it is gone">
+          <Fact label="Reason" value={`${app.reason}, checked twice`} />
+          <Fact label="Store" value={storeLabel(app.store)} />
+          <Fact label="Store id" value={app.bundle} mono />
+          <Fact label="Publisher" value={app.publisher} mono />
+          <Fact label="Gone since" value={day(app.since) ?? "\u2014"} />
+        </GoneWindow>
+      </div>
     </GoneCard>
   );
 }
