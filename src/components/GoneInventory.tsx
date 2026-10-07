@@ -261,7 +261,12 @@ function GoneAppCard({ app, open, onToggle }: { app: GoneApp; open: boolean; onT
               </span>
             </div>
             <div className="truncate text-xs text-slate-500">
-              publisher: <span className="text-slate-600">{app.publisher}</span>,{" "}
+              {/* A trial does not name the publisher (crawler viewer_frozen). */}
+              {app.publisher && (
+                <>
+                  publisher: <span className="text-slate-600">{app.publisher}</span>,{" "}
+                </>
+              )}
               <span className="text-critical">{app.reason}</span>
             </div>
           </div>
@@ -276,7 +281,7 @@ function GoneAppCard({ app, open, onToggle }: { app: GoneApp; open: boolean; onT
           <Fact label="Reason" value={`${app.reason}, checked twice`} />
           <Fact label="Store" value={storeLabel(app.store)} />
           <Fact label="Store id" value={app.bundle} mono />
-          <Fact label="Publisher" value={app.publisher} mono />
+          {app.publisher && <Fact label="Publisher" value={app.publisher} mono />}
           <Fact label="Gone since" value={day(app.since) ?? "\u2014"} />
         </GoneWindow>
       </div>
