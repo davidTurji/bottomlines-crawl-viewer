@@ -70,6 +70,8 @@ export type Scenario = {
    *  shipped before its crawler. Tails like "declarations". (An older
    *  snapshot on a current API answers 503 instead; see "hiccup" cases.) */
   missing?: string[];
+  /** false: a link frozen before the "No longer live" block existed. */
+  gone?: boolean;
   /** Last week's summary: "none" answers 503 (erased), "error" 500. */
   previousWeek?: "ok" | "none" | "error";
 };
@@ -111,6 +113,7 @@ export async function installFakeApi(page: Page, scenario: Scenario = {}): Promi
     forbidden: [],
     previousWeek: "ok",
     missing: [],
+    gone: true,
     ...scenario,
   };
   let signedIn = !s.signedOut && !s.expired;
@@ -163,7 +166,8 @@ export async function installFakeApi(page: Page, scenario: Scenario = {}): Promi
           if (s.previousWeek === "error") return reply(500, { detail: "boom" });
           return reply(200, mockPreviousSummary);
         }
-        const sum = mockSummaryFor(lines);
+        const full = mockSummaryFor(lines);
+        const sum = s.gone ? full : { ...full, gone: undefined };
         return reply(200, s.trial ? { ...sum, trial: TRIAL_CAPS } : sum);
       }
       case "export-info":

@@ -198,3 +198,48 @@ test.describe("sign-in", () => {
     await expect(page.getByText(EXPIRED)).toBeVisible();
   });
 });
+
+
+test.describe("the matched list", () => {
+  test("the tab stays when switching between publishers and apps", async ({ page }) => {
+    const errors = watchErrors(page);
+    await open(page, {});
+    await expectOverview(page);
+    await page.getByRole("tab", { name: "Added" }).click();
+    await expect(page.getByRole("tab", { name: "Added" })).toHaveAttribute("aria-selected", "true");
+    await page.getByRole("button", { name: /Matched apps/ }).click();
+    await expect(page.getByRole("heading", { name: "Matched apps" })).toBeVisible();
+    await expect(page.getByRole("tab", { name: "Added" })).toHaveAttribute("aria-selected", "true");
+    await page.getByRole("tab", { name: "Removed" }).click();
+    await page.getByRole("button", { name: /Matched publishers/ }).click();
+    await expect(page.getByRole("heading", { name: "Matched publishers" })).toBeVisible();
+    await expect(page.getByRole("tab", { name: "Removed" })).toHaveAttribute("aria-selected", "true");
+    expect(errors).toEqual([]);
+  });
+});
+
+test.describe("no longer live", () => {
+  test("a tab in the matched list, publishers and apps apart", async ({ page }) => {
+    const errors = watchErrors(page);
+    await open(page, {});
+    await expectOverview(page);
+    const tab = page.getByRole("tab", { name: /No longer live/ });
+    await expect(tab).toBeVisible();
+    await tab.click();
+    const list = page.getByTestId("no-longer-live");
+    await expect(list.getByText("Quokkaplay Legacy")).toBeVisible();
+    await expect(list.getByText(/The domain no longer exists/).first()).toBeVisible();
+    // The apps view lists gone apps under the same tab.
+    await page.getByRole("button", { name: /Matched apps/ }).click();
+    await page.getByRole("tab", { name: /No longer live/ }).click();
+    await expect(page.getByTestId("no-longer-live").getByText("No longer on Google Play").first()).toBeVisible();
+    expect(errors).toEqual([]);
+  });
+
+  test("an older link without the block has no tab", async ({ page }) => {
+    await open(page, { gone: false });
+    await expectOverview(page);
+    await expect(page.getByRole("tab", { name: /No longer live/ })).toHaveCount(0);
+    await expect(page.getByTestId("no-longer-live")).toHaveCount(0);
+  });
+});
