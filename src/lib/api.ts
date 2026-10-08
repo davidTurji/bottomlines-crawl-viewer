@@ -418,9 +418,9 @@ export const api = {
     );
   },
   /**
-   * One page of one Inactive list (publishers, apps or lines): what carried
-   * the reader's lines and stopped counting, with the date, the reason and
-   * the evidence. Frozen with the report, searched and paged server-side
+   * One page of one Inactive list (publishers or apps): what carried the
+   * reader's lines and went inactive between the two compared crawls, with
+   * the date, the reason and the evidence. Frozen with the report, searched and paged server-side
    * like the matched lists; a trial answers its first rows with `trial`.
    *
    * BACKWARDS COMPATIBLE. An API from before this route answers 404, which
@@ -429,7 +429,7 @@ export const api = {
    * `legacy`, the way the crawler itself serves an old link.
    *
    * In MOCK mode `?inactive=legacy` shows an older link (from the gone
-   * block, no lines) and `?inactive=none` a report without the section.
+   * block) and `?inactive=none` a report without the section.
    */
   inactive: async (
     token: string,
@@ -991,14 +991,19 @@ export type GoneInventory = {
 };
 
 // ---- Inactive (2026-10-08, crawler docs/INACTIVE.md) ----
-// Nothing is deleted: dead publishers, apps their store no longer lists and
-// lines that ended are kept with a date, a reason and the evidence, listed
-// apart from the active lists and never counted in the headline numbers.
+// A report is the difference between two crawls, and so is this section:
+// the publishers and apps that went inactive BETWEEN the compared crawl and
+// this one (inactive_since after the compared crawl, up to this crawl),
+// each with its date, its reason and the evidence. Listed apart from the
+// active lists and never counted in the headline numbers. Two lists only,
+// publishers and apps (David, 2026-10-08); Removed is unchanged.
 
-export type InactiveKind = "publishers" | "apps" | "lines";
+export type InactiveKind = "publishers" | "apps";
 
-/** How many of each are inactive: whole, never cut by a trial or a filter. */
-export type InactiveCounts = { publishers: number; apps: number; lines: number };
+/** How many of each went inactive between the two compared crawls: whole,
+ *  never cut by a trial or a filter. Older APIs also send ``lines``; it is
+ *  ignored. */
+export type InactiveCounts = { publishers: number; apps: number };
 
 /** One of the seat lines an inactive publisher carried. Links frozen before
  *  the section carry only the line's identity (derived from ``gone``). */
@@ -1050,28 +1055,13 @@ export type InactiveApp = {
   evidence_summary?: string | null;
   /** False while the store's two strikes await a person's approval. */
   confirmed?: boolean;
+  /** The reader's seat lines its publisher carries, as on a matched app
+   *  card. Optional: without them the card reads them by ``developer_id``
+   *  (as a matched app card does); a trial withholds both. */
+  lines?: InactivePublisherLine[];
 };
 
-export type InactiveLine = {
-  developer_id?: number | null;
-  /** The publisher's domain; "" on a trial (withheld). */
-  publisher: string;
-  publisher_name?: string | null;
-  publisher_inactive?: boolean;
-  file: string | null;
-  ssp_domain: string;
-  publisher_id: string;
-  relationship: string;
-  first_seen: string | null;
-  last_seen: string | null;
-  ended_at: string | null;
-  /** line_removed, file_gone, publisher_inactive, app_inactive. */
-  reason_code: string | null;
-  reason: string | null;
-  http_status?: number | null;
-};
-
-export type InactiveRow = InactivePublisher | InactiveApp | InactiveLine;
+export type InactiveRow = InactivePublisher | InactiveApp;
 
 /** GET /v1/viewer/{token}/inactive: one page of one Inactive list. */
 export type InactivePage<R = InactiveRow> = {
@@ -1096,9 +1086,16 @@ export type Summary = {
   crawl_id: number;
   /** What carried the reader's lines and is gone; never in the counts. */
   gone?: GoneInventory | null;
-  /** Inactive publishers, apps and lines: NOT in ``counters.matched``, which
-   *  counts active only. Absent on links frozen before the section. */
+  /** Publishers and apps that went inactive between the two compared
+   *  crawls: NOT in ``counters.matched``, which counts active only. Absent
+   *  on links frozen before the section. */
   inactive_counts?: InactiveCounts | null;
+  /** When this crawl and the crawl it is compared with ran: the window the
+   *  report covers (the Inactive section's, among others). Optional: until
+   *  the backend sends them, this crawl's ``finished_at`` and the previous
+   *  summary's ``finished_at`` stand in. */
+  crawl_at?: string | null;
+  compared_crawl_at?: string | null;
   /** Set on a trial report (see ``TrialCaps``); null or absent on a full one. */
   trial?: TrialCaps | null;
   /** The watchlist this report was built from: what the seat-line filter

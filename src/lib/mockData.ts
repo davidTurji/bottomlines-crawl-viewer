@@ -38,12 +38,11 @@ import type {
   DeclarationRowsPayload,
   InactiveApp,
   InactiveKind,
-  InactiveLine,
   InactivePage,
   InactivePublisher,
   InactiveRow,
 } from "./api";
-import { pageRows } from "./inactive";
+import { inactiveDay, inWindow, pageRows } from "./inactive";
 // The discovered-lines ORDER BY, shared with the page's sort control so the
 // mock endpoint and the client's "default" option cannot disagree.
 import { compareDefault } from "./discoveredSort";
@@ -208,8 +207,23 @@ export const mockGone: NonNullable<Summary["gone"]> = {
  * madeupmedia-style names checked to belong to nobody (dig NXDOMAIN, store
  * lookups empty). Newest first, as the bake keeps them. The seller ids are
  * the watchlist's own madeupmedia.com lines, so the seat-line filter has
- * something true to narrow the publishers and lines by.
+ * something true to narrow the publishers by.
+ *
+ * A report covers the window between its two crawls (David, 2026-10-08),
+ * so the fixtures are dated around this mock report's crawls and cut to
+ * that window the way the crawler must cut its own block. A few fall
+ * outside on purpose: one found dead BY the compared crawl (its day, the
+ * report before) and older ones; none of them may show.
  */
+export const MOCK_CRAWL_AT = "2026-08-25T09:18:47Z";
+export const MOCK_COMPARED_CRAWL_AT = "2026-08-18T09:19:22Z";
+/** A day, `before` days ahead of this mock report's crawl. */
+const crawlDay = (before: number) =>
+  new Date(Date.parse(MOCK_CRAWL_AT) - before * 86_400_000).toISOString().slice(0, 10);
+const MOCK_WINDOW = { from: MOCK_COMPARED_CRAWL_AT, to: MOCK_CRAWL_AT };
+/** "from 4 Aug to 25 Aug", for the evidence sentences. */
+const span = (from: number, to: number) => `from ${inactiveDay(crawlDay(from))} to ${inactiveDay(crawlDay(to))}`;
+
 const seat = (i: number) => CUSTOMER_SEATS.filter((l) => l.ssp_domain === "madeupmedia.com")[i];
 const pubLine = (i: number, ended: number, file = "app-ads.txt") => {
   const l = seat(i);
@@ -218,182 +232,152 @@ const pubLine = (i: number, ended: number, file = "app-ads.txt") => {
     publisher_id: l.publisher_id,
     relationship: l.relationship,
     file,
-    first_seen: goneDay(ended + 70),
-    last_seen: goneDay(ended + 7),
-    ended_at: goneDay(ended),
+    first_seen: crawlDay(ended + 70),
+    last_seen: crawlDay(ended + 7),
+    ended_at: crawlDay(ended),
     reason_code: "publisher_inactive",
   };
 };
 
-const INACTIVE_PUBLISHERS: InactivePublisher[] = [
+const INACTIVE_PUBLISHERS_ALL: InactivePublisher[] = [
   {
     developer_id: 880_101, domain: "brambleloop-old.net", name: null,
-    inactive_since: goneDay(8), reason_code: "site_silent", reason: "The website stopped answering",
-    evidence_summary: `Failed in 4 crawls in a row, from ${goneDay(29)} to ${goneDay(8)}`,
-    lines: [pubLine(1, 8), pubLine(2, 8, "ads.txt")], apps: 2,
+    inactive_since: crawlDay(0), reason_code: "site_silent", reason: "The website stopped answering",
+    evidence_summary: `Failed in 4 crawls in a row, ${span(21, 0)}`,
+    lines: [pubLine(1, 0), pubLine(2, 0, "ads.txt")], apps: 2,
   },
   {
     developer_id: 880_102, domain: "quokkaplay-legacy.com", name: "Quokkaplay Legacy",
-    inactive_since: goneDay(15), reason_code: "domain_gone", reason: "The domain no longer exists",
-    evidence_summary: `Failed in 3 crawls in a row, from ${goneDay(29)} to ${goneDay(15)}`,
-    lines: [pubLine(3, 15)], apps: 4,
+    inactive_since: crawlDay(0), reason_code: "domain_gone", reason: "The domain no longer exists",
+    evidence_summary: `Failed in 3 crawls in a row, ${span(14, 0)}`,
+    lines: [pubLine(3, 0)], apps: 4,
   },
   {
     developer_id: 880_103, domain: "tinplover-studio.net", name: "Tinplover Studio",
-    inactive_since: goneDay(19), reason_code: "no_file",
+    inactive_since: crawlDay(0), reason_code: "no_file",
     reason: "The website no longer serves an ads.txt or app-ads.txt file",
-    evidence_summary: `Failed in 3 crawls in a row, from ${goneDay(33)} to ${goneDay(19)}`,
-    lines: [pubLine(4, 19), pubLine(5, 19)], apps: 3,
-  },
-  {
-    developer_id: 880_104, domain: "lanternbay-apps.com", name: null,
-    inactive_since: goneDay(22), reason_code: "certificate_broken",
-    reason: "The website's security certificate is broken",
-    evidence_summary: `Failed in 3 crawls in a row, from ${goneDay(36)} to ${goneDay(22)}`,
-    lines: [pubLine(0, 22)], apps: 7,
-  },
-  {
-    developer_id: 880_105, domain: "driftquill-media.com", name: "Driftquill Media",
-    inactive_since: goneDay(30), reason_code: "site_refuses", reason: "The website refuses connections",
-    evidence_summary: `Failed in 5 crawls in a row, from ${goneDay(58)} to ${goneDay(30)}`,
-    lines: [pubLine(6, 30)], apps: 1,
+    evidence_summary: `Failed in 3 crawls in a row, ${span(14, 0)}`,
+    lines: [pubLine(4, 0), pubLine(5, 0)], apps: 3,
   },
   {
     developer_id: 880_106, domain: "pebblemarsh-tv.com", name: "Pebblemarsh TV",
-    inactive_since: goneDay(41), reason_code: "retired_by_operator", reason: "Retired by our team",
+    inactive_since: crawlDay(3), reason_code: "retired_by_operator", reason: "Retired by our team",
     evidence_summary: "Retired by our team after review",
-    lines: [pubLine(7, 41, "ads.txt"), pubLine(8, 41, "ads.txt")], apps: 0,
+    lines: [pubLine(7, 3, "ads.txt"), pubLine(8, 3, "ads.txt")], apps: 0,
+  },
+  // Outside the window: found dead by the compared crawl, and older.
+  {
+    developer_id: 880_104, domain: "lanternbay-apps.com", name: null,
+    inactive_since: crawlDay(7), reason_code: "certificate_broken",
+    reason: "The website's security certificate is broken",
+    evidence_summary: `Failed in 3 crawls in a row, ${span(21, 7)}`,
+    lines: [pubLine(0, 7)], apps: 7,
+  },
+  {
+    developer_id: 880_105, domain: "driftquill-media.com", name: "Driftquill Media",
+    inactive_since: crawlDay(28), reason_code: "site_refuses", reason: "The website refuses connections",
+    evidence_summary: `Failed in 5 crawls in a row, ${span(56, 28)}`,
+    lines: [pubLine(6, 28)], apps: 1,
   },
 ];
 
-const INACTIVE_APPS: InactiveApp[] = [
-  {
-    app_id: 990_201, store: "android", bundle: "puzzle.madeup.wool.sort", name: "Puzzle Wool Sort",
-    developer_id: 77_301, publisher: "cobaltriver15.com", publisher_name: "Cobalt River",
-    inactive_since: goneDay(3), reason_code: "unlisted_from_store", reason: "No longer on Google Play",
-    evidence: { http_status: 404, storefronts_checked: ["US", "GB"], qa_outcome: "cloud_gone" },
-    evidence_summary: "Google Play no longer lists it, checked in 2 storefronts, the store answered 404 (confirmed twice, removal awaiting review)",
-    confirmed: false,
-  },
-  {
-    app_id: 990_202, store: "android", bundle: "io.madeup.fighterjam", name: "Fighter Jam",
-    developer_id: 77_302, publisher: "orchardtide-ads.com", publisher_name: "Orchardtide",
-    inactive_since: goneDay(4), reason_code: "unlisted_from_store", reason: "No longer on Google Play",
-    evidence: { http_status: 404, storefronts_checked: ["US", "GB", "JP"], qa_outcome: "cloud_gone" },
-    evidence_summary: "Google Play no longer lists it, checked in 3 storefronts, the store answered 404",
-    confirmed: true,
-  },
-  {
-    app_id: 990_203, store: "ios", bundle: "com.madeup.lanternbay.solitaire", name: "Lantern Bay Solitaire",
-    developer_id: 77_303, publisher: "copperwren-hiphop.com", publisher_name: null,
-    inactive_since: goneDay(7), reason_code: "unlisted_from_store", reason: "No longer on the App Store",
-    evidence: { http_status: 404, storefronts_checked: ["US", "GB", "DE", "JP"], qa_outcome: "cloud_gone" },
-    evidence_summary: "The App Store no longer lists it, checked in 4 storefronts, the store answered 404",
-    confirmed: true,
-  },
-  {
-    app_id: 990_204, store: "android", bundle: "com.madeup.war.hex.world", name: "Hex World War",
-    developer_id: 77_304, publisher: "silvergull-media.tv", publisher_name: "Silvergull Media",
-    inactive_since: goneDay(10), reason_code: "unlisted_from_store", reason: "No longer on Google Play",
-    evidence: { http_status: 404, storefronts_checked: ["US"], qa_outcome: "cloud_gone" },
-    evidence_summary: "Google Play no longer lists it, checked in 1 storefront, the store answered 404",
-    confirmed: true,
-  },
-  {
-    app_id: 990_205, store: "roku", bundle: "614512", name: "Harbor News Live",
-    developer_id: 77_305, publisher: "harborview7news.com", publisher_name: "Harborview 7 News",
-    inactive_since: goneDay(12), reason_code: "unlisted_from_store", reason: "No longer on the Roku Channel Store",
-    evidence: { http_status: 404, qa_outcome: "cloud_gone" },
-    evidence_summary: "The Roku Channel Store no longer lists it, the store answered 404",
-    confirmed: true,
-  },
+/** The reader's lines a live publisher of an inactive app still carries. */
+const appLines = (...idx: number[]) =>
+  idx.map((i) => {
+    const l = seat(i);
+    return { ssp_domain: l.ssp_domain, publisher_id: l.publisher_id, relationship: l.relationship, file: "app-ads.txt" };
+  });
+
+const INACTIVE_APPS_ALL: InactiveApp[] = [
   {
     app_id: 990_206, store: "ios", bundle: "com.madeup.glintfox.runner", name: "Glintfox Runner",
     developer_id: 880_102, publisher: "quokkaplay-legacy.com", publisher_name: "Quokkaplay Legacy",
     publisher_inactive: true,
-    inactive_since: goneDay(15), reason_code: "unlisted_from_store", reason: "No longer on the App Store",
+    inactive_since: crawlDay(0), reason_code: "unlisted_from_store", reason: "No longer on the App Store",
     evidence: { http_status: 404, storefronts_checked: ["US", "CA"], qa_outcome: "cloud_gone" },
-    evidence_summary: "The App Store no longer lists it, checked in 2 storefronts, the store answered 404",
+    evidence_summary: "Checked in US, CA, the store answered 404",
     confirmed: true,
+    lines: [pubLine(3, 0)],
   },
+  {
+    app_id: 990_201, store: "android", bundle: "puzzle.madeup.wool.sort", name: "Puzzle Wool Sort",
+    developer_id: 77_301, publisher: "cobaltriver15.com", publisher_name: "Cobalt River",
+    inactive_since: crawlDay(1), reason_code: "unlisted_from_store", reason: "No longer on Google Play",
+    evidence: { http_status: 404, storefronts_checked: ["US", "GB"], qa_outcome: "cloud_gone" },
+    evidence_summary: "Checked in US, GB, the store answered 404 (gone twice, awaiting our review)",
+    confirmed: false,
+    publisher_inactive: false, lines: appLines(11, 12),
+  },
+  {
+    app_id: 990_202, store: "android", bundle: "io.madeup.fighterjam", name: "Fighter Jam",
+    developer_id: 77_302, publisher: "orchardtide-ads.com", publisher_name: "Orchardtide",
+    inactive_since: crawlDay(2), reason_code: "unlisted_from_store", reason: "No longer on Google Play",
+    evidence: { http_status: 404, storefronts_checked: ["US", "GB", "JP"], qa_outcome: "cloud_gone" },
+    evidence_summary: "Checked in US, GB, JP, the store answered 404",
+    confirmed: true,
+    publisher_inactive: false, lines: appLines(13),
+  },
+  {
+    app_id: 990_203, store: "ios", bundle: "com.madeup.lanternbay.solitaire", name: "Lantern Bay Solitaire",
+    developer_id: 77_303, publisher: "copperwren-hiphop.com", publisher_name: null,
+    inactive_since: crawlDay(3), reason_code: "unlisted_from_store", reason: "No longer on the App Store",
+    evidence: { http_status: 404, storefronts_checked: ["US", "GB", "DE", "JP"], qa_outcome: "cloud_gone" },
+    evidence_summary: "Checked in US, GB, DE, JP, the store answered 404",
+    confirmed: true,
+    publisher_inactive: false, lines: appLines(14, 15, 16),
+  },
+  {
+    app_id: 990_204, store: "android", bundle: "com.madeup.war.hex.world", name: "Hex World War",
+    developer_id: 77_304, publisher: "silvergull-media.tv", publisher_name: "Silvergull Media",
+    inactive_since: crawlDay(5), reason_code: "unlisted_from_store", reason: "No longer on Google Play",
+    evidence: { http_status: 404, storefronts_checked: ["US"], qa_outcome: "cloud_gone" },
+    evidence_summary: "Checked in US, the store answered 404",
+    confirmed: true,
+    publisher_inactive: false, lines: appLines(17),
+  },
+  {
+    app_id: 990_205, store: "roku", bundle: "614512", name: "Harbor News Live",
+    developer_id: 77_305, publisher: "harborview7news.com", publisher_name: "Harborview 7 News",
+    inactive_since: crawlDay(6), reason_code: "unlisted_from_store", reason: "No longer on the Roku Channel Store",
+    evidence: { http_status: 404, qa_outcome: "cloud_gone" },
+    evidence_summary: "The store answered 404",
+    confirmed: true,
+    publisher_inactive: false, lines: appLines(18, 19),
+  },
+  // Outside the window: retired before the compared crawl.
   {
     app_id: 990_207, store: "android", bundle: "com.madeup.mossgate.pinball", name: "Mossgate Pinball",
     developer_id: 77_307, publisher: "mossgate-arcade.com", publisher_name: "Mossgate Arcade",
-    inactive_since: goneDay(26), reason_code: "removed_by_operator", reason: "Retired by our team",
+    inactive_since: crawlDay(13), reason_code: "removed_by_operator", reason: "Retired by our team",
     evidence: {}, evidence_summary: "Retired by our team",
     confirmed: true,
+    publisher_inactive: false, lines: appLines(20),
   },
 ];
 
-const INACTIVE_LINE_PUBS = [
-  { developer_id: 77_311, publisher: "fernhollow-games.com", publisher_name: "Fernhollow Games" },
-  { developer_id: 77_312, publisher: "sunwhistle-apps.net", publisher_name: "Sunwhistle Apps" },
-  { developer_id: 77_313, publisher: "glintfox-games.com", publisher_name: "Glintfox Games" },
-  { developer_id: 77_314, publisher: "reedlark-play.com", publisher_name: null },
-];
+const INACTIVE_PUBLISHERS = INACTIVE_PUBLISHERS_ALL.filter((p) => inWindow(p.inactive_since, MOCK_WINDOW));
+const INACTIVE_APPS = INACTIVE_APPS_ALL.filter((a) => inWindow(a.inactive_since, MOCK_WINDOW));
 
-const INACTIVE_LINES: InactiveLine[] = [
-  // 26 ended lines on live publishers (removed from the file, or the whole
-  // file gone), plus the dead publishers' own lines, so the list pages.
-  ...Array.from({ length: 26 }, (_, i): InactiveLine => {
-    const pub = INACTIVE_LINE_PUBS[i % INACTIVE_LINE_PUBS.length];
-    const gone = i % 5 === 3;
-    const ended = 2 + Math.floor(i * 1.7);
-    const l = seat(10 + i * 2);
-    return {
-      ...pub,
-      publisher_inactive: false,
-      file: i % 3 === 0 ? "ads.txt" : "app-ads.txt",
-      ssp_domain: l.ssp_domain,
-      publisher_id: l.publisher_id,
-      relationship: l.relationship,
-      first_seen: goneDay(ended + 60 + i),
-      last_seen: goneDay(ended + 7),
-      ended_at: goneDay(ended),
-      reason_code: gone ? "file_gone" : "line_removed",
-      reason: gone
-        ? "The publisher's file is gone (the site answers 404)"
-        : "The publisher removed this line from its file",
-      ...(gone ? { http_status: 404 } : {}),
-    };
-  }),
-  ...INACTIVE_PUBLISHERS.flatMap((p) =>
-    p.lines.map(
-      (l): InactiveLine => ({
-        developer_id: p.developer_id,
-        publisher: p.domain,
-        publisher_name: p.name,
-        publisher_inactive: true,
-        file: l.file ?? null,
-        ssp_domain: l.ssp_domain,
-        publisher_id: l.publisher_id,
-        relationship: l.relationship,
-        first_seen: l.first_seen ?? null,
-        last_seen: l.last_seen ?? null,
-        ended_at: l.ended_at ?? null,
-        reason_code: "publisher_inactive",
-        reason: "The publisher is inactive",
-      }),
-    ),
-  ),
-].sort((a, b) => (b.ended_at ?? "").localeCompare(a.ended_at ?? ""));
-
+/** The report's block: only what went inactive between its two crawls. */
 export const mockInactiveBlock = {
   publishers: INACTIVE_PUBLISHERS,
   apps: INACTIVE_APPS,
-  lines: INACTIVE_LINES,
   counts: {
     publishers: INACTIVE_PUBLISHERS.length,
     apps: INACTIVE_APPS.length,
-    lines: INACTIVE_LINES.length,
+  },
+  /** Kept for the tests: rows that must never show on this report. */
+  outside: {
+    publishers: INACTIVE_PUBLISHERS_ALL.filter((p) => !INACTIVE_PUBLISHERS.includes(p)),
+    apps: INACTIVE_APPS_ALL.filter((a) => !INACTIVE_APPS.includes(a)),
   },
 };
 
 /**
  * One page of an Inactive list, the way viewer_frozen.inactive serves it.
  * A trial keeps the first rows of each list (the counts stay whole) and
- * withholds the publisher of apps and lines, BEFORE search and filter, as
- * the crawler's trial view does.
+ * withholds the publisher of apps (and so its lines), BEFORE search and
+ * filter, as the crawler's trial view does.
  */
 export function mockInactive(
   kind: InactiveKind,
@@ -404,8 +388,10 @@ export function mockInactive(
   let rows: InactiveRow[] = block[kind];
   if (trial) {
     rows = rows.slice(0, 3);
-    if (kind !== "publishers") {
-      rows = rows.map((r) => ({ ...r, publisher: "", publisher_name: "", developer_id: null }));
+    if (kind === "apps") {
+      rows = (rows as InactiveApp[]).map((r) => ({
+        ...r, publisher: "", publisher_name: "", publisher_inactive: undefined, developer_id: null, lines: undefined,
+      }));
     }
   }
   const cut = pageRows(kind, rows, { page: opts.page, pageSize: PAGE_SIZE, q: opts.q, lines: opts.lines });
@@ -427,6 +413,8 @@ export function mockInactive(
 export const mockSummary: Summary = {
   gone: mockGone,
   inactive_counts: { ...mockInactiveBlock.counts },
+  crawl_at: MOCK_CRAWL_AT,
+  compared_crawl_at: MOCK_COMPARED_CRAWL_AT,
   crawl_id: 47281,
   source: "weekly",
   status: "completed",

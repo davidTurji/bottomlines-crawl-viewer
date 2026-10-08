@@ -83,6 +83,9 @@ export type Scenario = {
   inactive?: "ok" | "legacy" | "missing";
   /** Last week's summary: "none" answers 503 (erased), "error" 500. */
   previousWeek?: "ok" | "none" | "error";
+  /** false: a summary without ``crawl_at`` / ``compared_crawl_at`` (the API
+   *  today), so the window's start comes from last week's summary. */
+  crawlDates?: boolean;
 };
 
 const TRIAL_CAPS = { publishers: 3, apps: 3, declarations: 3, discovered_lines: 3 };
@@ -124,6 +127,7 @@ export async function installFakeApi(page: Page, scenario: Scenario = {}): Promi
     missing: [],
     gone: true,
     inactive: "ok",
+    crawlDates: true,
     ...scenario,
   };
   let signedIn = !s.signedOut && !s.expired;
@@ -176,7 +180,8 @@ export async function installFakeApi(page: Page, scenario: Scenario = {}): Promi
           if (s.previousWeek === "error") return reply(500, { detail: "boom" });
           return reply(200, mockPreviousSummary);
         }
-        const full = mockSummaryFor(lines);
+        const dated = mockSummaryFor(lines);
+        const full = s.crawlDates ? dated : { ...dated, crawl_at: undefined, compared_crawl_at: undefined };
         const withGone = s.gone ? full : { ...full, gone: undefined };
         const sum = s.inactive === "ok" ? withGone : { ...withGone, inactive_counts: undefined };
         return reply(200, s.trial ? { ...sum, trial: TRIAL_CAPS } : sum);
