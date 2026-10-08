@@ -304,8 +304,8 @@ const INACTIVE_APPS_ALL: InactiveApp[] = [
     developer_id: 77_301, publisher: "cobaltriver15.com", publisher_name: "Cobalt River",
     inactive_since: crawlDay(1), reason_code: "unlisted_from_store", reason: "No longer on Google Play",
     evidence: { http_status: 404, storefronts_checked: ["US", "GB"], qa_outcome: "cloud_gone" },
-    evidence_summary: "Checked in US, GB, the store answered 404 (gone twice, awaiting our review)",
-    confirmed: false,
+    evidence_summary: "Checked in US, GB, the store answered 404",
+    confirmed: true,
     publisher_inactive: false, lines: appLines(11, 12),
   },
   {
@@ -348,8 +348,9 @@ const INACTIVE_APPS_ALL: InactiveApp[] = [
   {
     app_id: 990_207, store: "android", bundle: "com.madeup.mossgate.pinball", name: "Mossgate Pinball",
     developer_id: 77_307, publisher: "mossgate-arcade.com", publisher_name: "Mossgate Arcade",
-    inactive_since: crawlDay(13), reason_code: "removed_by_operator", reason: "Retired by our team",
-    evidence: {}, evidence_summary: "Retired by our team",
+    inactive_since: crawlDay(13), reason_code: "unlisted_from_store", reason: "No longer on Google Play",
+    evidence: { http_status: 404, storefronts_checked: ["US"], qa_outcome: "cloud_gone" },
+    evidence_summary: "Checked in US, the store answered 404",
     confirmed: true,
     publisher_inactive: false, lines: appLines(20),
   },
@@ -376,8 +377,10 @@ export const mockInactiveBlock = {
 /**
  * One page of an Inactive list, the way viewer_frozen.inactive serves it.
  * A trial keeps the first rows of each list (the counts stay whole) and
- * withholds the publisher of apps (and so its lines), BEFORE search and
- * filter, as the crawler's trial view does.
+ * withholds the publisher of apps (its domain, name and id; the row keeps
+ * its lines and publisher_inactive), BEFORE search and filter, as the
+ * crawler's trial view does (viewer_frozen._unnamed). There is no lines
+ * list: the crawler answers kind=lines with 410.
  */
 export function mockInactive(
   kind: InactiveKind,
@@ -390,7 +393,7 @@ export function mockInactive(
     rows = rows.slice(0, 3);
     if (kind === "apps") {
       rows = (rows as InactiveApp[]).map((r) => ({
-        ...r, publisher: "", publisher_name: "", publisher_inactive: undefined, developer_id: null, lines: undefined,
+        ...r, publisher: "", publisher_name: "", developer_id: null,
       }));
     }
   }

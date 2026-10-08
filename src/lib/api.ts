@@ -1044,7 +1044,8 @@ export type InactiveApp = {
   publisher_name?: string | null;
   publisher_inactive?: boolean;
   inactive_since: string | null;
-  /** unlisted_from_store, removed_by_operator; null when derived from ``gone``. */
+  /** unlisted_from_store (an operator's retirement is never listed to a
+   *  customer); null when derived from ``gone``. */
   reason_code: string | null;
   reason: string | null;
   evidence?: {
@@ -1053,11 +1054,13 @@ export type InactiveApp = {
     qa_outcome?: string | null;
   } | null;
   evidence_summary?: string | null;
-  /** False while the store's two strikes await a person's approval. */
+  /** Always true on a list frozen since 2026-10-08: only a death confirmed
+   *  in the window is listed. */
   confirmed?: boolean;
-  /** The reader's seat lines its publisher carries, as on a matched app
-   *  card. Optional: without them the card reads them by ``developer_id``
-   *  (as a matched app card does); a trial withholds both. */
+  /** The reader's seat lines its publisher carries (all of them, even none),
+   *  so the card needs no other call. Absent only on a row frozen before
+   *  them: the card then reads them by ``developer_id``, as a matched app
+   *  card does. A trial keeps them and withholds the publisher's name. */
   lines?: InactivePublisherLine[];
 };
 

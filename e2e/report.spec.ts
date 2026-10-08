@@ -292,6 +292,38 @@ test.describe("inactive", () => {
     await expect(section(page).getByText("Your seat lines its publisher carries")).toBeVisible();
   });
 
+  test("an app card shows the lines its row carries, with no other call, and no lines list is ever asked for", async ({ page }) => {
+    const errors = watchErrors(page);
+    const calls = await open(page, {});
+    await expectOverview(page);
+    await page.getByRole("tab", { name: "Inactive", exact: true }).click();
+    await sub(page, "Apps").click();
+    const before = calls.length;
+    for (const a of mockInactiveBlock.apps) {
+      await section(page).getByRole("button", { name: `Show the seat lines of ${a.name}` }).click();
+      // A closed card keeps its lines mounted (hidden): only the open one is visible.
+      await expect(section(page).getByText("Your seat lines its publisher carries").filter({ visible: true })).toHaveCount(1);
+      await expect(section(page).getByText(a.lines![0].publisher_id).filter({ visible: true }).first()).toBeVisible();
+    }
+    // The lines came on the rows: no line-events read for any card.
+    expect(calls.slice(before).filter((c) => c.path.endsWith("/line-events"))).toEqual([]);
+    await sub(page, "Publishers").click();
+    await expect(section(page).getByText("Quokkaplay Legacy")).toBeVisible();
+    const inactiveCalls = calls.filter((c) => c.path.endsWith("/inactive"));
+    expect(inactiveCalls.length).toBeGreaterThan(0);
+    for (const c of inactiveCalls) {
+      expect(new URLSearchParams(c.query).get("kind")).toMatch(/^(publishers|apps)$/);
+      expect(c.status).toBe(200);
+    }
+    expect(errors).toEqual([]);
+  });
+
+  test("the header says the two crawls the summary names", async ({ page }) => {
+    await open(page, {});
+    await expectOverview(page);
+    await expect(page.getByText(/Week of Aug 25, 2026, compared with Aug 18, 2026\./)).toBeVisible();
+  });
+
   test("without the summary's dates the window starts at last week's crawl", async ({ page }) => {
     await open(page, { crawlDates: false });
     await expectOverview(page);

@@ -130,9 +130,10 @@ function searchText(kind: InactiveKind, r: InactiveRow): string {
 }
 
 /**
- * One page of a list, cut the way the crawler cuts it: search, then the
- * seat-line filter (publishers by any of their lines, apps never hidden by
- * it), then the page. Used by the mock and by the
+ * One page of a list, cut the way the crawler cuts it (viewer_frozen.inactive):
+ * search, then the seat-line filter (a publisher by any of its card lines, an
+ * app by its publisher's lines; a row frozen without lines, an older link's
+ * app, is never hidden by it), then the page. Used by the mock and by the
  * fallback for an API older than the /inactive route.
  */
 export function pageRows<R extends InactiveRow>(
@@ -144,8 +145,8 @@ export function pageRows<R extends InactiveRow>(
   const needle = (opts.q ?? "").trim().toLowerCase();
   if (needle) out = out.filter((r) => searchText(kind, r).includes(needle));
   const want = new Set(opts.lines ?? []);
-  if (want.size && kind === "publishers") {
-    out = out.filter((r) => ((r as InactivePublisher).lines ?? []).some((l) => want.has(lineKey(l))));
+  if (want.size) {
+    out = out.filter((r) => r.lines == null || r.lines.some((l) => want.has(lineKey(l))));
   }
   const start = (opts.page - 1) * opts.pageSize;
   return { rows: out.slice(start, start + opts.pageSize), total: out.length };

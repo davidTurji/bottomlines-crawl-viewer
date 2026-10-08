@@ -110,7 +110,7 @@ function schainOverview(status: "ok") {
 }
 
 /** Every request the page made, for assertions. */
-export type Calls = { method: string; path: string; status: number }[];
+export type Calls = { method: string; path: string; status: number; query: string }[];
 
 export async function installFakeApi(page: Page, scenario: Scenario = {}): Promise<Calls> {
   const s: Required<Scenario> = {
@@ -145,7 +145,7 @@ export async function installFakeApi(page: Page, scenario: Scenario = {}): Promi
       .map((k) => decodeURIComponent(k));
 
     const reply = (status: number, body: unknown) => {
-      calls.push({ method: req.method(), path, status });
+      calls.push({ method: req.method(), path, status, query: url.search });
       return route.fulfill({
         status,
         contentType: "application/json",
@@ -247,7 +247,17 @@ export async function installFakeApi(page: Page, scenario: Scenario = {}): Promi
         );
       case "inactive": {
         if (s.inactive === "missing") return notFound();
-        const kind = (q.get("kind") ?? "publishers") as InactiveKind;
+        // There is no customer-facing lines list: the crawler answers 410
+        // (viewer_frozen.LINES_REFUSED), and any other kind is a 422.
+        const rawKind = q.get("kind") ?? "publishers";
+        if (rawKind === "lines") {
+          return reply(410, {
+            detail:
+              "The Inactive section lists publishers and apps only. The seat lines an inactive publisher carried are on its card (lines), and each inactive app carries its publisher's lines.",
+          });
+        }
+        if (rawKind !== "publishers" && rawKind !== "apps") return reply(422, { detail: "unknown kind" });
+        const kind = rawKind as InactiveKind;
         const opts = { page: page_, q: q.get("q") ?? "", lines };
         if (s.inactive === "legacy") {
           return reply(200, pageFromGone(s.gone ? mockGone : null, kind, { ...opts, pageSize: Number(q.get("page_size") ?? 50) }));

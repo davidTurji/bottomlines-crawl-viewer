@@ -76,7 +76,8 @@ export default function InactiveSection({
   cards,
 }: {
   token: string;
-  /** The seat-line filter: narrows publishers, never apps. */
+  /** The seat-line filter: narrows publishers by their lines and apps by
+   *  their publisher's lines. */
   lines: string[];
   /** The trial's caps, on a trial: the unlock card stands on every list. */
   caps: TrialCaps | null;
@@ -188,7 +189,7 @@ export default function InactiveSection({
           {intro(kind, since)} Not counted in your totals.
           {lines.length > 0 &&
             (kind === "apps"
-              ? " Apps carry no seat line, so all of them show whatever lines you select."
+              ? " Showing only apps whose publisher carries the selected lines."
               : " Showing only those with the selected lines.")}
         </p>
         <div className="relative w-full">
@@ -214,7 +215,7 @@ export default function InactiveSection({
             <p className="rounded-lg border border-dashed border-border bg-muted/20 p-6 text-center text-sm text-slate-500">
               {!data?.available || counts.publishers + counts.apps === 0
                 ? NOTHING_INACTIVE
-                : lines.length > 0 && kind !== "apps"
+                : lines.length > 0
                   ? `No ${noun} with the selected lines.`
                   : EMPTY[kind]}
             </p>

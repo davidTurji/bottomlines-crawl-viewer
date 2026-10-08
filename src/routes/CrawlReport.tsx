@@ -198,10 +198,14 @@ export default function CrawlReport() {
     );
   }
 
-  const finishedAt = summary.finished_at ? new Date(summary.finished_at) : null;
-  const weekLabel = finishedAt ? formatWeek(finishedAt) : `crawl #${summary.crawl_id}`;
-  const prevFinishedAt = previous?.finished_at ? new Date(previous.finished_at) : null;
-  const prevWeekLabel = prevFinishedAt ? formatWeek(prevFinishedAt) : null;
+  // The two crawls this report compares. The summary says when each ran
+  // (``crawl_at``, ``compared_crawl_at``) on every report frozen since
+  // 2026-10-08; an older one falls back to this crawl's finished_at and last
+  // week's summary's finished_at.
+  const crawlAt = validDate(summary.crawl_at ?? summary.finished_at);
+  const comparedAt = validDate(summary.compared_crawl_at ?? previous?.finished_at);
+  const weekLabel = crawlAt ? formatWeek(crawlAt) : `crawl #${summary.crawl_id}`;
+  const prevWeekLabel = comparedAt ? formatWeek(comparedAt) : null;
 
   const added = summary.hero_diff.line_totals.added;
   const removed = summary.hero_diff.line_totals.removed;
@@ -251,15 +255,9 @@ export default function CrawlReport() {
   // (a filter, an older link) reads as All matched rather than a tab-less list.
   const listTab: DrillTab = drillTab === "inactive" && !hasInactive ? "all" : drillTab;
   // A report covers the window between its two crawls, and the Inactive
-  // section lists what went inactive in it. When the compared crawl ran:
-  // the summary's own field once the backend sends it, else last week's
-  // finished_at (the same date the header says it is compared with).
-  const comparedAt = summary.compared_crawl_at ?? previous?.finished_at ?? null;
-  const comparedDate = comparedAt ? new Date(comparedAt) : null;
-  const inactiveSince =
-    comparedDate && !Number.isNaN(comparedDate.getTime())
-      ? `since ${formatWeek(comparedDate)}`
-      : "since the compared crawl";
+  // section lists what went inactive in it: since the compared crawl (the
+  // same date the header says it is compared with).
+  const inactiveSince = comparedAt ? `since ${formatWeek(comparedAt)}` : "since the compared crawl";
   const inactive = inactiveCounts && hasInactive
     ? {
         counts: inactiveCounts,
@@ -1072,6 +1070,13 @@ function sampleWorkbook(summary: Summary): { name: string; rows: (string | numbe
  * downloads a spreadsheet a customer can actually open, not a stub.
  */
 /** The report's date as it appears in a filename, from the crawl's finish. */
+/** An ISO time as a Date, or null when absent or unreadable. */
+function validDate(iso: string | null | undefined): Date | null {
+  if (!iso) return null;
+  const d = new Date(iso);
+  return Number.isNaN(d.getTime()) ? null : d;
+}
+
 export function reportDate(summary: { finished_at: string | null }): string {
   return summary.finished_at
     ? new Date(summary.finished_at).toISOString().slice(0, 10)
@@ -2591,12 +2596,19 @@ function MatchedAppCard({
             inactive ? "border-slate-200 bg-slate-100/50" : "border-app-border bg-app-bg/30",
           )}
         >
-          {inactive && lines.length > 0 ? (
-            <MatchedSeatLines
-              title="Your seat lines its publisher carries"
-              lines={lines}
-              publisherDomain={app.owner_domain}
-            />
+          {/* An inactive app's row carries its publisher's lines (even
+              none): shown as they are, never fetched again. Only a row
+              frozen without them reads them by developer_id below. */}
+          {inactive && app.matched_lines != null ? (
+            lines.length > 0 ? (
+              <MatchedSeatLines
+                title="Your seat lines its publisher carries"
+                lines={lines}
+                publisherDomain={app.owner_domain}
+              />
+            ) : (
+              <p className="text-xs text-slate-500">No seat lines on record for this app.</p>
+            )
           ) : inactive && app.developer_id == null ? (
             <p className="text-xs text-slate-500">
               {app.owner_domain
