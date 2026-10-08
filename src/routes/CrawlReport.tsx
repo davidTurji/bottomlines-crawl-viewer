@@ -2551,7 +2551,7 @@ function MatchedAppCard({
             <div className={cn("text-xs text-slate-500", inactive ? "break-words sm:truncate" : "truncate")}>
               publisher:{" "}
               {app.owner_domain ? (
-                <PublisherDomainLink domain={app.owner_domain} className="text-slate-600" />
+                <PublisherDomainLink domain={app.owner_domain} className="text-slate-600" arrow={false} />
               ) : null}
               {app.owner_name ? (
                 <span className="text-slate-400">, {app.owner_name}</span>

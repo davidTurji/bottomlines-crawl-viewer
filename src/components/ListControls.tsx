@@ -130,6 +130,7 @@ export function Pager({
   total,
   onPage,
   noun,
+  nounOne,
   placement = "bottom",
   anchorRef,
   className,
@@ -140,6 +141,9 @@ export function Pager({
   onPage: (next: number) => void;
   /** Plural noun for the count line, e.g. "publishers". */
   noun: string;
+  /** Singular noun for a count of one, e.g. "publisher". Without it the
+   *  plural stands for every count. */
+  nounOne?: string;
   /** The copy above the rows says nothing on a single page: the one below
    *  already carries the count, and saying it twice is noise. */
   placement?: "top" | "bottom";
@@ -174,7 +178,7 @@ export function Pager({
     if (placement === "top") return null;
     return (
       <p className="px-1 text-xs text-slate-500">
-        {total.toLocaleString()} {noun}
+        {total.toLocaleString()} {total === 1 && nounOne ? nounOne : noun}
       </p>
     );
   }
@@ -343,14 +347,17 @@ function scrollParentOf(el: Element): Element {
 export function TruncatedNotice({
   shown,
   noun,
+  nounOne,
 }: {
   shown: number;
   noun: string;
+  /** Singular noun for one row; the plural stands without it. */
+  nounOne?: string;
 }) {
   return (
     <p className="mt-3 rounded-lg border border-dashed border-border px-4 py-3 text-xs leading-relaxed text-slate-500">
       This report was frozen with an earlier row limit, so it carries the
-      first {shown.toLocaleString()} {noun} rather than all of them. Ask for
+      first {shown.toLocaleString()} {shown === 1 && nounOne ? nounOne : noun} rather than all of them. Ask for
       the report to be regenerated to get the full list.
     </p>
   );

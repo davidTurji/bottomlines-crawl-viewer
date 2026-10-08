@@ -250,7 +250,7 @@ test.describe("inactive", () => {
     // The matched card, greyed: an Inactive chip and the strip on top.
     const strips = section(page).getByTestId("inactive-strip");
     await expect(strips).toHaveCount(counts.publishers);
-    await expect(strips.filter({ hasText: "Inactive since 25 Aug: The domain no longer exists" })).toHaveCount(1);
+    await expect(strips.filter({ hasText: "Inactive since Aug 25, 2026: The domain no longer exists" })).toHaveCount(1);
     await expect(section(page).getByText("Inactive", { exact: true })).toHaveCount(counts.publishers);
     await sub(page, "Apps").click();
     await expect(section(page).getByRole("button", { name: /Show the seat lines of/ })).toHaveCount(counts.apps);
@@ -281,7 +281,7 @@ test.describe("inactive", () => {
     await open(page, {});
     await expectOverview(page);
     await page.getByRole("tab", { name: "Inactive", exact: true }).click();
-    await expect(section(page).getByText("Failed in 3 crawls in a row, from 11 Aug to 25 Aug").first()).toBeVisible();
+    await expect(section(page).getByText("Failed in 3 crawls in a row, from Aug 11, 2026 to Aug 25, 2026").first()).toBeVisible();
     await section(page).getByRole("button", { name: "Show the seat lines of Quokkaplay Legacy" }).click();
     await expect(section(page).getByText("Your seat lines it carried")).toBeVisible();
     await sub(page, "Apps").click();
@@ -371,7 +371,29 @@ test.describe("inactive", () => {
     await expect(section(page).getByText("publisher:")).toHaveCount(0);
     await expect(section(page).getByText(`${counts.apps - 3} more inactive apps are waiting in your full report.`)).toBeVisible();
     await expect(section(page).getByText(/every inactive publisher and app, with the date and the reason/)).toBeVisible();
+    // One kept back is said in the singular.
+    await sub(page, "Publishers").click();
+    const hiddenPubs = counts.publishers - 3;
+    const pubWords = hiddenPubs === 1 ? "inactive publisher is" : "inactive publishers are";
+    await expect(section(page).getByText(`${hiddenPubs} more ${pubWords} waiting in your full report.`)).toBeVisible();
     expect(errors).toEqual([]);
+  });
+
+  test("one row is counted in the singular, and the publisher line has no blank before its comma", async ({ page }) => {
+    await open(page, {});
+    await expectOverview(page);
+    await page.getByRole("tab", { name: "Inactive", exact: true }).click();
+    await section(page).getByRole("textbox", { name: "Search inactive publishers" }).fill("Quokkaplay");
+    await expect(section(page).getByText("1 inactive publisher", { exact: true })).toBeVisible();
+    await sub(page, "Apps").click();
+    await section(page).getByRole("textbox", { name: "Search inactive apps" }).fill("Glintfox");
+    await expect(section(page).getByText("1 inactive app", { exact: true })).toBeVisible();
+    // The domain link ends where its text ends: no hidden arrow holding a
+    // blank between it and the comma after it.
+    const link = section(page).getByRole("link", { name: "quokkaplay-legacy.com" });
+    const text = link.locator("span").first();
+    const [a, t] = await Promise.all([link.boundingBox(), text.boundingBox()]);
+    expect(a && t && Math.round(a.x + a.width - (t.x + t.width))).toBe(0);
   });
 
   for (const [name, scenario] of [

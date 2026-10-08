@@ -51,8 +51,6 @@ export function inactiveTotal(c: InactiveCounts | null | undefined): number {
   return c ? c.publishers + c.apps : 0;
 }
 
-/** "21 Sep", or "21 Sep 2025" outside the current year: these rows are
- *  kept for good, so an old one must not pass for this year's. */
 /** The two crawls a report compares: what the Inactive section covers. */
 export type CrawlWindow = {
   /** When the compared crawl ran; null when the report does not say. */
@@ -75,15 +73,17 @@ export function inWindow(since: string | null | undefined, w: CrawlWindow): bool
   return true;
 }
 
+/** "Sep 21, 2026": the report's own date format (formatWeek, the week
+ *  line and the quiet line's "since"), read by UTC day, the grain of
+ *  ``inactive_since``, so no time zone moves it a day. */
 export function inactiveDay(iso: string | null | undefined): string | null {
   if (!iso) return null;
   const d = new Date(`${iso.slice(0, 10)}T00:00:00Z`);
   if (Number.isNaN(d.getTime())) return null;
-  const sameYear = d.getUTCFullYear() === new Date().getUTCFullYear();
-  return d.toLocaleDateString("en-GB", {
-    day: "numeric",
+  return d.toLocaleDateString(undefined, {
     month: "short",
-    ...(sameYear ? {} : { year: "numeric" }),
+    day: "numeric",
+    year: "numeric",
     timeZone: "UTC",
   });
 }

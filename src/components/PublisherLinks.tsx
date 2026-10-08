@@ -129,6 +129,7 @@ export function PublisherDomainLink({
   className,
   active = false,
   onHoverChange,
+  arrow = true,
 }: {
   domain: string;
   /** What the link reads: the publisher's name, or by default the domain. */
@@ -138,6 +139,10 @@ export function PublisherDomainLink({
    *  hovered, lights its name up as the link it is. */
   active?: boolean;
   onHoverChange?: (hovering: boolean) => void;
+  /** The arrow that shows on hover. It holds its width while hidden, so a
+   *  link inside a sentence ("publisher: x.com, Name") turns it off, or the
+   *  comma after it stands a blank away. */
+  arrow?: boolean;
 }) {
   const stop = (e: MouseEvent | KeyboardEvent | PointerEvent) => e.stopPropagation();
   return (
@@ -159,13 +164,15 @@ export function PublisherDomainLink({
       )}
     >
       <span className="truncate">{label ?? domain}</span>
-      <ArrowUpRight
-        aria-hidden
-        className={cn(
-          "h-3 w-3 flex-shrink-0 opacity-0 transition-opacity group-hover/domain:opacity-100 group-focus-visible/domain:opacity-100",
-          active && "opacity-100",
-        )}
-      />
+      {arrow && (
+        <ArrowUpRight
+          aria-hidden
+          className={cn(
+            "h-3 w-3 flex-shrink-0 opacity-0 transition-opacity group-hover/domain:opacity-100 group-focus-visible/domain:opacity-100",
+            active && "opacity-100",
+          )}
+        />
+      )}
     </a>
   );
 }

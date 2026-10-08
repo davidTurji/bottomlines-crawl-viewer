@@ -154,6 +154,7 @@ export default function InactiveSection({
   const trial = ready ? (data.trial ?? null) : null;
   const locked = Boolean(caps || trial);
   const noun = inactiveNoun(kind);
+  const nounOne = inactiveNoun(kind, 1);
   const toggle = (key: string) => setExpanded((k) => (k === key ? null : key));
 
   return (
@@ -233,6 +234,7 @@ export default function InactiveSection({
           total={data.total}
           onPage={paging.onPage}
           noun={noun}
+          nounOne={nounOne}
         />
       )}
 
@@ -270,13 +272,21 @@ export default function InactiveSection({
           slice={trial}
           caps={caps}
           noun={noun}
+          nounOne={nounOne}
           detail="inactive publisher and app, with the date and the reason"
         />
       )}
       {ready && rows.length > 0 && !locked && (
         <div className="mt-4">
-          <Pager page={page} pageSize={PAGE_SIZE} total={data.total} onPage={paging.onPage} noun={noun} />
-          {data.truncated && <TruncatedNotice shown={data.total} noun={noun} />}
+          <Pager
+            page={page}
+            pageSize={PAGE_SIZE}
+            total={data.total}
+            onPage={paging.onPage}
+            noun={noun}
+            nounOne={nounOne}
+          />
+          {data.truncated && <TruncatedNotice shown={data.total} noun={noun} nounOne={nounOne} />}
         </div>
       )}
     </div>

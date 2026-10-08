@@ -18,6 +18,7 @@ export default function LockedTail({
   slice,
   caps,
   noun,
+  nounOne,
   detail,
 }: {
   /** The server's stamp for this list, when the response carried one. */
@@ -26,12 +27,16 @@ export default function LockedTail({
   caps: TrialCaps | null;
   /** Plural noun for the rows: "matched publishers", "discovered lines". */
   noun: string;
+  /** Singular noun for a count of one: "1 more matched publisher is
+   *  waiting". Without it the plural stands for every count. */
+  nounOne?: string;
   /** What the full list carries, finished as a sentence fragment after
    *  "every": "line, every app and every change, week after week". */
   detail?: string;
 }) {
   if (!slice && !caps) return null;
   const hidden = slice ? Math.max(0, slice.full_total - slice.shown) : 0;
+  const nounFor = (n: number) => (n === 1 && nounOne ? nounOne : noun);
   const carries = detail
     ? ` The full report carries every ${detail}.`
     : " The full report carries all of them, and what changes week after week.";
@@ -46,11 +51,12 @@ export default function LockedTail({
           {hidden > 0 && slice ? (
             <>
               <p className="font-display text-[17px] font-semibold leading-snug tracking-tight text-slate-900">
-                {hidden.toLocaleString()} more {noun} are waiting in your full report.
+                {hidden.toLocaleString()} more {nounFor(hidden)} {hidden === 1 && nounOne ? "is" : "are"} waiting in
+                your full report.
               </p>
               <p className="mt-1.5 text-[13px] leading-relaxed text-slate-600">
                 This trial shows {slice.shown.toLocaleString()} of{" "}
-                {slice.full_total.toLocaleString()} {noun} for your domain.
+                {slice.full_total.toLocaleString()} {nounFor(slice.full_total)} for your domain.
                 {carries}
               </p>
             </>
