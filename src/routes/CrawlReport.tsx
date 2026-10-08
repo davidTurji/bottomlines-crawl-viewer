@@ -1,4 +1,4 @@
-import GoneList, { goneCount } from "@/components/GoneInventory";
+import InactiveSection, { type InactiveCards } from "@/components/InactiveSection";
 import LockedTail from "@/components/LockedTail";
 import { MiniStat } from "@/components/MiniStat";
 import { Collapse, Settle, glideTo } from "@/components/Motion";
@@ -32,7 +32,13 @@ import {
   type LineEvent,
   type MatchedMove,
   type MatchedMoves,
+  type InactiveApp,
+  type InactiveCounts,
+  type InactiveKind,
+  type InactivePublisher,
+  type InactivePublisherLine,
 } from "../lib/api";
+import { inactiveCountsOf, inactiveDay, inactiveTotal, reasonText } from "@/lib/inactive";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import {
   EmptyResult,
@@ -88,6 +94,13 @@ export default function CrawlReport() {
   // The list's tab lives here, not in the list, so the "Lines added" and
   // "Lines removed" cards can open it on Added or Removed.
   const [drillTab, setDrillTab] = useState<DrillTab>("all");
+  // Which Inactive list is open (Publishers or Apps). The page's, so it
+  // survives switching views; picking a view picks its own list.
+  const [inactiveKind, setInactiveKind] = useState<InactiveKind>("publishers");
+  const pickView = (view: "publishers" | "apps") => {
+    setMatchedView(view);
+    setInactiveKind(view);
+  };
   // Bumped by those two cards: the list opens its first row once it has
   // landed, so the reader sees the lines the card counted, not just names.
   const [openFirst, setOpenFirst] = useState(0);
@@ -95,6 +108,12 @@ export default function CrawlReport() {
   const showLinesOf = (tab: DrillTab) => {
     setDrillTab(tab);
     setOpenFirst((n) => n + 1);
+    glideTo(listRef.current);
+  };
+  /** The quiet line's "See them": the Inactive tab, on a list that has rows. */
+  const showInactive = (counts: InactiveCounts) => {
+    setDrillTab("inactive");
+    setInactiveKind(counts[matchedView] > 0 ? matchedView : matchedView === "publishers" ? "apps" : "publishers");
     glideTo(listRef.current);
   };
   /* THE SEAT-LINE FILTER. In the URL, so it survives a refresh and follows
@@ -179,10 +198,14 @@ export default function CrawlReport() {
     );
   }
 
-  const finishedAt = summary.finished_at ? new Date(summary.finished_at) : null;
-  const weekLabel = finishedAt ? formatWeek(finishedAt) : `crawl #${summary.crawl_id}`;
-  const prevFinishedAt = previous?.finished_at ? new Date(previous.finished_at) : null;
-  const prevWeekLabel = prevFinishedAt ? formatWeek(prevFinishedAt) : null;
+  // The two crawls this report compares. The summary says when each ran
+  // (``crawl_at``, ``compared_crawl_at``) on every report frozen since
+  // 2026-10-08; an older one falls back to this crawl's finished_at and last
+  // week's summary's finished_at.
+  const crawlAt = validDate(summary.crawl_at ?? summary.finished_at);
+  const comparedAt = validDate(summary.compared_crawl_at ?? previous?.finished_at);
+  const weekLabel = crawlAt ? formatWeek(crawlAt) : `crawl #${summary.crawl_id}`;
+  const prevWeekLabel = comparedAt ? formatWeek(comparedAt) : null;
 
   const added = summary.hero_diff.line_totals.added;
   const removed = summary.hero_diff.line_totals.removed;
@@ -222,6 +245,28 @@ export default function CrawlReport() {
   // what was left was captions promising a comparison that is not there and
   // a pair of zeros presented as this week's result.
   const isFirstCrawl = summary.previous_job_id === null;
+
+  // INACTIVE (2026-10-08): the headline numbers count active only; what
+  // stopped counting is a tab of the list and one quiet line, never a card.
+  // An older link without the section counts from its No longer live block.
+  const inactiveCounts = inactiveCountsOf(summary);
+  const hasInactive = inactiveTotal(inactiveCounts) > 0;
+  // The tab exists only while something is inactive; a page left on it
+  // (a filter, an older link) reads as All matched rather than a tab-less list.
+  const listTab: DrillTab = drillTab === "inactive" && !hasInactive ? "all" : drillTab;
+  // A report covers the window between its two crawls, and the Inactive
+  // section lists what went inactive in it: since the compared crawl (the
+  // same date the header says it is compared with).
+  const inactiveSince = comparedAt ? `since ${formatWeek(comparedAt)}` : "since the compared crawl";
+  const inactive = inactiveCounts && hasInactive
+    ? {
+        counts: inactiveCounts,
+        kind: inactiveKind,
+        setKind: setInactiveKind,
+        legacy: summary.gone,
+        since: inactiveSince,
+      }
+    : null;
 
   // TWO BEATS (David, 2026-10-05): the left card's line figures count up
   // first, and the matched publishers and apps start a second after those
@@ -420,7 +465,7 @@ export default function CrawlReport() {
               active={matchedView === "publishers"}
               // The tab stays (David, 2026-10-07): Added on publishers
               // is Added on apps, never a silent jump back to All matched.
-              onClick={() => setMatchedView("publishers")}
+              onClick={() => pickView("publishers")}
             />
             <MatchedTile
               tone="app"
@@ -435,9 +480,17 @@ export default function CrawlReport() {
               active={matchedView === "apps"}
               // The tab stays (David, 2026-10-07): Added on publishers
               // is Added on apps, never a silent jump back to All matched.
-              onClick={() => setMatchedView("apps")}
+              onClick={() => pickView("apps")}
             />
           </div>
+          {inactive && (
+            <InactiveQuietLine
+              counts={inactive.counts}
+              since={inactive.since}
+              filtered={filtered}
+              onShow={() => showInactive(inactive.counts)}
+            />
+          )}
         </div>
       </div>
       )}
@@ -463,43 +516,34 @@ export default function CrawlReport() {
           tinted expansion. Publishers are green, apps are pink. */}
       {matchedView === "publishers" ? (
         <div data-tour="overview-list" ref={listRef} className="scroll-mt-6">
-          <div className="mb-3" data-tour="overview-list-head">
-            <h2 className="font-display text-base font-semibold tracking-tight text-slate-900">
-              Matched publishers
-            </h2>
-            <p className="text-sm text-slate-500">
-              Every publisher whose ads.txt matched your seats. Click a row to
-              see the exact seat lines it carried, and what moved this week.
-            </p>
-          </div>
+          <ListHead
+            inactive={listTab === "inactive"}
+            title="Matched publishers"
+            blurb="Every publisher whose ads.txt matched your seats. Click a row to see the exact seat lines it carried, and what moved this week."
+          />
           <DrilldownList
             token={token}
             lines={lines}
             caps={summary.trial ?? null}
-            gone={summary.gone}
-            tab={drillTab}
+            inactive={inactive}
+            tab={listTab}
             setTab={setDrillTab}
             openFirst={openFirst}
           />
         </div>
       ) : (
         <div data-tour="overview-list" ref={listRef} className="scroll-mt-6">
-          <div className="mb-3" data-tour="overview-list-head">
-            <h2 className="font-display text-base font-semibold tracking-tight text-slate-900">
-              Matched apps
-            </h2>
-            <p className="text-sm text-slate-500">
-              Every app whose app-ads.txt matched your seats, with the
-              publisher that owns it. Click a row to see the exact seat lines
-              it carried, and what moved this week.
-            </p>
-          </div>
+          <ListHead
+            inactive={listTab === "inactive"}
+            title="Matched apps"
+            blurb="Every app whose app-ads.txt matched your seats, with the publisher that owns it. Click a row to see the exact seat lines it carried, and what moved this week."
+          />
           <MatchedAppsList
             token={token}
             lines={lines}
             caps={summary.trial ?? null}
-            gone={summary.gone}
-            tab={drillTab}
+            inactive={inactive}
+            tab={listTab}
             setTab={setDrillTab}
             openFirst={openFirst}
           />
@@ -1026,6 +1070,13 @@ function sampleWorkbook(summary: Summary): { name: string; rows: (string | numbe
  * downloads a spreadsheet a customer can actually open, not a stub.
  */
 /** The report's date as it appears in a filename, from the crawl's finish. */
+/** An ISO time as a Date, or null when absent or unreadable. */
+function validDate(iso: string | null | undefined): Date | null {
+  if (!iso) return null;
+  const d = new Date(iso);
+  return Number.isNaN(d.getTime()) ? null : d;
+}
+
 export function reportDate(summary: { finished_at: string | null }): string {
   return summary.finished_at
     ? new Date(summary.finished_at).toISOString().slice(0, 10)
@@ -1113,8 +1164,82 @@ function ExportResultsButton({
   );
 }
 
-/** "gone" is No longer live: frozen with the summary, never fetched. */
-type DrillTab = "all" | "added" | "removed" | "changed" | "gone";
+/** "inactive" is the Inactive section (it replaced No longer live). */
+type DrillTab = "all" | "added" | "removed" | "changed" | "inactive";
+
+/** What the two lists need for their Inactive tab; null when nothing is
+ *  inactive (the tab then does not exist). */
+type InactiveTab = {
+  counts: InactiveCounts;
+  kind: InactiveKind;
+  setKind: (kind: InactiveKind) => void;
+  legacy: Summary["gone"];
+  /** "since Aug 18, 2026", or "since the compared crawl". */
+  since: string;
+} | null;
+
+/**
+ * The list's heading. On the Inactive tab it says what the list now is:
+ * a separate section, apart from the matched rows and their numbers.
+ */
+function ListHead({ inactive, title, blurb }: { inactive: boolean; title: string; blurb: string }) {
+  return (
+    <div className="mb-3" data-tour="overview-list-head">
+      <h2 className="font-display text-base font-semibold tracking-tight text-slate-900">
+        {inactive ? "Inactive" : title}
+      </h2>
+      <p className="text-sm text-slate-500">
+        {inactive
+          ? "Publishers and apps that went inactive between these two crawls, with the date and the reason. Nothing is deleted."
+          : blurb}
+      </p>
+    </div>
+  );
+}
+
+/**
+ * "6 publishers and 7 apps went inactive since Aug 18, 2026, not counted
+ * above." A report is the difference between two crawls (David,
+ * 2026-10-08), so this is what went inactive between them, said quietly,
+ * with the way to see it. The headline numbers count active only. Never a
+ * card: a side finding is a line or a tab.
+ */
+export function inactiveSentence(counts: InactiveCounts, since: string): string {
+  const noun = { publishers: ["publisher", "publishers"], apps: ["app", "apps"] } as const;
+  const parts = (["publishers", "apps"] as const)
+    .filter((k) => counts[k] > 0)
+    .map((k) => `${counts[k].toLocaleString()} ${noun[k][counts[k] === 1 ? 0 : 1]}`);
+  if (parts.length === 0) return "";
+  return `${parts.join(" and ")} went inactive ${since}`;
+}
+
+function InactiveQuietLine({
+  counts,
+  since,
+  filtered,
+  onShow,
+}: {
+  counts: InactiveCounts;
+  since: string;
+  filtered: boolean;
+  onShow: () => void;
+}) {
+  const said = inactiveSentence(counts, since);
+  if (!said) return null;
+  return (
+    <p data-testid="inactive-quiet" className="mt-3 text-[12px] leading-snug text-slate-500">
+      {said}
+      {filtered ? ", across all your seat lines" : ""}, not counted above.{" "}
+      <button
+        type="button"
+        onClick={onShow}
+        className="font-medium text-slate-600 underline decoration-slate-300 underline-offset-2 transition-colors hover:text-critical hover:decoration-critical/40"
+      >
+        See them
+      </button>
+    </p>
+  );
+}
 
 /**
  * Opens a list's first row after `nonce` bumps, as soon as the list is
@@ -1171,7 +1296,7 @@ function DrilldownList({
   token,
   lines,
   caps,
-  gone,
+  inactive,
   tab,
   setTab,
   openFirst,
@@ -1180,8 +1305,8 @@ function DrilldownList({
   lines: string[];
   /** The trial's caps, on a trial: the unlock card stands on every tab. */
   caps: TrialCaps | null;
-  /** No longer live, from the summary: a tab only when something is gone. */
-  gone: Summary["gone"];
+  /** The Inactive tab's wiring; null when nothing is inactive (no tab). */
+  inactive: InactiveTab;
   /** Owned by the page, so the line cards above can pick the tab. */
   tab: DrillTab;
   setTab: (tab: DrillTab) => void;
@@ -1206,14 +1331,6 @@ function DrilldownList({
   // Bumps each time a list lands, so the new rows ease in as one piece.
   const [settled, setSettled] = useState(0);
 
-  // No longer live is a tab only while something is gone in THIS view: the
-  // page's tab is shared by both views, so arriving on a view with nothing
-  // gone falls back to All matched instead of an empty, tab-less list.
-  const goneTotal = goneCount(gone, "publishers");
-  useEffect(() => {
-    if (tab === "gone" && goneTotal === 0) setTab("all");
-  }, [tab, goneTotal, setTab]);
-
   // A new search, a new tab or a new line selection is a new list, so it
   // starts at its first page. Without this, searching from page 7 asks
   // for page 7 of a result that may have one page, and the reader gets an
@@ -1237,8 +1354,8 @@ function DrilldownList({
   }, [tab, lines]);
 
   useEffect(() => {
-    // No longer live is frozen with the summary: nothing to read.
-    if (tab === "gone") return;
+    // The Inactive section reads its own lists.
+    if (tab === "inactive") return;
     const event = tab;
     let cancelled = false;
     const load = (pg: number) =>
@@ -1342,33 +1459,29 @@ function DrilldownList({
           so the two pages read as one product. */}
       <div className="mb-3 space-y-2">
         <div className="flex flex-wrap items-center gap-3">
-          <Tabs value={tab} onValueChange={(v) => setTab(v as DrillTab)}>
-            <TabsList>
+          <Tabs value={tab} onValueChange={(v) => setTab(v as DrillTab)} className="max-w-full">
+            {/* Scrolls sideways on a narrow phone rather than pushing the page wider. */}
+            <TabsList className="max-w-full justify-start overflow-x-auto">
               <TabsTrigger value="all">All matched</TabsTrigger>
               <TabsTrigger value="added">Added</TabsTrigger>
               <TabsTrigger value="removed">Removed</TabsTrigger>
               <TabsTrigger value="changed">Changed</TabsTrigger>
-              {goneTotal > 0 && (
-                <TabsTrigger value="gone">
-                  No longer live
-                  <span className="ml-1.5 tabular-nums text-slate-400">{goneTotal.toLocaleString()}</span>
-                </TabsTrigger>
-              )}
+              {inactive && <TabsTrigger value="inactive">Inactive</TabsTrigger>}
             </TabsList>
           </Tabs>
           {/* Silent until a list has landed. While a new tab or filter is
               in flight this still holds the PREVIOUS total, and printing
               "260 matched" over a skeleton states a number for a question
               that is still being asked. */}
-          {settled > 0 && tab !== "gone" && (
+          {settled > 0 && tab !== "inactive" && (
             <span className="text-xs text-slate-500">
               {total.toLocaleString()}{" "}
               {tab === "all" ? "matched" : "with changes"}
             </span>
           )}
-          {loading && settled > 0 && tab !== "gone" && <Dots />}
+          {loading && settled > 0 && tab !== "inactive" && <Dots />}
         </div>
-        {tab !== "gone" && (
+        {tab !== "inactive" && (
         <div className="relative w-full">
           <Search className="pointer-events-none absolute left-3.5 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
           <input
@@ -1395,8 +1508,18 @@ function DrilldownList({
           still answering the question the reader just changed. Those reset
           `settled` to 0, which is the same "nothing has landed yet" state a
           cold open is in, and so draws the same skeleton. */}
-      {tab === "gone" ? (
-        <GoneList gone={gone} kind="publishers" filtered={lines.length > 0} />
+      {tab === "inactive" && inactive ? (
+        <InactiveSection
+          token={token}
+          lines={lines}
+          caps={caps}
+          counts={inactive.counts}
+          kind={inactive.kind}
+          setKind={inactive.setKind}
+          legacy={inactive.legacy}
+          since={inactive.since}
+          cards={INACTIVE_CARDS}
+        />
       ) : (
       <div>
         {loading && settled === 0 && (
@@ -1533,11 +1656,14 @@ function PublisherCard({
   token,
   open,
   onToggle,
+  inactive,
 }: {
   row: Row;
   token: string;
   open: boolean;
   onToggle: () => void;
+  /** Set on the Inactive tab: the same card, greyed, with its strip. */
+  inactive?: InactiveMark & { apps: number | null };
 }) {
   const initial = (
     (row.developer_name || row.developer_domain || "?")
@@ -1562,7 +1688,8 @@ function PublisherCard({
   return (
     <div
       className={cn(
-        "overflow-hidden rounded-3xl border border-border bg-white shadow-sm transition-colors",
+        "overflow-hidden rounded-3xl border shadow-sm transition-colors",
+        inactive ? "border-slate-200 bg-slate-50" : "border-border bg-white",
         open && "shadow-md",
       )}
     >
@@ -1578,6 +1705,7 @@ function PublisherCard({
           aria-label={`${open ? "Hide" : "Show"} the seat lines of ${row.developer_name || row.developer_domain || "this publisher"}`}
           className="absolute inset-0 z-0 rounded-t-3xl focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-primary/30"
         />
+        {inactive && <InactiveStrip mark={inactive} />}
       <div className="pointer-events-none flex w-full items-center gap-4 px-4 py-4 text-left sm:px-5">
         {row.developer_domain ? (
           <PublisherAvatarLink
@@ -1586,12 +1714,22 @@ function PublisherCard({
             hover={siteHover}
             onHoverChange={setSiteHover}
           >
-            <div className="flex h-11 w-11 items-center justify-center rounded-full bg-accent text-base font-semibold text-primary">
+            <div
+              className={cn(
+                "flex h-11 w-11 items-center justify-center rounded-full text-base font-semibold",
+                inactive ? "bg-slate-200 text-slate-500" : "bg-accent text-primary",
+              )}
+            >
               {initial}
             </div>
           </PublisherAvatarLink>
         ) : (
-          <div className="flex h-11 w-11 flex-shrink-0 items-center justify-center rounded-full bg-accent text-base font-semibold text-primary">
+          <div
+            className={cn(
+              "flex h-11 w-11 flex-shrink-0 items-center justify-center rounded-full text-base font-semibold",
+              inactive ? "bg-slate-200 text-slate-500" : "bg-accent text-primary",
+            )}
+          >
             {initial}
           </div>
         )}
@@ -1618,6 +1756,7 @@ function PublisherCard({
                 {row.developer_platform}
               </span>
             )}
+            {inactive && <InactiveChip />}
           </div>
           {row.developer_domain && row.developer_name && (
             <div className="flex min-w-0 text-xs text-slate-500">
@@ -1628,6 +1767,16 @@ function PublisherCard({
             </div>
           )}
         </div>
+        {inactive ? (
+          <div className="hidden items-center gap-6 text-right sm:flex">
+            <div className="w-[84px]">
+              <MiniStat label="Your lines" value={row.current} emphasis />
+            </div>
+            <div className="w-[112px]">
+              <MiniStat label="Apps" value={inactive.apps ?? 0} />
+            </div>
+          </div>
+        ) : (
         <div className="hidden items-center gap-6 text-right sm:flex">
           {row.prev != null && (
             <div className="w-[84px]">
@@ -1643,6 +1792,7 @@ function PublisherCard({
             certChanged={row.cert_changed}
           />
         </div>
+        )}
         <ChevronDown
           className={cn(
             "h-4 w-4 flex-shrink-0 text-slate-400 transition-transform",
@@ -1652,8 +1802,23 @@ function PublisherCard({
       </div>
       </div>
       <Collapse open={open}>
-        <div className="border-t border-border bg-accent/30 px-4 pb-4 pt-3 sm:px-5">
-          {hasEmbeddedLines ? (
+        <div
+          className={cn(
+            "border-t px-4 pb-4 pt-3 sm:px-5",
+            inactive ? "border-slate-200 bg-slate-100/50" : "border-border bg-accent/30",
+          )}
+        >
+          {inactive ? (
+            row.matched_lines.length > 0 ? (
+              <MatchedSeatLines
+                title="Your seat lines it carried"
+                lines={row.matched_lines}
+                publisherDomain={row.developer_domain}
+              />
+            ) : (
+              <p className="text-xs text-slate-500">No seat lines on record for this publisher.</p>
+            )
+          ) : hasEmbeddedLines ? (
             <ChangeExpansion
               added={row.added_lines}
               removed={row.removed_lines}
@@ -1926,16 +2091,19 @@ export { MiniStat };
 function MatchedSeatLines({
   lines,
   publisherDomain,
+  title = "Matched seat lines",
 }: {
   lines: MatchedSeatLine[];
   publisherDomain?: string | null;
+  /** The block's heading; the Inactive cards say whose lines these were. */
+  title?: string;
 }) {
   if (lines.length === 0) return null;
   return (
     <div>
       <div className="mb-1 flex items-baseline justify-between">
         <span className="text-xs font-medium text-slate-700">
-          Matched seat lines
+          {title}
         </span>
         <span className="font-mono text-[11px] tabular-nums text-slate-500">
           {lines.length}
@@ -2042,7 +2210,7 @@ function MatchedAppsList({
   token,
   lines,
   caps,
-  gone,
+  inactive,
   tab,
   setTab,
   openFirst,
@@ -2050,8 +2218,8 @@ function MatchedAppsList({
   token: string;
   lines: string[];
   caps: TrialCaps | null;
-  /** No longer live, from the summary: a tab only when something is gone. */
-  gone: Summary["gone"];
+  /** The Inactive tab's wiring; null when nothing is inactive (no tab). */
+  inactive: InactiveTab;
   /** Owned by the page, so the line cards above can pick the tab. */
   tab: DrillTab;
   setTab: (tab: DrillTab) => void;
@@ -2073,14 +2241,6 @@ function MatchedAppsList({
   const keyOf = (a: MatchedApp) => `${a.store}:${a.bundle_id}`;
   const appCache = usePageCache<unknown>();
   const [settled, setSettled] = useState(0);
-
-  // No longer live is a tab only while something is gone in THIS view: the
-  // page's tab is shared by both views, so arriving on a view with nothing
-  // gone falls back to All matched instead of an empty, tab-less list.
-  const goneTotal = goneCount(gone, "apps");
-  useEffect(() => {
-    if (tab === "gone" && goneTotal === 0) setTab("all");
-  }, [tab, goneTotal, setTab]);
 
   // A new search or a new line selection is a new list and starts at its
   // first page.
@@ -2173,30 +2333,26 @@ function MatchedAppsList({
     <div>
       <div className="mb-3 space-y-2">
         <div className="flex flex-wrap items-center gap-3">
-          <Tabs value={tab} onValueChange={(v) => setTab(v as DrillTab)}>
-            <TabsList>
+          <Tabs value={tab} onValueChange={(v) => setTab(v as DrillTab)} className="max-w-full">
+            {/* Scrolls sideways on a narrow phone rather than pushing the page wider. */}
+            <TabsList className="max-w-full justify-start overflow-x-auto">
               <TabsTrigger value="all">All matched</TabsTrigger>
               <TabsTrigger value="added">Added</TabsTrigger>
               <TabsTrigger value="removed">Removed</TabsTrigger>
               <TabsTrigger value="changed">Changed</TabsTrigger>
-              {goneTotal > 0 && (
-                <TabsTrigger value="gone">
-                  No longer live
-                  <span className="ml-1.5 tabular-nums text-slate-400">{goneTotal.toLocaleString()}</span>
-                </TabsTrigger>
-              )}
+              {inactive && <TabsTrigger value="inactive">Inactive</TabsTrigger>}
             </TabsList>
           </Tabs>
           {/* Same rule as the publishers list: silent until one lands. */}
-          {settled > 0 && tab !== "gone" && (
+          {settled > 0 && tab !== "inactive" && (
             <span className="text-xs text-slate-500">
               {(tab === "all" ? total : rows.length).toLocaleString()}{" "}
               {tab === "all" ? "matched" : "with changes"}
             </span>
           )}
-          {loading && settled > 0 && tab !== "gone" && <Dots />}
+          {loading && settled > 0 && tab !== "inactive" && <Dots />}
         </div>
-        {tab !== "gone" && (
+        {tab !== "inactive" && (
         <div className="relative w-full">
           <Search className="pointer-events-none absolute left-3.5 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
           <input
@@ -2209,8 +2365,18 @@ function MatchedAppsList({
         </div>
         )}
       </div>
-      {tab === "gone" ? (
-        <GoneList gone={gone} kind="apps" filtered={lines.length > 0} />
+      {tab === "inactive" && inactive ? (
+        <InactiveSection
+          token={token}
+          lines={lines}
+          caps={caps}
+          counts={inactive.counts}
+          kind={inactive.kind}
+          setKind={inactive.setKind}
+          legacy={inactive.legacy}
+          since={inactive.since}
+          cards={INACTIVE_CARDS}
+        />
       ) : (
       <>
       {loading && settled === 0 && (
@@ -2308,11 +2474,16 @@ function MatchedAppCard({
   open,
   onToggle,
   token,
+  inactive,
 }: {
   app: MatchedApp;
   open: boolean;
   onToggle: () => void;
   token: string;
+  /** Set on the Inactive tab: the same card, greyed, with its strip.
+   *  `publisherLive` says whether the app's publisher is still live (null:
+   *  not known). */
+  inactive?: InactiveMark & { publisherLive: boolean | null };
 }) {
   const lines = app.matched_lines ?? [];
   const added = app.lines_added ?? 0;
@@ -2330,7 +2501,11 @@ function MatchedAppCard({
     <div
       className={cn(
         "overflow-hidden rounded-3xl border shadow-sm transition-colors",
-        open ? "border-app-border bg-app-bg/40 shadow-md" : "border-border bg-white",
+        inactive
+          ? cn("border-slate-200 bg-slate-50", open && "shadow-md")
+          : open
+            ? "border-app-border bg-app-bg/40 shadow-md"
+            : "border-border bg-white",
       )}
     >
       {/* A real button laid over the row, the publisher's links above it
@@ -2343,8 +2518,14 @@ function MatchedAppCard({
           aria-label={`${open ? "Hide" : "Show"} the seat lines of ${app.app_name}`}
           className="absolute inset-0 z-0 rounded-t-3xl focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-app/30"
         />
+        {inactive && <InactiveStrip mark={inactive} />}
       <div className="pointer-events-none flex w-full items-center gap-4 px-4 py-4 text-left sm:px-5">
-        <div className="flex h-11 w-11 flex-shrink-0 items-center justify-center rounded-full bg-app-bg text-app">
+        <div
+          className={cn(
+            "flex h-11 w-11 flex-shrink-0 items-center justify-center rounded-full",
+            inactive ? "bg-slate-200 text-slate-500" : "bg-app-bg text-app",
+          )}
+        >
           <Smartphone aria-hidden className="h-5 w-5" />
         </div>
         <div className="min-w-0 flex-1">
@@ -2352,26 +2533,53 @@ function MatchedAppCard({
             <span className="truncate text-base font-semibold tracking-tight text-slate-900">
               {app.app_name}
             </span>
-            <span className="flex-shrink-0 rounded-full border border-app-border bg-app-bg px-1.5 py-px text-[10px] font-medium text-app">
+            <span
+              className={cn(
+                "flex-shrink-0 rounded-full border px-1.5 py-px text-[10px] font-medium",
+                inactive ? "border-slate-300 bg-white text-slate-500" : "border-app-border bg-app-bg text-app",
+              )}
+            >
               {storeLabel(app.store)}
             </span>
+            {inactive && <InactiveChip />}
           </div>
-          <div className="truncate text-xs text-slate-500">
-            publisher:{" "}
-            {app.owner_domain ? (
-              <PublisherDomainLink domain={app.owner_domain} className="text-slate-600" />
-            ) : null}
-            {app.owner_name ? (
-              <span className="text-slate-400">, {app.owner_name}</span>
-            ) : null}
-          </div>
+          {/* A trial withholds an inactive app's publisher (the crawler
+              sends ""): no "publisher:" with nothing after it. */}
+          {(!inactive || app.owner_domain) && (
+            // Inactive, it wraps on a phone: whether the publisher is still
+            // live is the point of the line and must not be cut off.
+            <div className={cn("text-xs text-slate-500", inactive ? "break-words sm:truncate" : "truncate")}>
+              publisher:{" "}
+              {app.owner_domain ? (
+                <PublisherDomainLink domain={app.owner_domain} className="text-slate-600" arrow={false} />
+              ) : null}
+              {app.owner_name ? (
+                <span className="text-slate-400">, {app.owner_name}</span>
+              ) : null}
+              {inactive && inactive.publisherLive != null && (
+                <span className={inactive.publisherLive ? "text-slate-500" : "text-critical"}>
+                  , {inactive.publisherLive ? "still live" : "inactive too"}
+                </span>
+              )}
+            </div>
+          )}
         </div>
+        {inactive ? (
+          app.matched_lines != null && (
+            <div className="hidden items-center gap-6 text-right sm:flex">
+              <div className="w-[84px] whitespace-nowrap">
+                <MiniStat label="Your lines" value={app.line_count} emphasis />
+              </div>
+            </div>
+          )
+        ) : (
         <div className="hidden items-center gap-6 text-right sm:flex">
           <div className="w-[84px] whitespace-nowrap">
             <MiniStat label="Matched lines" value={app.line_count} emphasis />
           </div>
           <ChangeCell added={added} removed={removed} certChanged={certChanged} />
         </div>
+        )}
         <ChevronDown
           aria-hidden
           className={cn(
@@ -2382,8 +2590,32 @@ function MatchedAppCard({
       </div>
       </div>
       <Collapse open={open}>
-        <div className="border-t border-app-border bg-app-bg/30 px-4 pb-4 pt-3 sm:px-5">
-          {!hasEmbeddedLines && app.developer_id != null ? (
+        <div
+          className={cn(
+            "border-t px-4 pb-4 pt-3 sm:px-5",
+            inactive ? "border-slate-200 bg-slate-100/50" : "border-app-border bg-app-bg/30",
+          )}
+        >
+          {/* An inactive app's row carries its publisher's lines (even
+              none): shown as they are, never fetched again. Only a row
+              frozen without them reads them by developer_id below. */}
+          {inactive && app.matched_lines != null ? (
+            lines.length > 0 ? (
+              <MatchedSeatLines
+                title="Your seat lines its publisher carries"
+                lines={lines}
+                publisherDomain={app.owner_domain}
+              />
+            ) : (
+              <p className="text-xs text-slate-500">No seat lines on record for this app.</p>
+            )
+          ) : inactive && app.developer_id == null ? (
+            <p className="text-xs text-slate-500">
+              {app.owner_domain
+                ? "No seat lines on record for this app."
+                : "Its publisher and the lines it carries are in your full report."}
+            </p>
+          ) : !hasEmbeddedLines && app.developer_id != null ? (
             <LazyMatchedSeatLines
               token={token}
               developerId={app.developer_id}
@@ -2403,3 +2635,132 @@ function MatchedAppCard({
     </div>
   );
 }
+
+/* ── INACTIVE CARDS (David, 2026-10-08) ─────────────────────────────
+   The Inactive tab shows the very cards the matched lists use, greyed,
+   with an Inactive chip and a strip on top: "Inactive since <date>:
+   <reason>", the evidence quiet beneath. A publisher shows the lines of
+   yours it carried; an app its publisher (and whether that publisher is
+   still live) and the lines of yours that publisher carries. */
+
+/** What turns a matched card into an inactive one. */
+type InactiveMark = {
+  since: string | null;
+  reason: string;
+  evidence?: string | null;
+};
+
+/** The strip on top of an inactive card: since when, why, and the proof. */
+function InactiveStrip({ mark }: { mark: InactiveMark }) {
+  const day = inactiveDay(mark.since);
+  return (
+    <div
+      data-testid="inactive-strip"
+      className="pointer-events-none rounded-t-3xl border-b border-slate-200 bg-slate-100/80 px-4 py-2 sm:px-5"
+    >
+      <p className="text-xs font-medium text-slate-700">
+        {day ? `Inactive since ${day}: ` : ""}
+        {mark.reason}
+      </p>
+      {mark.evidence && <p className="mt-0.5 text-[11px] leading-snug text-slate-400">{mark.evidence}</p>}
+    </div>
+  );
+}
+
+function InactiveChip() {
+  return (
+    <span className="flex-shrink-0 rounded-full border border-slate-300 bg-slate-100 px-1.5 py-px text-[10px] font-medium text-slate-600">
+      Inactive
+    </span>
+  );
+}
+
+const inactiveSeatLine = (l: InactivePublisherLine): MatchedSeatLine => ({
+  ssp_domain: l.ssp_domain,
+  publisher_id: l.publisher_id,
+  relationship: l.relationship,
+  ...(l.file ? { found_in: l.file } : {}),
+});
+
+function InactivePublisherCard({
+  pub,
+  open,
+  onToggle,
+  token,
+}: {
+  pub: InactivePublisher;
+  open: boolean;
+  onToggle: () => void;
+  token: string;
+}) {
+  const lines = (pub.lines ?? []).map(inactiveSeatLine);
+  const row: Row = {
+    developer_id: pub.developer_id ?? 0,
+    developer_name: pub.name && pub.name !== pub.domain ? pub.name : null,
+    developer_domain: pub.domain,
+    developer_platform: null,
+    prev: null,
+    current: lines.length,
+    added: 0,
+    removed: 0,
+    cert_changed: 0,
+    matched_lines: lines,
+    added_lines: [],
+    removed_lines: [],
+    cert_changed_lines: [],
+  };
+  return (
+    <PublisherCard
+      row={row}
+      token={token}
+      open={open}
+      onToggle={onToggle}
+      inactive={{
+        since: pub.inactive_since,
+        reason: reasonText(pub),
+        evidence: pub.evidence_summary,
+        apps: pub.apps,
+      }}
+    />
+  );
+}
+
+function InactiveAppCard({
+  app,
+  open,
+  onToggle,
+  token,
+}: {
+  app: InactiveApp;
+  open: boolean;
+  onToggle: () => void;
+  token: string;
+}) {
+  const lines = app.lines ? app.lines.map(inactiveSeatLine) : undefined;
+  const asMatched: MatchedApp = {
+    store: app.store,
+    bundle_id: app.bundle,
+    app_name: app.name || app.bundle,
+    owner_domain: app.publisher,
+    owner_name: app.publisher_name && app.publisher_name !== app.publisher ? app.publisher_name : null,
+    line_count: lines?.length ?? 0,
+    ...(app.developer_id != null ? { developer_id: app.developer_id } : {}),
+    ...(lines ? { matched_lines: lines } : {}),
+  };
+  return (
+    <MatchedAppCard
+      app={asMatched}
+      token={token}
+      open={open}
+      onToggle={onToggle}
+      inactive={{
+        since: app.inactive_since,
+        reason: reasonText(app),
+        evidence: app.evidence_summary,
+        publisherLive: !app.publisher || app.publisher_inactive == null ? null : !app.publisher_inactive,
+      }}
+    />
+  );
+}
+
+const INACTIVE_CARDS: InactiveCards = { Publisher: InactivePublisherCard, App: InactiveAppCard };

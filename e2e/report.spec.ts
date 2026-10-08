@@ -9,6 +9,7 @@
  */
 import { expect, test, type Page } from "@playwright/test";
 
+import { mockInactiveBlock } from "../src/lib/mockData";
 import { installFakeApi, TOKEN, type Scenario } from "./fakeApi";
 
 const EXPIRED = "This report link is not valid or has expired.";
@@ -63,6 +64,8 @@ test.describe("the overview opens whatever the optional parts answer", () => {
     ["last week erased (503)", { previousWeek: "none" }],
     ["last week fails (500)", { previousWeek: "error" }],
     ["trial report", { trial: true }],
+    ["a link frozen before the Inactive section", { inactive: "legacy" }],
+    ["an API without the Inactive route (404)", { inactive: "missing" }],
     // The rule behind both outages: a 404 from ANY data call is never "this
     // link is dead". Here every optional route is missing, as on an older API.
     [
@@ -218,28 +221,204 @@ test.describe("the matched list", () => {
   });
 });
 
-test.describe("no longer live", () => {
-  test("a tab in the matched list, publishers and apps apart", async ({ page }) => {
+test.describe("inactive", () => {
+  const counts = mockInactiveBlock.counts;
+  const section = (page: Page) => page.getByTestId("inactive-section");
+  const sub = (page: Page, name: string) => section(page).getByRole("tab", { name: new RegExp(`^${name}`) });
+  // The mock report compares the crawl of Aug 25 with the one of Aug 18.
+  const SINCE = /since Aug 18, 2026/;
+
+  test("the quiet line opens the Inactive tab, two lists of what went inactive between the two crawls", async ({ page }) => {
     const errors = watchErrors(page);
     await open(page, {});
     await expectOverview(page);
-    const tab = page.getByRole("tab", { name: /No longer live/ });
-    await expect(tab).toBeVisible();
-    await tab.click();
-    const list = page.getByTestId("no-longer-live");
-    await expect(list.getByText("Quokkaplay Legacy")).toBeVisible();
-    await expect(list.getByText(/The domain no longer exists/).first()).toBeVisible();
-    // The apps view lists gone apps under the same tab.
-    await page.getByRole("button", { name: /Matched apps/ }).click();
-    await page.getByRole("tab", { name: /No longer live/ }).click();
-    await expect(page.getByTestId("no-longer-live").getByText("No longer on Google Play").first()).toBeVisible();
+    const quiet = page.getByTestId("inactive-quiet");
+    await expect(quiet).toContainText(
+      `${counts.publishers} publishers and ${counts.apps} apps went inactive since Aug 18, 2026, not counted above.`,
+    );
+    await expect(quiet).not.toContainText("lines");
+    await quiet.getByRole("button", { name: "See them" }).click();
+    await expect(page.getByRole("tab", { name: "Inactive", exact: true })).toHaveAttribute("aria-selected", "true");
+    await expect(page.getByRole("heading", { name: "Inactive" })).toBeVisible();
+    // Two lists, never a third.
+    await expect(section(page).getByRole("tab")).toHaveCount(2);
+    await expect(sub(page, "Lines")).toHaveCount(0);
+    await expect(sub(page, "Publishers")).toHaveAttribute("aria-selected", "true");
+    await expect(section(page).getByText(SINCE).first()).toBeVisible();
+    await expect(section(page).getByRole("button", { name: /Show the seat lines of/ })).toHaveCount(counts.publishers);
+    await expect(section(page).getByText("Quokkaplay Legacy")).toBeVisible();
+    // The matched card, greyed: an Inactive chip and the strip on top.
+    const strips = section(page).getByTestId("inactive-strip");
+    await expect(strips).toHaveCount(counts.publishers);
+    await expect(strips.filter({ hasText: "Inactive since Aug 25, 2026: The domain no longer exists" })).toHaveCount(1);
+    await expect(section(page).getByText("Inactive", { exact: true })).toHaveCount(counts.publishers);
+    await sub(page, "Apps").click();
+    await expect(section(page).getByRole("button", { name: /Show the seat lines of/ })).toHaveCount(counts.apps);
+    await expect(section(page).getByText("No longer on Google Play").first()).toBeVisible();
+    await expect(section(page).getByText("publisher:").first()).toBeVisible();
     expect(errors).toEqual([]);
   });
 
-  test("an older link without the block has no tab", async ({ page }) => {
-    await open(page, { gone: false });
+  test("only what went inactive between the two compared crawls shows", async ({ page }) => {
+    await open(page, {});
     await expectOverview(page);
-    await expect(page.getByRole("tab", { name: /No longer live/ })).toHaveCount(0);
-    await expect(page.getByTestId("no-longer-live")).toHaveCount(0);
+    await page.getByRole("tab", { name: "Inactive", exact: true }).click();
+    await expect(section(page).getByText("Quokkaplay Legacy")).toBeVisible();
+    // Found dead by the compared crawl itself (Aug 18), and older: the
+    // report before, never this one.
+    for (const p of mockInactiveBlock.outside.publishers) {
+      await expect(section(page).getByText(p.name ?? p.domain)).toHaveCount(0);
+    }
+    expect(mockInactiveBlock.outside.publishers.length).toBeGreaterThan(0);
+    await sub(page, "Apps").click();
+    await expect(section(page).getByText("Glintfox Runner")).toBeVisible();
+    for (const a of mockInactiveBlock.outside.apps) {
+      await expect(section(page).getByText(a.name ?? a.bundle)).toHaveCount(0);
+    }
+  });
+
+  test("a row keeps its date, reason, evidence and what it carried", async ({ page }) => {
+    await open(page, {});
+    await expectOverview(page);
+    await page.getByRole("tab", { name: "Inactive", exact: true }).click();
+    await expect(section(page).getByText("Failed in 3 crawls in a row, from Aug 11, 2026 to Aug 25, 2026").first()).toBeVisible();
+    await section(page).getByRole("button", { name: "Show the seat lines of Quokkaplay Legacy" }).click();
+    await expect(section(page).getByText("Your seat lines it carried")).toBeVisible();
+    await sub(page, "Apps").click();
+    await expect(section(page).getByText("inactive too")).toHaveCount(1);
+    await expect(section(page).getByText("still live").first()).toBeVisible();
+    await expect(section(page).getByText("Checked in US, CA, the store answered 404")).toBeVisible();
+    await section(page).getByRole("button", { name: "Show the seat lines of Glintfox Runner" }).click();
+    await expect(section(page).getByText("Your seat lines its publisher carries")).toBeVisible();
+  });
+
+  test("an app card shows the lines its row carries, with no other call, and no lines list is ever asked for", async ({ page }) => {
+    const errors = watchErrors(page);
+    const calls = await open(page, {});
+    await expectOverview(page);
+    await page.getByRole("tab", { name: "Inactive", exact: true }).click();
+    await sub(page, "Apps").click();
+    const before = calls.length;
+    for (const a of mockInactiveBlock.apps) {
+      await section(page).getByRole("button", { name: `Show the seat lines of ${a.name}` }).click();
+      // A closed card keeps its lines mounted (hidden): only the open one is visible.
+      await expect(section(page).getByText("Your seat lines its publisher carries").filter({ visible: true })).toHaveCount(1);
+      await expect(section(page).getByText(a.lines![0].publisher_id).filter({ visible: true }).first()).toBeVisible();
+    }
+    // The lines came on the rows: no line-events read for any card.
+    expect(calls.slice(before).filter((c) => c.path.endsWith("/line-events"))).toEqual([]);
+    await sub(page, "Publishers").click();
+    await expect(section(page).getByText("Quokkaplay Legacy")).toBeVisible();
+    const inactiveCalls = calls.filter((c) => c.path.endsWith("/inactive"));
+    expect(inactiveCalls.length).toBeGreaterThan(0);
+    for (const c of inactiveCalls) {
+      expect(new URLSearchParams(c.query).get("kind")).toMatch(/^(publishers|apps)$/);
+      expect(c.status).toBe(200);
+    }
+    expect(errors).toEqual([]);
+  });
+
+  test("the header says the two crawls the summary names", async ({ page }) => {
+    await open(page, {});
+    await expectOverview(page);
+    await expect(page.getByText(/Week of Aug 25, 2026, compared with Aug 18, 2026\./)).toBeVisible();
+  });
+
+  test("without the summary's dates the window starts at last week's crawl", async ({ page }) => {
+    await open(page, { crawlDates: false });
+    await expectOverview(page);
+    await expect(page.getByTestId("inactive-quiet")).toContainText("went inactive since Aug 18, 2026");
+  });
+
+  test("with no date for the compared crawl it says so in words", async ({ page }) => {
+    await open(page, { crawlDates: false, previousWeek: "none" });
+    await expectOverview(page);
+    await expect(page.getByTestId("inactive-quiet")).toContainText("went inactive since the compared crawl, not counted above.");
+    await page.getByTestId("inactive-quiet").getByRole("button", { name: "See them" }).click();
+    await expect(section(page).getByText(/went inactive since the compared crawl/)).toBeVisible();
+  });
+
+  test("the main lists stay active only, and the open list survives a view switch", async ({ page }) => {
+    await open(page, {});
+    await expectOverview(page);
+    await expect(page.getByText("Quokkaplay Legacy")).toHaveCount(0);
+    await page.getByRole("tab", { name: "Inactive", exact: true }).click();
+    await sub(page, "Apps").click();
+    await page.getByRole("button", { name: /Matched publishers/ }).click();
+    await expect(page.getByRole("tab", { name: "Inactive", exact: true })).toHaveAttribute("aria-selected", "true");
+    await expect(sub(page, "Publishers")).toHaveAttribute("aria-selected", "true");
+    await page.getByRole("button", { name: /Matched apps/ }).click();
+    await expect(sub(page, "Apps")).toHaveAttribute("aria-selected", "true");
+  });
+
+  test("search narrows a list", async ({ page }) => {
+    await open(page, {});
+    await expectOverview(page);
+    await page.getByRole("tab", { name: "Inactive", exact: true }).click();
+    const box = section(page).getByRole("textbox", { name: "Search inactive publishers" });
+    await box.fill("tinplover");
+    await expect(section(page).getByText("Tinplover Studio")).toBeVisible();
+    await expect(section(page).getByText("Quokkaplay Legacy")).toHaveCount(0);
+  });
+
+  test("a trial shows three rows, the locked tail, and no publisher on apps", async ({ page }) => {
+    const errors = watchErrors(page);
+    await open(page, { trial: true });
+    await expectOverview(page);
+    await page.getByRole("tab", { name: "Inactive", exact: true }).click();
+    await sub(page, "Apps").click();
+    await expect(section(page).getByRole("button", { name: /Show the seat lines of/ })).toHaveCount(3);
+    await expect(section(page).getByText("publisher:")).toHaveCount(0);
+    await expect(section(page).getByText(`${counts.apps - 3} more inactive apps are waiting in your full report.`)).toBeVisible();
+    await expect(section(page).getByText(/every inactive publisher and app, with the date and the reason/)).toBeVisible();
+    // One kept back is said in the singular.
+    await sub(page, "Publishers").click();
+    const hiddenPubs = counts.publishers - 3;
+    const pubWords = hiddenPubs === 1 ? "inactive publisher is" : "inactive publishers are";
+    await expect(section(page).getByText(`${hiddenPubs} more ${pubWords} waiting in your full report.`)).toBeVisible();
+    expect(errors).toEqual([]);
+  });
+
+  test("one row is counted in the singular, and the publisher line has no blank before its comma", async ({ page }) => {
+    await open(page, {});
+    await expectOverview(page);
+    await page.getByRole("tab", { name: "Inactive", exact: true }).click();
+    await section(page).getByRole("textbox", { name: "Search inactive publishers" }).fill("Quokkaplay");
+    await expect(section(page).getByText("1 inactive publisher", { exact: true })).toBeVisible();
+    await sub(page, "Apps").click();
+    await section(page).getByRole("textbox", { name: "Search inactive apps" }).fill("Glintfox");
+    await expect(section(page).getByText("1 inactive app", { exact: true })).toBeVisible();
+    // The domain link ends where its text ends: no hidden arrow holding a
+    // blank between it and the comma after it.
+    const link = section(page).getByRole("link", { name: "quokkaplay-legacy.com" });
+    const text = link.locator("span").first();
+    const [a, t] = await Promise.all([link.boundingBox(), text.boundingBox()]);
+    expect(a && t && Math.round(a.x + a.width - (t.x + t.width))).toBe(0);
+  });
+
+  for (const [name, scenario] of [
+    ["an older link: built from its No longer live block", { inactive: "legacy" }],
+    ["an older API without the route (404): built from the summary", { inactive: "missing" }],
+  ] as [string, Scenario][]) {
+    test(name, async ({ page }) => {
+      const errors = watchErrors(page);
+      await open(page, scenario);
+      await expectOverview(page);
+      await expect(page.getByTestId("inactive-quiet")).toContainText("3 publishers and 5 apps went inactive since Aug 18, 2026");
+      await page.getByRole("tab", { name: "Inactive", exact: true }).click();
+      await expect(section(page).getByRole("tab")).toHaveCount(2);
+      await expect(section(page).getByText("Quokkaplay Legacy")).toBeVisible();
+      await sub(page, "Apps").click();
+      await expect(section(page).getByText("Hex World War")).toBeVisible();
+      await expect(page.getByText(EXPIRED)).toHaveCount(0);
+      expect(errors).toEqual([]);
+    });
+  }
+
+  test("a link with neither block has no tab and no line", async ({ page }) => {
+    await open(page, { gone: false, inactive: "legacy" });
+    await expectOverview(page);
+    await expect(page.getByRole("tab", { name: "Inactive", exact: true })).toHaveCount(0);
+    await expect(page.getByTestId("inactive-quiet")).toHaveCount(0);
   });
 });

@@ -20,6 +20,8 @@ import {
   mockDeveloperEvents,
   mockDiscoveredLinePlacements,
   mockDiscoveredLines,
+  mockGone,
+  mockInactive,
   mockLineEvents,
   mockMatchedApps,
   mockMatchedBundles,
@@ -27,6 +29,8 @@ import {
   mockPreviousSummary,
   mockSummaryFor,
 } from "../src/lib/mockData";
+import { pageFromGone } from "../src/lib/inactive";
+import type { InactiveKind } from "../src/lib/api";
 import {
   MOCK_CHECKED_AT,
   MOCK_SELLERS_DOMAIN,
@@ -72,8 +76,16 @@ export type Scenario = {
   missing?: string[];
   /** false: a link frozen before the "No longer live" block existed. */
   gone?: boolean;
+  /** The Inactive section. "ok": frozen with it (summary inactive_counts,
+   *  /inactive answers). "legacy": a link frozen before it, served from its
+   *  gone block (derived_from "gone"). "missing": an API older than the
+   *  route (404), the SPA builds it from the summary's gone block. */
+  inactive?: "ok" | "legacy" | "missing";
   /** Last week's summary: "none" answers 503 (erased), "error" 500. */
   previousWeek?: "ok" | "none" | "error";
+  /** false: a summary without ``crawl_at`` / ``compared_crawl_at`` (the API
+   *  today), so the window's start comes from last week's summary. */
+  crawlDates?: boolean;
 };
 
 const TRIAL_CAPS = { publishers: 3, apps: 3, declarations: 3, discovered_lines: 3 };
@@ -98,7 +110,7 @@ function schainOverview(status: "ok") {
 }
 
 /** Every request the page made, for assertions. */
-export type Calls = { method: string; path: string; status: number }[];
+export type Calls = { method: string; path: string; status: number; query: string }[];
 
 export async function installFakeApi(page: Page, scenario: Scenario = {}): Promise<Calls> {
   const s: Required<Scenario> = {
@@ -114,6 +126,8 @@ export async function installFakeApi(page: Page, scenario: Scenario = {}): Promi
     previousWeek: "ok",
     missing: [],
     gone: true,
+    inactive: "ok",
+    crawlDates: true,
     ...scenario,
   };
   let signedIn = !s.signedOut && !s.expired;
@@ -131,7 +145,7 @@ export async function installFakeApi(page: Page, scenario: Scenario = {}): Promi
       .map((k) => decodeURIComponent(k));
 
     const reply = (status: number, body: unknown) => {
-      calls.push({ method: req.method(), path, status });
+      calls.push({ method: req.method(), path, status, query: url.search });
       return route.fulfill({
         status,
         contentType: "application/json",
@@ -166,8 +180,10 @@ export async function installFakeApi(page: Page, scenario: Scenario = {}): Promi
           if (s.previousWeek === "error") return reply(500, { detail: "boom" });
           return reply(200, mockPreviousSummary);
         }
-        const full = mockSummaryFor(lines);
-        const sum = s.gone ? full : { ...full, gone: undefined };
+        const dated = mockSummaryFor(lines);
+        const full = s.crawlDates ? dated : { ...dated, crawl_at: undefined, compared_crawl_at: undefined };
+        const withGone = s.gone ? full : { ...full, gone: undefined };
+        const sum = s.inactive === "ok" ? withGone : { ...withGone, inactive_counts: undefined };
         return reply(200, s.trial ? { ...sum, trial: TRIAL_CAPS } : sum);
       }
       case "export-info":
@@ -229,6 +245,25 @@ export async function installFakeApi(page: Page, scenario: Scenario = {}): Promi
             ? { ...mockDeclarationRows, ...cut(mockDeclarationRows.rows, TRIAL_CAPS.declarations, mockDeclarationRows.total) }
             : mockDeclarationRows,
         );
+      case "inactive": {
+        if (s.inactive === "missing") return notFound();
+        // There is no customer-facing lines list: the crawler answers 410
+        // (viewer_frozen.LINES_REFUSED), and any other kind is a 422.
+        const rawKind = q.get("kind") ?? "publishers";
+        if (rawKind === "lines") {
+          return reply(410, {
+            detail:
+              "The Inactive section lists publishers and apps only. The seat lines an inactive publisher carried are on its card (lines), and each inactive app carries its publisher's lines.",
+          });
+        }
+        if (rawKind !== "publishers" && rawKind !== "apps") return reply(422, { detail: "unknown kind" });
+        const kind = rawKind as InactiveKind;
+        const opts = { page: page_, q: q.get("q") ?? "", lines };
+        if (s.inactive === "legacy") {
+          return reply(200, pageFromGone(s.gone ? mockGone : null, kind, { ...opts, pageSize: Number(q.get("page_size") ?? 50) }));
+        }
+        return reply(200, mockInactive(kind, opts, s.trial));
+      }
       case "sellers-fix":
         if (s.sellers === "none") return notFound("This report has no sellers.json page.");
         if (s.sellers === "error") return reply(503, { detail: "not available yet" });
