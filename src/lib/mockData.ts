@@ -36,7 +36,14 @@ import type {
   ChatFrame,
   DeclarationRow,
   DeclarationRowsPayload,
+  InactiveApp,
+  InactiveKind,
+  InactiveLine,
+  InactivePage,
+  InactivePublisher,
+  InactiveRow,
 } from "./api";
+import { pageRows } from "./inactive";
 // The discovered-lines ORDER BY, shared with the page's sort control so the
 // mock endpoint and the client's "default" option cannot disagree.
 import { compareDefault } from "./discoveredSort";
@@ -196,8 +203,230 @@ export const mockGone: NonNullable<Summary["gone"]> = {
   totals: { publishers: 3, apps: 5 },
 };
 
+/*
+ * INACTIVE (2026-10-08): every reason the crawler can give, on invented
+ * madeupmedia-style names checked to belong to nobody (dig NXDOMAIN, store
+ * lookups empty). Newest first, as the bake keeps them. The seller ids are
+ * the watchlist's own madeupmedia.com lines, so the seat-line filter has
+ * something true to narrow the publishers and lines by.
+ */
+const seat = (i: number) => CUSTOMER_SEATS.filter((l) => l.ssp_domain === "madeupmedia.com")[i];
+const pubLine = (i: number, ended: number, file = "app-ads.txt") => {
+  const l = seat(i);
+  return {
+    ssp_domain: l.ssp_domain,
+    publisher_id: l.publisher_id,
+    relationship: l.relationship,
+    file,
+    first_seen: goneDay(ended + 70),
+    last_seen: goneDay(ended + 7),
+    ended_at: goneDay(ended),
+    reason_code: "publisher_inactive",
+  };
+};
+
+const INACTIVE_PUBLISHERS: InactivePublisher[] = [
+  {
+    developer_id: 880_101, domain: "brambleloop-old.net", name: null,
+    inactive_since: goneDay(8), reason_code: "site_silent", reason: "The website stopped answering",
+    evidence_summary: `Failed in 4 crawls in a row, from ${goneDay(29)} to ${goneDay(8)}`,
+    lines: [pubLine(1, 8), pubLine(2, 8, "ads.txt")], apps: 2,
+  },
+  {
+    developer_id: 880_102, domain: "quokkaplay-legacy.com", name: "Quokkaplay Legacy",
+    inactive_since: goneDay(15), reason_code: "domain_gone", reason: "The domain no longer exists",
+    evidence_summary: `Failed in 3 crawls in a row, from ${goneDay(29)} to ${goneDay(15)}`,
+    lines: [pubLine(3, 15)], apps: 4,
+  },
+  {
+    developer_id: 880_103, domain: "tinplover-studio.net", name: "Tinplover Studio",
+    inactive_since: goneDay(19), reason_code: "no_file",
+    reason: "The website no longer serves an ads.txt or app-ads.txt file",
+    evidence_summary: `Failed in 3 crawls in a row, from ${goneDay(33)} to ${goneDay(19)}`,
+    lines: [pubLine(4, 19), pubLine(5, 19)], apps: 3,
+  },
+  {
+    developer_id: 880_104, domain: "lanternbay-apps.com", name: null,
+    inactive_since: goneDay(22), reason_code: "certificate_broken",
+    reason: "The website's security certificate is broken",
+    evidence_summary: `Failed in 3 crawls in a row, from ${goneDay(36)} to ${goneDay(22)}`,
+    lines: [pubLine(0, 22)], apps: 7,
+  },
+  {
+    developer_id: 880_105, domain: "driftquill-media.com", name: "Driftquill Media",
+    inactive_since: goneDay(30), reason_code: "site_refuses", reason: "The website refuses connections",
+    evidence_summary: `Failed in 5 crawls in a row, from ${goneDay(58)} to ${goneDay(30)}`,
+    lines: [pubLine(6, 30)], apps: 1,
+  },
+  {
+    developer_id: 880_106, domain: "pebblemarsh-tv.com", name: "Pebblemarsh TV",
+    inactive_since: goneDay(41), reason_code: "retired_by_operator", reason: "Retired by our team",
+    evidence_summary: "Retired by our team after review",
+    lines: [pubLine(7, 41, "ads.txt"), pubLine(8, 41, "ads.txt")], apps: 0,
+  },
+];
+
+const INACTIVE_APPS: InactiveApp[] = [
+  {
+    app_id: 990_201, store: "android", bundle: "puzzle.madeup.wool.sort", name: "Puzzle Wool Sort",
+    developer_id: 77_301, publisher: "cobaltriver15.com", publisher_name: "Cobalt River",
+    inactive_since: goneDay(3), reason_code: "unlisted_from_store", reason: "No longer on Google Play",
+    evidence: { http_status: 404, storefronts_checked: ["US", "GB"], qa_outcome: "cloud_gone" },
+    evidence_summary: "Google Play no longer lists it, checked in 2 storefronts, the store answered 404 (confirmed twice, removal awaiting review)",
+    confirmed: false,
+  },
+  {
+    app_id: 990_202, store: "android", bundle: "io.madeup.fighterjam", name: "Fighter Jam",
+    developer_id: 77_302, publisher: "orchardtide-ads.com", publisher_name: "Orchardtide",
+    inactive_since: goneDay(4), reason_code: "unlisted_from_store", reason: "No longer on Google Play",
+    evidence: { http_status: 404, storefronts_checked: ["US", "GB", "JP"], qa_outcome: "cloud_gone" },
+    evidence_summary: "Google Play no longer lists it, checked in 3 storefronts, the store answered 404",
+    confirmed: true,
+  },
+  {
+    app_id: 990_203, store: "ios", bundle: "com.madeup.lanternbay.solitaire", name: "Lantern Bay Solitaire",
+    developer_id: 77_303, publisher: "copperwren-hiphop.com", publisher_name: null,
+    inactive_since: goneDay(7), reason_code: "unlisted_from_store", reason: "No longer on the App Store",
+    evidence: { http_status: 404, storefronts_checked: ["US", "GB", "DE", "JP"], qa_outcome: "cloud_gone" },
+    evidence_summary: "The App Store no longer lists it, checked in 4 storefronts, the store answered 404",
+    confirmed: true,
+  },
+  {
+    app_id: 990_204, store: "android", bundle: "com.madeup.war.hex.world", name: "Hex World War",
+    developer_id: 77_304, publisher: "silvergull-media.tv", publisher_name: "Silvergull Media",
+    inactive_since: goneDay(10), reason_code: "unlisted_from_store", reason: "No longer on Google Play",
+    evidence: { http_status: 404, storefronts_checked: ["US"], qa_outcome: "cloud_gone" },
+    evidence_summary: "Google Play no longer lists it, checked in 1 storefront, the store answered 404",
+    confirmed: true,
+  },
+  {
+    app_id: 990_205, store: "roku", bundle: "614512", name: "Harbor News Live",
+    developer_id: 77_305, publisher: "harborview7news.com", publisher_name: "Harborview 7 News",
+    inactive_since: goneDay(12), reason_code: "unlisted_from_store", reason: "No longer on the Roku Channel Store",
+    evidence: { http_status: 404, qa_outcome: "cloud_gone" },
+    evidence_summary: "The Roku Channel Store no longer lists it, the store answered 404",
+    confirmed: true,
+  },
+  {
+    app_id: 990_206, store: "ios", bundle: "com.madeup.glintfox.runner", name: "Glintfox Runner",
+    developer_id: 880_102, publisher: "quokkaplay-legacy.com", publisher_name: "Quokkaplay Legacy",
+    publisher_inactive: true,
+    inactive_since: goneDay(15), reason_code: "unlisted_from_store", reason: "No longer on the App Store",
+    evidence: { http_status: 404, storefronts_checked: ["US", "CA"], qa_outcome: "cloud_gone" },
+    evidence_summary: "The App Store no longer lists it, checked in 2 storefronts, the store answered 404",
+    confirmed: true,
+  },
+  {
+    app_id: 990_207, store: "android", bundle: "com.madeup.mossgate.pinball", name: "Mossgate Pinball",
+    developer_id: 77_307, publisher: "mossgate-arcade.com", publisher_name: "Mossgate Arcade",
+    inactive_since: goneDay(26), reason_code: "removed_by_operator", reason: "Retired by our team",
+    evidence: {}, evidence_summary: "Retired by our team",
+    confirmed: true,
+  },
+];
+
+const INACTIVE_LINE_PUBS = [
+  { developer_id: 77_311, publisher: "fernhollow-games.com", publisher_name: "Fernhollow Games" },
+  { developer_id: 77_312, publisher: "sunwhistle-apps.net", publisher_name: "Sunwhistle Apps" },
+  { developer_id: 77_313, publisher: "glintfox-games.com", publisher_name: "Glintfox Games" },
+  { developer_id: 77_314, publisher: "reedlark-play.com", publisher_name: null },
+];
+
+const INACTIVE_LINES: InactiveLine[] = [
+  // 26 ended lines on live publishers (removed from the file, or the whole
+  // file gone), plus the dead publishers' own lines, so the list pages.
+  ...Array.from({ length: 26 }, (_, i): InactiveLine => {
+    const pub = INACTIVE_LINE_PUBS[i % INACTIVE_LINE_PUBS.length];
+    const gone = i % 5 === 3;
+    const ended = 2 + Math.floor(i * 1.7);
+    const l = seat(10 + i * 2);
+    return {
+      ...pub,
+      publisher_inactive: false,
+      file: i % 3 === 0 ? "ads.txt" : "app-ads.txt",
+      ssp_domain: l.ssp_domain,
+      publisher_id: l.publisher_id,
+      relationship: l.relationship,
+      first_seen: goneDay(ended + 60 + i),
+      last_seen: goneDay(ended + 7),
+      ended_at: goneDay(ended),
+      reason_code: gone ? "file_gone" : "line_removed",
+      reason: gone
+        ? "The publisher's file is gone (the site answers 404)"
+        : "The publisher removed this line from its file",
+      ...(gone ? { http_status: 404 } : {}),
+    };
+  }),
+  ...INACTIVE_PUBLISHERS.flatMap((p) =>
+    p.lines.map(
+      (l): InactiveLine => ({
+        developer_id: p.developer_id,
+        publisher: p.domain,
+        publisher_name: p.name,
+        publisher_inactive: true,
+        file: l.file ?? null,
+        ssp_domain: l.ssp_domain,
+        publisher_id: l.publisher_id,
+        relationship: l.relationship,
+        first_seen: l.first_seen ?? null,
+        last_seen: l.last_seen ?? null,
+        ended_at: l.ended_at ?? null,
+        reason_code: "publisher_inactive",
+        reason: "The publisher is inactive",
+      }),
+    ),
+  ),
+].sort((a, b) => (b.ended_at ?? "").localeCompare(a.ended_at ?? ""));
+
+export const mockInactiveBlock = {
+  publishers: INACTIVE_PUBLISHERS,
+  apps: INACTIVE_APPS,
+  lines: INACTIVE_LINES,
+  counts: {
+    publishers: INACTIVE_PUBLISHERS.length,
+    apps: INACTIVE_APPS.length,
+    lines: INACTIVE_LINES.length,
+  },
+};
+
+/**
+ * One page of an Inactive list, the way viewer_frozen.inactive serves it.
+ * A trial keeps the first rows of each list (the counts stay whole) and
+ * withholds the publisher of apps and lines, BEFORE search and filter, as
+ * the crawler's trial view does.
+ */
+export function mockInactive(
+  kind: InactiveKind,
+  opts: { page: number; q?: string; lines?: string[] },
+  trial = false,
+): InactivePage {
+  const block = mockInactiveBlock;
+  let rows: InactiveRow[] = block[kind];
+  if (trial) {
+    rows = rows.slice(0, 3);
+    if (kind !== "publishers") {
+      rows = rows.map((r) => ({ ...r, publisher: "", publisher_name: "", developer_id: null }));
+    }
+  }
+  const cut = pageRows(kind, rows, { page: opts.page, pageSize: PAGE_SIZE, q: opts.q, lines: opts.lines });
+  return {
+    kind,
+    page: opts.page,
+    page_size: PAGE_SIZE,
+    total: cut.total,
+    rows: cut.rows,
+    available: true,
+    counts: { ...block.counts },
+    truncated: false,
+    ...(trial
+      ? { trial: { cap: 3, shown: Math.min(3, block[kind].length), full_total: block.counts[kind] } }
+      : {}),
+  };
+}
+
 export const mockSummary: Summary = {
   gone: mockGone,
+  inactive_counts: { ...mockInactiveBlock.counts },
   crawl_id: 47281,
   source: "weekly",
   status: "completed",

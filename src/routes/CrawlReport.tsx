@@ -1,4 +1,4 @@
-import GoneList, { goneCount } from "@/components/GoneInventory";
+import InactiveSection from "@/components/InactiveSection";
 import LockedTail from "@/components/LockedTail";
 import { MiniStat } from "@/components/MiniStat";
 import { Collapse, Settle, glideTo } from "@/components/Motion";
@@ -32,7 +32,10 @@ import {
   type LineEvent,
   type MatchedMove,
   type MatchedMoves,
+  type InactiveCounts,
+  type InactiveKind,
 } from "../lib/api";
+import { inactiveCountsOf, inactiveNoun, inactiveTotal } from "@/lib/inactive";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import {
   EmptyResult,
@@ -88,6 +91,14 @@ export default function CrawlReport() {
   // The list's tab lives here, not in the list, so the "Lines added" and
   // "Lines removed" cards can open it on Added or Removed.
   const [drillTab, setDrillTab] = useState<DrillTab>("all");
+  // Which Inactive list is open (Publishers, Apps or Lines). The page's, so
+  // it survives switching views; picking a view picks its own list unless
+  // the reader is on Lines, which belongs to neither view.
+  const [inactiveKind, setInactiveKind] = useState<InactiveKind>("publishers");
+  const pickView = (view: "publishers" | "apps") => {
+    setMatchedView(view);
+    setInactiveKind((k) => (k === "lines" ? k : view));
+  };
   // Bumped by those two cards: the list opens its first row once it has
   // landed, so the reader sees the lines the card counted, not just names.
   const [openFirst, setOpenFirst] = useState(0);
@@ -95,6 +106,16 @@ export default function CrawlReport() {
   const showLinesOf = (tab: DrillTab) => {
     setDrillTab(tab);
     setOpenFirst((n) => n + 1);
+    glideTo(listRef.current);
+  };
+  /** The quiet line's "See them": the Inactive tab, on a list that has rows. */
+  const showInactive = (counts: InactiveCounts) => {
+    setDrillTab("inactive");
+    setInactiveKind((k) => {
+      const mine = k === "lines" ? k : matchedView;
+      if (counts[mine] > 0) return mine;
+      return (["publishers", "apps", "lines"] as const).find((x) => counts[x] > 0) ?? mine;
+    });
     glideTo(listRef.current);
   };
   /* THE SEAT-LINE FILTER. In the URL, so it survives a refresh and follows
@@ -222,6 +243,23 @@ export default function CrawlReport() {
   // what was left was captions promising a comparison that is not there and
   // a pair of zeros presented as this week's result.
   const isFirstCrawl = summary.previous_job_id === null;
+
+  // INACTIVE (2026-10-08): the headline numbers count active only; what
+  // stopped counting is a tab of the list and one quiet line, never a card.
+  // An older link without the section counts from its No longer live block.
+  const inactiveCounts = inactiveCountsOf(summary);
+  const hasInactive = inactiveTotal(inactiveCounts) > 0;
+  // The tab exists only while something is inactive; a page left on it
+  // (a filter, an older link) reads as All matched rather than a tab-less list.
+  const listTab: DrillTab = drillTab === "inactive" && !hasInactive ? "all" : drillTab;
+  const inactive = inactiveCounts && hasInactive
+    ? {
+        counts: inactiveCounts,
+        kind: inactiveKind,
+        setKind: setInactiveKind,
+        legacy: summary.gone,
+      }
+    : null;
 
   // TWO BEATS (David, 2026-10-05): the left card's line figures count up
   // first, and the matched publishers and apps start a second after those
@@ -420,7 +458,7 @@ export default function CrawlReport() {
               active={matchedView === "publishers"}
               // The tab stays (David, 2026-10-07): Added on publishers
               // is Added on apps, never a silent jump back to All matched.
-              onClick={() => setMatchedView("publishers")}
+              onClick={() => pickView("publishers")}
             />
             <MatchedTile
               tone="app"
@@ -435,9 +473,16 @@ export default function CrawlReport() {
               active={matchedView === "apps"}
               // The tab stays (David, 2026-10-07): Added on publishers
               // is Added on apps, never a silent jump back to All matched.
-              onClick={() => setMatchedView("apps")}
+              onClick={() => pickView("apps")}
             />
           </div>
+          {inactive && (
+            <InactiveQuietLine
+              counts={inactive.counts}
+              filtered={filtered}
+              onShow={() => showInactive(inactive.counts)}
+            />
+          )}
         </div>
       </div>
       )}
@@ -463,43 +508,34 @@ export default function CrawlReport() {
           tinted expansion. Publishers are green, apps are pink. */}
       {matchedView === "publishers" ? (
         <div data-tour="overview-list" ref={listRef} className="scroll-mt-6">
-          <div className="mb-3" data-tour="overview-list-head">
-            <h2 className="font-display text-base font-semibold tracking-tight text-slate-900">
-              Matched publishers
-            </h2>
-            <p className="text-sm text-slate-500">
-              Every publisher whose ads.txt matched your seats. Click a row to
-              see the exact seat lines it carried, and what moved this week.
-            </p>
-          </div>
+          <ListHead
+            inactive={listTab === "inactive"}
+            title="Matched publishers"
+            blurb="Every publisher whose ads.txt matched your seats. Click a row to see the exact seat lines it carried, and what moved this week."
+          />
           <DrilldownList
             token={token}
             lines={lines}
             caps={summary.trial ?? null}
-            gone={summary.gone}
-            tab={drillTab}
+            inactive={inactive}
+            tab={listTab}
             setTab={setDrillTab}
             openFirst={openFirst}
           />
         </div>
       ) : (
         <div data-tour="overview-list" ref={listRef} className="scroll-mt-6">
-          <div className="mb-3" data-tour="overview-list-head">
-            <h2 className="font-display text-base font-semibold tracking-tight text-slate-900">
-              Matched apps
-            </h2>
-            <p className="text-sm text-slate-500">
-              Every app whose app-ads.txt matched your seats, with the
-              publisher that owns it. Click a row to see the exact seat lines
-              it carried, and what moved this week.
-            </p>
-          </div>
+          <ListHead
+            inactive={listTab === "inactive"}
+            title="Matched apps"
+            blurb="Every app whose app-ads.txt matched your seats, with the publisher that owns it. Click a row to see the exact seat lines it carried, and what moved this week."
+          />
           <MatchedAppsList
             token={token}
             lines={lines}
             caps={summary.trial ?? null}
-            gone={summary.gone}
-            tab={drillTab}
+            inactive={inactive}
+            tab={listTab}
             setTab={setDrillTab}
             openFirst={openFirst}
           />
@@ -1113,8 +1149,77 @@ function ExportResultsButton({
   );
 }
 
-/** "gone" is No longer live: frozen with the summary, never fetched. */
-type DrillTab = "all" | "added" | "removed" | "changed" | "gone";
+/** "inactive" is the Inactive section (it replaced No longer live). */
+type DrillTab = "all" | "added" | "removed" | "changed" | "inactive";
+
+/** What the two lists need for their Inactive tab; null when nothing is
+ *  inactive (the tab then does not exist). */
+type InactiveTab = {
+  counts: InactiveCounts;
+  kind: InactiveKind;
+  setKind: (kind: InactiveKind) => void;
+  legacy: Summary["gone"];
+} | null;
+
+/**
+ * The list's heading. On the Inactive tab it says what the list now is:
+ * a separate section, apart from the matched rows and their numbers.
+ */
+function ListHead({ inactive, title, blurb }: { inactive: boolean; title: string; blurb: string }) {
+  return (
+    <div className="mb-3" data-tour="overview-list-head">
+      <h2 className="font-display text-base font-semibold tracking-tight text-slate-900">
+        {inactive ? "Inactive" : title}
+      </h2>
+      <p className="text-sm text-slate-500">
+        {inactive
+          ? "Nothing is deleted. Publishers, apps and lines that stopped counting stay here with the date and the reason."
+          : blurb}
+      </p>
+    </div>
+  );
+}
+
+/**
+ * "Plus 6 inactive publishers, 7 inactive apps and 32 inactive lines, not
+ * counted above." The headline numbers count active only (David,
+ * 2026-10-08); this is the whole of what is set aside, said quietly, with
+ * the way to see it. Never a card: a side finding is a line or a tab.
+ */
+export function inactiveSentence(counts: InactiveCounts): string {
+  const parts = (["publishers", "apps", "lines"] as const)
+    .filter((k) => counts[k] > 0)
+    .map((k) => `${counts[k].toLocaleString()} ${inactiveNoun(k, counts[k])}`);
+  if (parts.length === 0) return "";
+  const list = parts.length === 1 ? parts[0] : `${parts.slice(0, -1).join(", ")} and ${parts[parts.length - 1]}`;
+  return `Plus ${list}`;
+}
+
+function InactiveQuietLine({
+  counts,
+  filtered,
+  onShow,
+}: {
+  counts: InactiveCounts;
+  filtered: boolean;
+  onShow: () => void;
+}) {
+  const said = inactiveSentence(counts);
+  if (!said) return null;
+  return (
+    <p data-testid="inactive-quiet" className="mt-3 text-[12px] leading-snug text-slate-500">
+      {said}
+      {filtered ? " across all your seat lines" : ""}, not counted above.{" "}
+      <button
+        type="button"
+        onClick={onShow}
+        className="font-medium text-slate-600 underline decoration-slate-300 underline-offset-2 transition-colors hover:text-critical hover:decoration-critical/40"
+      >
+        See them
+      </button>
+    </p>
+  );
+}
 
 /**
  * Opens a list's first row after `nonce` bumps, as soon as the list is
@@ -1171,7 +1276,7 @@ function DrilldownList({
   token,
   lines,
   caps,
-  gone,
+  inactive,
   tab,
   setTab,
   openFirst,
@@ -1180,8 +1285,8 @@ function DrilldownList({
   lines: string[];
   /** The trial's caps, on a trial: the unlock card stands on every tab. */
   caps: TrialCaps | null;
-  /** No longer live, from the summary: a tab only when something is gone. */
-  gone: Summary["gone"];
+  /** The Inactive tab's wiring; null when nothing is inactive (no tab). */
+  inactive: InactiveTab;
   /** Owned by the page, so the line cards above can pick the tab. */
   tab: DrillTab;
   setTab: (tab: DrillTab) => void;
@@ -1206,14 +1311,6 @@ function DrilldownList({
   // Bumps each time a list lands, so the new rows ease in as one piece.
   const [settled, setSettled] = useState(0);
 
-  // No longer live is a tab only while something is gone in THIS view: the
-  // page's tab is shared by both views, so arriving on a view with nothing
-  // gone falls back to All matched instead of an empty, tab-less list.
-  const goneTotal = goneCount(gone, "publishers");
-  useEffect(() => {
-    if (tab === "gone" && goneTotal === 0) setTab("all");
-  }, [tab, goneTotal, setTab]);
-
   // A new search, a new tab or a new line selection is a new list, so it
   // starts at its first page. Without this, searching from page 7 asks
   // for page 7 of a result that may have one page, and the reader gets an
@@ -1237,8 +1334,8 @@ function DrilldownList({
   }, [tab, lines]);
 
   useEffect(() => {
-    // No longer live is frozen with the summary: nothing to read.
-    if (tab === "gone") return;
+    // The Inactive section reads its own lists.
+    if (tab === "inactive") return;
     const event = tab;
     let cancelled = false;
     const load = (pg: number) =>
@@ -1342,33 +1439,29 @@ function DrilldownList({
           so the two pages read as one product. */}
       <div className="mb-3 space-y-2">
         <div className="flex flex-wrap items-center gap-3">
-          <Tabs value={tab} onValueChange={(v) => setTab(v as DrillTab)}>
-            <TabsList>
+          <Tabs value={tab} onValueChange={(v) => setTab(v as DrillTab)} className="max-w-full">
+            {/* Scrolls sideways on a narrow phone rather than pushing the page wider. */}
+            <TabsList className="max-w-full justify-start overflow-x-auto">
               <TabsTrigger value="all">All matched</TabsTrigger>
               <TabsTrigger value="added">Added</TabsTrigger>
               <TabsTrigger value="removed">Removed</TabsTrigger>
               <TabsTrigger value="changed">Changed</TabsTrigger>
-              {goneTotal > 0 && (
-                <TabsTrigger value="gone">
-                  No longer live
-                  <span className="ml-1.5 tabular-nums text-slate-400">{goneTotal.toLocaleString()}</span>
-                </TabsTrigger>
-              )}
+              {inactive && <TabsTrigger value="inactive">Inactive</TabsTrigger>}
             </TabsList>
           </Tabs>
           {/* Silent until a list has landed. While a new tab or filter is
               in flight this still holds the PREVIOUS total, and printing
               "260 matched" over a skeleton states a number for a question
               that is still being asked. */}
-          {settled > 0 && tab !== "gone" && (
+          {settled > 0 && tab !== "inactive" && (
             <span className="text-xs text-slate-500">
               {total.toLocaleString()}{" "}
               {tab === "all" ? "matched" : "with changes"}
             </span>
           )}
-          {loading && settled > 0 && tab !== "gone" && <Dots />}
+          {loading && settled > 0 && tab !== "inactive" && <Dots />}
         </div>
-        {tab !== "gone" && (
+        {tab !== "inactive" && (
         <div className="relative w-full">
           <Search className="pointer-events-none absolute left-3.5 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
           <input
@@ -1395,8 +1488,16 @@ function DrilldownList({
           still answering the question the reader just changed. Those reset
           `settled` to 0, which is the same "nothing has landed yet" state a
           cold open is in, and so draws the same skeleton. */}
-      {tab === "gone" ? (
-        <GoneList gone={gone} kind="publishers" filtered={lines.length > 0} />
+      {tab === "inactive" && inactive ? (
+        <InactiveSection
+          token={token}
+          lines={lines}
+          caps={caps}
+          counts={inactive.counts}
+          kind={inactive.kind}
+          setKind={inactive.setKind}
+          legacy={inactive.legacy}
+        />
       ) : (
       <div>
         {loading && settled === 0 && (
@@ -2042,7 +2143,7 @@ function MatchedAppsList({
   token,
   lines,
   caps,
-  gone,
+  inactive,
   tab,
   setTab,
   openFirst,
@@ -2050,8 +2151,8 @@ function MatchedAppsList({
   token: string;
   lines: string[];
   caps: TrialCaps | null;
-  /** No longer live, from the summary: a tab only when something is gone. */
-  gone: Summary["gone"];
+  /** The Inactive tab's wiring; null when nothing is inactive (no tab). */
+  inactive: InactiveTab;
   /** Owned by the page, so the line cards above can pick the tab. */
   tab: DrillTab;
   setTab: (tab: DrillTab) => void;
@@ -2073,14 +2174,6 @@ function MatchedAppsList({
   const keyOf = (a: MatchedApp) => `${a.store}:${a.bundle_id}`;
   const appCache = usePageCache<unknown>();
   const [settled, setSettled] = useState(0);
-
-  // No longer live is a tab only while something is gone in THIS view: the
-  // page's tab is shared by both views, so arriving on a view with nothing
-  // gone falls back to All matched instead of an empty, tab-less list.
-  const goneTotal = goneCount(gone, "apps");
-  useEffect(() => {
-    if (tab === "gone" && goneTotal === 0) setTab("all");
-  }, [tab, goneTotal, setTab]);
 
   // A new search or a new line selection is a new list and starts at its
   // first page.
@@ -2173,30 +2266,26 @@ function MatchedAppsList({
     <div>
       <div className="mb-3 space-y-2">
         <div className="flex flex-wrap items-center gap-3">
-          <Tabs value={tab} onValueChange={(v) => setTab(v as DrillTab)}>
-            <TabsList>
+          <Tabs value={tab} onValueChange={(v) => setTab(v as DrillTab)} className="max-w-full">
+            {/* Scrolls sideways on a narrow phone rather than pushing the page wider. */}
+            <TabsList className="max-w-full justify-start overflow-x-auto">
               <TabsTrigger value="all">All matched</TabsTrigger>
               <TabsTrigger value="added">Added</TabsTrigger>
               <TabsTrigger value="removed">Removed</TabsTrigger>
               <TabsTrigger value="changed">Changed</TabsTrigger>
-              {goneTotal > 0 && (
-                <TabsTrigger value="gone">
-                  No longer live
-                  <span className="ml-1.5 tabular-nums text-slate-400">{goneTotal.toLocaleString()}</span>
-                </TabsTrigger>
-              )}
+              {inactive && <TabsTrigger value="inactive">Inactive</TabsTrigger>}
             </TabsList>
           </Tabs>
           {/* Same rule as the publishers list: silent until one lands. */}
-          {settled > 0 && tab !== "gone" && (
+          {settled > 0 && tab !== "inactive" && (
             <span className="text-xs text-slate-500">
               {(tab === "all" ? total : rows.length).toLocaleString()}{" "}
               {tab === "all" ? "matched" : "with changes"}
             </span>
           )}
-          {loading && settled > 0 && tab !== "gone" && <Dots />}
+          {loading && settled > 0 && tab !== "inactive" && <Dots />}
         </div>
-        {tab !== "gone" && (
+        {tab !== "inactive" && (
         <div className="relative w-full">
           <Search className="pointer-events-none absolute left-3.5 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
           <input
@@ -2209,8 +2298,16 @@ function MatchedAppsList({
         </div>
         )}
       </div>
-      {tab === "gone" ? (
-        <GoneList gone={gone} kind="apps" filtered={lines.length > 0} />
+      {tab === "inactive" && inactive ? (
+        <InactiveSection
+          token={token}
+          lines={lines}
+          caps={caps}
+          counts={inactive.counts}
+          kind={inactive.kind}
+          setKind={inactive.setKind}
+          legacy={inactive.legacy}
+        />
       ) : (
       <>
       {loading && settled === 0 && (

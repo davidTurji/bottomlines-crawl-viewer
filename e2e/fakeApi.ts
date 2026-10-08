@@ -20,6 +20,8 @@ import {
   mockDeveloperEvents,
   mockDiscoveredLinePlacements,
   mockDiscoveredLines,
+  mockGone,
+  mockInactive,
   mockLineEvents,
   mockMatchedApps,
   mockMatchedBundles,
@@ -27,6 +29,8 @@ import {
   mockPreviousSummary,
   mockSummaryFor,
 } from "../src/lib/mockData";
+import { pageFromGone } from "../src/lib/inactive";
+import type { InactiveKind } from "../src/lib/api";
 import {
   MOCK_CHECKED_AT,
   MOCK_SELLERS_DOMAIN,
@@ -72,6 +76,11 @@ export type Scenario = {
   missing?: string[];
   /** false: a link frozen before the "No longer live" block existed. */
   gone?: boolean;
+  /** The Inactive section. "ok": frozen with it (summary inactive_counts,
+   *  /inactive answers). "legacy": a link frozen before it, served from its
+   *  gone block (derived_from "gone"). "missing": an API older than the
+   *  route (404), the SPA builds it from the summary's gone block. */
+  inactive?: "ok" | "legacy" | "missing";
   /** Last week's summary: "none" answers 503 (erased), "error" 500. */
   previousWeek?: "ok" | "none" | "error";
 };
@@ -114,6 +123,7 @@ export async function installFakeApi(page: Page, scenario: Scenario = {}): Promi
     previousWeek: "ok",
     missing: [],
     gone: true,
+    inactive: "ok",
     ...scenario,
   };
   let signedIn = !s.signedOut && !s.expired;
@@ -167,7 +177,8 @@ export async function installFakeApi(page: Page, scenario: Scenario = {}): Promi
           return reply(200, mockPreviousSummary);
         }
         const full = mockSummaryFor(lines);
-        const sum = s.gone ? full : { ...full, gone: undefined };
+        const withGone = s.gone ? full : { ...full, gone: undefined };
+        const sum = s.inactive === "ok" ? withGone : { ...withGone, inactive_counts: undefined };
         return reply(200, s.trial ? { ...sum, trial: TRIAL_CAPS } : sum);
       }
       case "export-info":
@@ -229,6 +240,15 @@ export async function installFakeApi(page: Page, scenario: Scenario = {}): Promi
             ? { ...mockDeclarationRows, ...cut(mockDeclarationRows.rows, TRIAL_CAPS.declarations, mockDeclarationRows.total) }
             : mockDeclarationRows,
         );
+      case "inactive": {
+        if (s.inactive === "missing") return notFound();
+        const kind = (q.get("kind") ?? "publishers") as InactiveKind;
+        const opts = { page: page_, q: q.get("q") ?? "", lines };
+        if (s.inactive === "legacy") {
+          return reply(200, pageFromGone(s.gone ? mockGone : null, kind, { ...opts, pageSize: Number(q.get("page_size") ?? 50) }));
+        }
+        return reply(200, mockInactive(kind, opts, s.trial));
+      }
       case "sellers-fix":
         if (s.sellers === "none") return notFound("This report has no sellers.json page.");
         if (s.sellers === "error") return reply(503, { detail: "not available yet" });

@@ -7,6 +7,7 @@ const BASE = (import.meta.env.VITE_API_BASE as string) ?? "/api";
 // The mock adapter lives in src/lib/mockData.ts.
 import { LINES_PARAM, linesQuery, serializeLines } from "./lineFilter";
 import { PAGE_SIZE } from "./paging";
+import { pageFromGone } from "./inactive";
 
 export const MOCK = (import.meta.env.VITE_MOCK as string | undefined) === "true";
 
@@ -38,10 +39,24 @@ const trialMock = () => {
   }
   return params.has("trial") && params.get("trial") !== "0";
 };
-const TRIAL_CAPS_MOCK = { publishers: 3, apps: 3, declarations: 3, discovered_lines: 3 };
+const TRIAL_CAPS_MOCK = { publishers: 3, apps: 3, declarations: 3, discovered_lines: 3, inactive: 3 };
 function cutRows<T>(rows: T[], cap: number, total: number) {
   const shown = Math.min(cap, rows.length, total);
   return { rows: rows.slice(0, cap), trial: { cap, shown, full_total: total } };
+}
+
+/** In MOCK mode, ``?inactive=legacy`` is a link frozen before the Inactive
+ *  section (only its No longer live block) and ``?inactive=none`` one with
+ *  neither. Read per call, like ``?bigapps=1``. */
+const mockInactiveMode = (): "full" | "legacy" | "none" => {
+  const v = new URLSearchParams(window.location.search).get("inactive");
+  return v === "legacy" || v === "none" ? v : "full";
+};
+function mockInactiveVariant(s: Summary): Summary {
+  const mode = mockInactiveMode();
+  if (mode === "full") return s;
+  const { inactive_counts: _drop, ...rest } = s;
+  return mode === "legacy" ? rest : { ...rest, gone: undefined };
 }
 
 // ── AI chat flag ─────────────────────────────────────────────────
@@ -238,7 +253,7 @@ export const api = {
   summary: async (token: string, lines?: string[]) => {
     if (MOCK) {
       const { mockSummaryFor } = await import("./mockData");
-      const s = mockSummaryFor(lines ?? []);
+      const s = mockInactiveVariant(mockSummaryFor(lines ?? []));
       return trialMock() ? { ...s, trial: TRIAL_CAPS_MOCK } : s;
     }
     const q = linesQuery(lines);
@@ -401,6 +416,56 @@ export const api = {
       "GET",
       `/v1/viewer/${token}/matched-apps?page=${page}&page_size=${PAGE_SIZE}${q ? `&q=${encodeURIComponent(q)}` : ""}${linesQuery(lines)}`,
     );
+  },
+  /**
+   * One page of one Inactive list (publishers, apps or lines): what carried
+   * the reader's lines and stopped counting, with the date, the reason and
+   * the evidence. Frozen with the report, searched and paged server-side
+   * like the matched lists; a trial answers its first rows with `trial`.
+   *
+   * BACKWARDS COMPATIBLE. An API from before this route answers 404, which
+   * here means only "this API is older" (never a dead link, see above): the
+   * page is then built from the summary's No longer live block, passed in as
+   * `legacy`, the way the crawler itself serves an old link.
+   *
+   * In MOCK mode `?inactive=legacy` shows an older link (from the gone
+   * block, no lines) and `?inactive=none` a report without the section.
+   */
+  inactive: async (
+    token: string,
+    kind: InactiveKind,
+    opts: { page?: number; q?: string; lines?: string[] } = {},
+    legacy?: GoneInventory | null,
+  ): Promise<InactivePage> => {
+    const page = opts.page ?? 1;
+    if (MOCK) {
+      const variant = mockInactiveMode();
+      if (variant !== "full") {
+        // An older link: the crawler answers from its gone block (or has
+        // nothing), exactly what the 404 fallback below builds.
+        const { mockGone } = await import("./mockData");
+        return pageFromGone(variant === "legacy" ? mockGone : null, kind, {
+          page, pageSize: PAGE_SIZE, q: opts.q, lines: opts.lines,
+        });
+      }
+      const { mockInactive } = await import("./mockData");
+      return mockInactive(kind, { page, q: opts.q, lines: opts.lines }, trialMock());
+    }
+    const q = new URLSearchParams({ kind, page: String(page), page_size: String(PAGE_SIZE) });
+    if (opts.q) q.set("q", opts.q);
+    // Appended raw, as every list does: the keys are encoded once by
+    // serializeLines, and the API splits them without decoding again.
+    try {
+      return await req<InactivePage>(
+        "GET",
+        `/v1/viewer/${token}/inactive?${q.toString()}${linesQuery(opts.lines)}`,
+      );
+    } catch (e) {
+      if (e instanceof ApiError && e.status === 404) {
+        return pageFromGone(legacy, kind, { page, pageSize: PAGE_SIZE, q: opts.q, lines: opts.lines });
+      }
+      throw e;
+    }
   },
   /**
    * Line events scoped to a single developer, used by the nested-row
@@ -873,6 +938,8 @@ export type TrialCaps = {
   apps: number;
   declarations: number;
   discovered_lines: number;
+  /** Rows of each Inactive list; present when the report carries the section. */
+  inactive?: number;
 };
 
 /** How a capped list was cut on a trial report: the cap, how many rows are
@@ -923,10 +990,115 @@ export type GoneInventory = {
   totals: { publishers: number; apps: number };
 };
 
+// ---- Inactive (2026-10-08, crawler docs/INACTIVE.md) ----
+// Nothing is deleted: dead publishers, apps their store no longer lists and
+// lines that ended are kept with a date, a reason and the evidence, listed
+// apart from the active lists and never counted in the headline numbers.
+
+export type InactiveKind = "publishers" | "apps" | "lines";
+
+/** How many of each are inactive: whole, never cut by a trial or a filter. */
+export type InactiveCounts = { publishers: number; apps: number; lines: number };
+
+/** One of the seat lines an inactive publisher carried. Links frozen before
+ *  the section carry only the line's identity (derived from ``gone``). */
+export type InactivePublisherLine = {
+  ssp_domain: string;
+  publisher_id: string;
+  relationship: string;
+  file?: string | null;
+  first_seen?: string | null;
+  last_seen?: string | null;
+  ended_at?: string | null;
+  reason_code?: string | null;
+};
+
+export type InactivePublisher = {
+  developer_id?: number | null;
+  domain: string;
+  name: string | null;
+  inactive_since: string | null;
+  /** domain_gone, certificate_broken, site_refuses, site_silent, no_file,
+   *  retired_by_operator, inactive; null on a link derived from ``gone``. */
+  reason_code: string | null;
+  reason: string | null;
+  evidence_summary?: string | null;
+  lines: InactivePublisherLine[];
+  apps: number | null;
+};
+
+export type InactiveApp = {
+  app_id?: number | null;
+  store: string;
+  bundle: string;
+  name: string | null;
+  store_url?: string | null;
+  developer_id?: number | null;
+  /** The publisher's domain; "" on a trial (withheld). */
+  publisher: string;
+  publisher_name?: string | null;
+  publisher_inactive?: boolean;
+  inactive_since: string | null;
+  /** unlisted_from_store, removed_by_operator; null when derived from ``gone``. */
+  reason_code: string | null;
+  reason: string | null;
+  evidence?: {
+    http_status?: number | null;
+    storefronts_checked?: string[] | null;
+    qa_outcome?: string | null;
+  } | null;
+  evidence_summary?: string | null;
+  /** False while the store's two strikes await a person's approval. */
+  confirmed?: boolean;
+};
+
+export type InactiveLine = {
+  developer_id?: number | null;
+  /** The publisher's domain; "" on a trial (withheld). */
+  publisher: string;
+  publisher_name?: string | null;
+  publisher_inactive?: boolean;
+  file: string | null;
+  ssp_domain: string;
+  publisher_id: string;
+  relationship: string;
+  first_seen: string | null;
+  last_seen: string | null;
+  ended_at: string | null;
+  /** line_removed, file_gone, publisher_inactive, app_inactive. */
+  reason_code: string | null;
+  reason: string | null;
+  http_status?: number | null;
+};
+
+export type InactiveRow = InactivePublisher | InactiveApp | InactiveLine;
+
+/** GET /v1/viewer/{token}/inactive: one page of one Inactive list. */
+export type InactivePage<R = InactiveRow> = {
+  kind: InactiveKind;
+  page: number;
+  page_size: number;
+  /** Rows matching the search and the line filter (what the pager counts). */
+  total: number;
+  rows: R[];
+  /** False: the report was frozen without the section (and without ``gone``). */
+  available: boolean;
+  counts: InactiveCounts;
+  /** The bake kept only the newest rows of this list. */
+  truncated: boolean;
+  /** Present on a trial report: this list was cut (see ``TrialSlice``). */
+  trial?: TrialSlice | null;
+  /** "gone": an older link, served from its No longer live block. */
+  derived_from?: string | null;
+};
+
 export type Summary = {
   crawl_id: number;
   /** What carried the reader's lines and is gone; never in the counts. */
   gone?: GoneInventory | null;
+  /** Inactive publishers, apps and lines: NOT in ``counters.matched``, which
+   *  counts active only. Absent on links frozen before the section. */
+  inactive_counts?: InactiveCounts | null;
   /** Set on a trial report (see ``TrialCaps``); null or absent on a full one. */
   trial?: TrialCaps | null;
   /** The watchlist this report was built from: what the seat-line filter
