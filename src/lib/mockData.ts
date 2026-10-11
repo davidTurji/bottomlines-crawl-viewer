@@ -46,6 +46,7 @@ import { inactiveDay, inWindow, pageRows } from "./inactive";
 // The discovered-lines ORDER BY, shared with the page's sort control so the
 // mock endpoint and the client's "default" option cannot disagree.
 import { compareDefault } from "./discoveredSort";
+import { originsFrom } from "./discoveredOrigin";
 import { PAGE_SIZE } from "./paging";
 
 /*
@@ -1678,8 +1679,8 @@ export function linesForDeveloper(developer_id: number): LineEvent[] {
  * (publisher x line): a line is kept because its SSP domain is on the run's
  * discover_domains list, not because it matched an exact seat line.
  *
- * Modelled on the operator's real case: a crawl for carambola.com and
- * carambo.la with no seat lines at all. Most lines therefore carry one of
+ * Modelled on the operator's real case: a crawl for madeupmedia.com and
+ * madeupmedia.la with no seat lines at all. Most lines therefore carry one of
  * those two domains; a couple of others are mixed in because an operator
  * usually lists every domain a partner is known to publish under.
  *
@@ -1691,10 +1692,10 @@ export function linesForDeveloper(developer_id: number): LineEvent[] {
 
 /** Discovery domains, weighted: the two real ones dominate. */
 const DISCOVERY_SSPS: { domain: string; weight: number }[] = [
-  { domain: "carambola.com", weight: 46 },
-  { domain: "carambo.la", weight: 34 },
-  { domain: "carambolamedia.com", weight: 12 },
-  { domain: "sonobi.com", weight: 8 },
+  { domain: "madeupmedia.com", weight: 46 },
+  { domain: "madeupmedia.la", weight: 34 },
+  { domain: "madeupmedia-ads.com", weight: 12 },
+  { domain: "madeupmedia-video.com", weight: 8 },
 ];
 
 const DISCOVERY_SSP_PICK: string[] = DISCOVERY_SSPS.flatMap((s) =>
@@ -1725,9 +1726,9 @@ const DISCOVERED_SUFFIX = [
 
 /** A publisher account id in the shape the named SSP hands out. */
 function discoveredPublisherId(ssp: string, n: number): string {
-  if (ssp === "sonobi.com") return `sb-${(n % 90_000) + 10_000}`;
-  if (ssp === "carambo.la") return `${(n % 900_000) + 100_000}`;
-  if (ssp === "carambolamedia.com") return `cm${(n % 90_000) + 10_000}`;
+  if (ssp === "madeupmedia-video.com") return `sb-${(n % 90_000) + 10_000}`;
+  if (ssp === "madeupmedia.la") return `${(n % 900_000) + 100_000}`;
+  if (ssp === "madeupmedia-ads.com") return `cm${(n % 90_000) + 10_000}`;
   return `${(n % 9_000_000) + 1_000_000}`;
 }
 
@@ -1798,7 +1799,7 @@ type MockLineSpec = {
  */
 const DISCOVERED_HEAD: MockLineSpec[] = [
   {
-    ssp_domain: "carambola.com",
+    ssp_domain: "madeupmedia.com",
     publisher_id: "1042318",
     relationship: "RESELLER",
     cert_id: "4a7be0c1d9f23b58",
@@ -1806,7 +1807,7 @@ const DISCOVERED_HEAD: MockLineSpec[] = [
     previous_placements_count: 402, // up 29
   },
   {
-    ssp_domain: "carambo.la",
+    ssp_domain: "madeupmedia.la",
     publisher_id: "618402",
     relationship: "RESELLER",
     cert_id: "",
@@ -1814,7 +1815,7 @@ const DISCOVERED_HEAD: MockLineSpec[] = [
     previous_placements_count: 391, // down 4
   },
   {
-    ssp_domain: "carambola.com",
+    ssp_domain: "madeupmedia.com",
     publisher_id: "2884190",
     relationship: "DIRECT",
     cert_id: "b1f4c72e5a08d9c3",
@@ -1822,7 +1823,7 @@ const DISCOVERED_HEAD: MockLineSpec[] = [
     previous_placements_count: 264, // no change
   },
   {
-    ssp_domain: "carambo.la",
+    ssp_domain: "madeupmedia.la",
     publisher_id: "774061",
     relationship: "RESELLER",
     cert_id: "9c02ea41b7d5f6a8",
@@ -1830,7 +1831,7 @@ const DISCOVERED_HEAD: MockLineSpec[] = [
     previous_placements_count: null, // new this week
   },
   {
-    ssp_domain: "carambola.com",
+    ssp_domain: "madeupmedia.com",
     publisher_id: "3390514",
     relationship: "RESELLER",
     cert_id: "",
@@ -1838,7 +1839,7 @@ const DISCOVERED_HEAD: MockLineSpec[] = [
     previous_placements_count: 151, // up 25
   },
   {
-    ssp_domain: "carambolamedia.com",
+    ssp_domain: "madeupmedia-ads.com",
     publisher_id: "cm41288",
     relationship: "RESELLER",
     cert_id: "77d3b0e9c142a5fb",
@@ -1978,10 +1979,10 @@ const DISCOVERED_LINES = buildDiscoveredLines();
  * never needs this table.
  */
 const DISCOVERY_VANISHED: Record<string, { lines: number; placements: number }> = {
-  "carambola.com": { lines: 4, placements: 62 },
-  "carambo.la": { lines: 3, placements: 41 },
-  "carambolamedia.com": { lines: 1, placements: 9 },
-  "sonobi.com": { lines: 0, placements: 0 },
+  "madeupmedia.com": { lines: 4, placements: 62 },
+  "madeupmedia.la": { lines: 3, placements: 41 },
+  "madeupmedia-ads.com": { lines: 1, placements: 9 },
+  "madeupmedia-video.com": { lines: 0, placements: 0 },
 };
 
 /** Embed threshold, mirroring the rule stated in the api.ts contract. */
@@ -2024,18 +2025,37 @@ function lineKeyOf(k: DiscoveredLineKey): string {
 
 /**
  * Filtering matches the live line-events behaviour: ssp_domain is a
- * case-insensitive substring, so typing "caramb" keeps both carambola.com
- * and carambo.la, and "la" keeps carambo.la alone.
+ * case-insensitive substring, so typing "madeupmedia" keeps madeupmedia.com,
+ * madeupmedia.la and the others, and ".la" keeps madeupmedia.la alone.
  *
  * Mock-only escape hatch: adding ``?discovery=none`` to the URL empties the
  * list, which is how the seat-line-only empty state is reviewed without a
  * second fixture set. Never reached in a production build, where MOCK is
  * false and this module is tree-shaken out.
  */
+/*
+ * WHO BROUGHT EACH LINE (2026-10-11), as the API marks it from the report's
+ * watchlist: a few of the head's lines are in the customer's list (from
+ * their sellers.json, by hand, one found earlier), and one seller ID they
+ * gave as RESELLER turns up DIRECT, so a preview shows every mark.
+ */
+const DISCOVERY_SEATS: MatchedSeatLine[] = [
+  { ssp_domain: "madeupmedia.com", publisher_id: "1042318", relationship: "RESELLER", source: "sellers_json", added_at: "2026-08-30" },
+  { ssp_domain: "madeupmedia.com", publisher_id: "2884190", relationship: "RESELLER", source: "sellers_json", added_at: "2026-08-30" },
+  { ssp_domain: "madeupmedia.com", publisher_id: "3390514", relationship: "RESELLER", source: "manual", added_at: "2026-09-04" },
+  { ssp_domain: "madeupmedia.la", publisher_id: "618402", relationship: "RESELLER", source: "discovered", added_at: "2026-09-16" },
+];
+const mockOrigin = originsFrom([...CUSTOMER_SEATS, ...DISCOVERY_SEATS])!;
+
+/** Publishers once each, in the shape a report from 2026-10-11 carries:
+ *  most publishers hold the line in one file, some in both. */
+const publishersOf = (listings: number | null) => (listings == null ? null : Math.max(1, Math.round(listings * 0.62)));
+
 export function mockDiscoveredLines(opts: {
   page?: number;
   page_size?: number;
   ssp_domain?: string;
+  origin?: "given" | "found";
 }): DiscoveredLinesPage {
   const page = opts.page ?? 1;
   const pageSize = opts.page_size ?? 50;
@@ -2047,12 +2067,30 @@ export function mockDiscoveredLines(opts: {
     const needle = opts.ssp_domain.trim().toLowerCase();
     pool = pool.filter((r) => r.ssp_domain.toLowerCase().includes(needle));
   }
+  pool = pool.map((r) => ({
+    ...r,
+    ...mockOrigin(r),
+    publishers_count: publishersOf(r.placements_count)!,
+    previous_publishers_count: publishersOf(r.previous_placements_count),
+  }));
+  const whole = pool;
+  const given = whole.filter((r) => r.origin === "given").length;
+  if (opts.origin) pool = pool.filter((r) => (r.origin === "given") === (opts.origin === "given"));
+  const base = discoveredTotals(whole);
   const start = (page - 1) * pageSize;
   return {
     page,
     page_size: pageSize,
     total: pool.length,
-    totals: discoveredTotals(pool),
+    totals: {
+      ...base,
+      given_lines: given,
+      found_lines: whole.length - given,
+      // Distinct across lines: a publisher on several lines counts once.
+      publishers: opts.ssp_domain ? null : Math.round(whole.reduce((n, r) => n + (r.publishers_count ?? 0), 0) * 0.7),
+      previous_publishers:
+        opts.ssp_domain || base.previous_placements == null ? null : Math.round((publishersOf(base.previous_placements) ?? 0) * 0.7),
+    },
     // Strip the embedded placements above the threshold, exactly as the
     // proposed endpoint would, so the card's fetch-on-expand path is what
     // a mock review actually exercises on the wide lines.
@@ -2169,12 +2207,12 @@ export const mockDeclarations: Declarations = {
   totals: { ipd_partners: 3, owner_domains: 2, relationship_mismatches: 2 },
   ipd: [
     {
-      partner_domain: "carambola.com",
+      partner_domain: "madeupmedia.com",
       declared_by: declarationSources(50, 0),
       declarer_total: 63,
     },
     {
-      partner_domain: "carambo.la",
+      partner_domain: "madeupmedia.la",
       declared_by: declarationSources(4, 17),
       declarer_total: 4,
     },

@@ -112,6 +112,12 @@ export const mockSellersFile: SellersFile = {
     { seller_id: "400112", name: "Bramblemist TV", domain: "bramblemist-tv.tv", seller_type: "PUBLISHER" },
     { seller_id: "400118", name: "Pebblecrest Apps", domain: "pebblecrest-apps.com", seller_type: "PUBLISHER" },
     { seller_id: "400126", name: "Cinderloft Games", domain: "cinderloft-games.com", seller_type: "PUBLISHER" },
+    // Seen only in their OWN ads.txt (read at bake time, 2026-10-11): seen,
+    // but no type or domain is read off it. The first is an ad network
+    // writing DIRECT on its own site and must never be told "maybe
+    // PUBLISHER"; the second has a name with spaces, so it shows as a fix.
+    { seller_id: "400150", name: "Larchwick Network", domain: "larchwick-net.com", seller_type: "INTERMEDIARY" },
+    { seller_id: "400160", name: " Hazelburn Media ", domain: "hazelburn-media.com", seller_type: "INTERMEDIARY" },
   ],
 };
 
@@ -141,6 +147,8 @@ export const mockSellerSightings: Sighting[] = [
   { seller_id: "300324", relationship: "RESELLER", publishers: pubs(["quokkaplay-games.com", "tidepoolarcade.com"]) },
   { seller_id: "300324", relationship: "DIRECT", publishers: pubs(["duskhollow-media.com", "duskhollow-kids.com"]) },
   { seller_id: "abc778", relationship: "DIRECT", publishers: pubs(["hollowcrest-apps.com"]) },
+  { seller_id: "400150", relationship: "DIRECT", publishers: [{ domain: "larchwick-net.com", name: null, found_in: "ads.txt", own_file: true }] },
+  { seller_id: "400160", relationship: "DIRECT", publishers: [{ domain: "hazelburn-media.com", name: null, found_in: "ads.txt", own_file: true }] },
   // In publishers' files, missing from the sellers.json.
   { seller_id: "500301", relationship: "DIRECT", publishers: [{ domain: "saltmarsh-radio9.com", name: "Saltmarsh Radio 9", found_in: "ads.txt" }] },
   { seller_id: "500318", relationship: "DIRECT", publishers: [{ domain: "kettlebrook-games.com", name: "Kettlebrook Games", found_in: "app-ads.txt" }] },

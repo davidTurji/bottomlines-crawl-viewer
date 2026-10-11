@@ -4,7 +4,7 @@ import {
   CircleAlert,
   Copy,
   Download,
-  Minus,
+  EyeOff,
   Plus,
   RefreshCw,
   RotateCcw,
@@ -16,6 +16,7 @@ import { useEffect, useMemo, useState } from "react";
 import { EntryDiff, JsonDiff } from "@/components/JsonDiff";
 import { Collapse, Settle, glideTo } from "@/components/Motion";
 import { PageShell } from "@/components/PageShell";
+import { ActionableLine, fileUrl, filesOf, linkable, PublisherDomainLink, ShownLink, siteUrl } from "@/components/PublisherLinks";
 import { SkeletonRows, SkeletonStatCards } from "@/components/Skeleton";
 import { formatWeek, WeekLine } from "@/components/WeekLine";
 import { useReportScope } from "@/lib/reportScope";
@@ -65,13 +66,28 @@ import { SplitStat } from "./CrawlReport";
 
 type GroupKey = "add" | "fix" | "remove";
 
-/** Each group's sign and ink, the Changes page's grammar: + green, - red,
- *  a fix amber. */
+/** Each group's sign and ink, the Changes page's grammar: + green, a fix
+ *  amber. A seller no crawled file lists is amber too, never red (David,
+ *  2026-10-11): the IAB spec does not ask a seller to appear in any ads.txt,
+ *  so "not seen" is a reason to check, not proof the entry is wrong. */
 const GROUP: Record<GroupKey, { title: string; icon: typeof Plus; disc: string; text: string }> = {
   add: { title: "Add", icon: Plus, disc: "bg-ok-bg text-ok", text: "text-ok" },
   fix: { title: "Fix", icon: RefreshCw, disc: "bg-warn-bg text-warn", text: "text-warn" },
-  remove: { title: "Remove", icon: Minus, disc: "bg-critical-bg text-critical", text: "text-critical" },
+  remove: { title: "Not seen, check first", icon: EyeOff, disc: "bg-warn-bg text-warn", text: "text-warn" },
 };
+
+/** The customer's live sellers.json, opened at one seller ID when given.
+ *  The highlight is a text fragment on the ID as the file writes it: in its
+ *  quotes when it is text, so "1" cannot land on "version": "1.0" or an
+ *  is_confidential 1 (review, 2026-10-11). An ID written as a number is
+ *  highlighted bare only when it is long enough to be unlikely elsewhere.
+ *  A browser without text fragments opens the file at the top. */
+function sellersJsonUrl(fileHref: string, id?: string, raw?: unknown): string {
+  const t = (id ?? "").trim();
+  if (!t) return fileHref;
+  const needle = typeof raw === "number" ? (t.length >= 4 ? t : "") : `"${t}"`;
+  return needle ? `${fileHref}#:~:text=${encodeURIComponent(needle).replace(/-/g, "%2D")}` : fileHref;
+}
 
 /** "6 Oct 2026": the day the live file was read. */
 const day = (iso: string | null | undefined) =>
@@ -230,6 +246,9 @@ export default function CrawlSellers() {
     data?.file_url && data.file_url.replace(/^https?:\/\//, "") !== `${data.domain}/sellers.json`
       ? data.file_url.replace(/^https?:\/\//, "")
       : null;
+  /** Where the customer's live file sits: where it was read, else the
+   *  standard place. */
+  const fileHref = data ? data.file_url || `https://${data.domain}/sellers.json` : "";
   const exportText = useMemo(
     () => (exportFile ? JSON.stringify(exportFile, null, 2) + "\n" : ""),
     [exportFile],
@@ -369,9 +388,18 @@ export default function CrawlSellers() {
           <div className="rounded-2xl border border-border bg-white p-5 shadow-sm">
             <div className="mb-3 flex items-baseline justify-between gap-3">
               <div>
-                <div className="font-display text-sm font-medium text-slate-700">
-                  {data.domain}/sellers.json
-                </div>
+                {creating ? (
+                  // No file there to open: plain text, never a link to a 404.
+                  <div className="font-display text-sm font-medium text-slate-700">{data.domain}/sellers.json</div>
+                ) : (
+                  <ShownLink
+                    href={fileHref}
+                    title={`Open ${fileHref.replace(/^https?:\/\//, "")} in a new tab`}
+                    className="font-display text-sm font-medium"
+                  >
+                    {data.domain}/sellers.json
+                  </ShownLink>
+                )}
                 <div className="text-[11px] text-slate-500">
                   {creating
                     ? `No file at ${data.domain}/sellers.json${readOn ? ` when we checked on ${readOn}` : ""}. Built from every ads.txt and app-ads.txt line naming ${data.domain}`
@@ -430,10 +458,10 @@ export default function CrawlSellers() {
                 />
                 <SplitStat
                   className="bg-white"
-                  tone="critical"
+                  tone="warn"
                   number={counts.remove}
-                  label="Suggested removals"
-                  caption="Listed nowhere we crawled"
+                  label="Not seen"
+                  caption="In no file we crawled, check first"
                 />
               </div>
             )}
@@ -497,6 +525,7 @@ export default function CrawlSellers() {
                 onReset={reset}
                 flagged={new Set(issues.map((x) => x.sellerId).filter(Boolean) as string[])}
                 domain={data.domain}
+                fileHref={creating ? null : fileHref}
                 headerFix={
                   g.key === "fix" && versionMissing
                     ? {
@@ -610,10 +639,13 @@ function SuggestionGroup({
   onReset,
   flagged,
   domain,
+  fileHref,
   headerFix,
 }: {
   group: GroupKey;
   domain: string;
+  /** The customer's live file, for the links to it; null when there is none. */
+  fileHref: string | null;
   /** A fix to the file's header (a missing version), shown first. */
   headerFix?: { on: boolean; onSet: (on: boolean) => void };
   edits: Record<string, Edit>;
@@ -651,7 +683,7 @@ function SuggestionGroup({
             <span className="font-mono text-[12px] font-normal tabular-nums text-slate-400">{total}</span>
           </h2>
           <div className="text-[11px] text-slate-500">
-            {taken} of {total} going into your file
+            {group === "remove" ? `${taken} of ${total} taken out of your file` : `${taken} of ${total} going into your file`}
           </div>
         </div>
         <div className="flex items-center gap-3 text-xs text-slate-500">
@@ -703,6 +735,7 @@ function SuggestionGroup({
               changed={changed(r.seller_id)}
               onReset={() => onReset([r.seller_id])}
               domain={domain}
+              fileHref={fileHref}
             />
           </Settle>
         ))}
@@ -737,7 +770,7 @@ function summaryOf(r: SellerRow): string {
   if (r.kind === "fix" && r.current && r.suggested) {
     const parts: string[] = [];
     if (r.dropped?.length) parts.push(`listed ${r.dropped.length + 1} times, kept once`);
-    for (const f of ["seller_id", "name", "domain", "seller_type"] as const) {
+    for (const f of ["seller_id", "name", "domain", "seller_type", "is_confidential", "is_passthrough"] as const) {
       const a = r.current[f];
       const b = r.suggested[f];
       if (JSON.stringify(a) === JSON.stringify(b)) continue;
@@ -766,10 +799,12 @@ function SuggestionCard({
   changed,
   onReset,
   domain,
+  fileHref,
 }: {
   row: SellerRow;
   group: GroupKey;
   domain: string;
+  fileHref: string | null;
   /** What the reader typed into this card, as typed (the file gets it
    *  cleaned: trimmed, a domain made plain). */
   typed?: Edit;
@@ -809,13 +844,34 @@ function SuggestionCard({
         <span className={cn("flex h-7 w-7 flex-shrink-0 items-center justify-center rounded-full", g.disc)}>
           <Icon aria-hidden className="h-3.5 w-3.5" strokeWidth={2.5} />
         </span>
-        <button type="button" onClick={onOpen} aria-expanded={open} className="min-w-0 flex-1 text-left">
-          <span className="flex min-w-0 items-baseline gap-2">
-            <code className="flex-shrink-0 font-mono text-[12.5px] font-semibold text-slate-900">
-              {row.seller_id || "no seller_id"}
-            </code>
-            <span className={cn("truncate text-[12px] text-slate-600", row.kind === "remove" && on && "line-through")}>
-              {summaryOf(row)}
+        {/* The row opens the card from anywhere on it; the seller ID and the
+            seller's domain on it are links of their own (David,
+            2026-10-11: everything on this page clickable, like the other
+            pages). One real button under the text, links above it. */}
+        <div className="relative min-w-0 flex-1">
+          <button
+            type="button"
+            onClick={onOpen}
+            aria-expanded={open}
+            aria-label={`Seller ${row.seller_id || "with no seller_id"}, details`}
+            className="absolute inset-0 z-0 rounded-md focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40"
+          />
+          <span className="pointer-events-none relative flex min-w-0 items-baseline gap-2">
+            {fileHref && row.current && row.seller_id ? (
+              <ShownLink
+                href={sellersJsonUrl(fileHref, row.seller_id, row.current.seller_id)}
+                title={`Open ${domain}/sellers.json at seller ${row.seller_id}`}
+                className="flex-shrink-0 font-mono text-[12.5px] font-semibold"
+              >
+                {row.seller_id}
+              </ShownLink>
+            ) : (
+              <code className="flex-shrink-0 font-mono text-[12.5px] font-semibold text-slate-900">
+                {row.seller_id || "no seller_id"}
+              </code>
+            )}
+            <span className={cn("min-w-0 truncate text-[12px] text-slate-600", row.kind === "remove" && on && "line-through")}>
+              {row.kind === "fix" ? summaryOf(row) : <SellerWho seller={row.kind === "remove" ? row.current : row.suggested} />}
             </span>
             {missing.length > 0 && (
               <span className="flex-shrink-0 text-[11px] font-medium text-warn">needs a {missing.join(" and a ")}</span>
@@ -824,8 +880,11 @@ function SuggestionCard({
           </span>
           {/* Open, the card says the whole reason below; the short line
               would only say it twice. */}
-          {!open && <span className="block truncate text-[11px] text-slate-400">{row.reason}</span>}
-        </button>
+          {!open && <span className="pointer-events-none relative block truncate text-[11px] text-slate-400">{row.reason}</span>}
+          {/* THE ONE PLACE TO CHECK IT, on the row itself (David,
+              2026-10-11): which link depends on what the row says. */}
+          {!open && <RowLinks row={row} domain={domain} fileHref={fileHref} />}
+        </div>
         {/* On a phone the worded choice takes its own row under the seller,
             so neither squeezes the other. */}
         <div className="order-last flex basis-full items-center gap-2 pl-10 sm:order-none sm:basis-auto sm:pl-0">
@@ -844,6 +903,7 @@ function SuggestionCard({
       <Collapse open={open}>
         <div className="space-y-3 border-t border-border bg-muted/20 px-4 py-3 text-[12px] text-slate-600">
           <p className="leading-snug">{row.reason}</p>
+          <CheckLinks row={row} domain={domain} fileHref={fileHref} />
           {/* The entry as it changes in the file, and the ads.txt lines
               behind it, side by side. */}
           <div className="grid grid-cols-1 gap-3 lg:grid-cols-2">
@@ -864,7 +924,7 @@ function SuggestionCard({
             </div>
             <div className="min-w-0">
               <div className="mb-1 text-[11px] font-medium text-slate-500">In publishers' files</div>
-              <ListingWindow row={row} domain={domain} group={group} />
+              <ListingWindow row={row} domain={domain} group={group} sellerDomain={sellerDomainOf(row)} />
             </div>
           </div>
           {/* What only the reader can say: who an add is, or the name or
@@ -908,6 +968,141 @@ function SuggestionCard({
   );
 }
 
+/** A plain domain worth linking: no spaces, at least one dot. */
+const linkableDomain = (d: unknown): string | null => {
+  const t = String(d ?? "").trim();
+  return t && /^[^\s/]+\.[^\s/]+/.test(t.replace(/^[a-z][a-z0-9+.-]*:\/\//i, "")) && linkable(t) ? t : null;
+};
+
+/** The seller's own domain, as the file (or the suggestion) writes it. */
+function sellerDomainOf(r: SellerRow): string | null {
+  return linkableDomain(r.current?.domain) ?? linkableDomain(r.suggested?.domain);
+}
+
+/** Who a seller is on the card's one line: name, domain (a link to their
+ *  site) and type. */
+function SellerWho({ seller }: { seller: Seller | null }) {
+  if (!seller || !isEntry(seller)) return null;
+  const d = linkableDomain(seller.domain);
+  const parts: React.ReactNode[] = [];
+  if (seller.name) parts.push(String(seller.name));
+  if (d) parts.push(<PublisherDomainLink key="d" domain={d} label={String(seller.domain)} shown />);
+  else if (seller.domain) parts.push(String(seller.domain));
+  if (seller.seller_type) parts.push(String(seller.seller_type));
+  return (
+    <>
+      {parts.map((p, i) => (
+        <span key={i}>
+          {i > 0 && ", "}
+          {p}
+        </span>
+      ))}
+    </>
+  );
+}
+
+/**
+ * CHECK IT YOURSELF (David, 2026-10-11): every claim on a card one click
+ * from its source. The entry in the customer's live sellers.json, the
+ * seller's site, and the seller's own ads.txt and app-ads.txt, opened at
+ * the customer's line where it is there.
+ */
+function CheckLinks({ row, domain, fileHref }: { row: SellerRow; domain: string; fileHref: string | null }) {
+  const sd = sellerDomainOf(row);
+  const id = row.listedAs ?? row.seller_id;
+  const items: React.ReactNode[] = [];
+  if (fileHref && row.current && row.seller_id) {
+    items.push(
+      <ShownLink key="file" href={sellersJsonUrl(fileHref, row.seller_id, row.current.seller_id)}>
+        {domain}/sellers.json at {row.seller_id}
+      </ShownLink>,
+    );
+  }
+  if (sd) {
+    items.push(
+      <ShownLink key="site" href={siteUrl(sd)}>
+        {sd}
+      </ShownLink>,
+    );
+    for (const f of ["ads.txt", "app-ads.txt"] as const) {
+      items.push(
+        <ShownLink key={f} href={fileUrl(sd, f, { ssp_domain: domain, publisher_id: id })}>
+          {sd}/{f}
+        </ShownLink>,
+      );
+    }
+  }
+  if (!items.length) return null;
+  return (
+    <p className="flex flex-wrap items-baseline gap-x-3 gap-y-1 text-[11px] text-slate-500">
+      <span>Check it yourself:</span>
+      {items}
+    </p>
+  );
+}
+
+/**
+ * The link a row's problem points to, shown on the closed row (David,
+ * 2026-10-11): where the reader sees the problem with their own eyes.
+ *
+ *   Not seen  the seller's own ads.txt and app-ads.txt, where a line naming
+ *             the customer would be;
+ *   Add       the publisher file where the line was found;
+ *   Fix       the entry in the customer's sellers.json, and, when the fix
+ *             rests on what publishers list ("check first"), their file.
+ */
+function RowLinks({ row, domain, fileHref }: { row: SellerRow; domain: string; fileHref: string | null }) {
+  const id = row.listedAs ?? row.seller_id;
+  const at = { ssp_domain: domain, publisher_id: id };
+  const items: React.ReactNode[] = [];
+  const firstListing = () => {
+    const l = row.listings[0];
+    if (!l || !linkable(l.publisher)) return;
+    const f = filesOf(l.found_in)[0];
+    items.push(
+      <ShownLink key="pub" href={fileUrl(l.publisher, f, at)} title={`Open ${l.publisher}/${f} at ${domain}, ${id}`}>
+        {l.publisher}/{f}
+      </ShownLink>,
+    );
+    const more = Math.max(row.listingsTotal ?? 0, row.listings.length) - 1;
+    if (more > 0) items.push(<span key="more" className="text-slate-400">and {more.toLocaleString()} more</span>);
+  };
+  const ownFile = () => {
+    if (fileHref && row.current && row.seller_id) {
+      items.push(
+        <ShownLink key="file" href={sellersJsonUrl(fileHref, row.seller_id, row.current.seller_id)}>
+          your sellers.json at {row.seller_id}
+        </ShownLink>,
+      );
+    }
+  };
+  if (row.kind === "remove") {
+    const sd = sellerDomainOf(row);
+    if (sd) {
+      for (const f of ["ads.txt", "app-ads.txt"] as const) {
+        items.push(
+          <ShownLink key={f} href={fileUrl(sd, f, at)} title={`Look for ${domain}, ${id} in ${sd}/${f}`}>
+            {sd}/{f}
+          </ShownLink>,
+        );
+      }
+    } else {
+      ownFile();
+    }
+  } else if (row.kind === "add") {
+    firstListing();
+  } else if (row.kind === "fix") {
+    ownFile();
+    if (row.check) firstListing();
+  }
+  if (!items.length) return null;
+  return (
+    <span className="pointer-events-none relative mt-0.5 flex min-w-0 flex-wrap items-baseline gap-x-3 gap-y-0.5 text-[11px]">
+      {items}
+    </span>
+  );
+}
+
 /** An entry's change, or, for something in the list that is not an entry
  *  at all (a null, a number), that value as one removed line. */
 function EntryOrRaw({ before, after }: { before: Seller | null; after: Seller | null }) {
@@ -928,7 +1123,7 @@ function EntryOrRaw({ before, after }: { before: Seller | null; after: Seller | 
 const WINDOW: Record<GroupKey, { glyph: string; text: string; head: string; border: string }> = {
   add: { glyph: "+", text: "text-ok", head: "bg-ok-bg/60", border: "border-ok-border" },
   fix: { glyph: "↻", text: "text-warn", head: "bg-warn-bg/60", border: "border-warn-border" },
-  remove: { glyph: "-", text: "text-critical", head: "bg-critical-bg/60", border: "border-critical-border" },
+  remove: { glyph: "-", text: "text-warn", head: "bg-warn-bg/60", border: "border-warn-border" },
 };
 
 /**
@@ -937,7 +1132,18 @@ const WINDOW: Record<GroupKey, { glyph: string; text: string; head: string; bord
  * with the publisher and the file at the right margin. A suggested removal
  * has none, and says so.
  */
-function ListingWindow({ row, domain, group }: { row: SellerRow; domain: string; group: GroupKey }) {
+function ListingWindow({
+  row,
+  domain,
+  group,
+  sellerDomain,
+}: {
+  row: SellerRow;
+  domain: string;
+  group: GroupKey;
+  /** The seller's own domain, where a PUBLISHER or BOTH lists it DIRECT. */
+  sellerDomain: string | null;
+}) {
   const w = WINDOW[group];
   const cap = 6;
   const shown = row.listings.slice(0, cap);
@@ -955,24 +1161,53 @@ function ListingWindow({ row, domain, group }: { row: SellerRow; domain: string;
         <span className={cn("font-mono text-[11px] font-semibold tabular-nums", w.text)}>{total.toLocaleString()}</span>
       </div>
       {total === 0 ? (
-        <p className="px-3 py-2 text-[11px] text-slate-500">
-          No ads.txt or app-ads.txt we crawled carries{" "}
-          <code className="font-mono text-slate-700">
-            {domain}, {row.listedAs ?? row.seller_id}, …
-          </code>
-        </p>
+        <div className="space-y-1.5 px-3 py-2 text-[11px] text-slate-500">
+          <p>
+            No ads.txt or app-ads.txt we crawled carries{" "}
+            <code className="font-mono text-slate-700">
+              {domain}, {row.listedAs ?? row.seller_id}, …
+            </code>
+          </p>
+          {/* Where to look with your own eyes: the seller's own files. A
+              PUBLISHER or BOTH lists its own ID there as DIRECT; an
+              intermediary's own files often do not, which is why this is a
+              check and not a verdict. */}
+          {sellerDomain && (
+            <p className="flex flex-wrap items-baseline gap-x-2 gap-y-1">
+              <span>Look in {sellerDomain}'s own files:</span>
+              {(["ads.txt", "app-ads.txt"] as const).map((f) => (
+                <ShownLink
+                  key={f}
+                  href={fileUrl(sellerDomain, f, { ssp_domain: domain, publisher_id: row.listedAs ?? row.seller_id })}
+                >
+                  {f}
+                </ShownLink>
+              ))}
+            </p>
+          )}
+        </div>
       ) : (
         <ul className="divide-y divide-border">
+          {/* Each line opens the publisher's file at it, and the publisher's
+              name opens their site, the way every other page's lines do. */}
           {shown.map((l, i) => (
-            <li key={`${l.publisher}:${l.relationship}:${i}`} className="flex items-baseline gap-3 px-3 py-1.5">
-              <code className="min-w-0 flex-1 truncate font-mono text-[11px] tabular-nums text-slate-800">
+            <ActionableLine
+              key={`${l.publisher}:${l.relationship}:${i}`}
+              line={{ ssp_domain: domain, publisher_id: row.listedAs ?? row.seller_id, relationship: l.relationship }}
+              publisherDomain={l.publisher}
+              foundIn={l.found_in}
+              shown
+              className="flex items-baseline gap-3 px-3 py-1.5"
+            >
+              <code data-line-text className="min-w-0 flex-1 truncate font-mono text-[11px] tabular-nums text-slate-800">
                 {domain}, {row.listedAs ?? row.seller_id}, {l.relationship}
               </code>
               <span className="min-w-0 flex-shrink truncate text-[10px] text-slate-400">
-                on {l.publisher}
+                {l.own ? "in the seller's own file on " : "on "}
+                <PublisherDomainLink domain={l.publisher} shown />
                 {foundInLabel(l.found_in) ? `, ${foundInLabel(l.found_in)}` : ""}
               </span>
-            </li>
+            </ActionableLine>
           ))}
         </ul>
       )}
@@ -993,7 +1228,7 @@ function ListingWindow({ row, domain, group }: { row: SellerRow; domain: string;
 const DECISION: Record<GroupKey, { take: string; skip: string; solid: string }> = {
   add: { take: "Add to file", skip: "Don't add", solid: "bg-ok text-white" },
   fix: { take: "Apply fix", skip: "Don't fix", solid: "bg-warn text-white" },
-  remove: { take: "Remove from file", skip: "Don't remove", solid: "bg-critical text-white" },
+  remove: { take: "Remove from file", skip: "Don't remove", solid: "bg-warn text-white" },
 };
 
 /** Puts picks back where the suggestions started. Quiet in a group or a
@@ -1271,9 +1506,7 @@ function ProblemsList({
                   onClick={() => onApply(row.seller_id)}
                   className={cn(
                     pill,
-                    row.kind === "remove"
-                      ? "border-critical bg-critical text-white hover:brightness-110"
-                      : "border-warn bg-warn text-white hover:brightness-110",
+                    "border-warn bg-warn text-white hover:brightness-110",
                   )}
                 >
                   {row.kind === "remove" ? "Remove" : "Apply fix"}
