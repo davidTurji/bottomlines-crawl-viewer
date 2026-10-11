@@ -514,7 +514,7 @@ test.describe("discovery says who brought each line", () => {
     const kpi = page.locator('[data-tour="discovery-kpi"]');
     await expect(kpi.getByText(/\d+ given by you, \d+ found automatically by Path Finder/)).toBeVisible();
     await expect(kpi.getByText("Lines with your domain")).toBeVisible();
-    await expect(page.getByText("Each publisher once, whichever file")).toBeVisible();
+    await expect(page.getByText("With a line naming your domain, each counted once")).toBeVisible();
     await noTour(page);
     await expect((await find(page, "carambola.com, 2884190, DIRECT")).getByText("You gave us this seller ID as RESELLER")).toBeVisible();
     await page.getByRole("navigation", { name: "Pages" }).first().getByRole("button", { name: "Page 1", exact: true }).click();

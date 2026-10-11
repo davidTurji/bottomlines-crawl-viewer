@@ -358,8 +358,8 @@ export default function CrawlDiscovered() {
             {countsPublishers && totals.publishers != null ? (
               <SplitStat
                 number={totals.publishers}
-                label="Publishers"
-                caption="Each publisher once, whichever file"
+                label="Publishers carrying your domain"
+                caption="With a line naming your domain, each counted once"
                 className="bg-white"
                 delta={
                   totals.previous_publishers != null
