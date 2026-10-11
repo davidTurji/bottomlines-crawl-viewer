@@ -267,6 +267,7 @@ export function ActionableLine({
   publisherDomain,
   foundIn,
   gone = false,
+  shown = false,
   className,
   children,
 }: {
@@ -275,6 +276,9 @@ export function ActionableLine({
   foundIn: string | null | undefined;
   /** The line has left the publisher's file (a removed line). */
   gone?: boolean;
+  /** Always in the hover look (David, 2026-10-11: a reader must see it is a
+   *  link without pointing at it). */
+  shown?: boolean;
   className?: string;
   /** The row's content: the line text and whatever sits at its margin. */
   children: React.ReactNode;
@@ -314,6 +318,7 @@ export function ActionableLine({
         "[&_[data-line-text]]:decoration-primary/40 [&_[data-line-text]]:underline-offset-2",
         "[&:hover_[data-line-text]]:text-primary [&:hover_[data-line-text]]:underline",
         "[&:focus-within_[data-line-text]]:text-primary [&:focus-within_[data-line-text]]:underline",
+        shown && "[&_[data-line-text]]:text-primary [&_[data-line-text]]:underline",
         className,
       )}
     >
@@ -381,11 +386,53 @@ export function ActionableLine({
       <span className="pointer-events-none contents">{children}</span>
       <ArrowUpRight
         aria-hidden
-        className="pointer-events-none h-3 w-3 flex-shrink-0 self-center text-primary opacity-0 transition-opacity group-focus-within/line:opacity-100 group-hover/line:opacity-100"
+        className={cn(
+          "pointer-events-none h-3 w-3 flex-shrink-0 self-center text-primary opacity-0 transition-opacity group-focus-within/line:opacity-100 group-hover/line:opacity-100",
+          shown && "opacity-100",
+        )}
       />
       <span role="status" className="sr-only">
         {copied ? "Line copied" : ""}
       </span>
     </li>
+  );
+}
+
+/**
+ * A plain link in the overview's hover look, always shown (David,
+ * 2026-10-11): brand ink, underline, the new-tab arrow. For a link that is
+ * not a publisher or a line (a file, the customer's own sellers.json).
+ * Sits inside clickable rows, so its click never reaches the row.
+ */
+export function ShownLink({
+  href,
+  children,
+  title,
+  className,
+}: {
+  href: string;
+  children: React.ReactNode;
+  title?: string;
+  className?: string;
+}) {
+  const stop = (e: MouseEvent | KeyboardEvent | PointerEvent) => e.stopPropagation();
+  return (
+    <a
+      href={href}
+      target="_blank"
+      rel="noopener noreferrer"
+      title={title}
+      onClick={stop}
+      onKeyDown={stop}
+      onPointerDown={stop}
+      className={cn(
+        NESTED,
+        "inline-flex max-w-full items-center gap-0.5 rounded-sm text-primary underline decoration-primary/40 underline-offset-2 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40",
+        className,
+      )}
+    >
+      <span className="truncate">{children}</span>
+      <ArrowUpRight aria-hidden className="h-3 w-3 flex-shrink-0" />
+    </a>
   );
 }

@@ -842,25 +842,14 @@ export function SplitStat({
     // Toned to the stat when its lines are the ones listed below, so the
     // card and the tab it opened read as one selection.
     const activeGround =
-      tone === "critical"
-        ? "bg-critical-bg/60"
-        : tone === "ok"
-          ? "bg-ok-bg/60"
-          : tone === "info"
-            ? "bg-info-bg/70"
-            : "bg-muted/50";
+      tone === "critical" ? "bg-critical-bg/60" : tone === "ok" ? "bg-ok-bg/60" : "bg-muted/50";
     return (
       <button
         type="button"
         onClick={onClick}
         aria-pressed={active}
         className={cn(
-          // A flex column, top first: a button centres its content by
-          // default, which set a short stat lower than its neighbours.
-          "group flex w-full flex-col justify-start px-5 py-4 text-left transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring",
-          // The caller's ground (a stat in a hairline grid is white), unless
-          // it is the selection.
-          className,
+          "group block w-full px-5 py-4 text-left transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring",
           active ? activeGround : "hover:bg-muted/40",
         )}
       >

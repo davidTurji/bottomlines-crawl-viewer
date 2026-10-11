@@ -459,6 +459,26 @@ test.describe("sellers.json links", () => {
     expect(errors).toEqual([]);
   });
 
+  test("every closed row shows the link its problem points to, before any hover", async ({ page }) => {
+    await open(page, { sellers: "page" }, "/sellers");
+    while ((await page.getByRole("button", { name: /^Show all/ }).count()) > 0) {
+      await page.getByRole("button", { name: /^Show all/ }).first().click();
+    }
+    // Not seen: the seller's own files, where a line naming the customer would be.
+    const unseen = page.locator("#seller-400105");
+    await expect(unseen.getByRole("link", { name: "fogharbor-news7.com/ads.txt" })).toHaveAttribute(
+      "href",
+      /^https:\/\/fogharbor-news7\.com\/ads\.txt#:~:text=madeupmedia\.com%2C-,400105&text=400105$/,
+    );
+    await expect(unseen.getByRole("link", { name: "fogharbor-news7.com/app-ads.txt" })).toBeVisible();
+    // Fix that rests on publishers: the customer's entry and a publisher's file.
+    const fix = page.locator("#seller-300210");
+    await expect(fix.getByRole("link", { name: "your sellers.json at 300210" })).toBeVisible();
+    await expect(fix.getByRole("link", { name: /^fernhollow-team\.it\/ads\.txt/ })).toBeVisible();
+    // Shown, not only on hover: underlined in the brand ink.
+    await expect(fix.getByRole("link", { name: "your sellers.json at 300210" })).toHaveCSS("text-decoration-line", "underline");
+  });
+
   test("an unseen seller links its own files, to check by eye", async ({ page }) => {
     await open(page, { sellers: "page" }, "/sellers");
     const group = page.locator("section", { has: page.getByRole("heading", { name: /Not seen, check first/ }) });
@@ -489,7 +509,11 @@ test.describe("discovery says who brought each line", () => {
   test("lines they gave us and lines we found, apart and counted", async ({ page }) => {
     const errors = watchErrors(page);
     await open(page, { discovery: true }, "/discovery");
-    await expect(page.getByRole("button", { name: /You gave us/ }).first()).toBeVisible();
+    // The three cards as they always were; who brought the lines is the
+    // middle card's caption.
+    const kpi = page.locator('[data-tour="discovery-kpi"]');
+    await expect(kpi.getByText(/\d+ you gave us, \d+ found by Path Finder/)).toBeVisible();
+    await expect(kpi.getByText("Lines with your domain")).toBeVisible();
     await expect(page.getByText("Each publisher once, whichever file")).toBeVisible();
     await noTour(page);
     await expect((await find(page, "carambola.com, 2884190, DIRECT")).getByText("You gave us this seller ID as RESELLER")).toBeVisible();
@@ -497,7 +521,8 @@ test.describe("discovery says who brought each line", () => {
     await expect((await find(page, "carambo.la, 618402, RESELLER")).getByText(/In your list since 16 Sept? 2026/)).toBeVisible();
 
     // Only what they gave us.
-    await page.locator('[data-tour="discovery-kpi"]').getByRole("button", { name: /You gave us/ }).click();
+    await page.getByRole("button", { name: "Show lines by who brought them" }).click();
+    await page.getByRole("menuitem", { name: "You gave us" }).click();
     const given = card(page, "carambola.com, 1042318, RESELLER");
     await expect(given.getByText("You gave us", { exact: true })).toBeVisible();
     await expect(given.getByText("From your sellers.json, 30 Aug 2026")).toBeVisible();
@@ -521,8 +546,8 @@ test.describe("discovery says who brought each line", () => {
     const errors = watchErrors(page);
     await open(page, { discovery: true, discoveryApi: "old" }, "/discovery");
     await expect(page.getByText("Publisher listings")).toBeVisible();
-    await expect(page.getByText("One per file: a publisher with both files counts twice")).toBeVisible();
-    await expect(page.locator('[data-tour="discovery-kpi"]').getByText("You gave us")).toHaveCount(0);
+    await expect(page.getByText("One per publisher file carrying a line")).toBeVisible();
+    await expect(page.locator('[data-tour="discovery-kpi"]').getByText(/you gave us/i)).toHaveCount(0);
     // The browser marks lines from the summary's watchlist instead.
     await expect(page.locator("div.rounded-3xl").getByText("Found by Path Finder").first()).toBeVisible();
     await expect(page.getByText(CRASHED)).toHaveCount(0);

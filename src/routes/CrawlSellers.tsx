@@ -16,7 +16,7 @@ import { useEffect, useMemo, useState } from "react";
 import { EntryDiff, JsonDiff } from "@/components/JsonDiff";
 import { Collapse, Settle, glideTo } from "@/components/Motion";
 import { PageShell } from "@/components/PageShell";
-import { ActionableLine, fileUrl, linkable, PublisherDomainLink, siteUrl } from "@/components/PublisherLinks";
+import { ActionableLine, fileUrl, filesOf, linkable, PublisherDomainLink, ShownLink, siteUrl } from "@/components/PublisherLinks";
 import { SkeletonRows, SkeletonStatCards } from "@/components/Skeleton";
 import { formatWeek, WeekLine } from "@/components/WeekLine";
 import { useReportScope } from "@/lib/reportScope";
@@ -392,15 +392,13 @@ export default function CrawlSellers() {
                   // No file there to open: plain text, never a link to a 404.
                   <div className="font-display text-sm font-medium text-slate-700">{data.domain}/sellers.json</div>
                 ) : (
-                  <a
+                  <ShownLink
                     href={fileHref}
-                    target="_blank"
-                    rel="noopener noreferrer"
                     title={`Open ${fileHref.replace(/^https?:\/\//, "")} in a new tab`}
-                    className="font-display text-sm font-medium text-slate-700 underline-offset-2 hover:text-primary hover:underline"
+                    className="font-display text-sm font-medium"
                   >
                     {data.domain}/sellers.json
-                  </a>
+                  </ShownLink>
                 )}
                 <div className="text-[11px] text-slate-500">
                   {creating
@@ -860,16 +858,13 @@ function SuggestionCard({
           />
           <span className="pointer-events-none relative flex min-w-0 items-baseline gap-2">
             {fileHref && row.current && row.seller_id ? (
-              <a
+              <ShownLink
                 href={sellersJsonUrl(fileHref, row.seller_id, row.current.seller_id)}
-                target="_blank"
-                rel="noopener noreferrer"
                 title={`Open ${domain}/sellers.json at seller ${row.seller_id}`}
-                onClick={(e) => e.stopPropagation()}
-                className="pointer-events-auto relative z-[1] flex-shrink-0 rounded-sm font-mono text-[12.5px] font-semibold text-slate-900 underline-offset-2 hover:text-primary hover:underline"
+                className="flex-shrink-0 font-mono text-[12.5px] font-semibold"
               >
                 {row.seller_id}
-              </a>
+              </ShownLink>
             ) : (
               <code className="flex-shrink-0 font-mono text-[12.5px] font-semibold text-slate-900">
                 {row.seller_id || "no seller_id"}
@@ -886,6 +881,9 @@ function SuggestionCard({
           {/* Open, the card says the whole reason below; the short line
               would only say it twice. */}
           {!open && <span className="pointer-events-none relative block truncate text-[11px] text-slate-400">{row.reason}</span>}
+          {/* THE ONE PLACE TO CHECK IT, on the row itself (David,
+              2026-10-11): which link depends on what the row says. */}
+          {!open && <RowLinks row={row} domain={domain} fileHref={fileHref} />}
         </div>
         {/* On a phone the worded choice takes its own row under the seller,
             so neither squeezes the other. */}
@@ -988,7 +986,7 @@ function SellerWho({ seller }: { seller: Seller | null }) {
   const d = linkableDomain(seller.domain);
   const parts: React.ReactNode[] = [];
   if (seller.name) parts.push(String(seller.name));
-  if (d) parts.push(<PublisherDomainLink key="d" domain={d} label={String(seller.domain)} arrow={false} />);
+  if (d) parts.push(<PublisherDomainLink key="d" domain={d} label={String(seller.domain)} active />);
   else if (seller.domain) parts.push(String(seller.domain));
   if (seller.seller_type) parts.push(String(seller.seller_type));
   return (
@@ -1012,39 +1010,25 @@ function SellerWho({ seller }: { seller: Seller | null }) {
 function CheckLinks({ row, domain, fileHref }: { row: SellerRow; domain: string; fileHref: string | null }) {
   const sd = sellerDomainOf(row);
   const id = row.listedAs ?? row.seller_id;
-  const link =
-    "inline-flex items-center gap-0.5 font-medium text-slate-700 underline decoration-slate-300 underline-offset-2 hover:text-primary hover:decoration-primary/40";
   const items: React.ReactNode[] = [];
   if (fileHref && row.current && row.seller_id) {
     items.push(
-      <a
-        key="file"
-        href={sellersJsonUrl(fileHref, row.seller_id, row.current.seller_id)}
-        target="_blank"
-        rel="noopener noreferrer"
-        className={link}
-      >
+      <ShownLink key="file" href={sellersJsonUrl(fileHref, row.seller_id, row.current.seller_id)}>
         {domain}/sellers.json at {row.seller_id}
-      </a>,
+      </ShownLink>,
     );
   }
   if (sd) {
     items.push(
-      <a key="site" href={siteUrl(sd)} target="_blank" rel="noopener noreferrer" className={link}>
+      <ShownLink key="site" href={siteUrl(sd)}>
         {sd}
-      </a>,
+      </ShownLink>,
     );
     for (const f of ["ads.txt", "app-ads.txt"] as const) {
       items.push(
-        <a
-          key={f}
-          href={fileUrl(sd, f, { ssp_domain: domain, publisher_id: id })}
-          target="_blank"
-          rel="noopener noreferrer"
-          className={link}
-        >
+        <ShownLink key={f} href={fileUrl(sd, f, { ssp_domain: domain, publisher_id: id })}>
           {sd}/{f}
-        </a>,
+        </ShownLink>,
       );
     }
   }
@@ -1054,6 +1038,68 @@ function CheckLinks({ row, domain, fileHref }: { row: SellerRow; domain: string;
       <span>Check it yourself:</span>
       {items}
     </p>
+  );
+}
+
+/**
+ * The link a row's problem points to, shown on the closed row (David,
+ * 2026-10-11): where the reader sees the problem with their own eyes.
+ *
+ *   Not seen  the seller's own ads.txt and app-ads.txt, where a line naming
+ *             the customer would be;
+ *   Add       the publisher file where the line was found;
+ *   Fix       the entry in the customer's sellers.json, and, when the fix
+ *             rests on what publishers list ("check first"), their file.
+ */
+function RowLinks({ row, domain, fileHref }: { row: SellerRow; domain: string; fileHref: string | null }) {
+  const id = row.listedAs ?? row.seller_id;
+  const at = { ssp_domain: domain, publisher_id: id };
+  const items: React.ReactNode[] = [];
+  const firstListing = () => {
+    const l = row.listings[0];
+    if (!l || !linkable(l.publisher)) return;
+    const f = filesOf(l.found_in)[0];
+    items.push(
+      <ShownLink key="pub" href={fileUrl(l.publisher, f, at)} title={`Open ${l.publisher}/${f} at ${domain}, ${id}`}>
+        {l.publisher}/{f}
+      </ShownLink>,
+    );
+    const more = Math.max(row.listingsTotal ?? 0, row.listings.length) - 1;
+    if (more > 0) items.push(<span key="more" className="text-slate-400">and {more.toLocaleString()} more</span>);
+  };
+  const ownFile = () => {
+    if (fileHref && row.current && row.seller_id) {
+      items.push(
+        <ShownLink key="file" href={sellersJsonUrl(fileHref, row.seller_id, row.current.seller_id)}>
+          your sellers.json at {row.seller_id}
+        </ShownLink>,
+      );
+    }
+  };
+  if (row.kind === "remove") {
+    const sd = sellerDomainOf(row);
+    if (sd) {
+      for (const f of ["ads.txt", "app-ads.txt"] as const) {
+        items.push(
+          <ShownLink key={f} href={fileUrl(sd, f, at)} title={`Look for ${domain}, ${id} in ${sd}/${f}`}>
+            {sd}/{f}
+          </ShownLink>,
+        );
+      }
+    } else {
+      ownFile();
+    }
+  } else if (row.kind === "add") {
+    firstListing();
+  } else if (row.kind === "fix") {
+    ownFile();
+    if (row.check) firstListing();
+  }
+  if (!items.length) return null;
+  return (
+    <span className="pointer-events-none relative mt-0.5 flex min-w-0 flex-wrap items-baseline gap-x-3 gap-y-0.5 text-[11px]">
+      {items}
+    </span>
   );
 }
 
@@ -1130,15 +1176,12 @@ function ListingWindow({
             <p className="flex flex-wrap items-baseline gap-x-2 gap-y-1">
               <span>Look in {sellerDomain}'s own files:</span>
               {(["ads.txt", "app-ads.txt"] as const).map((f) => (
-                <a
+                <ShownLink
                   key={f}
                   href={fileUrl(sellerDomain, f, { ssp_domain: domain, publisher_id: row.listedAs ?? row.seller_id })}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="font-medium text-slate-700 underline decoration-slate-300 underline-offset-2 hover:text-primary hover:decoration-primary/40"
                 >
                   {f}
-                </a>
+                </ShownLink>
               ))}
             </p>
           )}
@@ -1153,13 +1196,14 @@ function ListingWindow({
               line={{ ssp_domain: domain, publisher_id: row.listedAs ?? row.seller_id, relationship: l.relationship }}
               publisherDomain={l.publisher}
               foundIn={l.found_in}
+              shown
               className="flex items-baseline gap-3 px-3 py-1.5"
             >
               <code data-line-text className="min-w-0 flex-1 truncate font-mono text-[11px] tabular-nums text-slate-800">
                 {domain}, {row.listedAs ?? row.seller_id}, {l.relationship}
               </code>
               <span className="min-w-0 flex-shrink truncate text-[10px] text-slate-400">
-                on <PublisherDomainLink domain={l.publisher} arrow={false} className="text-slate-500" />
+                on <PublisherDomainLink domain={l.publisher} active />
                 {foundInLabel(l.found_in) ? `, ${foundInLabel(l.found_in)}` : ""}
               </span>
             </ActionableLine>

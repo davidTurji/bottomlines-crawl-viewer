@@ -325,96 +325,58 @@ export default function CrawlDiscovered() {
               such count and shows the two totals alone. Each label carries
               a caption, since "Distinct lines" and "Publisher placements"
               did not say what they count. */}
-          {(() => {
-            const stats: React.ReactNode[] = [];
-            if (newLines != null) {
-              stats.push(
-                <SplitStat
-                  key="new"
-                  tone="info"
-                  prefix={newLines > 0 ? "+" : undefined}
-                  number={newLines}
-                  label="New this week"
-                  caption="Lines no publisher carried last week"
-                  className="bg-white"
-                />,
-              );
-            }
-            stats.push(
+          {/* THE THREE CARDS, as they always looked (David, 2026-10-11):
+              the split of who brought the lines lives in the middle card's
+              caption, never in cards of its own. */}
+          <div
+            className={cn(
+              "grid gap-px overflow-hidden rounded-xl border border-border bg-border",
+              newLines != null ? "grid-cols-1 sm:grid-cols-[1.4fr_1fr_1fr]" : "grid-cols-2",
+            )}
+          >
+            {newLines != null && (
               <SplitStat
-                key="lines"
-                number={totals.lines}
-                label="Lines with your domain"
-                caption="Each different ads.txt line, counted once"
+                tone="info"
+                prefix={newLines > 0 ? "+" : undefined}
+                number={newLines}
+                label="New this week"
+                caption="Lines no publisher carried last week"
                 className="bg-white"
-                delta={prevLines != null ? computeDelta(totals.lines, prevLines) : null}
-              />,
-            );
-            if (split) {
-              // WHO BROUGHT THEM (David, 2026-10-11): what they gave us and
-              // what we found apart, each a click to list only those.
-              stats.push(
-                <SplitStat
-                  key="given"
-                  number={totals.given_lines!}
-                  label="You gave us"
-                  caption="From your sellers.json or added by hand"
-                  className="bg-white"
-                  active={origin === "given"}
-                  onClick={() => setOrigin((o) => (o === "given" ? "all" : "given"))}
-                />,
-                <SplitStat
-                  key="found"
-                  tone="info"
-                  number={totals.found_lines!}
-                  label="Found by Path Finder"
-                  caption="Found by us, not given by you"
-                  className="bg-white"
-                  active={origin === "found"}
-                  onClick={() => setOrigin((o) => (o === "found" ? "all" : "found"))}
-                />,
-              );
-            }
-            if (countsPublishers) {
-              if (totals.publishers != null) {
-                stats.push(
-                  <SplitStat
-                    key="pubs"
-                    number={totals.publishers}
-                    label="Publishers"
-                    caption="Each publisher once, whichever file"
-                    className="bg-white"
-                    delta={
-                      totals.previous_publishers != null
-                        ? computeDelta(totals.publishers, totals.previous_publishers)
-                        : null
-                    }
-                  />,
-                );
+              />
+            )}
+            <SplitStat
+              number={totals.lines}
+              label="Lines with your domain"
+              caption={
+                split
+                  ? `${totals.given_lines!.toLocaleString()} you gave us, ${totals.found_lines!.toLocaleString()} found by Path Finder`
+                  : "Each different ads.txt line, counted once"
               }
-            } else {
-              stats.push(
-                <SplitStat
-                  key="listings"
-                  number={totals.placements}
-                  label="Publisher listings"
-                  caption="One per file: a publisher with both files counts twice"
-                  className="bg-white"
-                  delta={prevPlacements != null ? computeDelta(totals.placements, prevPlacements) : null}
-                />,
-              );
-            }
-            return (
-              <div
-                className={cn(
-                  "grid grid-cols-1 gap-px overflow-hidden rounded-xl border border-border bg-border sm:grid-cols-2",
-                  LG_COLS[stats.length] ?? "lg:grid-cols-4",
-                )}
-              >
-                {stats}
-              </div>
-            );
-          })()}
+              className="bg-white"
+              delta={prevLines != null ? computeDelta(totals.lines, prevLines) : null}
+            />
+            {countsPublishers && totals.publishers != null ? (
+              <SplitStat
+                number={totals.publishers}
+                label="Publishers"
+                caption="Each publisher once, whichever file"
+                className="bg-white"
+                delta={
+                  totals.previous_publishers != null
+                    ? computeDelta(totals.publishers, totals.previous_publishers)
+                    : null
+                }
+              />
+            ) : (
+              <SplitStat
+                number={totals.placements}
+                label="Publisher listings"
+                caption="One per publisher file carrying a line"
+                className="bg-white"
+                delta={prevPlacements != null ? computeDelta(totals.placements, prevPlacements) : null}
+              />
+            )}
+          </div>
           {/* A list shorter than its numbers says so, never passes for
               whole. */}
           {totals.listed_lines != null && totals.listed_lines < totals.lines && (
@@ -866,6 +828,7 @@ function LineCard({
                     line={line}
                     publisherDomain={p.developer_domain}
                     foundIn={p.found_in}
+                    shown
                     className="flex items-baseline gap-2.5 px-3 py-1.5 text-[11px]"
                   >
                     {p.app_name ? (
@@ -889,8 +852,8 @@ function LineCard({
                     ) : (
                       <PublisherDomainLink
                         domain={p.developer_domain}
-                        arrow={false}
-                        className="font-mono tabular-nums text-slate-800"
+                        active
+                        className="font-mono tabular-nums"
                       />
                     )}
                     <span data-line-text className="ml-auto flex-shrink-0 text-[10px] text-slate-400">
@@ -1040,11 +1003,3 @@ const ORIGIN_OPTIONS: { value: OriginFilter; label: string }[] = [
   { value: "given", label: "You gave us" },
 ];
 
-/** Static class names for Tailwind, by how many stats the card holds. */
-const LG_COLS: Record<number, string> = {
-  1: "lg:grid-cols-1",
-  2: "lg:grid-cols-2",
-  3: "lg:grid-cols-3",
-  4: "lg:grid-cols-4",
-  5: "lg:grid-cols-5",
-};
