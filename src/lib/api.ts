@@ -513,7 +513,7 @@ export const api = {
    * verbatim: one row per (developer x SSP x publisher id x file). That is
    * the right shape for a spreadsheet and the wrong shape for the screen,
    * because the reader's unit is THE LINE. The same
-   * "carambola.com, 1042318, RESELLER" appears on four hundred publishers
+   * "madeupmedia.com, 1042318, RESELLER" appears on four hundred publishers
    * and produced four hundred rows, which buried the one fact the weekly
    * crawl exists to deliver: is this line on more publishers than it was
    * last week, or fewer.
@@ -543,7 +543,7 @@ export const api = {
    *     },
    *     "rows": [
    *       {
-   *         "ssp_domain": "carambola.com",
+   *         "ssp_domain": "madeupmedia.com",
    *         "publisher_id": "1042318",
    *         "relationship": "RESELLER",
    *         "cert_id": "4a7be0c1d9f23b58",   // "" when the file omits it
@@ -612,7 +612,7 @@ export const api = {
    * ── 2. One line's placements ──────────────────────────────────────
    *
    *   GET /v1/viewer/{token}/discovered-lines/placements
-   *       ?ssp_domain=carambola.com    (all four required, EXACT match)
+   *       ?ssp_domain=madeupmedia.com    (all four required, EXACT match)
    *       &publisher_id=1042318
    *       &relationship=RESELLER
    *       &cert_id=                    (empty string is a valid value)
@@ -1455,7 +1455,7 @@ export type DiscoveredPlacement = {
  * The first four fields ARE the line as it appears in the file, in file
  * order, and together they are its identity:
  *
- *   carambola.com, 1042318, RESELLER, 4a7be0c1d9f23b58
+ *   madeupmedia.com, 1042318, RESELLER, 4a7be0c1d9f23b58
  *   ssp_domain     publisher_id  relationship  cert_id
  *
  * cert_id is "" (never null) when the publisher's file omits the fourth

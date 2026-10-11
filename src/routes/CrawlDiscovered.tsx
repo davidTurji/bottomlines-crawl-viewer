@@ -41,7 +41,7 @@ import { computeDelta, MiniStat, SplitStat } from "./CrawlReport";
  * DISCOVERED LINES.
  *
  * The unit on this page is THE LINE, not the publisher. A discovery crawl
- * asks one question ("who is carrying carambola.com at all?") and the answer
+ * asks one question ("who is carrying madeupmedia.com at all?") and the answer
  * is a set of ads.txt lines, each of which turns up on some number of
  * publishers. The previous draft flattened that into a (publisher x line)
  * grid, which is the right shape for the export workbook and the wrong shape
@@ -238,7 +238,7 @@ export default function CrawlDiscovered() {
   // suppress its deltas under a filter because there the current count is
   // filtered client-side while last week's comes unfiltered from the
   // summary; that asymmetry does not exist here, and suppressing anyway
-  // would hide a true answer to "did carambola grow this week".
+  // would hide a true answer to "did madeupmedia grow this week".
   // NOTHING TO COMPARE WITH (David, 2026-10-11): a report whose baseline
   // did not watch this domain holds zero lines for last week, and read
   // that as growth ("+2,952 vs last week", every line "new this week" on

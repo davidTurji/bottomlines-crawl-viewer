@@ -233,16 +233,24 @@ export async function installFakeApi(page: Page, scenario: Scenario = {}): Promi
           origin: s.discoveryApi === "old" ? undefined : ((q.get("origin") as "given" | "found" | null) ?? undefined),
         });
         if (s.discoveryApi === "unwatched") {
-          // An artifact frozen before 2026-10-11 whose baseline did not watch
-          // the domain: zero last week, every line without a previous count.
-          r.totals = { ...r.totals, previous_lines: 0, previous_placements: 0, new_lines: null, previous_publishers: null };
-          r.rows = r.rows.map((row) => ({ ...row, previous_placements_count: null, previous_publishers_count: null }));
+          // An artifact frozen before 2026-10-11, served by today's API,
+          // whose baseline did not watch the domain: zero last week, every
+          // line without a previous count, no publisher counts at all (the
+          // API adds only the origin marks and given/found to old links).
+          const { publishers: _p, previous_publishers: _pp, ...totals } = r.totals;
+          r.totals = { ...totals, previous_lines: 0, previous_placements: 0, new_lines: null };
+          r.rows = r.rows.map((row) => {
+            const { publishers_count: _c, previous_publishers_count: _pc, ...rest } = row;
+            return { ...rest, previous_placements_count: null };
+          });
         }
         if (s.discoveryApi === "unwatched_new") {
-          // A report from 2026-10-11 whose baseline did not watch carambo.la.
-          r.totals = { ...r.totals, previous_lines: null, previous_placements: null, new_lines: null, previous_publishers: null, unwatched_domains: ["carambo.la"] };
+          // A report from 2026-10-11 whose baseline did not watch madeupmedia.la.
+          // The partial-overlap shape: other domains were watched, so their
+          // lines keep last week; the totals are not compared.
+          r.totals = { ...r.totals, previous_lines: null, previous_placements: null, new_lines: null, previous_publishers: null, scope_changed: true, unwatched_domains: ["madeupmedia.la"] };
           r.rows = r.rows.map((row) =>
-            row.ssp_domain === "carambo.la" ? { ...row, previous_placements_count: null, previous_publishers_count: null, previous_watched: false } : row,
+            row.ssp_domain === "madeupmedia.la" ? { ...row, previous_placements_count: null, previous_publishers_count: null, previous_watched: false } : row,
           );
         }
         if (s.discoveryApi === "scope_dropped") {
@@ -250,9 +258,14 @@ export async function installFakeApi(page: Page, scenario: Scenario = {}): Promi
           r.totals = { ...r.totals, previous_lines: null, previous_placements: null, new_lines: null, previous_publishers: null, scope_changed: true, unwatched_domains: [] };
         }
         if (s.discoveryApi === "cut") {
-          // A list cut past 5,000 lines: the API sends no split then.
-          const { given_lines: _g, found_lines: _f, ...totals } = r.totals;
-          r.totals = q.get("origin") ? r.totals : { ...totals, listed_lines: r.total, lines: r.total + 100 };
+          // A list cut at 5,000 lines (viewer_frozen.discovered_lines): when
+          // UNFILTERED the totals are the baked whole ones, with no
+          // given/found split, whatever the origin asked. Under an SSP
+          // filter the API counts the list itself, split included.
+          if (!q.get("ssp_domain")) {
+            const { given_lines: _g, found_lines: _f, ...totals } = r.totals;
+            r.totals = { ...totals, listed_lines: r.total, lines: r.total + 100, placements: (r.totals.placements ?? 0) + 4_000 };
+          }
         }
         if (s.discoveryApi === "old") {
           // What the API answered before 2026-10-11, field for field.
@@ -267,9 +280,12 @@ export async function installFakeApi(page: Page, scenario: Scenario = {}): Promi
       }
       case "discovered-lines/placements":
         if (s.placements === "hiccup") {
-          return reply(503, { detail: "This report is not available yet. Please contact your admin." });
+          // viewer_v2._link_refusal's transient answer, word for word.
+          return reply(503, { detail: "Temporarily unavailable. Please try again in a few minutes." });
         }
         if (s.placements === "toolarge") {
+          // viewer_v2.viewer_discovered_placements, word for word: the page
+          // keys on "too large" (CrawlDiscovered LineCard).
           return reply(503, { detail: "This list is too large to display here. Please contact your admin for the full workbook." });
         }
         return reply(
