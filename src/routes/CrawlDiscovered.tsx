@@ -12,6 +12,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { ChevronDown, Download, Radar } from "lucide-react";
 
 import {
+  ApiError,
   type TrialSlice,
   api,
   type DiscoveredLine,
@@ -21,6 +22,7 @@ import {
   type Summary,
 } from "../lib/api";
 import {
+  lineMeasure,
   SORT_OPTIONS,
   type SortKey,
   sortDiscoveredLines,
@@ -237,8 +239,16 @@ export default function CrawlDiscovered() {
   // filtered client-side while last week's comes unfiltered from the
   // summary; that asymmetry does not exist here, and suppressing anyway
   // would hide a true answer to "did carambola grow this week".
-  const prevLines = totals?.previous_lines ?? null;
-  const prevPlacements = totals?.previous_placements ?? null;
+  // NOTHING TO COMPARE WITH (David, 2026-10-11): a report whose baseline
+  // did not watch this domain holds zero lines for last week, and read
+  // that as growth ("+2,952 vs last week", every line "new this week" on
+  // Truvid). Zero last week beside lines this week means no comparison.
+  // Reports from 2026-10-11 send null here themselves.
+  const noBaseline = totals?.previous_lines === 0 && (totals?.lines ?? 0) > 0;
+  // Reports from 2026-10-11 name the domains last week did not watch.
+  const unwatched = totals?.unwatched_domains ?? [];
+  const prevLines = noBaseline ? null : (totals?.previous_lines ?? null);
+  const prevPlacements = noBaseline ? null : (totals?.previous_placements ?? null);
   // Absent on reports frozen before the crawler counted it, and null on a
   // first crawl, where every line is "new" and saying so would be noise.
   const newLines = prevLines != null ? (totals?.new_lines ?? null) : null;
@@ -249,6 +259,11 @@ export default function CrawlDiscovered() {
   // Publishers once each (reports from 2026-10-11); an older report counts
   // files and says so.
   const countsPublishers = totals != null && totals.publishers !== undefined;
+  // The Show filter only exists with the split; never leave the list
+  // filtered by a control that is no longer on screen.
+  useEffect(() => {
+    if (totals && !split && origin !== "all") setOrigin("all");
+  }, [totals, split, origin]);
 
   return (
     <PageShell>
@@ -290,7 +305,11 @@ export default function CrawlDiscovered() {
                 Lines carrying your domains
               </div>
               <div className="text-[11px] text-slate-500">
-                {prevLines == null && prevPlacements == null
+                {unwatched.length > 0
+                  ? `Last week's report did not watch ${unwatched.join(", ")}, so there is nothing to compare`
+                  : noBaseline
+                  ? "No lines carried this domain last week, so there is nothing to compare"
+                  : prevLines == null && prevPlacements == null
                   ? "First crawl, no prior week to compare"
                   : "Found across every publisher we scanned, against last week"}
               </div>
@@ -349,7 +368,7 @@ export default function CrawlDiscovered() {
                   tone="info"
                   number={totals.found_lines!}
                   label="Found by Path Finder"
-                  caption="Not in the list you gave us"
+                  caption="Found by us, not given by you"
                   className="bg-white"
                   active={origin === "found"}
                   onClick={() => setOrigin((o) => (o === "found" ? "all" : "found"))}
@@ -448,7 +467,7 @@ export default function CrawlDiscovered() {
               disabled={exporting || total === 0}
               onClick={() => {
                 setExporting(true);
-                downloadCsv(token, filter).finally(() => setExporting(false));
+                downloadCsv(token, filter, origin, originFallback).finally(() => setExporting(false));
               }}
             >
               {exporting ? "Preparing..." : "Export CSV"}
@@ -501,6 +520,7 @@ export default function CrawlDiscovered() {
                   token={token}
                   line={line}
                   origin={originOf(line, originFallback)}
+                  compare={!noBaseline && line.previous_watched !== false}
                   open={open.has(key)}
                   onToggle={() => toggle(key)}
                 />
@@ -557,11 +577,14 @@ function LineCard({
   token,
   line,
   origin,
+  compare = true,
   open,
   onToggle,
 }: {
   token: string;
   line: DiscoveredLine;
+  /** False when last week did not watch this domain: no "new", no move. */
+  compare?: boolean;
   /** Who brought the line; null when the report cannot say. */
   origin: Origin | null;
   open: boolean;
@@ -570,7 +593,7 @@ function LineCard({
   // Embedded placements are authoritative when present; the wide lines
   // arrive without them and are fetched once, on first expand, then kept.
   const [fetched, setFetched] = useState<
-    DiscoveredPlacement[] | "loading" | "error" | null
+    DiscoveredPlacement[] | "loading" | "error" | "toolarge" | null
   >(null);
   const embedded = line.placements;
   const placements = embedded ?? fetched;
@@ -607,15 +630,18 @@ function LineCard({
       .then((r) => {
         if (alive.current) setFetched(r.rows);
       })
-      .catch(() => {
+      .catch((e: unknown) => {
         if (!alive.current) return;
         // Let a re-open try again rather than pinning the error forever.
         requested.current = null;
-        setFetched("error");
+        // 503 here means the report did not keep this line's list (too
+        // large), which a retry cannot change.
+        setFetched(e instanceof ApiError && e.status === 503 ? "toolarge" : "error");
       });
   }, [open, token, key, embedded, line]);
 
-  const delta = deltaOf(line);
+  const delta: Delta = compare ? deltaOf(line) : { kind: "flat" };
+  const measure = lineMeasure(line);
   const initial = (line.ssp_domain.replace(/^www\./i, "").charAt(0) || "?")
     .toUpperCase();
   /* NEVER CRASH ON A NUMBER THAT IS NOT THERE.
@@ -626,9 +652,9 @@ function LineCard({
      an absent count. Defence in depth, not a substitute for the fix. */
   // Publishers once each where the report counts them; else files, and
   // the words say listings (David, 2026-10-11: "2 publishers" for one).
-  const byPublisher = line.publishers_count != null;
-  const count = (byPublisher ? line.publishers_count : line.placements_count) ?? 0;
-  const lastWeek = byPublisher ? line.previous_publishers_count ?? null : line.previous_placements_count;
+  const byPublisher = measure.unit === "publishers";
+  const count = measure.now;
+  const lastWeek = compare ? measure.before : null;
   const isNew = delta.kind === "new";
   const words = origin ? originWords(origin) : null;
 
@@ -810,6 +836,10 @@ function LineCard({
           </div>
           {placements === "loading" || placements === null ? (
             <SkeletonInlineRows rows={4} label="Loading publishers for this line" />
+          ) : placements === "toolarge" ? (
+            <p className="py-2 text-xs text-slate-500">
+              This line is on too many publishers to list here. The full list is in your Excel export.
+            </p>
           ) : placements === "error" ? (
             <p className="py-2 text-xs text-critical">
               Could not load the publishers for this line.
@@ -887,16 +917,10 @@ type Delta =
 
 function deltaOf(line: DiscoveredLine): Delta {
   if (line.previous_placements_count == null) return { kind: "new" };
-  // Publishers once each when both weeks counted them; a week that counted
-  // files cannot be set against one that counted publishers.
-  if (line.publishers_count != null) {
-    if (line.previous_publishers_count == null) return { kind: "flat" };
-    const p = line.publishers_count - line.previous_publishers_count;
-    if (p > 0) return { kind: "up", n: p };
-    if (p < 0) return { kind: "down", n: -p };
-    return { kind: "flat" };
-  }
-  const d = line.placements_count - line.previous_placements_count;
+  // The same count on both sides, by the rule the sorts use.
+  const m = lineMeasure(line);
+  if (m.before == null) return { kind: "flat" };
+  const d = m.now - m.before;
   if (d > 0) return { kind: "up", n: d };
   if (d < 0) return { kind: "down", n: -d };
   return { kind: "flat" };
@@ -953,7 +977,12 @@ function lineKey(l: DiscoveredLine): string {
  * looking at. Walks the pages with the same 20-page cap the sibling pages
  * use and carries the active SSP filter.
  */
-async function downloadCsv(token: string, ssp: string) {
+async function downloadCsv(
+  token: string,
+  ssp: string,
+  show: OriginFilter = "all",
+  fallback: ((l: DiscoveredLine) => Origin) | null = null,
+) {
   const header = [
     "ssp_domain",
     "publisher_id",
@@ -976,8 +1005,10 @@ async function downloadCsv(token: string, ssp: string) {
       page: pageNo,
       page_size: pageSize,
       ssp_domain: ssp || undefined,
+      origin: show === "all" ? undefined : show,
     });
-    acc.push(...r.rows);
+    // The marks the page shows, also where the API does not send them.
+    acc.push(...r.rows.map((row) => ({ ...row, origin: originOf(row, fallback)?.origin })));
     if (r.rows.length < r.page_size) break;
   }
   const csv = [

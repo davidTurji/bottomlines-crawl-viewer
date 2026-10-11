@@ -77,11 +77,16 @@ const GROUP: Record<GroupKey, { title: string; icon: typeof Plus; disc: string; 
 };
 
 /** The customer's live sellers.json, opened at one seller ID when given.
- *  The highlight is a text fragment on the ID; a browser without them
- *  opens the file at the top. */
-function sellersJsonUrl(fileHref: string, id?: string): string {
+ *  The highlight is a text fragment on the ID as the file writes it: in its
+ *  quotes when it is text, so "1" cannot land on "version": "1.0" or an
+ *  is_confidential 1 (review, 2026-10-11). An ID written as a number is
+ *  highlighted bare only when it is long enough to be unlikely elsewhere.
+ *  A browser without text fragments opens the file at the top. */
+function sellersJsonUrl(fileHref: string, id?: string, raw?: unknown): string {
   const t = (id ?? "").trim();
-  return t ? `${fileHref}#:~:text=${encodeURIComponent(t).replace(/-/g, "%2D")}` : fileHref;
+  if (!t) return fileHref;
+  const needle = typeof raw === "number" ? (t.length >= 4 ? t : "") : `"${t}"`;
+  return needle ? `${fileHref}#:~:text=${encodeURIComponent(needle).replace(/-/g, "%2D")}` : fileHref;
 }
 
 /** "6 Oct 2026": the day the live file was read. */
@@ -383,15 +388,20 @@ export default function CrawlSellers() {
           <div className="rounded-2xl border border-border bg-white p-5 shadow-sm">
             <div className="mb-3 flex items-baseline justify-between gap-3">
               <div>
-                <a
-                  href={fileHref}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  title={`Open ${fileHref.replace(/^https?:\/\//, "")} in a new tab`}
-                  className="font-display text-sm font-medium text-slate-700 underline-offset-2 hover:text-primary hover:underline"
-                >
-                  {data.domain}/sellers.json
-                </a>
+                {creating ? (
+                  // No file there to open: plain text, never a link to a 404.
+                  <div className="font-display text-sm font-medium text-slate-700">{data.domain}/sellers.json</div>
+                ) : (
+                  <a
+                    href={fileHref}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    title={`Open ${fileHref.replace(/^https?:\/\//, "")} in a new tab`}
+                    className="font-display text-sm font-medium text-slate-700 underline-offset-2 hover:text-primary hover:underline"
+                  >
+                    {data.domain}/sellers.json
+                  </a>
+                )}
                 <div className="text-[11px] text-slate-500">
                   {creating
                     ? `No file at ${data.domain}/sellers.json${readOn ? ` when we checked on ${readOn}` : ""}. Built from every ads.txt and app-ads.txt line naming ${data.domain}`
@@ -845,13 +855,13 @@ function SuggestionCard({
             type="button"
             onClick={onOpen}
             aria-expanded={open}
-            aria-label={`${open ? "Close" : "Open"} seller ${row.seller_id || "with no seller_id"}`}
+            aria-label={`Seller ${row.seller_id || "with no seller_id"}, details`}
             className="absolute inset-0 z-0 rounded-md focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40"
           />
           <span className="pointer-events-none relative flex min-w-0 items-baseline gap-2">
             {fileHref && row.current && row.seller_id ? (
               <a
-                href={sellersJsonUrl(fileHref, row.seller_id)}
+                href={sellersJsonUrl(fileHref, row.seller_id, row.current.seller_id)}
                 target="_blank"
                 rel="noopener noreferrer"
                 title={`Open ${domain}/sellers.json at seller ${row.seller_id}`}
@@ -1007,7 +1017,13 @@ function CheckLinks({ row, domain, fileHref }: { row: SellerRow; domain: string;
   const items: React.ReactNode[] = [];
   if (fileHref && row.current && row.seller_id) {
     items.push(
-      <a key="file" href={sellersJsonUrl(fileHref, row.seller_id)} target="_blank" rel="noopener noreferrer" className={link}>
+      <a
+        key="file"
+        href={sellersJsonUrl(fileHref, row.seller_id, row.current.seller_id)}
+        target="_blank"
+        rel="noopener noreferrer"
+        className={link}
+      >
         {domain}/sellers.json at {row.seller_id}
       </a>,
     );

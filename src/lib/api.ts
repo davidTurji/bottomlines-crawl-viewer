@@ -1491,6 +1491,9 @@ export type DiscoveredLine = {
   origin_source?: string | null;
   origin_added_at?: string | null;
   given_as?: string;
+  /** false: last week's report did not watch this line's domain, so the
+   *  line is neither new nor moved (reports from 2026-10-11). */
+  previous_watched?: boolean;
 };
 
 /** The four fields that identify a line, for the placements endpoint. */
@@ -1526,6 +1529,8 @@ export type DiscoveredTotals = {
   found_lines?: number;
   /** Set when the totals count more lines than the list holds. */
   listed_lines?: number;
+  /** Discovery domains last week's report did not watch (2026-10-11). */
+  unwatched_domains?: string[];
 };
 
 export type DiscoveredLinesPage = {

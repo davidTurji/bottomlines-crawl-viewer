@@ -24,8 +24,34 @@ import type { DiscoveredLine } from "./api";
  * and ranking it against a number would be inventing data.
  */
 export function deltaValue(l: DiscoveredLine): number | null {
-  if (l.previous_placements_count == null) return null;
-  return l.placements_count - l.previous_placements_count;
+  // Last week did not watch this line's domain: not new, no move.
+  if (l.previous_watched === false) return 0;
+  const m = lineMeasure(l);
+  return m.before == null ? null : m.now - m.before;
+}
+
+/**
+ * WHAT A LINE'S NUMBERS COUNT, one rule for the card and the sorts
+ * (review, 2026-10-11). Publishers once each when this week counts them and
+ * last week either counted them too or did not have the line; otherwise
+ * listings (one per publisher file) on both sides, so a week that counted
+ * files is never set against one that counted publishers.
+ */
+export function lineMeasure(l: DiscoveredLine): {
+  unit: "publishers" | "listings";
+  now: number;
+  before: number | null;
+} {
+  const pubs =
+    l.publishers_count != null && (l.previous_placements_count == null || l.previous_publishers_count != null);
+  if (pubs) {
+    return {
+      unit: "publishers",
+      now: l.publishers_count ?? 0,
+      before: l.previous_placements_count == null ? null : (l.previous_publishers_count ?? null),
+    };
+  }
+  return { unit: "listings", now: l.placements_count ?? 0, before: l.previous_placements_count };
 }
 
 /**

@@ -57,7 +57,9 @@ export type Scenario = {
   discovery?: boolean;
   /** "old": the discovered-lines answer of an API before 2026-10-11 (no
    *  origin marks, no publisher counts, no split totals). */
-  discoveryApi?: "current" | "old";
+  discoveryApi?: "current" | "old" | "unwatched" | "unwatched_new" | "cut";
+  /** "toolarge": the report kept no roster for wide lines (503). */
+  placements?: "ok" | "toolarge";
   /** "ok", or "none" for an API older than this SPA (404). */
   exportInfo?: "ok" | "none" | "trial";
   /** Trial report: lists capped, the summary says so. */
@@ -121,6 +123,7 @@ export async function installFakeApi(page: Page, scenario: Scenario = {}): Promi
     schain: "none",
     discovery: true,
     discoveryApi: "current",
+    placements: "ok",
     exportInfo: "ok",
     trial: false,
     signedOut: false,
@@ -228,6 +231,24 @@ export async function installFakeApi(page: Page, scenario: Scenario = {}): Promi
           ssp_domain: q.get("ssp_domain") ?? undefined,
           origin: s.discoveryApi === "old" ? undefined : ((q.get("origin") as "given" | "found" | null) ?? undefined),
         });
+        if (s.discoveryApi === "unwatched") {
+          // An artifact frozen before 2026-10-11 whose baseline did not watch
+          // the domain: zero last week, every line without a previous count.
+          r.totals = { ...r.totals, previous_lines: 0, previous_placements: 0, new_lines: null, previous_publishers: null };
+          r.rows = r.rows.map((row) => ({ ...row, previous_placements_count: null, previous_publishers_count: null }));
+        }
+        if (s.discoveryApi === "unwatched_new") {
+          // A report from 2026-10-11 whose baseline did not watch carambo.la.
+          r.totals = { ...r.totals, previous_lines: null, previous_placements: null, new_lines: null, previous_publishers: null, unwatched_domains: ["carambo.la"] };
+          r.rows = r.rows.map((row) =>
+            row.ssp_domain === "carambo.la" ? { ...row, previous_placements_count: null, previous_publishers_count: null, previous_watched: false } : row,
+          );
+        }
+        if (s.discoveryApi === "cut") {
+          // A list cut past 5,000 lines: the API sends no split then.
+          const { given_lines: _g, found_lines: _f, ...totals } = r.totals;
+          r.totals = q.get("origin") ? r.totals : { ...totals, listed_lines: r.total, lines: r.total + 100 };
+        }
         if (s.discoveryApi === "old") {
           // What the API answered before 2026-10-11, field for field.
           const { publishers: _p, previous_publishers: _pp, given_lines: _g, found_lines: _f, ...totals } = r.totals;
@@ -240,6 +261,9 @@ export async function installFakeApi(page: Page, scenario: Scenario = {}): Promi
         return reply(200, s.trial ? { ...r, page: 1, ...cut(r.rows, TRIAL_CAPS.discovered_lines, r.total) } : r);
       }
       case "discovered-lines/placements":
+        if (s.placements === "toolarge") {
+          return reply(503, { detail: "This list is too large to display here. Please contact your admin for the full workbook." });
+        }
         return reply(
           200,
           mockDiscoveredLinePlacements(

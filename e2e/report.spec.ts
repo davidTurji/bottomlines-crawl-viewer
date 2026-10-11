@@ -444,9 +444,9 @@ test.describe("sellers.json links", () => {
     const card = page.locator("#seller-300210");
     await expect(card.getByRole("link", { name: "300210", exact: true })).toHaveAttribute(
       "href",
-      "https://madeupmedia.com/sellers.json#:~:text=300210",
+      "https://madeupmedia.com/sellers.json#:~:text=%22300210%22",
     );
-    await card.getByRole("button", { name: "Open seller 300210" }).click();
+    await card.getByRole("button", { name: "Seller 300210, details" }).click();
     await expect(card.getByRole("link", { name: /Open madeupmedia\.com, 300210, RESELLER in fernhollow-team\.it\/ads\.txt/ })).toHaveAttribute(
       "href",
       /^https:\/\/fernhollow-team\.it\/ads\.txt#:~:text=madeupmedia\.com%2C-,300210&text=300210$/,
@@ -464,7 +464,7 @@ test.describe("sellers.json links", () => {
     const group = page.locator("section", { has: page.getByRole("heading", { name: /Not seen, check first/ }) });
     const first = group.locator('[id^="seller-"]').first();
     const id = (await first.getAttribute("id"))!.replace("seller-", "");
-    await first.getByRole("button", { name: `Open seller ${id}` }).click();
+    await first.getByRole("button", { name: `Seller ${id}, details` }).click();
     await expect(first.getByText("Check it yourself:")).toBeVisible();
     await expect(first.getByRole("link", { name: `madeupmedia.com/sellers.json at ${id}` })).toBeVisible();
     await expect(first.getByRole("link", { name: /\/ads\.txt$/ }).first()).toHaveAttribute("href", /^https:\/\/[^/]+\/ads\.txt/);
@@ -527,5 +527,40 @@ test.describe("discovery says who brought each line", () => {
     await expect(page.locator("div.rounded-3xl").getByText("Found by Path Finder").first()).toBeVisible();
     await expect(page.getByText(CRASHED)).toHaveCount(0);
     expect(errors).toEqual([]);
+  });
+
+  test("a week that did not watch the domain is not compared with zero", async ({ page }) => {
+    const errors = watchErrors(page);
+    await open(page, { discovery: true, discoveryApi: "unwatched" }, "/discovery");
+    await expect(page.getByText("No lines carried this domain last week, so there is nothing to compare")).toBeVisible();
+    await expect(page.locator('[data-tour="discovery-kpi"]').getByText(/vs last week/)).toHaveCount(0);
+    await expect(page.getByText("new this week")).toHaveCount(0);
+    expect(errors).toEqual([]);
+  });
+
+  test("a new report names the domain last week did not watch, and its lines are not new", async ({ page }) => {
+    await open(page, { discovery: true, discoveryApi: "unwatched_new" }, "/discovery");
+    await noTour(page);
+    await expect(page.getByText("Last week's report did not watch carambo.la, so there is nothing to compare")).toBeVisible();
+    const c = await find(page, "carambo.la, 774061, RESELLER");
+    await expect(c.getByText("new this week")).toHaveCount(0);
+  });
+
+  test("a line too wide to keep says so, not an error", async ({ page }) => {
+    await open(page, { discovery: true, placements: "toolarge" }, "/discovery");
+    await noTour(page);
+    // The widest line has no embedded roster in the mock, so it asks.
+    const first = page.locator("div.rounded-3xl").first();
+    await first.getByRole("button", { expanded: false }).first().click();
+    await expect(first.getByText("This line is on too many publishers to list here.", { exact: false })).toBeVisible();
+    await expect(first.getByText("Could not load the publishers for this line.")).toHaveCount(0);
+  });
+
+  test("the Show filter never outlives its control", async ({ page }) => {
+    await open(page, { discovery: true, discoveryApi: "cut" }, "/discovery");
+    await noTour(page);
+    // No split on a cut list: no Show control, and the list is every line.
+    await expect(page.getByRole("button", { name: "Show lines by who brought them" })).toHaveCount(0);
+    await expect(page.getByText(/The list below shows the/)).toBeVisible();
   });
 });
