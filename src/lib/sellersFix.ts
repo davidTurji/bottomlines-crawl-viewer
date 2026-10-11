@@ -58,7 +58,14 @@ export type Sighting = {
   seller_id: string;
   relationship: "DIRECT" | "RESELLER";
   /** The first publishers carrying it (the backend keeps up to fifty). */
-  publishers: { domain: string; name?: string | null; found_in: string }[];
+  publishers: {
+    domain: string;
+    name?: string | null;
+    found_in: string;
+    /** Read at bake time from the seller's OWN file (2026-10-11): proof the
+     *  seller is seen, never evidence for its type or domain. */
+    own_file?: boolean;
+  }[];
   /** How many publishers carry it, always whole; the list above may be cut. */
   publishers_total?: number;
 };
@@ -121,6 +128,8 @@ export type Listing = {
   relationship: "DIRECT" | "RESELLER";
   publisher: string;
   found_in: string;
+  /** Found in the seller's own file, not on a publisher we crawl. */
+  own?: boolean;
 };
 
 /** A real entry (an object), as opposed to a null or a number in the list. */
@@ -206,15 +215,21 @@ export function suggest(file: SellersFile, sightings: Sighting[], ownDomain: str
       e = { direct: new Set(), reseller: new Set(), dN: 0, rN: 0, names: new Map(), listings: [] };
       seen.set(id, e);
     }
+    // A seller's own file proves it is seen, and is listed as such, but
+    // says nothing about its type or domain: an ad network selling its own
+    // site writes DIRECT there and is still an INTERMEDIARY or BOTH.
+    const own = s.publishers.length > 0 && s.publishers.every((p) => p.own_file);
     const total = Math.max(Number(s.publishers_total ?? 0), s.publishers.length);
-    if (s.relationship === "DIRECT") e.dN += total;
-    else e.rN += total;
+    if (!own) {
+      if (s.relationship === "DIRECT") e.dN += total;
+      else e.rN += total;
+    }
     for (const p of s.publishers) {
       const d = norm(p.domain);
       if (!d) continue;
-      (s.relationship === "DIRECT" ? e.direct : e.reseller).add(d);
-      e.listings.push({ relationship: s.relationship, publisher: d, found_in: p.found_in });
-      if (p.name) e.names.set(d, p.name);
+      if (!p.own_file) (s.relationship === "DIRECT" ? e.direct : e.reseller).add(d);
+      e.listings.push({ relationship: s.relationship, publisher: d, found_in: p.found_in, ...(p.own_file ? { own: true } : {}) });
+      if (p.name && !p.own_file) e.names.set(d, p.name);
     }
   }
 
@@ -343,7 +358,8 @@ export function suggest(file: SellersFile, sightings: Sighting[], ownDomain: str
     // did not see is not proof the seller lacks it.
     const confidential = Number(cur.is_confidential ?? 0) === 1;
     const typed = String(cur.seller_type ?? "").trim().toUpperCase();
-    const want = e ? expectedType(direct, reseller) : null;
+    // No type is read off a seller seen only in its own file.
+    const want = e && (direct.length || reseller.length) ? expectedType(direct, reseller) : null;
     if (TYPES.includes(typed)) {
       if (want && typed !== want && typed !== "BOTH") {
         change(

@@ -130,6 +130,10 @@ const SHOWN_TEXT =
 const SHOWN_BOX = "-mx-0.5 rounded-[3px] px-0.5 hover:bg-primary/[0.07]";
 const SHOWN_ARROW =
   "h-3 w-3 flex-shrink-0 transition-transform duration-150 group-hover/shown:-translate-y-[1.5px] group-hover/shown:translate-x-[1.5px]";
+/** The same nudge for a whole line, on its own group name, so hovering a
+ *  line never moves the arrow of a link inside it. */
+const SHOWN_LINE_ARROW =
+  "transition-transform duration-150 group-hover/shownline:-translate-y-[1.5px] group-hover/shownline:translate-x-[1.5px]";
 
 /**
  * The publisher's domain, quiet until hovered, then a link to their site.
@@ -336,7 +340,7 @@ export function ActionableLine({
         "[&:hover_[data-line-text]]:text-primary [&:hover_[data-line-text]]:underline",
         "[&:focus-within_[data-line-text]]:text-primary [&:focus-within_[data-line-text]]:underline",
         shown &&
-          "group/shown [&_[data-line-text]]:text-primary [&_[data-line-text]]:underline [&_[data-line-text]]:decoration-primary/35 [&_[data-line-text]]:decoration-1 [&_[data-line-text]]:underline-offset-[3px] [&:hover_[data-line-text]]:decoration-primary",
+          "group/shownline [&_[data-line-text]]:text-primary [&_[data-line-text]]:underline [&_[data-line-text]]:decoration-primary/35 [&_[data-line-text]]:decoration-1 [&_[data-line-text]]:underline-offset-[3px] [&:hover_[data-line-text]]:decoration-primary",
         className,
       )}
     >
@@ -406,7 +410,7 @@ export function ActionableLine({
         aria-hidden
         className={cn(
           "pointer-events-none h-3 w-3 flex-shrink-0 self-center text-primary opacity-0 transition-opacity group-focus-within/line:opacity-100 group-hover/line:opacity-100",
-          shown && cn("opacity-100", SHOWN_ARROW),
+          shown && cn("opacity-100", SHOWN_LINE_ARROW),
         )}
       />
       <span role="status" className="sr-only">

@@ -306,7 +306,9 @@ export default function CrawlDiscovered() {
               </div>
               <div className="text-[11px] text-slate-500">
                 {unwatched.length > 0
-                  ? `Last week's report did not watch ${unwatched.join(", ")}, so there is nothing to compare`
+                  ? `Last week's report did not watch ${unwatched.join(", ")}, so the totals are not compared`
+                  : totals?.scope_changed
+                  ? "Your discovery domains changed since last week, so the totals are not compared"
                   : noBaseline
                   ? "No lines carried this domain last week, so there is nothing to compare"
                   : prevLines == null && prevPlacements == null
@@ -483,6 +485,7 @@ export default function CrawlDiscovered() {
                   line={line}
                   origin={originOf(line, originFallback)}
                   compare={!noBaseline && line.previous_watched !== false}
+                  canExport={!trial && !summary?.trial}
                   open={open.has(key)}
                   onToggle={() => toggle(key)}
                 />
@@ -540,6 +543,7 @@ function LineCard({
   line,
   origin,
   compare = true,
+  canExport = true,
   open,
   onToggle,
 }: {
@@ -547,6 +551,8 @@ function LineCard({
   line: DiscoveredLine;
   /** False when last week did not watch this domain: no "new", no move. */
   compare?: boolean;
+  /** A full report has an Excel export; a trial has none. */
+  canExport?: boolean;
   /** Who brought the line; null when the report cannot say. */
   origin: Origin | null;
   open: boolean;
@@ -598,7 +604,8 @@ function LineCard({
         requested.current = null;
         // 503 here means the report did not keep this line's list (too
         // large), which a retry cannot change.
-        setFetched(e instanceof ApiError && e.status === 503 ? "toolarge" : "error");
+        // Only the bake's own answer: a passing storage hiccup is a 503 too.
+        setFetched(e instanceof ApiError && e.status === 503 && /too large/i.test(e.message) ? "toolarge" : "error");
       });
   }, [open, token, key, embedded, line]);
 
@@ -800,7 +807,8 @@ function LineCard({
             <SkeletonInlineRows rows={4} label="Loading publishers for this line" />
           ) : placements === "toolarge" ? (
             <p className="py-2 text-xs text-slate-500">
-              This line is on too many publishers to list here. The full list is in your Excel export.
+              This line is on too many publishers to list here.
+              {canExport ? " The full list is in your Excel export." : ""}
             </p>
           ) : placements === "error" ? (
             <p className="py-2 text-xs text-critical">

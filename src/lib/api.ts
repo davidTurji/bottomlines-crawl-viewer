@@ -1531,6 +1531,9 @@ export type DiscoveredTotals = {
   listed_lines?: number;
   /** Discovery domains last week's report did not watch (2026-10-11). */
   unwatched_domains?: string[];
+  /** The discovery domains changed since last week (added or dropped):
+   *  the totals are not compared. */
+  scope_changed?: boolean;
 };
 
 export type DiscoveredLinesPage = {

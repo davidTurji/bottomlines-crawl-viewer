@@ -566,7 +566,7 @@ test.describe("discovery says who brought each line", () => {
   test("a new report names the domain last week did not watch, and its lines are not new", async ({ page }) => {
     await open(page, { discovery: true, discoveryApi: "unwatched_new" }, "/discovery");
     await noTour(page);
-    await expect(page.getByText("Last week's report did not watch carambo.la, so there is nothing to compare")).toBeVisible();
+    await expect(page.getByText("Last week's report did not watch carambo.la, so the totals are not compared")).toBeVisible();
     const c = await find(page, "carambo.la, 774061, RESELLER");
     await expect(c.getByText("new this week")).toHaveCount(0);
   });
@@ -587,5 +587,20 @@ test.describe("discovery says who brought each line", () => {
     // No split on a cut list: no Show control, and the list is every line.
     await expect(page.getByRole("button", { name: "Show lines by who brought them" })).toHaveCount(0);
     await expect(page.getByText(/The list below shows the/)).toBeVisible();
+  });
+
+  test("a dropped domain says the totals are not compared, never 'first crawl'", async ({ page }) => {
+    await open(page, { discovery: true, discoveryApi: "scope_dropped" }, "/discovery");
+    await expect(page.getByText("Your discovery domains changed since last week, so the totals are not compared")).toBeVisible();
+    await expect(page.getByText("First crawl, no prior week to compare")).toHaveCount(0);
+  });
+
+  test("a passing storage hiccup is an error, not 'too many publishers'", async ({ page }) => {
+    await open(page, { discovery: true, placements: "hiccup" }, "/discovery");
+    await noTour(page);
+    const first = page.locator("div.rounded-3xl").first();
+    await first.getByRole("button", { expanded: false }).first().click();
+    await expect(first.getByText("Could not load the publishers for this line.")).toBeVisible();
+    await expect(first.getByText(/too many publishers/)).toHaveCount(0);
   });
 });

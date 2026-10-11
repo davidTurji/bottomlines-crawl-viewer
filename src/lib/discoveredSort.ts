@@ -27,7 +27,9 @@ export function deltaValue(l: DiscoveredLine): number | null {
   // Last week did not watch this line's domain: not new, no move.
   if (l.previous_watched === false) return 0;
   const m = lineMeasure(l);
-  return m.before == null ? null : m.now - m.before;
+  if (m.before === null) return null;
+  // Last week counted something else: there, but no move to rank.
+  return m.before === undefined ? 0 : m.now - m.before;
 }
 
 /**
@@ -40,15 +42,17 @@ export function deltaValue(l: DiscoveredLine): number | null {
 export function lineMeasure(l: DiscoveredLine): {
   unit: "publishers" | "listings";
   now: number;
-  before: number | null;
+  /** null: the line is new. undefined: it was there last week, but last
+   *  week counted listings, so there is no number to set against this one. */
+  before: number | null | undefined;
 } {
-  const pubs =
-    l.publishers_count != null && (l.previous_placements_count == null || l.previous_publishers_count != null);
-  if (pubs) {
+  // One unit per report: every line of a report from 2026-10-11 carries
+  // publishers_count, so a page never mixes publishers and listings.
+  if (l.publishers_count != null) {
     return {
       unit: "publishers",
-      now: l.publishers_count ?? 0,
-      before: l.previous_placements_count == null ? null : (l.previous_publishers_count ?? null),
+      now: l.publishers_count,
+      before: l.previous_placements_count == null ? null : (l.previous_publishers_count ?? undefined),
     };
   }
   return { unit: "listings", now: l.placements_count ?? 0, before: l.previous_placements_count };
@@ -74,7 +78,7 @@ function byIdentity(a: DiscoveredLine, b: DiscoveredLine): number {
 /** Widest line first. The old default, still what "Most publishers" means. */
 function byCount(a: DiscoveredLine, b: DiscoveredLine): number {
   // Publishers once each where the report counts them (2026-10-11).
-  return (b.publishers_count ?? b.placements_count) - (a.publishers_count ?? a.placements_count);
+  return lineMeasure(b).now - lineMeasure(a).now;
 }
 
 /**

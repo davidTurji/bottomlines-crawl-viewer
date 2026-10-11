@@ -57,9 +57,10 @@ export type Scenario = {
   discovery?: boolean;
   /** "old": the discovered-lines answer of an API before 2026-10-11 (no
    *  origin marks, no publisher counts, no split totals). */
-  discoveryApi?: "current" | "old" | "unwatched" | "unwatched_new" | "cut";
-  /** "toolarge": the report kept no roster for wide lines (503). */
-  placements?: "ok" | "toolarge";
+  discoveryApi?: "current" | "old" | "unwatched" | "unwatched_new" | "cut" | "scope_dropped";
+  /** "toolarge": the report kept no roster for wide lines (503 with the
+   *  bake's sentence). "hiccup": a passing 503 from storage. */
+  placements?: "ok" | "toolarge" | "hiccup";
   /** "ok", or "none" for an API older than this SPA (404). */
   exportInfo?: "ok" | "none" | "trial";
   /** Trial report: lists capped, the summary says so. */
@@ -244,6 +245,10 @@ export async function installFakeApi(page: Page, scenario: Scenario = {}): Promi
             row.ssp_domain === "carambo.la" ? { ...row, previous_placements_count: null, previous_publishers_count: null, previous_watched: false } : row,
           );
         }
+        if (s.discoveryApi === "scope_dropped") {
+          // A domain was dropped since last week: totals not compared.
+          r.totals = { ...r.totals, previous_lines: null, previous_placements: null, new_lines: null, previous_publishers: null, scope_changed: true, unwatched_domains: [] };
+        }
         if (s.discoveryApi === "cut") {
           // A list cut past 5,000 lines: the API sends no split then.
           const { given_lines: _g, found_lines: _f, ...totals } = r.totals;
@@ -261,6 +266,9 @@ export async function installFakeApi(page: Page, scenario: Scenario = {}): Promi
         return reply(200, s.trial ? { ...r, page: 1, ...cut(r.rows, TRIAL_CAPS.discovered_lines, r.total) } : r);
       }
       case "discovered-lines/placements":
+        if (s.placements === "hiccup") {
+          return reply(503, { detail: "This report is not available yet. Please contact your admin." });
+        }
         if (s.placements === "toolarge") {
           return reply(503, { detail: "This list is too large to display here. Please contact your admin for the full workbook." });
         }

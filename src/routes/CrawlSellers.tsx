@@ -1203,7 +1203,8 @@ function ListingWindow({
                 {domain}, {row.listedAs ?? row.seller_id}, {l.relationship}
               </code>
               <span className="min-w-0 flex-shrink truncate text-[10px] text-slate-400">
-                on <PublisherDomainLink domain={l.publisher} shown />
+                {l.own ? "in the seller's own file on " : "on "}
+                <PublisherDomainLink domain={l.publisher} shown />
                 {foundInLabel(l.found_in) ? `, ${foundInLabel(l.found_in)}` : ""}
               </span>
             </ActionableLine>
