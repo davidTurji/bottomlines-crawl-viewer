@@ -10,8 +10,11 @@
  *   - fix     an entry that is written wrong (a duplicate ID, a domain
  *             written as a URL, a seller_type in the wrong case, a missing
  *             value) or that disagrees with what publishers list;
- *   - remove  an entry no crawled file lists (the seller may sit on sites
- *             outside the crawl).
+ *   - remove  an entry no crawled file lists. The page calls these "not
+ *             seen, check first" (David, 2026-10-11): the IAB spec does not
+ *             ask a seller to appear in any ads.txt, and one selling on apps
+ *             or sites outside the crawl is not seen either. Taken, it is
+ *             still removed from the file.
  *
  * EVERYTHING STARTS OFF (David, 2026-10-06): every suggestion opens as
  * "Don't", and the customer switches on what they want. Nothing is ever
@@ -60,12 +63,28 @@ export type Sighting = {
   publishers_total?: number;
 };
 
-/** One field the fix changes. ``to: null`` drops the key from the entry. */
+/** One field the fix changes. ``to: null`` drops the key from the entry.
+ *  The two flags are written back as the integers the spec asks for. */
 export type FieldChange = {
-  field: "seller_id" | "seller_type" | "domain" | "name";
+  field: "seller_id" | "seller_type" | "domain" | "name" | "is_confidential" | "is_passthrough";
   from?: string;
-  to: string | null;
+  to: string | number | null;
 };
+
+/** The spec's two 0/1 flags on a seller. */
+export const FLAGS = ["is_confidential", "is_passthrough"] as const;
+
+/** A flag written another way that clearly means 0 or 1 (true, "1", "0"),
+ *  as that integer; null when it is already 0 or 1, absent, or unreadable. */
+function flagAsInt(v: unknown): 0 | 1 | null {
+  if (v === undefined || v === null || v === 0 || v === 1) return null;
+  if (v === true || v === "1" || (typeof v === "string" && v.trim().toLowerCase() === "true")) return 1;
+  if (v === false || v === "0" || (typeof v === "string" && v.trim().toLowerCase() === "false")) return 0;
+  return null;
+}
+
+/** True when a flag holds what the spec allows: absent, 0 or 1. */
+const flagOk = (v: unknown) => v === undefined || v === 0 || v === 1;
 
 /** What the reader can type on a row. */
 export type FillField = "name" | "domain" | "seller_type";
@@ -274,7 +293,7 @@ export function suggest(file: SellersFile, sightings: Sighting[], ownDomain: str
     const reasons: string[] = [];
     const ask: FillField[] = [];
     let check = false;
-    const change = (field: FieldChange["field"], to: string | null, why: string, isCheck = false) => {
+    const change = (field: FieldChange["field"], to: string | number | null, why: string, isCheck = false) => {
       const from = cur[field];
       changes.push({ field, from: from === undefined ? undefined : String(from), to });
       reasons.push(why);
@@ -309,6 +328,14 @@ export function suggest(file: SellersFile, sightings: Sighting[], ownDomain: str
       change("seller_id", id, "The seller_id is a number; sellers.json wants it as text.");
     } else if (cur.seller_id !== id) {
       change("seller_id", id, "The seller_id has spaces around it.");
+    }
+
+    // THE FLAGS. is_confidential and is_passthrough are 0 or 1 by the
+    // spec; true, "1" or "0" mean one of them plainly and are written back
+    // as the integer. Anything else is left for the reader (validate).
+    for (const f of FLAGS) {
+      const to = flagAsInt(cur[f]);
+      if (to !== null) change(f, to, `${f} is written ${JSON.stringify(cur[f])}; sellers.json wants ${to}.`);
     }
 
     // THE TYPE. A written-wrong type is fixed; a valid type publishers
@@ -423,7 +450,7 @@ export function suggest(file: SellersFile, sightings: Sighting[], ownDomain: str
         current: cur,
         suggested: null,
         changes: [],
-        reason: `No ads.txt or app-ads.txt we crawled lists ID ${id} under ${ownDomain}. It may sit on sites outside this crawl.`,
+        reason: `No ads.txt or app-ads.txt we crawled lists ID ${id} under ${ownDomain}. It may sell on apps or sites outside this crawl, so check before removing it.`,
         direct: [],
         reseller: [],
         listings: [],
@@ -449,7 +476,7 @@ export function suggest(file: SellersFile, sightings: Sighting[], ownDomain: str
     const next: Seller = { ...cur };
     for (const c of changes) {
       if (c.to === null) delete next[c.field];
-      else next[c.field] = c.to;
+      else (next as Record<string, unknown>)[c.field] = c.to;
     }
     rows.push({
       seller_id: id,
@@ -583,6 +610,26 @@ export function validate(file: SellersFile, opts: { creating?: boolean } = {}): 
   if (!String(file.version ?? "").trim()) {
     issues.push({ key: "version", field: "version", text: "The file has no version. sellers.json is version 1.0." });
   }
+  // A contact email the live file already carries: fixed there, not here.
+  const email = file.contact_email;
+  if (!opts.creating && email !== undefined && email !== null && String(email).trim() && !EMAIL.test(String(email).trim())) {
+    issues.push({ key: "contact_email-bad", text: `The contact_email "${String(email)}" is not an email address. Fix it in your live file.` });
+  }
+  // identifiers: a list of {name, value}, both written (TAG-ID, DUNS ...).
+  if (file.identifiers !== undefined && file.identifiers !== null) {
+    const ids = file.identifiers;
+    const broken = !Array.isArray(ids)
+      ? 1
+      : ids.filter((x) => !isEntry(x) || !String((x as Record<string, unknown>).name ?? "").trim() || !String((x as Record<string, unknown>).value ?? "").trim()).length;
+    if (broken) {
+      issues.push({
+        key: "identifiers",
+        text: !Array.isArray(ids)
+          ? "The file's identifiers is not a list. Each identifier needs a name and a value (for example TAG-ID)."
+          : `${broken === 1 ? "An identifier" : `${broken} identifiers`} in the file's header ${broken === 1 ? "lacks" : "lack"} a name or a value. Fix ${broken === 1 ? "it" : "them"} in your live file.`,
+      });
+    }
+  }
   const count = new Map<string, number>();
   for (const s of file.sellers) {
     const id = idOf(s);
@@ -601,6 +648,9 @@ export function validate(file: SellersFile, opts: { creating?: boolean } = {}): 
     const at = (k: string, text: string) => issues.push({ key: `${k}-${id}`, sellerId: id, text });
     if (!unsafeNumber(s.seller_id) && (typeof s.seller_id !== "string" || s.seller_id !== id)) {
       at("id", `Seller ID ${id} is not written as plain text.`);
+    }
+    for (const f of FLAGS) {
+      if (!flagOk(s[f])) at(f, `Seller ${id}'s ${f} must be 0 or 1, not ${JSON.stringify(s[f])}.`);
     }
     const type = String(s.seller_type ?? "");
     if (!TYPES.includes(type)) {

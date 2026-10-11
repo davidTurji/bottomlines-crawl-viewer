@@ -46,6 +46,7 @@ import { inactiveDay, inWindow, pageRows } from "./inactive";
 // The discovered-lines ORDER BY, shared with the page's sort control so the
 // mock endpoint and the client's "default" option cannot disagree.
 import { compareDefault } from "./discoveredSort";
+import { originsFrom } from "./discoveredOrigin";
 import { PAGE_SIZE } from "./paging";
 
 /*
@@ -2032,10 +2033,29 @@ function lineKeyOf(k: DiscoveredLineKey): string {
  * second fixture set. Never reached in a production build, where MOCK is
  * false and this module is tree-shaken out.
  */
+/*
+ * WHO BROUGHT EACH LINE (2026-10-11), as the API marks it from the report's
+ * watchlist: a few of the head's lines are in the customer's list (from
+ * their sellers.json, by hand, one found earlier), and one seller ID they
+ * gave as RESELLER turns up DIRECT, so a preview shows every mark.
+ */
+const DISCOVERY_SEATS: MatchedSeatLine[] = [
+  { ssp_domain: "carambola.com", publisher_id: "1042318", relationship: "RESELLER", source: "sellers_json", added_at: "2026-08-30" },
+  { ssp_domain: "carambola.com", publisher_id: "2884190", relationship: "RESELLER", source: "sellers_json", added_at: "2026-08-30" },
+  { ssp_domain: "carambola.com", publisher_id: "3390514", relationship: "RESELLER", source: "manual", added_at: "2026-09-04" },
+  { ssp_domain: "carambo.la", publisher_id: "618402", relationship: "RESELLER", source: "discovered", added_at: "2026-09-16" },
+];
+const mockOrigin = originsFrom([...CUSTOMER_SEATS, ...DISCOVERY_SEATS])!;
+
+/** Publishers once each, in the shape a report from 2026-10-11 carries:
+ *  most publishers hold the line in one file, some in both. */
+const publishersOf = (listings: number | null) => (listings == null ? null : Math.max(1, Math.round(listings * 0.62)));
+
 export function mockDiscoveredLines(opts: {
   page?: number;
   page_size?: number;
   ssp_domain?: string;
+  origin?: "given" | "found";
 }): DiscoveredLinesPage {
   const page = opts.page ?? 1;
   const pageSize = opts.page_size ?? 50;
@@ -2047,12 +2067,30 @@ export function mockDiscoveredLines(opts: {
     const needle = opts.ssp_domain.trim().toLowerCase();
     pool = pool.filter((r) => r.ssp_domain.toLowerCase().includes(needle));
   }
+  pool = pool.map((r) => ({
+    ...r,
+    ...mockOrigin(r),
+    publishers_count: publishersOf(r.placements_count)!,
+    previous_publishers_count: publishersOf(r.previous_placements_count),
+  }));
+  const whole = pool;
+  const given = whole.filter((r) => r.origin === "given").length;
+  if (opts.origin) pool = pool.filter((r) => (r.origin === "given") === (opts.origin === "given"));
+  const base = discoveredTotals(whole);
   const start = (page - 1) * pageSize;
   return {
     page,
     page_size: pageSize,
     total: pool.length,
-    totals: discoveredTotals(pool),
+    totals: {
+      ...base,
+      given_lines: given,
+      found_lines: whole.length - given,
+      // Distinct across lines: a publisher on several lines counts once.
+      publishers: opts.ssp_domain ? null : Math.round(whole.reduce((n, r) => n + (r.publishers_count ?? 0), 0) * 0.7),
+      previous_publishers:
+        opts.ssp_domain || base.previous_placements == null ? null : Math.round((publishersOf(base.previous_placements) ?? 0) * 0.7),
+    },
     // Strip the embedded placements above the threshold, exactly as the
     // proposed endpoint would, so the card's fetch-on-expand path is what
     // a mock review actually exercises on the wide lines.

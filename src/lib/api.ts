@@ -652,7 +652,7 @@ export const api = {
    */
   discoveredLines: async (
     token: string,
-    opts: { page?: number; page_size?: number; ssp_domain?: string } = {},
+    opts: { page?: number; page_size?: number; ssp_domain?: string; origin?: "given" | "found" } = {},
   ) => {
     if (MOCK) {
       const { mockDiscoveredLines } = await import("./mockData");
@@ -665,6 +665,7 @@ export const api = {
     q.set("page", String(opts.page ?? 1));
     q.set("page_size", String(opts.page_size ?? 50));
     if (opts.ssp_domain) q.set("ssp_domain", opts.ssp_domain);
+    if (opts.origin) q.set("origin", opts.origin);
     return req<DiscoveredLinesPage>(
       "GET",
       `/v1/viewer/${token}/discovered-lines?${q.toString()}`,
@@ -1479,6 +1480,17 @@ export type DiscoveredLine = {
    * endpoint", it never means "this line has no placements".
    */
   placements?: DiscoveredPlacement[];
+  /** Different publishers carrying the line, each once whichever of its
+   *  two files holds it (reports from 2026-10-11). Absent before, where
+   *  placements_count counted files. */
+  publishers_count?: number;
+  previous_publishers_count?: number | null;
+  /** Who brought the line (2026-10-11), see lib/discoveredOrigin.ts.
+   *  Absent from an API that predates it, or a report with no watchlist. */
+  origin?: "given" | "found_listed" | "found";
+  origin_source?: string | null;
+  origin_added_at?: string | null;
+  given_as?: string;
 };
 
 /** The four fields that identify a line, for the placements endpoint. */
@@ -1504,11 +1516,24 @@ export type DiscoveredTotals = {
    *  over the whole filtered set. OPTIONAL: seeded in mock today; absent on
    *  live until the crawler sends it, and the page then leaves it out. */
   new_lines?: number | null;
+  /** Different publishers carrying any line, each once (2026-10-11).
+   *  Null under an SSP filter; absent on older reports. */
+  publishers?: number | null;
+  previous_publishers?: number | null;
+  /** Lines the customer gave us, and the rest (2026-10-11). Absent when
+   *  the report cannot say, or the list was cut. */
+  given_lines?: number;
+  found_lines?: number;
+  /** Set when the totals count more lines than the list holds. */
+  listed_lines?: number;
 };
 
 export type DiscoveredLinesPage = {
   /** Present on a trial report: this list was cut (see ``TrialSlice``). */
   trial?: TrialSlice | null;
+  /** The bake cut this list short (before 2026-10-11): the numbers count
+   *  only what was kept. */
+  cut?: boolean;
   page: number;
   page_size: number;
   total: number;

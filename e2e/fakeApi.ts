@@ -55,6 +55,9 @@ export type Scenario = {
   schain?: "ok" | "none" | "no_sdks" | "error";
   /** false: this crawl discovered nothing (total 0). */
   discovery?: boolean;
+  /** "old": the discovered-lines answer of an API before 2026-10-11 (no
+   *  origin marks, no publisher counts, no split totals). */
+  discoveryApi?: "current" | "old";
   /** "ok", or "none" for an API older than this SPA (404). */
   exportInfo?: "ok" | "none" | "trial";
   /** Trial report: lists capped, the summary says so. */
@@ -117,6 +120,7 @@ export async function installFakeApi(page: Page, scenario: Scenario = {}): Promi
     sellers: "none",
     schain: "none",
     discovery: true,
+    discoveryApi: "current",
     exportInfo: "ok",
     trial: false,
     signedOut: false,
@@ -222,7 +226,17 @@ export async function installFakeApi(page: Page, scenario: Scenario = {}): Promi
           page: page_,
           page_size: Number(q.get("page_size") ?? 50),
           ssp_domain: q.get("ssp_domain") ?? undefined,
+          origin: s.discoveryApi === "old" ? undefined : ((q.get("origin") as "given" | "found" | null) ?? undefined),
         });
+        if (s.discoveryApi === "old") {
+          // What the API answered before 2026-10-11, field for field.
+          const { publishers: _p, previous_publishers: _pp, given_lines: _g, found_lines: _f, ...totals } = r.totals;
+          r.totals = totals;
+          r.rows = r.rows.map((row) => {
+            const { origin: _o, origin_source: _s, origin_added_at: _a, given_as: _ga, publishers_count: _c, previous_publishers_count: _pc, ...rest } = row;
+            return rest;
+          });
+        }
         return reply(200, s.trial ? { ...r, page: 1, ...cut(r.rows, TRIAL_CAPS.discovered_lines, r.total) } : r);
       }
       case "discovered-lines/placements":

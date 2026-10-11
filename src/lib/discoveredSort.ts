@@ -47,7 +47,8 @@ function byIdentity(a: DiscoveredLine, b: DiscoveredLine): number {
 
 /** Widest line first. The old default, still what "Most publishers" means. */
 function byCount(a: DiscoveredLine, b: DiscoveredLine): number {
-  return b.placements_count - a.placements_count;
+  // Publishers once each where the report counts them (2026-10-11).
+  return (b.publishers_count ?? b.placements_count) - (a.publishers_count ?? a.placements_count);
 }
 
 /**

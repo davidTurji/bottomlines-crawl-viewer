@@ -422,3 +422,110 @@ test.describe("inactive", () => {
     await expect(page.getByTestId("inactive-quiet")).toHaveCount(0);
   });
 });
+
+/* ── 2026-10-11: links everywhere, Discovery says who brought each line ── */
+
+test.describe("sellers.json links", () => {
+  test("the file, every seller and every line link to their source", async ({ page }) => {
+    const errors = watchErrors(page);
+    await open(page, { sellers: "page" }, "/sellers");
+    const file = page.getByRole("link", { name: "madeupmedia.com/sellers.json", exact: true });
+    await expect(file).toHaveAttribute("href", "https://madeupmedia.com/sellers.json");
+    // Unseen sellers are a check, never a red verdict.
+    await expect(page.getByRole("heading", { name: /Not seen, check first/ })).toBeVisible();
+    await expect(page.getByText("Suggested removals")).toHaveCount(0);
+    // Each "Show all" turns into "Show fewer" when clicked.
+    while ((await page.getByRole("button", { name: /^Show all/ }).count()) > 0) {
+      await page.getByRole("button", { name: /^Show all/ }).first().click();
+    }
+
+    // A seller publishers list: its ID opens the customer's file at it, and
+    // each line opens the publisher's file at the line.
+    const card = page.locator("#seller-300210");
+    await expect(card.getByRole("link", { name: "300210", exact: true })).toHaveAttribute(
+      "href",
+      "https://madeupmedia.com/sellers.json#:~:text=300210",
+    );
+    await card.getByRole("button", { name: "Open seller 300210" }).click();
+    await expect(card.getByRole("link", { name: /Open madeupmedia\.com, 300210, RESELLER in fernhollow-team\.it\/ads\.txt/ })).toHaveAttribute(
+      "href",
+      /^https:\/\/fernhollow-team\.it\/ads\.txt#:~:text=madeupmedia\.com%2C-,300210&text=300210$/,
+    );
+    await expect(card.getByRole("link", { name: "fernhollow-team.it", exact: true })).toHaveAttribute("href", "https://fernhollow-team.it");
+    await expect(card.getByRole("link", { name: "emberquay-news.com/app-ads.txt" })).toHaveAttribute(
+      "href",
+      /^https:\/\/emberquay-news\.com\/app-ads\.txt#:~:text=/,
+    );
+    expect(errors).toEqual([]);
+  });
+
+  test("an unseen seller links its own files, to check by eye", async ({ page }) => {
+    await open(page, { sellers: "page" }, "/sellers");
+    const group = page.locator("section", { has: page.getByRole("heading", { name: /Not seen, check first/ }) });
+    const first = group.locator('[id^="seller-"]').first();
+    const id = (await first.getAttribute("id"))!.replace("seller-", "");
+    await first.getByRole("button", { name: `Open seller ${id}` }).click();
+    await expect(first.getByText("Check it yourself:")).toBeVisible();
+    await expect(first.getByRole("link", { name: `madeupmedia.com/sellers.json at ${id}` })).toBeVisible();
+    await expect(first.getByRole("link", { name: /\/ads\.txt$/ }).first()).toHaveAttribute("href", /^https:\/\/[^/]+\/ads\.txt/);
+  });
+});
+
+test.describe("discovery says who brought each line", () => {
+  const card = (page: Page, line: string) => page.locator("div.rounded-3xl", { hasText: line });
+  /** New lines sort first, so a line may sit on a later page. */
+  async function find(page: Page, line: string) {
+    for (let n = 2; n <= 8 && (await card(page, line).count()) === 0; n += 1) {
+      await page.getByRole("navigation", { name: "Pages" }).first().getByRole("button", { name: `Page ${n}`, exact: true }).click();
+      await page.waitForTimeout(150);
+    }
+    return card(page, line);
+  }
+  async function noTour(page: Page) {
+    const no = page.getByRole("button", { name: "No thanks" });
+    if (await no.isVisible().catch(() => false)) await no.click();
+  }
+
+  test("lines they gave us and lines we found, apart and counted", async ({ page }) => {
+    const errors = watchErrors(page);
+    await open(page, { discovery: true }, "/discovery");
+    await expect(page.getByRole("button", { name: /You gave us/ }).first()).toBeVisible();
+    await expect(page.getByText("Each publisher once, whichever file")).toBeVisible();
+    await noTour(page);
+    await expect((await find(page, "carambola.com, 2884190, DIRECT")).getByText("You gave us this seller ID as RESELLER")).toBeVisible();
+    await page.getByRole("navigation", { name: "Pages" }).first().getByRole("button", { name: "Page 1", exact: true }).click();
+    await expect((await find(page, "carambo.la, 618402, RESELLER")).getByText(/In your list since 16 Sept? 2026/)).toBeVisible();
+
+    // Only what they gave us.
+    await page.locator('[data-tour="discovery-kpi"]').getByRole("button", { name: /You gave us/ }).click();
+    const given = card(page, "carambola.com, 1042318, RESELLER");
+    await expect(given.getByText("You gave us", { exact: true })).toBeVisible();
+    await expect(given.getByText("From your sellers.json, 30 Aug 2026")).toBeVisible();
+    await expect(card(page, "carambola.com, 3390514, RESELLER").getByText("You added it by hand, 4 Sept 2026")).toBeVisible();
+    const pills = page.locator("div.rounded-3xl").getByText(/^(You gave us|Found by Path Finder)$/);
+    await expect(pills.first()).toHaveText("You gave us");
+    expect(new Set(await pills.allTextContents())).toEqual(new Set(["You gave us"]));
+    expect(errors).toEqual([]);
+  });
+
+  test("a publisher under a line opens their file at it", async ({ page }) => {
+    await open(page, { discovery: true }, "/discovery");
+    await noTour(page);
+    const c = await find(page, "carambola.com, 1042318, RESELLER");
+    await c.getByRole("button", { expanded: false }).first().click();
+    const link = c.locator('a[href*="#:~:text=carambola.com"]').first();
+    await expect(link).toHaveAttribute("href", /^https:\/\/[^/]+\/(app-)?ads\.txt#:~:text=carambola\.com%2C-,1042318&text=1042318$/);
+  });
+
+  test("an API from before the marks still opens, counting listings honestly", async ({ page }) => {
+    const errors = watchErrors(page);
+    await open(page, { discovery: true, discoveryApi: "old" }, "/discovery");
+    await expect(page.getByText("Publisher listings")).toBeVisible();
+    await expect(page.getByText("One per file: a publisher with both files counts twice")).toBeVisible();
+    await expect(page.locator('[data-tour="discovery-kpi"]').getByText("You gave us")).toHaveCount(0);
+    // The browser marks lines from the summary's watchlist instead.
+    await expect(page.locator("div.rounded-3xl").getByText("Found by Path Finder").first()).toBeVisible();
+    await expect(page.getByText(CRASHED)).toHaveCount(0);
+    expect(errors).toEqual([]);
+  });
+});

@@ -27,6 +27,8 @@ import {
 } from "../lib/discoveredSort";
 import { FilterAction, FilterBar, FilterSearch, FilterSelect } from "@/components/FilterBar";
 import { PageShell } from "@/components/PageShell";
+import { ActionableLine, PublisherDomainLink } from "@/components/PublisherLinks";
+import { type Origin, originOf, originsFrom, originWords } from "@/lib/discoveredOrigin";
 import { formatWeek, WeekLine } from "@/components/WeekLine";
 import { PAGE_SIZE } from "@/lib/paging";
 import { useReportScope } from "@/lib/reportScope";
@@ -79,6 +81,8 @@ export default function CrawlDiscovered() {
   const cache = usePageCache<unknown>();
   const [total, setTotal] = useState(0);
   const [totals, setTotals] = useState<DiscoveredTotals | null>(null);
+  /** The bake cut this report's list short (see DiscoveredLinesPage.cut). */
+  const [cut, setCut] = useState(false);
   /** The cut this trial report made to the list, or null on a full report. */
   const [trial, setTrial] = useState<TrialSlice | null>(null);
   const [page, setPage] = useState(1);
@@ -89,6 +93,9 @@ export default function CrawlDiscovered() {
   const [exporting, setExporting] = useState(false);
   const [open, setOpen] = useState<Set<string>>(new Set());
   const [sort, setSort] = useState<SortKey>("default");
+  /** Which lines to list: all, the ones the customer gave us, or the ones
+   *  Path Finder found (David, 2026-10-11). */
+  const [origin, setOrigin] = useState<OriginFilter>("all");
 
   // Whether this crawl has any discovered lines at all, independent of the
   // filter. Without it an over-narrow filter would render the "this crawl
@@ -117,7 +124,9 @@ export default function CrawlDiscovered() {
     };
   }, [token]);
 
-  useEffect(() => setPage(1), [ssp]);
+  useEffect(() => setPage(1), [ssp, origin]);
+  // The browser's own marks, for an API that does not mark lines yet.
+  const originFallback = useMemo(() => originsFrom(summary?.watchlist?.seats), [summary]);
 
   useEffect(() => {
     let cancelled = false;
@@ -126,9 +135,10 @@ export default function CrawlDiscovered() {
         page: pg,
         page_size: PAGE_SIZE,
         ssp_domain: filter || undefined,
+        origin: origin === "all" ? undefined : origin,
       });
     type Loaded = Awaited<ReturnType<typeof load>>;
-    const keyFor = (pg: number) => `${pg}|${filter}`;
+    const keyFor = (pg: number) => `${pg}|${filter}|${origin}`;
     // Read the next page while this one is on screen, so "next" is
     // instant. Not while an SSP filter is being typed.
     const readAhead = (r: Loaded) => {
@@ -140,13 +150,14 @@ export default function CrawlDiscovered() {
       setRows(r.rows);
       setTotal(r.total);
       setTotals(r.totals);
+      setCut(Boolean(r.cut));
       setTrial(r.trial ?? null);
       // Changing page or filter re-renders a different set of cards, so
       // an expansion held open from the previous set would either vanish
       // or, worse, appear to belong to a line it does not.
       setOpen(new Set());
       // An unfiltered answer settles the question for the whole crawl.
-      if (!filter) setAnyDiscovered(r.total > 0);
+      if (!filter && origin === "all") setAnyDiscovered(r.total > 0);
       else if (r.total > 0) setAnyDiscovered(true);
     };
     setError(null);
@@ -170,7 +181,7 @@ export default function CrawlDiscovered() {
     return () => {
       cancelled = true;
     };
-  }, [token, page, filter, cache]);
+  }, [token, page, filter, origin, cache]);
 
   const toggle = useCallback((key: string) => {
     setOpen((prev) => {
@@ -231,6 +242,13 @@ export default function CrawlDiscovered() {
   // Absent on reports frozen before the crawler counted it, and null on a
   // first crawl, where every line is "new" and saying so would be noise.
   const newLines = prevLines != null ? (totals?.new_lines ?? null) : null;
+  // Who brought the lines, counted by the API over the whole list. Absent
+  // from an older API, or when the list was cut: the page then shows no
+  // split rather than one counted over a page.
+  const split = totals?.given_lines != null && totals?.found_lines != null;
+  // Publishers once each (reports from 2026-10-11); an older report counts
+  // files and says so.
+  const countsPublishers = totals != null && totals.publishers !== undefined;
 
   return (
     <PageShell>
@@ -288,45 +306,109 @@ export default function CrawlDiscovered() {
               such count and shows the two totals alone. Each label carries
               a caption, since "Distinct lines" and "Publisher placements"
               did not say what they count. */}
-          <div
-            className={cn(
-              "grid gap-px overflow-hidden rounded-xl border border-border bg-border",
-              newLines != null ? "grid-cols-1 sm:grid-cols-[1.4fr_1fr_1fr]" : "grid-cols-2",
-            )}
-          >
-            {newLines != null && (
+          {(() => {
+            const stats: React.ReactNode[] = [];
+            if (newLines != null) {
+              stats.push(
+                <SplitStat
+                  key="new"
+                  tone="info"
+                  prefix={newLines > 0 ? "+" : undefined}
+                  number={newLines}
+                  label="New this week"
+                  caption="Lines no publisher carried last week"
+                  className="bg-white"
+                />,
+              );
+            }
+            stats.push(
               <SplitStat
-                tone="info"
-                prefix={newLines > 0 ? "+" : undefined}
-                number={newLines}
-                label="New this week"
-                caption="Lines no publisher carried last week"
+                key="lines"
+                number={totals.lines}
+                label="Lines with your domain"
+                caption="Each different ads.txt line, counted once"
                 className="bg-white"
-              />
-            )}
-            <SplitStat
-              number={totals.lines}
-              label="Lines with your domain"
-              caption="Each different ads.txt line, counted once"
-              className="bg-white"
-              delta={
-                prevLines != null
-                  ? computeDelta(totals.lines, prevLines)
-                  : null
+                delta={prevLines != null ? computeDelta(totals.lines, prevLines) : null}
+              />,
+            );
+            if (split) {
+              // WHO BROUGHT THEM (David, 2026-10-11): what they gave us and
+              // what we found apart, each a click to list only those.
+              stats.push(
+                <SplitStat
+                  key="given"
+                  number={totals.given_lines!}
+                  label="You gave us"
+                  caption="From your sellers.json or added by hand"
+                  className="bg-white"
+                  active={origin === "given"}
+                  onClick={() => setOrigin((o) => (o === "given" ? "all" : "given"))}
+                />,
+                <SplitStat
+                  key="found"
+                  tone="info"
+                  number={totals.found_lines!}
+                  label="Found by Path Finder"
+                  caption="Not in the list you gave us"
+                  className="bg-white"
+                  active={origin === "found"}
+                  onClick={() => setOrigin((o) => (o === "found" ? "all" : "found"))}
+                />,
+              );
+            }
+            if (countsPublishers) {
+              if (totals.publishers != null) {
+                stats.push(
+                  <SplitStat
+                    key="pubs"
+                    number={totals.publishers}
+                    label="Publishers"
+                    caption="Each publisher once, whichever file"
+                    className="bg-white"
+                    delta={
+                      totals.previous_publishers != null
+                        ? computeDelta(totals.publishers, totals.previous_publishers)
+                        : null
+                    }
+                  />,
+                );
               }
-            />
-            <SplitStat
-              number={totals.placements}
-              label="Publisher listings"
-              caption="One per publisher file carrying a line"
-              className="bg-white"
-              delta={
-                prevPlacements != null
-                  ? computeDelta(totals.placements, prevPlacements)
-                  : null
-              }
-            />
-          </div>
+            } else {
+              stats.push(
+                <SplitStat
+                  key="listings"
+                  number={totals.placements}
+                  label="Publisher listings"
+                  caption="One per file: a publisher with both files counts twice"
+                  className="bg-white"
+                  delta={prevPlacements != null ? computeDelta(totals.placements, prevPlacements) : null}
+                />,
+              );
+            }
+            return (
+              <div
+                className={cn(
+                  "grid grid-cols-1 gap-px overflow-hidden rounded-xl border border-border bg-border sm:grid-cols-2",
+                  LG_COLS[stats.length] ?? "lg:grid-cols-4",
+                )}
+              >
+                {stats}
+              </div>
+            );
+          })()}
+          {/* A list shorter than its numbers says so, never passes for
+              whole. */}
+          {totals.listed_lines != null && totals.listed_lines < totals.lines && (
+            <p className="mt-2 text-[11px] text-slate-500">
+              The list below shows the {totals.listed_lines.toLocaleString()} widest lines. The numbers above
+              count all {totals.lines.toLocaleString()}.
+            </p>
+          )}
+          {cut && (
+            <p className="mt-2 text-[11px] text-warn">
+              This report's list was cut short when it was made, so these numbers count only the lines it kept.
+            </p>
+          )}
         </div>
       )}
 
@@ -345,6 +427,15 @@ export default function CrawlDiscovered() {
               onChange={setSsp}
               placeholder="Filter by SSP domain"
             />
+            {split && (
+              <FilterSelect
+                value={origin}
+                onChange={setOrigin}
+                options={ORIGIN_OPTIONS}
+                leading="Show"
+                ariaLabel="Show lines by who brought them"
+              />
+            )}
             <FilterSelect
               value={sort}
               onChange={setSort}
@@ -409,6 +500,7 @@ export default function CrawlDiscovered() {
                 <LineCard
                   token={token}
                   line={line}
+                  origin={originOf(line, originFallback)}
                   open={open.has(key)}
                   onToggle={() => toggle(key)}
                 />
@@ -464,11 +556,14 @@ export default function CrawlDiscovered() {
 function LineCard({
   token,
   line,
+  origin,
   open,
   onToggle,
 }: {
   token: string;
   line: DiscoveredLine;
+  /** Who brought the line; null when the report cannot say. */
+  origin: Origin | null;
   open: boolean;
   onToggle: () => void;
 }) {
@@ -529,8 +624,13 @@ function LineCard({
      field takes the whole report with it, and the customer sees a blank
      screen instead of the rest of their week. An absent count renders as
      an absent count. Defence in depth, not a substitute for the fix. */
-  const count = line.placements_count ?? 0;
+  // Publishers once each where the report counts them; else files, and
+  // the words say listings (David, 2026-10-11: "2 publishers" for one).
+  const byPublisher = line.publishers_count != null;
+  const count = (byPublisher ? line.publishers_count : line.placements_count) ?? 0;
+  const lastWeek = byPublisher ? line.previous_publishers_count ?? null : line.previous_placements_count;
   const isNew = delta.kind === "new";
+  const words = origin ? originWords(origin) : null;
 
   /*
    * NEWNESS, SIGNALLED BY THE GROUND RATHER THAN BY A BADGE.
@@ -610,8 +710,26 @@ function LineCard({
               <span className="font-mono tabular-nums text-slate-700">
                 {count.toLocaleString()}
               </span>{" "}
-              {count === 1 ? "publisher" : "publishers"}
+              {byPublisher ? (count === 1 ? "publisher" : "publishers") : count === 1 ? "listing" : "listings"}
             </span>
+            {/* WHO BROUGHT IT (David, 2026-10-11): "You gave us" for a line
+                in their list, sellers.json imports included; the detail
+                says how and when. */}
+            {words && origin && (
+              <span className="flex min-w-0 items-center gap-1.5" title={words.detail}>
+                <span
+                  className={cn(
+                    "flex-shrink-0 rounded-full border px-1.5 py-px text-[10px] font-medium",
+                    origin.origin === "given"
+                      ? "border-border bg-slate-50 text-slate-700"
+                      : "border-info-border bg-info-bg text-info",
+                  )}
+                >
+                  {words.pill}
+                </span>
+                <span className="truncate text-[11px] text-slate-500">{words.detail}</span>
+              </span>
+            )}
             {isNew && (
               <span className="flex-shrink-0 font-medium text-info">
                 new this week
@@ -626,11 +744,8 @@ function LineCard({
             down the list rather than jittering card to card. */}
         <div className="hidden items-center gap-6 text-right sm:flex">
           <div className="w-[72px]">
-            {line.previous_placements_count != null && (
-              <MiniStat
-                label="Last week"
-                value={line.previous_placements_count}
-              />
+            {lastWeek != null && (
+              <MiniStat label="Last week" value={lastWeek} />
             )}
           </div>
           <div className="w-[72px]">
@@ -685,8 +800,11 @@ function LineCard({
               Where it was found
             </span>
             {Array.isArray(placements) && (
-              <span className="font-mono text-[11px] tabular-nums text-slate-500">
-                {placements.length.toLocaleString()}
+              // One row per publisher file, so it says listings: a
+              // publisher with the line in both files has two rows.
+              <span className="text-[11px] text-slate-500">
+                <span className="font-mono tabular-nums">{placements.length.toLocaleString()}</span>{" "}
+                {placements.length === 1 ? "listing" : "listings"}
               </span>
             )}
           </div>
@@ -710,8 +828,14 @@ function LineCard({
             <div className="scroll-y max-h-[320px] overflow-y-auto rounded-md border border-border bg-white">
               <ul className="divide-y divide-border">
                 {placements.map((p, i) => (
-                  <li
+                  // Each placement opens the publisher's file at this line,
+                  // and the publisher's name opens their site (David,
+                  // 2026-10-11: clickable like every other page).
+                  <ActionableLine
                     key={`${p.developer_domain}|${p.bundle_id ?? ""}|${p.found_in}|${i}`}
+                    line={line}
+                    publisherDomain={p.developer_domain}
+                    foundIn={p.found_in}
                     className="flex items-baseline gap-2.5 px-3 py-1.5 text-[11px]"
                   >
                     {p.app_name ? (
@@ -733,14 +857,16 @@ function LineCard({
                         )}
                       </>
                     ) : (
-                      <span className="truncate font-mono tabular-nums text-slate-800">
-                        {p.developer_domain}
-                      </span>
+                      <PublisherDomainLink
+                        domain={p.developer_domain}
+                        arrow={false}
+                        className="font-mono tabular-nums text-slate-800"
+                      />
                     )}
-                    <span className="ml-auto flex-shrink-0 text-[10px] text-slate-400">
+                    <span data-line-text className="ml-auto flex-shrink-0 text-[10px] text-slate-400">
                       {foundInLabel(p.found_in)}
                     </span>
-                  </li>
+                  </ActionableLine>
                 ))}
               </ul>
             </div>
@@ -761,6 +887,15 @@ type Delta =
 
 function deltaOf(line: DiscoveredLine): Delta {
   if (line.previous_placements_count == null) return { kind: "new" };
+  // Publishers once each when both weeks counted them; a week that counted
+  // files cannot be set against one that counted publishers.
+  if (line.publishers_count != null) {
+    if (line.previous_publishers_count == null) return { kind: "flat" };
+    const p = line.publishers_count - line.previous_publishers_count;
+    if (p > 0) return { kind: "up", n: p };
+    if (p < 0) return { kind: "down", n: -p };
+    return { kind: "flat" };
+  }
   const d = line.placements_count - line.previous_placements_count;
   if (d > 0) return { kind: "up", n: d };
   if (d < 0) return { kind: "down", n: -d };
@@ -826,6 +961,8 @@ async function downloadCsv(token: string, ssp: string) {
     "cert_id",
     "placements_count",
     "previous_placements_count",
+    "publishers_count",
+    "origin",
   ] as const;
   const acc: DiscoveredLine[] = [];
   const pageSize = 200;
@@ -863,3 +1000,20 @@ async function downloadCsv(token: string, ssp: string) {
   document.body.removeChild(a);
   URL.revokeObjectURL(url);
 }
+
+type OriginFilter = "all" | "given" | "found";
+
+const ORIGIN_OPTIONS: { value: OriginFilter; label: string }[] = [
+  { value: "all", label: "All lines" },
+  { value: "found", label: "Found by Path Finder" },
+  { value: "given", label: "You gave us" },
+];
+
+/** Static class names for Tailwind, by how many stats the card holds. */
+const LG_COLS: Record<number, string> = {
+  1: "lg:grid-cols-1",
+  2: "lg:grid-cols-2",
+  3: "lg:grid-cols-3",
+  4: "lg:grid-cols-4",
+  5: "lg:grid-cols-5",
+};
