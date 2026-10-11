@@ -2025,8 +2025,8 @@ function lineKeyOf(k: DiscoveredLineKey): string {
 
 /**
  * Filtering matches the live line-events behaviour: ssp_domain is a
- * case-insensitive substring, so typing "caramb" keeps both madeupmedia.com
- * and madeupmedia.la, and "la" keeps madeupmedia.la alone.
+ * case-insensitive substring, so typing "madeupmedia" keeps madeupmedia.com,
+ * madeupmedia.la and the others, and ".la" keeps madeupmedia.la alone.
  *
  * Mock-only escape hatch: adding ``?discovery=none`` to the URL empties the
  * list, which is how the seat-line-only empty state is reviewed without a
