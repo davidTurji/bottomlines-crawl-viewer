@@ -120,6 +120,18 @@ function openTab(url: string) {
 const NESTED = "pointer-events-auto relative z-[1]";
 
 /**
+ * A link that looks like one before any hover (David, 2026-10-11): the
+ * overview's hover ink, a thin underline set off the text so it stays crisp,
+ * and on hover a soft highlight, the full underline and the arrow nudging
+ * out. Used on Sellers.json and Discovery.
+ */
+const SHOWN_TEXT =
+  "text-primary underline decoration-primary/35 decoration-1 underline-offset-[3px] transition-[color,background-color,text-decoration-color] duration-150 hover:decoration-primary";
+const SHOWN_BOX = "-mx-0.5 rounded-[3px] px-0.5 hover:bg-primary/[0.07]";
+const SHOWN_ARROW =
+  "h-3 w-3 flex-shrink-0 transition-transform duration-150 group-hover/shown:-translate-y-[1.5px] group-hover/shown:translate-x-[1.5px]";
+
+/**
  * The publisher's domain, quiet until hovered, then a link to their site.
  * Sits inside clickable cards, so its click never reaches the card.
  */
@@ -128,6 +140,7 @@ export function PublisherDomainLink({
   label,
   className,
   active = false,
+  shown = false,
   onHoverChange,
   arrow = true,
 }: {
@@ -138,6 +151,8 @@ export function PublisherDomainLink({
   /** Show the hover look without the pointer on it: the publisher's circle,
    *  hovered, lights its name up as the link it is. */
   active?: boolean;
+  /** Always in the link look, with the hover animation (see SHOWN_TEXT). */
+  shown?: boolean;
   onHoverChange?: (hovering: boolean) => void;
   /** The arrow that shows on hover. It holds its width while hidden, so a
    *  link inside a sentence ("publisher: x.com, Name") turns it off, or the
@@ -160,6 +175,7 @@ export function PublisherDomainLink({
         NESTED,
         "group/domain inline-flex max-w-full items-center gap-0.5 truncate rounded-sm underline-offset-2 transition-colors hover:text-primary hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40",
         active && "text-primary underline",
+        shown && cn("group/shown", SHOWN_TEXT, SHOWN_BOX),
         className,
       )}
     >
@@ -170,6 +186,7 @@ export function PublisherDomainLink({
           className={cn(
             "h-3 w-3 flex-shrink-0 opacity-0 transition-opacity group-hover/domain:opacity-100 group-focus-visible/domain:opacity-100",
             active && "opacity-100",
+            shown && cn("opacity-100", SHOWN_ARROW),
           )}
         />
       )}
@@ -318,7 +335,8 @@ export function ActionableLine({
         "[&_[data-line-text]]:decoration-primary/40 [&_[data-line-text]]:underline-offset-2",
         "[&:hover_[data-line-text]]:text-primary [&:hover_[data-line-text]]:underline",
         "[&:focus-within_[data-line-text]]:text-primary [&:focus-within_[data-line-text]]:underline",
-        shown && "[&_[data-line-text]]:text-primary [&_[data-line-text]]:underline",
+        shown &&
+          "group/shown [&_[data-line-text]]:text-primary [&_[data-line-text]]:underline [&_[data-line-text]]:decoration-primary/35 [&_[data-line-text]]:decoration-1 [&_[data-line-text]]:underline-offset-[3px] [&:hover_[data-line-text]]:decoration-primary",
         className,
       )}
     >
@@ -388,7 +406,7 @@ export function ActionableLine({
         aria-hidden
         className={cn(
           "pointer-events-none h-3 w-3 flex-shrink-0 self-center text-primary opacity-0 transition-opacity group-focus-within/line:opacity-100 group-hover/line:opacity-100",
-          shown && "opacity-100",
+          shown && cn("opacity-100", SHOWN_ARROW),
         )}
       />
       <span role="status" className="sr-only">
@@ -427,12 +445,14 @@ export function ShownLink({
       onPointerDown={stop}
       className={cn(
         NESTED,
-        "inline-flex max-w-full items-center gap-0.5 rounded-sm text-primary underline decoration-primary/40 underline-offset-2 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40",
+        "group/shown inline-flex max-w-full items-center gap-0.5 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40",
+        SHOWN_TEXT,
+        SHOWN_BOX,
         className,
       )}
     >
       <span className="truncate">{children}</span>
-      <ArrowUpRight aria-hidden className="h-3 w-3 flex-shrink-0" />
+      <ArrowUpRight aria-hidden className={SHOWN_ARROW} />
     </a>
   );
 }

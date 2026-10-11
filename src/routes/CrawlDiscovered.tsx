@@ -349,7 +349,7 @@ export default function CrawlDiscovered() {
               label="Lines with your domain"
               caption={
                 split
-                  ? `${totals.given_lines!.toLocaleString()} you gave us, ${totals.found_lines!.toLocaleString()} found by Path Finder`
+                  ? `${totals.given_lines!.toLocaleString()} given by you, ${totals.found_lines!.toLocaleString()} found automatically by Path Finder`
                   : "Each different ads.txt line, counted once"
               }
               className="bg-white"
@@ -852,7 +852,7 @@ function LineCard({
                     ) : (
                       <PublisherDomainLink
                         domain={p.developer_domain}
-                        active
+                        shown
                         className="font-mono tabular-nums"
                       />
                     )}

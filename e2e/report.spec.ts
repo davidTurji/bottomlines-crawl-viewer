@@ -512,7 +512,7 @@ test.describe("discovery says who brought each line", () => {
     // The three cards as they always were; who brought the lines is the
     // middle card's caption.
     const kpi = page.locator('[data-tour="discovery-kpi"]');
-    await expect(kpi.getByText(/\d+ you gave us, \d+ found by Path Finder/)).toBeVisible();
+    await expect(kpi.getByText(/\d+ given by you, \d+ found automatically by Path Finder/)).toBeVisible();
     await expect(kpi.getByText("Lines with your domain")).toBeVisible();
     await expect(page.getByText("Each publisher once, whichever file")).toBeVisible();
     await noTour(page);
