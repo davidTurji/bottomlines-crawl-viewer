@@ -213,8 +213,11 @@ export default function CrawlDiscovered() {
       : "Each different line, counted once";
 
   // The Show menu offers only what the report can answer: "New this week"
-  // needs a compared week, the sellers.json pair needs the file.
+  // needs a compared week, "Needs fixing" a report that checked its lines
+  // (an older one never did, and an empty list would read as "nothing to
+  // fix"), the sellers.json pair the file.
   const hasSellersJson = Boolean(totals?.sellers_json);
+  const checkedLines = totals?.needs_fixing != null;
   const showOptions = useMemo(() => {
     const o: { value: ShowFilter; label: string }[] = [
       { value: "all", label: "All lines" },
@@ -222,13 +225,13 @@ export default function CrawlDiscovered() {
       { value: "reseller", label: "RESELLER lines" },
     ];
     if (baseline.lines) o.push({ value: "new", label: "New this week" });
-    o.push({ value: "fixing", label: "Needs fixing" });
+    if (checkedLines) o.push({ value: "fixing", label: "Needs fixing" });
     if (hasSellersJson) {
       o.push({ value: "listed", label: "In your sellers.json" });
       o.push({ value: "unlisted", label: "Not in your sellers.json" });
     }
     return o;
-  }, [baseline.lines, hasSellersJson]);
+  }, [baseline.lines, checkedLines, hasSellersJson]);
   // Never leave the list filtered by an option that is no longer offered.
   useEffect(() => {
     if (totals && !showOptions.some((o) => o.value === show)) setShow("all");
