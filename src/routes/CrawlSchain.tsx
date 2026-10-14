@@ -14,6 +14,7 @@ import { lineKey, lineLabel, sourceHint } from "@/lib/lineFilter";
 import { useReportScope } from "@/lib/reportScope";
 import { PAGE_SIZE } from "@/lib/paging";
 import { cn, foundInLabel, storeLabel } from "@/lib/utils";
+import { APP_DATE_COLUMNS, shownAppDates } from "@/lib/appDates";
 
 import {
   api,
@@ -1324,6 +1325,11 @@ function SchainAppCard({ row, open, onToggle }: { row: SchainRow; open: boolean;
           <CardLine label="Bundle / store ID" line={row.bundle_id} />
           <CardLine label="Node 1 (asi1, sid1)" line={`${row.asi1}, ${row.sid1}`} />
           <CardLine label="Node 2 (asi2, sid2)" line={`${row.asi2}, ${row.sid2}`} />
+          {/* The app's dates, each only when this report carries it. */}
+          {APP_DATE_COLUMNS.map((c) => {
+            const day = shownAppDates(row)[c.key];
+            return day ? <CardLine key={c.key} label={c.label} line={day} /> : null;
+          })}
           {row.store_url && (
             <p className="pt-1 text-[11px] text-slate-500">
               <a href={row.store_url} target="_blank" rel="noreferrer noopener" className="hover:text-primary">

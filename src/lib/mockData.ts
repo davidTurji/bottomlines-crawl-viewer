@@ -360,6 +360,18 @@ const INACTIVE_APPS_ALL: InactiveApp[] = [
   },
 ];
 
+// First seen / last seen / removed on, as reports frozen from 2026-10-14
+// carry them. The store dropped each app the day before the crawl that
+// confirmed it; Glintfox Runner's removal is the day on its strip, so it is
+// not said twice.
+for (const [n, a] of INACTIVE_APPS_ALL.entries()) {
+  const since = Math.round((Date.parse(MOCK_CRAWL_AT) - Date.parse(`${a.inactive_since}T09:18:47Z`)) / 86_400_000);
+  a.first_seen_at = `${crawlDay(since + 120 + n * 31)}T00:00:00Z`;
+  a.first_seen_source = n % 2 ? "discovered" : "store_listing";
+  a.last_seen_at = `${crawlDay(since + 7)}T09:00:00Z`;
+  a.removed_at = `${crawlDay(a.bundle === "com.madeup.glintfox.runner" ? since : since + 1)}T00:00:00Z`;
+}
+
 const INACTIVE_PUBLISHERS = INACTIVE_PUBLISHERS_ALL.filter((p) => inWindow(p.inactive_since, MOCK_WINDOW));
 const INACTIVE_APPS = INACTIVE_APPS_ALL.filter((a) => inWindow(a.inactive_since, MOCK_WINDOW));
 
@@ -1505,6 +1517,21 @@ export function bundlesForDeveloper(developer_id: number) {
  * Matched publishers. Deterministic, like the rest of this fixture, and a
  * couple of dozen strong so the list reads as real.
  */
+/** First seen / last seen on a report frozen from 2026-10-14. Every ninth
+ *  app has none (no date on record), so a list shows "—" for it. Active
+ *  apps are never removed. No random draws: the rest of the fixture keeps
+ *  its numbers. */
+const FIRST_SEEN_SOURCES = ["store_listing", "discovered", "catalogue_add"] as const;
+function matchedAppDates(i: number): Partial<MatchedApp> {
+  if (i % 9 === 8) return {};
+  return {
+    first_seen_at: `${crawlDay(2 + ((i * 37) % 400))}T00:00:00Z`,
+    first_seen_source: FIRST_SEEN_SOURCES[i % FIRST_SEEN_SOURCES.length],
+    last_seen_at: MOCK_CRAWL_AT,
+    removed_at: null,
+  };
+}
+
 function buildMatchedApps(): MatchedApp[] {
   const rnd = xorshift(9_931);
   const owners = MATCHED_DEVS.filter((d) => d.platform !== "Web");
@@ -1556,6 +1583,7 @@ function buildMatchedApps(): MatchedApp[] {
       lines_cert_changed,
       matched_lines: matchedLinesFor(appSeed, line_count),
       ...changeArrays(appSeed, lines_added, lines_removed, lines_cert_changed),
+      ...matchedAppDates(i),
     });
   }
   return rows.sort((a, b) => b.line_count - a.line_count);

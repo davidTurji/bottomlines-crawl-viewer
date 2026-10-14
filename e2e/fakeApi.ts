@@ -106,7 +106,24 @@ export type Scenario = {
   /** false: a summary without ``crawl_at`` / ``compared_crawl_at`` (the API
    *  today), so the window's start comes from last week's summary. */
   crawlDates?: boolean;
+  /** false: a report frozen before 2026-10-14, whose app rows carry no
+   *  first seen / last seen / removed on (none of the fields at all). */
+  appDates?: boolean;
 };
+
+const APP_DATE_FIELDS = ["first_seen_at", "first_seen_source", "last_seen_at", "removed_at", "listed_on"];
+
+/** The page as an older report serves it: its app rows without the dates. */
+function withoutAppDates<P extends { rows: unknown[] }>(page: P): P {
+  return {
+    ...page,
+    rows: page.rows.map((r) => {
+      const row = { ...(r as Record<string, unknown>) };
+      for (const k of APP_DATE_FIELDS) delete row[k];
+      return row;
+    }),
+  };
+}
 
 const TRIAL_CAPS = { publishers: 3, apps: 3, declarations: 3, discovered_lines: 3 };
 
@@ -169,6 +186,7 @@ export async function installFakeApi(page: Page, scenario: Scenario = {}): Promi
     gone: true,
     inactive: "ok",
     crawlDates: true,
+    appDates: true,
     ...scenario,
   };
   let signedIn = !s.signedOut && !s.expired;
@@ -256,7 +274,8 @@ export async function installFakeApi(page: Page, scenario: Scenario = {}): Promi
         return reply(200, mockMatchedBundles(page_, q.get("q") ?? ""));
       }
       case "matched-apps": {
-        const r = mockMatchedApps(page_, q.get("q") ?? "", lines);
+        const all = mockMatchedApps(page_, q.get("q") ?? "", lines);
+        const r = s.appDates ? all : withoutAppDates(all);
         return reply(200, s.trial ? { ...r, page: 1, ...cut(r.rows, TRIAL_CAPS.apps, r.total) } : r);
       }
       case "discovered-lines": {
@@ -383,7 +402,8 @@ export async function installFakeApi(page: Page, scenario: Scenario = {}): Promi
         if (s.inactive === "legacy") {
           return reply(200, pageFromGone(s.gone ? mockGone : null, kind, { ...opts, pageSize: Number(q.get("page_size") ?? 50) }));
         }
-        return reply(200, mockInactive(kind, opts, s.trial));
+        const inactive = mockInactive(kind, opts, s.trial);
+        return reply(200, s.appDates ? inactive : withoutAppDates(inactive));
       }
       case "sellers-fix":
         if (s.sellers === "none") return notFound("This report has no sellers.json page.");

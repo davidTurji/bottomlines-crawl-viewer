@@ -8,6 +8,7 @@ const BASE = (import.meta.env.VITE_API_BASE as string) ?? "/api";
 import { LINES_PARAM, linesQuery, serializeLines } from "./lineFilter";
 import { PAGE_SIZE } from "./paging";
 import { pageFromGone } from "./inactive";
+import type { AppDates } from "./appDates";
 
 export const MOCK = (import.meta.env.VITE_MOCK as string | undefined) === "true";
 
@@ -995,7 +996,7 @@ export type GonePublisher = {
 };
 
 /** An app of a matched publisher that its store has twice said is gone. */
-export type GoneApp = {
+export type GoneApp = AppDates & {
   name: string;
   store: string;
   bundle: string;
@@ -1054,7 +1055,8 @@ export type InactivePublisher = {
   apps: number | null;
 };
 
-export type InactiveApp = {
+/** The dates (``AppDates``) ride on rows frozen from 2026-10-14 only. */
+export type InactiveApp = AppDates & {
   app_id?: number | null;
   store: string;
   bundle: string;
@@ -1348,7 +1350,7 @@ export type MatchedDevelopersPage = {
   rows: MatchedDeveloper[];
 };
 
-export type MatchedBundle = {
+export type MatchedBundle = AppDates & {
   store: string;
   bundle_id: string;
   app_name: string | null;
@@ -1387,7 +1389,7 @@ export type MatchedBundlesPage = {
  * in the expanded row; it is capped for display, and `line_count` is the
  * honest total.
  */
-export type MatchedApp = {
+export type MatchedApp = AppDates & {
   store: string;
   bundle_id: string;
   app_name: string;
@@ -1449,7 +1451,7 @@ export type MatchedAppsPage = {
  * files carried it. The SQL COALESCEs the text columns to "" rather than
  * NULL, so they are plain strings here.
  */
-export type DiscoveredPlacement = {
+export type DiscoveredPlacement = AppDates & {
   developer_domain: string;
   developer_name: string;
   platform: string;
@@ -1807,7 +1809,7 @@ export type SchainFunnel = {
 /** One row of the Apps sheet: one app whose chain closes. An app whose
  *  publisher holds several valid accounts at the SDK lists them all in
  *  `sid1`, comma separated, exactly as the file writes it. */
-export type SchainRow = {
+export type SchainRow = AppDates & {
   publisher_domain: string;
   app_name: string;
   store: string;

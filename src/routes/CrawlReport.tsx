@@ -52,6 +52,8 @@ import { PageShell } from "@/components/PageShell";
 import { formatWeek } from "@/components/WeekLine";
 import { cn, foundInLabel, storeLabel } from "@/lib/utils";
 import { ActionableLine, PublisherAvatarLink, PublisherDomainLink } from "@/components/PublisherLinks";
+import { AppDateCells, AppDatesLine } from "@/components/AppDates";
+import { appDateColumns, type AppDateKey } from "@/lib/appDates";
 import { useReportScope } from "@/lib/reportScope";
 
 const OVERVIEW_SUGGESTIONS = [
@@ -2322,6 +2324,10 @@ function MatchedAppsList({
     return allRows;
   }, [allRows, tab]);
 
+  // First seen / Last seen / Removed on: a column only when a row on this
+  // page has it, so a report frozen before the dates shows none.
+  const dateColumns = useMemo(() => appDateColumns(rows), [rows]);
+
   useOpenFirst(
     openFirst,
     !loading && settled > 0,
@@ -2419,6 +2425,7 @@ function MatchedAppsList({
             <Settle key={keyOf(a)} index={i}>
               <MatchedAppCard
                 app={a}
+                dateColumns={dateColumns}
                 open={expanded === keyOf(a)}
                 onToggle={() =>
                   setExpanded(expanded === keyOf(a) ? null : keyOf(a))
@@ -2471,12 +2478,16 @@ function MatchedAppsList({
  */
 function MatchedAppCard({
   app,
+  dateColumns = [],
+  inactive,
   open,
   onToggle,
   token,
-  inactive,
 }: {
   app: MatchedApp;
+  /** The date columns the list shows (see appDateColumns); none on a
+   *  report frozen before the dates. */
+  dateColumns?: AppDateKey[];
   open: boolean;
   onToggle: () => void;
   token: string;
@@ -2489,6 +2500,8 @@ function MatchedAppCard({
   const added = app.lines_added ?? 0;
   const removed = app.lines_removed ?? 0;
   const certChanged = app.lines_cert_changed ?? 0;
+  // An inactive card's strip already says the day it went inactive.
+  const dateRow = inactive ? { ...app, inactive_since: inactive.since } : app;
   // Real-data rows carry no embedded line arrays (the list stays cheap); when
   // none are present we lazy-fetch the owning developer's seat lines, exactly
   // as PublisherCard does. Mock rows embed them, so the change windows render.
@@ -2563,17 +2576,22 @@ function MatchedAppCard({
               )}
             </div>
           )}
+          {dateColumns.length > 0 && <AppDatesLine row={dateRow} />}
         </div>
         {inactive ? (
-          app.matched_lines != null && (
+          (app.matched_lines != null || dateColumns.length > 0) && (
             <div className="hidden items-center gap-6 text-right sm:flex">
-              <div className="w-[84px] whitespace-nowrap">
-                <MiniStat label="Your lines" value={app.line_count} emphasis />
-              </div>
+              <AppDateCells row={dateRow} columns={dateColumns} />
+              {app.matched_lines != null && (
+                <div className="w-[84px] whitespace-nowrap">
+                  <MiniStat label="Your lines" value={app.line_count} emphasis />
+                </div>
+              )}
             </div>
           )
         ) : (
         <div className="hidden items-center gap-6 text-right sm:flex">
+          <AppDateCells row={dateRow} columns={dateColumns} />
           <div className="w-[84px] whitespace-nowrap">
             <MiniStat label="Matched lines" value={app.line_count} emphasis />
           </div>
@@ -2727,11 +2745,13 @@ function InactivePublisherCard({
 
 function InactiveAppCard({
   app,
+  dateColumns,
   open,
   onToggle,
   token,
 }: {
   app: InactiveApp;
+  dateColumns?: AppDateKey[];
   open: boolean;
   onToggle: () => void;
   token: string;
@@ -2746,10 +2766,15 @@ function InactiveAppCard({
     line_count: lines?.length ?? 0,
     ...(app.developer_id != null ? { developer_id: app.developer_id } : {}),
     ...(lines ? { matched_lines: lines } : {}),
+    first_seen_at: app.first_seen_at,
+    first_seen_source: app.first_seen_source,
+    last_seen_at: app.last_seen_at,
+    removed_at: app.removed_at,
   };
   return (
     <MatchedAppCard
       app={asMatched}
+      dateColumns={dateColumns}
       token={token}
       open={open}
       onToggle={onToggle}
