@@ -652,7 +652,20 @@ export const api = {
    */
   discoveredLines: async (
     token: string,
-    opts: { page?: number; page_size?: number; ssp_domain?: string; origin?: "given" | "found" } = {},
+    opts: {
+      page?: number;
+      page_size?: number;
+      ssp_domain?: string;
+      origin?: "given" | "found";
+      /** Which lines to list (reports from 2026-10-14): by relationship,
+       *  new this week, needing a fix, or by the customer's sellers.json.
+       *  Absent lists every line. */
+      show?: DiscoveredShow;
+      /** Case-insensitive substring: a line matches on its publisher_id,
+       *  ssp_domain or cert_id, or when any publisher in its roster
+       *  matches on developer_domain or developer_name. */
+      q?: string;
+    } = {},
   ) => {
     if (MOCK) {
       const { mockDiscoveredLines } = await import("./mockData");
@@ -666,20 +679,27 @@ export const api = {
     q.set("page_size", String(opts.page_size ?? 50));
     if (opts.ssp_domain) q.set("ssp_domain", opts.ssp_domain);
     if (opts.origin) q.set("origin", opts.origin);
+    if (opts.show) q.set("show", opts.show);
+    if (opts.q) q.set("q", opts.q);
     return req<DiscoveredLinesPage>(
       "GET",
       `/v1/viewer/${token}/discovered-lines?${q.toString()}`,
     );
   },
   /**
-   * Every publisher carrying one discovered line, for the card expansion.
-   * Only called when the list response did not embed `placements`, i.e. for
-   * the wide lines, which are the ones worth a round trip.
+   * Every publisher carrying one discovered line, for the card's roster:
+   * whole, paged, searchable. The page always reads the roster here, never
+   * from a row's embedded `placements` (older reports still carry one,
+   * capped at 200; the API serves it from this route too).
+   *
+   * `q` is a substring on developer_domain / developer_name, and on
+   * app_name / bundle_id when present. 503 with "too large" in the detail
+   * when the report did not keep that line's roster.
    */
   discoveredLinePlacements: async (
     token: string,
     key: DiscoveredLineKey,
-    opts: { page?: number; page_size?: number } = {},
+    opts: { page?: number; page_size?: number; q?: string } = {},
   ) => {
     if (MOCK) {
       const { mockDiscoveredLinePlacements } = await import("./mockData");
@@ -692,6 +712,7 @@ export const api = {
     q.set("cert_id", key.cert_id);
     q.set("page", String(opts.page ?? 1));
     q.set("page_size", String(opts.page_size ?? 100));
+    if (opts.q) q.set("q", opts.q);
     return req<DiscoveredPlacementsPage>(
       "GET",
       `/v1/viewer/${token}/discovered-lines/placements?${q.toString()}`,
@@ -1450,6 +1471,32 @@ export type DiscoveredPlacement = {
 };
 
 /**
+ * What the customer's OWN sellers.json says about a line's seller ID
+ * (reports from 2026-10-14). The discovery domain is the customer's domain,
+ * so every line's seller ID should be one of theirs: either the file lists
+ * it, with the seller's name and type, or it does not.
+ */
+export type SellerCheck =
+  | { status: "listed"; name: string; seller_type: string }
+  | { status: "unlisted" };
+
+/** Something in the line itself a publisher should fix: a placeholder or
+ *  malformed seller ID, a corrupted cert id, a seller carried with the
+ *  relationship the sellers.json does not give it, or the same seller ID
+ *  both as DIRECT and RESELLER. `text` is the sentence the page shows. */
+export type LineIssue = {
+  kind: "bad_id" | "bad_cert" | "relationship_mismatch" | "both_relationships";
+  text: string;
+};
+
+/**
+ * The `show` filter of api.discoveredLines. "new" is previous_placements_count
+ * null while the report compares (totals.baseline "compared"); "fixing" is
+ * issues non-empty; "listed" / "unlisted" is seller.status.
+ */
+export type DiscoveredShow = "direct" | "reseller" | "new" | "fixing" | "listed" | "unlisted";
+
+/**
  * One discovered ads.txt line, which is the unit this page is built on.
  *
  * The first four fields ARE the line as it appears in the file, in file
@@ -1475,9 +1522,10 @@ export type DiscoveredLine = {
    */
   previous_placements_count: number | null;
   /**
-   * Embedded placements, present only for narrow lines (see the contract
-   * note on api.discoveredLines). Absent means "ask the placements
-   * endpoint", it never means "this line has no placements".
+   * Embedded placements, which reports frozen before 2026-10-14 carry for
+   * narrow lines (capped at 200). The page ignores it: the roster always
+   * comes from api.discoveredLinePlacements, which serves the embedded one
+   * for those older reports. Absent never means "no placements".
    */
   placements?: DiscoveredPlacement[];
   /** Different publishers carrying the line, each once whichever of its
@@ -1494,6 +1542,10 @@ export type DiscoveredLine = {
   /** false: last week's report did not watch this line's domain, so the
    *  line is neither new nor moved (reports from 2026-10-11). */
   previous_watched?: boolean;
+  /** The seller ID against the customer's own sellers.json, and what a
+   *  publisher should fix (reports from 2026-10-14; absent before). */
+  seller?: SellerCheck;
+  issues?: LineIssue[];
 };
 
 /** The four fields that identify a line, for the placements endpoint. */
@@ -1534,6 +1586,28 @@ export type DiscoveredTotals = {
   /** The discovery domains changed since last week (added or dropped):
    *  the totals are not compared. */
   scope_changed?: boolean;
+  /** The customer's sellers.json the lines were checked against (reports
+   *  from 2026-10-14). Null when the report has no file to check with. */
+  sellers_json?: {
+    url: string;
+    sellers: number;
+    read_at: string;
+    listed_ids: number;
+    unlisted_ids: number;
+  } | null;
+  /** Lines whose seller ID is, and is not, in that file; absent with no
+   *  file. The Lines stat's caption, and nowhere else. */
+  in_file_lines?: number;
+  not_in_file_lines?: number;
+  /** Lines with at least one issue. */
+  needs_fixing?: number;
+  /** Why last week is, or is not, compared (reports from 2026-10-14):
+   *  "cut" when last week's list was cut short when that report was made,
+   *  "none" on a first report. Absent before: the page reads
+   *  previous_lines and the summary's previous_job_id instead. The
+   *  discovery domains themselves come from the summary's
+   *  watchlist.discover, not from here. */
+  baseline?: "compared" | "cut" | "none";
 };
 
 export type DiscoveredLinesPage = {

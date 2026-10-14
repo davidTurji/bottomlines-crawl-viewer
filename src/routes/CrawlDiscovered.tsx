@@ -2,14 +2,12 @@ import { Pager, usePaging } from "@/components/ListControls";
 import { Collapse, Settle } from "@/components/Motion";
 import { usePageCache } from "@/lib/pageCache";
 import LockedTail from "@/components/LockedTail";
+import { MiniStat } from "@/components/MiniStat";
 import TrialBanner from "@/components/TrialBanner";
-import {
-  SkeletonInlineRows,
-  SkeletonRows,
-  SkeletonStatCards,
-} from "@/components/Skeleton";
+import { SkeletonInlineRows, SkeletonRows, SkeletonStatCards } from "@/components/Skeleton";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { ChevronDown, Download, Radar } from "lucide-react";
+import { useNavigate } from "react-router-dom";
+import { ChevronDown, ChevronLeft, ChevronRight, Download, Radar, Search } from "lucide-react";
 
 import {
   ApiError,
@@ -18,65 +16,63 @@ import {
   type DiscoveredLine,
   type DiscoveredLineKey,
   type DiscoveredPlacement,
+  type DiscoveredShow,
   type DiscoveredTotals,
   type Summary,
 } from "../lib/api";
-import {
-  lineMeasure,
-  SORT_OPTIONS,
-  type SortKey,
-  sortDiscoveredLines,
-} from "../lib/discoveredSort";
+import { lineMeasure, SORT_OPTIONS, type SortKey, sortDiscoveredLines } from "../lib/discoveredSort";
 import { FilterAction, FilterBar, FilterSearch, FilterSelect } from "@/components/FilterBar";
 import { PageShell } from "@/components/PageShell";
 import { ActionableLine, PublisherDomainLink } from "@/components/PublisherLinks";
-import { type Origin, originOf, originsFrom, originWords } from "@/lib/discoveredOrigin";
 import { formatWeek, WeekLine } from "@/components/WeekLine";
 import { PAGE_SIZE } from "@/lib/paging";
 import { useReportScope } from "@/lib/reportScope";
+import { useSellersPage } from "@/lib/useSellersPage";
 import { cn, foundInLabel, storeLabel } from "@/lib/utils";
-import { computeDelta, MiniStat, SplitStat } from "./CrawlReport";
+import { computeDelta, SplitStat } from "./CrawlReport";
 
 /**
- * DISCOVERED LINES.
+ * DISCOVERY, own-domain edition (2026-10-14).
  *
- * The unit on this page is THE LINE, not the publisher. A discovery crawl
- * asks one question ("who is carrying madeupmedia.com at all?") and the answer
- * is a set of ads.txt lines, each of which turns up on some number of
- * publishers. The previous draft flattened that into a (publisher x line)
- * grid, which is the right shape for the export workbook and the wrong shape
- * for a reader: the same line repeated four hundred times buried the only
- * fact a WEEKLY crawl exists to deliver, which is whether that line is on
- * more publishers than it was seven days ago.
+ * The page answers one question: every ads.txt and app-ads.txt line on the
+ * open web that STARTS WITH the customer's domain. One card per distinct
+ * line, publishers counted once each, the week-over-week move per line.
  *
- * So: one card per line. The card's face carries the line itself, the number
- * of publishers, and the week-over-week move. Nothing else. Clicking it
- * opens the roster of publishers carrying it, and which of their two files
- * it was found in.
+ * What changed against the page before it:
+ *   - the "given by you / found by Path Finder" split is gone: for a line
+ *     that starts with the customer's own domain the only honest reference
+ *     is their own sellers.json, so each card says whether its seller ID is
+ *     in that file, and what the file calls the seller;
+ *   - a "needs fixing" mark on lines that cannot be right (a placeholder or
+ *     malformed seller ID, a corrupted cert id, a seller carried with the
+ *     relationship the file does not give it, the same seller ID both as
+ *     DIRECT and RESELLER);
+ *   - last week is compared only when it can be, and the rectangle says why
+ *     when it cannot (readBaseline below), never "first report" for a week
+ *     that merely could not be read;
+ *   - the roster under a line is whole: paged, searchable, with the
+ *     publisher and file links, always from the placements endpoint.
  *
- * ORDER. The default is not "widest first" but "newest first": lines with
- * no previous week lead, then the biggest weekly gains, then the standing
- * picture widest-first. That order is the endpoint's contract, not a client
- * opinion (see api.discoveredLines and compareDefault in
- * src/lib/discoveredSort.ts), which is what lets it survive paging. The
- * sort control offers four alternatives, and those ARE client-side, over
- * the loaded page only; the bar says so whenever it matters.
+ * ORDER. The default is the endpoint's own (new lines first, then the
+ * biggest weekly gains, then widest first; see compareDefault in
+ * src/lib/discoveredSort.ts), which is what lets it survive paging. The sort
+ * control's alternatives are client-side over the loaded page, and the bar
+ * says so whenever that matters.
  *
- * Data contract, including the exact endpoints this page wants built, is
- * documented on api.discoveredLines in src/lib/api.ts.
+ * Data contract: api.discoveredLines and api.discoveredLinePlacements in
+ * src/lib/api.ts.
  */
 
+type ShowFilter = "all" | DiscoveredShow;
+
+const ROSTER_PAGE = 100;
 
 export default function CrawlDiscovered() {
-  const { token } = useReportScope();
+  const { token, basePath } = useReportScope();
   const [summary, setSummary] = useState<Summary | null>(null);
-  // Whether the summary request has SETTLED, success or failure — which
-  // is not the same question as whether a summary arrived. Every page here
-  // swallows a summary failure (the week line is the only thing that reads
-  // it, and a page whose own numbers are fine should not die for a missing
-  // date), so `summary` stays null forever on an old artifact whose summary
-  // does not load. Reserving the week line's space on `!summary` would then
-  // shimmer a skeleton bar for ever on exactly those older links.
+  // Whether the summary request has SETTLED, success or failure, which is
+  // not the same question as whether a summary arrived: a page whose own
+  // numbers are fine must not die, or shimmer for ever, for a missing one.
   const [summarySettled, setSummarySettled] = useState(false);
   const [previous, setPrevious] = useState<Summary | null>(null);
   const [rows, setRows] = useState<DiscoveredLine[]>([]);
@@ -89,23 +85,24 @@ export default function CrawlDiscovered() {
   const [trial, setTrial] = useState<TrialSlice | null>(null);
   const [page, setPage] = useState(1);
   const paging = usePaging(setPage);
-  const [ssp, setSsp] = useState("");
+  const [q, setQ] = useState("");
+  const [show, setShow] = useState<ShowFilter>("all");
+  const [sort, setSort] = useState<SortKey>("default");
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [exporting, setExporting] = useState(false);
   const [open, setOpen] = useState<Set<string>>(new Set());
-  const [sort, setSort] = useState<SortKey>("default");
-  /** Which lines to list: all, the ones the customer gave us, or the ones
-   *  Path Finder found (David, 2026-10-11). */
-  const [origin, setOrigin] = useState<OriginFilter>("all");
-
   // Whether this crawl has any discovered lines at all, independent of the
-  // filter. Without it an over-narrow filter would render the "this crawl
-  // did not use discovery domains" card, which would be a lie about the
-  // crawl rather than a fact about the filter.
+  // filter, so an over-narrow filter never renders the "did not look"
+  // card, which would be a lie about the report rather than a fact about
+  // the filter.
   const [anyDiscovered, setAnyDiscovered] = useState<boolean | null>(null);
+  // The badges link to the Sellers.json page only when the report has it,
+  // by the rail's own rule.
+  const sellersPage = useSellersPage(token);
 
-  const filter = ssp.trim();
+  const filter = q.trim();
+  const filtered = Boolean(filter) || show !== "all";
 
   useEffect(() => {
     let cancelled = false;
@@ -114,9 +111,9 @@ export default function CrawlDiscovered() {
       .then((s) => !cancelled && setSummary(s))
       .catch(() => {})
       .finally(() => !cancelled && setSummarySettled(true));
-    // Only for the week line's "compared with" date. The comparison figures
-    // themselves come from the discovered-lines totals, not from here, so a
-    // failure costs the date and nothing else.
+    // Only for the week line's "compared with" date. The comparison itself
+    // comes from the discovered-lines totals, so a failure costs the date
+    // and nothing else.
     api
       .previousSummary(token)
       .then((p) => !cancelled && setPrevious(p))
@@ -126,9 +123,7 @@ export default function CrawlDiscovered() {
     };
   }, [token]);
 
-  useEffect(() => setPage(1), [ssp, origin]);
-  // The browser's own marks, for an API that does not mark lines yet.
-  const originFallback = useMemo(() => originsFrom(summary?.watchlist?.seats), [summary]);
+  useEffect(() => setPage(1), [filter, show]);
 
   useEffect(() => {
     let cancelled = false;
@@ -136,13 +131,13 @@ export default function CrawlDiscovered() {
       api.discoveredLines(token, {
         page: pg,
         page_size: PAGE_SIZE,
-        ssp_domain: filter || undefined,
-        origin: origin === "all" ? undefined : origin,
+        q: filter || undefined,
+        show: show === "all" ? undefined : show,
       });
     type Loaded = Awaited<ReturnType<typeof load>>;
-    const keyFor = (pg: number) => `${pg}|${filter}|${origin}`;
+    const keyFor = (pg: number) => `${pg}|${filter}|${show}`;
     // Read the next page while this one is on screen, so "next" is
-    // instant. Not while an SSP filter is being typed.
+    // instant. Not while a search is being typed.
     const readAhead = (r: Loaded) => {
       if (!filter && page * PAGE_SIZE < r.total) {
         cache.prefetch(keyFor(page + 1), () => load(page + 1));
@@ -154,12 +149,11 @@ export default function CrawlDiscovered() {
       setTotals(r.totals);
       setCut(Boolean(r.cut));
       setTrial(r.trial ?? null);
-      // Changing page or filter re-renders a different set of cards, so
-      // an expansion held open from the previous set would either vanish
-      // or, worse, appear to belong to a line it does not.
+      // A different set of cards: an expansion held open from the previous
+      // set would vanish or, worse, appear to belong to another line.
       setOpen(new Set());
-      // An unfiltered answer settles the question for the whole crawl.
-      if (!filter && origin === "all") setAnyDiscovered(r.total > 0);
+      // An unfiltered answer settles the question for the whole report.
+      if (!filtered) setAnyDiscovered(r.total > 0);
       else if (r.total > 0) setAnyDiscovered(true);
     };
     setError(null);
@@ -183,7 +177,7 @@ export default function CrawlDiscovered() {
     return () => {
       cancelled = true;
     };
-  }, [token, page, filter, origin, cache]);
+  }, [token, page, filter, show, filtered, cache]);
 
   const toggle = useCallback((key: string) => {
     setOpen((prev) => {
@@ -194,87 +188,73 @@ export default function CrawlDiscovered() {
     });
   }, []);
 
-  const weekLabel = summary?.finished_at
-    ? formatWeek(new Date(summary.finished_at))
-    : null;
-  const prevWeekLabel = previous?.finished_at
-    ? formatWeek(new Date(previous.finished_at))
-    : null;
-
+  const weekLabel = summary?.finished_at ? formatWeek(new Date(summary.finished_at)) : null;
+  const prevWeekLabel = previous?.finished_at ? formatWeek(new Date(previous.finished_at)) : null;
   const pageCount = Math.max(1, Math.ceil(total / PAGE_SIZE));
-
-  /*
-   * THE LOCAL SORT, and the one honesty problem in it.
-   *
-   * "Do it locally" is what was asked for, and locally is what this is: it
-   * reorders `rows`, which is the page the endpoint just handed back, and
-   * it never refetches. On the default option that is free of consequence,
-   * because the default IS the endpoint's ORDER BY, so re-sorting is a
-   * no-op and page 3 of "New and biggest gains" is genuinely the third
-   * slice of the whole list.
-   *
-   * Every other option is only true of what is on screen. Pick "Biggest
-   * decrease" on a list of 170 lines and you get the biggest decrease among
-   * these 50, not among the 170. That is a real way to mislead somebody, so
-   * the bar says it out loud (`localOnly` below) rather than leaving the
-   * reader to infer it from a page number. Making these sorts global means
-   * a `sort=` parameter on the endpoint, which is a backend change and was
-   * explicitly not what was asked for.
-   */
+  // The local sort reorders the loaded page only; on the default option
+  // that is the endpoint's own order, so it is a no-op. Every other option
+  // is true of what is on screen, and the bar says so (localOnly).
   const sorted = useMemo(() => sortDiscoveredLines(rows, sort), [rows, sort]);
   const localOnly = sort !== "default" && pageCount > 1;
-
-  // No rows, no filter, and the crawl itself has none: a seat-line-only
-  // crawl, which is a normal thing to be, not an error.
   const noDiscovery = !loading && !error && total === 0 && anyDiscovered === false;
+  const onTrial = Boolean(trial || summary?.trial);
 
-  // Last week's figures. Null on a first crawl, where there is no prior week
-  // and inventing a delta would be a lie.
-  //
-  // These ARE comparable under a filter, unlike the ones on Changes. The
-  // endpoint computes `totals` and `previous_*` over the same filtered set
-  // (see _DISCOVERED_PREV_TOTALS_SQL, which carries the same ssp
-  // predicate), so both sides describe the same slice. Changes has to
-  // suppress its deltas under a filter because there the current count is
-  // filtered client-side while last week's comes unfiltered from the
-  // summary; that asymmetry does not exist here, and suppressing anyway
-  // would hide a true answer to "did madeupmedia grow this week".
-  // NOTHING TO COMPARE WITH (David, 2026-10-11): a report whose baseline
-  // did not watch this domain holds zero lines for last week, and read
-  // that as growth ("+2,952 vs last week", every line "new this week" on
-  // Truvid). Zero last week beside lines this week means no comparison.
-  // Reports from 2026-10-11 send null here themselves.
-  const noBaseline = totals?.previous_lines === 0 && (totals?.lines ?? 0) > 0;
-  // Reports from 2026-10-11 name the domains last week did not watch.
-  const unwatched = totals?.unwatched_domains ?? [];
-  const prevLines = noBaseline ? null : (totals?.previous_lines ?? null);
-  const prevPlacements = noBaseline ? null : (totals?.previous_placements ?? null);
-  // Absent on reports frozen before the crawler counted it, and null on a
-  // first crawl, where every line is "new" and saying so would be noise.
-  const newLines = prevLines != null ? (totals?.new_lines ?? null) : null;
-  // Who brought the lines, counted by the API over the whole list. Absent
-  // from an older API, or when the list was cut: the page then shows no
-  // split rather than one counted over a page.
-  const split = totals?.given_lines != null && totals?.found_lines != null;
+  const baseline = useMemo(() => readBaseline(totals, summary, summarySettled), [totals, summary, summarySettled]);
+  // "New this week" is a count only against a week that was compared.
+  const newLines = baseline.totals && totals?.new_lines != null ? totals.new_lines : null;
   // Publishers once each (reports from 2026-10-11); an older report counts
   // files and says so.
-  const countsPublishers = totals != null && totals.publishers !== undefined;
-  // The Show filter only exists with the split; never leave the list
-  // filtered by a control that is no longer on screen.
+  const countsPublishers = totals?.publishers != null;
+  const domains = summary?.watchlist?.discover ?? [];
+  // The sellers.json coverage lives in this caption only.
+  const linesCaption =
+    totals && totals.in_file_lines != null && totals.not_in_file_lines != null
+      ? `${totals.in_file_lines.toLocaleString()} in your sellers.json, ${totals.not_in_file_lines.toLocaleString()} not`
+      : "Each different line, counted once";
+
+  // The Show menu offers only what the report can answer: "New this week"
+  // needs a compared week, the sellers.json pair needs the file.
+  const hasSellersJson = Boolean(totals?.sellers_json);
+  const showOptions = useMemo(() => {
+    const o: { value: ShowFilter; label: string }[] = [
+      { value: "all", label: "All lines" },
+      { value: "direct", label: "DIRECT lines" },
+      { value: "reseller", label: "RESELLER lines" },
+    ];
+    if (baseline.lines) o.push({ value: "new", label: "New this week" });
+    o.push({ value: "fixing", label: "Needs fixing" });
+    if (hasSellersJson) {
+      o.push({ value: "listed", label: "In your sellers.json" });
+      o.push({ value: "unlisted", label: "Not in your sellers.json" });
+    }
+    return o;
+  }, [baseline.lines, hasSellersJson]);
+  // Never leave the list filtered by an option that is no longer offered.
   useEffect(() => {
-    if (totals && !split && origin !== "all") setOrigin("all");
-  }, [totals, split, origin]);
+    if (totals && !showOptions.some((o) => o.value === show)) setShow("all");
+  }, [totals, showOptions, show]);
 
   return (
     <PageShell>
       {summary?.trial && <TrialBanner caps={summary.trial} summary={summary} />}
-      {/* Page header */}
       <div className="min-w-0" data-tour="discovery-header">
         <h1 className="text-xl font-bold leading-tight tracking-tight text-slate-900 sm:text-2xl">
           Discovery
         </h1>
         <p className="mt-1 text-sm text-slate-500">
-          Every line on the open web carrying one of your domains.
+          Every ads.txt and app-ads.txt line on the open web that starts with your domain
+          {domains.length > 0 && (
+            <>
+              {": "}
+              {domains.map((d, i) => (
+                <span key={d}>
+                  <span className="font-mono text-[13px] text-slate-700">{d}</span>
+                  {i < domains.length - 1 ? ", " : ""}
+                </span>
+              ))}
+            </>
+          )}
+          .
         </p>
         <WeekLine
           week={weekLabel}
@@ -285,51 +265,22 @@ export default function CrawlDiscovered() {
         />
       </div>
 
-      {/* One KPI card, full width. It was two: this one, plus a second card
-          that put last week's placements next to this week's. Once each
-          stat here carries its own "vs last week" delta, that second card
-          was the same comparison spelled out a second way, so it went. */}
-      {/* The KPI card's own slot, so the real card lands where its
-          outline was rather than arriving above the filter bar and
-          pushing the list down. */}
+      {/* The KPI card's own slot, so the real card lands where its outline
+          was rather than pushing the list down. */}
       {loading && !totals && <SkeletonStatCards />}
 
       {!noDiscovery && totals && (
-        <div
-          className="rounded-2xl border border-border bg-white p-5 shadow-sm"
-          data-tour="discovery-kpi"
-        >
+        <div className="rounded-2xl border border-border bg-white p-5 shadow-sm" data-tour="discovery-kpi">
           <div className="mb-3 flex items-baseline justify-between gap-3">
             <div>
               <div className="font-display text-sm font-medium text-slate-700">
-                Lines carrying your domains
+                Lines that start with your domain
               </div>
-              <div className="text-[11px] text-slate-500">
-                {unwatched.length > 0
-                  ? `Last week's report did not watch ${unwatched.join(", ")}, so the totals are not compared`
-                  : totals?.scope_changed
-                  ? "Your discovery domains changed since last week, so the totals are not compared"
-                  : noBaseline
-                  ? "No lines carried this domain last week, so there is nothing to compare"
-                  : prevLines == null && prevPlacements == null
-                  ? "First crawl, no prior week to compare"
-                  : "Found across every publisher we scanned, against last week"}
-              </div>
+              <div className="text-[11px] text-slate-500">{baseline.words}</div>
             </div>
-            {filter && (
-              <span className="text-xs text-slate-500">this filter</span>
-            )}
           </div>
-          {/* NEW THIS WEEK LEADS, wider, in the info blue the page's new
-              cards wear (on white, not a tinted ground), because "what
-              appeared" is what a weekly reader opens Discovery for. Only
-              when the report says: an older one, or a first crawl, has no
-              such count and shows the two totals alone. Each label carries
-              a caption, since "Distinct lines" and "Publisher placements"
-              did not say what they count. */}
-          {/* THE THREE CARDS, as they always looked (David, 2026-10-11):
-              the split of who brought the lines lives in the middle card's
-              caption, never in cards of its own. */}
+          {/* New this week leads, wider, in the info blue the new cards
+              wear, only when the report compares. */}
           <div
             className={cn(
               "grid gap-px overflow-hidden rounded-xl border border-border bg-border",
@@ -349,25 +300,27 @@ export default function CrawlDiscovered() {
             <SplitStat
               number={totals.lines}
               label="Lines with your domain"
-              caption={
-                split
-                  ? `${totals.given_lines!.toLocaleString()} given by you, ${totals.found_lines!.toLocaleString()} found automatically by Path Finder`
-                  : "Each different ads.txt line, counted once"
-              }
+              caption={linesCaption}
               className="bg-white"
-              delta={prevLines != null ? computeDelta(totals.lines, prevLines) : null}
+              delta={
+                baseline.totals && totals.previous_lines != null
+                  ? computeDelta(totals.lines, totals.previous_lines)
+                  : null
+              }
+              note={baseline.totals ? undefined : "not compared"}
             />
-            {countsPublishers && totals.publishers != null ? (
+            {countsPublishers ? (
               <SplitStat
-                number={totals.publishers}
+                number={totals.publishers ?? 0}
                 label="Publishers carrying your domain"
-                caption="With a line naming your domain, each counted once"
+                caption="Each counted once, whichever of its files"
                 className="bg-white"
                 delta={
-                  totals.previous_publishers != null
-                    ? computeDelta(totals.publishers, totals.previous_publishers)
+                  baseline.totals && totals.previous_publishers != null
+                    ? computeDelta(totals.publishers ?? 0, totals.previous_publishers)
                     : null
                 }
+                note={baseline.totals ? undefined : "not compared"}
               />
             ) : (
               <SplitStat
@@ -375,7 +328,12 @@ export default function CrawlDiscovered() {
                 label="Publisher listings"
                 caption="One per publisher file carrying a line"
                 className="bg-white"
-                delta={prevPlacements != null ? computeDelta(totals.placements, prevPlacements) : null}
+                delta={
+                  baseline.totals && totals.previous_placements != null
+                    ? computeDelta(totals.placements, totals.previous_placements)
+                    : null
+                }
+                note={baseline.totals ? undefined : "not compared"}
               />
             )}
           </div>
@@ -395,30 +353,17 @@ export default function CrawlDiscovered() {
         </div>
       )}
 
-      {/* Filter, sort and export. Search and sort are ONE bar, hairline
-          divided, in the console's filter-bar language rather than two
-          controls floating side by side; export keeps its place on the
-          right. Deliberately quiet chrome: the cards are the page. */}
       {!noDiscovery && (
         <div className="space-y-2">
-          {/* Search, sort and export are ONE bar spanning the row. The
-              export used to be a separate pill outside it, a different
-              height from the search and free to wrap onto its own line. */}
           <FilterBar className="w-full min-w-0">
-            <FilterSearch
-              value={ssp}
-              onChange={setSsp}
-              placeholder="Filter by SSP domain"
+            <FilterSearch value={q} onChange={setQ} placeholder="Search seller IDs, publishers or apps" />
+            <FilterSelect
+              value={show}
+              onChange={setShow}
+              options={showOptions}
+              leading="Show"
+              ariaLabel="Show which lines"
             />
-            {split && (
-              <FilterSelect
-                value={origin}
-                onChange={setOrigin}
-                options={ORIGIN_OPTIONS}
-                leading="Show"
-                ariaLabel="Show lines by who brought them"
-              />
-            )}
             <FilterSelect
               value={sort}
               onChange={setSort}
@@ -431,21 +376,16 @@ export default function CrawlDiscovered() {
               disabled={exporting || total === 0}
               onClick={() => {
                 setExporting(true);
-                downloadCsv(token, filter, origin, originFallback).finally(() => setExporting(false));
+                downloadCsv(token, filter, show).finally(() => setExporting(false));
               }}
             >
               {exporting ? "Preparing..." : "Export CSV"}
             </FilterAction>
           </FilterBar>
-          {/* Only when it can actually mislead: a sort that is not the
-              endpoint's own order, on a list long enough to have a second
-              page. One page, or the default sort, and this line would be
-              noise. */}
           {localOnly && (
             <p className="text-[11px] leading-relaxed text-slate-400">
-              This sort reorders the {rows.length.toLocaleString()} lines on
-              this page. The full list of {(total ?? 0).toLocaleString()} stays in
-              new and biggest gains order.
+              This sort reorders the {rows.length.toLocaleString()} lines on this page. The full list of{" "}
+              {(total ?? 0).toLocaleString()} stays in new and biggest gains order.
             </p>
           )}
         </div>
@@ -453,16 +393,15 @@ export default function CrawlDiscovered() {
 
       {loading && <SkeletonRows rows={6} label="Loading discovered lines" />}
       {error && <p className="py-4 text-sm text-critical">{error}</p>}
-
       {noDiscovery && <NoDiscoveryCard />}
 
       {!loading && !error && !noDiscovery && rows.length === 0 && (
         <p className="rounded-2xl border border-dashed border-border bg-muted/20 px-6 py-10 text-center text-sm text-slate-500">
-          No discovered lines match this filter.
+          No lines match this filter.
         </p>
       )}
 
-      {!error && !trial && !summary?.trial && total > 0 && pageCount > 1 && (
+      {!error && !onTrial && total > 0 && pageCount > 1 && (
         <Pager
           placement="top"
           anchorRef={paging.topRef}
@@ -482,10 +421,12 @@ export default function CrawlDiscovered() {
               <Settle key={key} index={i}>
                 <LineCard
                   token={token}
+                  basePath={basePath}
                   line={line}
-                  origin={originOf(line, originFallback)}
-                  compare={!noBaseline && line.previous_watched !== false}
-                  canExport={!trial && !summary?.trial}
+                  compare={baseline.lines && line.previous_watched !== false}
+                  search={filter}
+                  canExport={!onTrial}
+                  sellersPage={sellersPage}
                   open={open.has(key)}
                   onToggle={() => toggle(key)}
                 />
@@ -495,15 +436,15 @@ export default function CrawlDiscovered() {
         </div>
       )}
 
-      {(summary?.trial || trial) && (
+      {onTrial && (
         <LockedTail
           slice={trial}
           caps={summary?.trial ?? null}
           noun="discovered lines"
-          detail="line on the open web that carries one of your domains, with every placement"
+          detail="line on the open web that starts with your domain, with every publisher carrying it"
         />
       )}
-      {!trial && !summary?.trial && total > 0 && pageCount > 1 && (
+      {!onTrial && total > 0 && pageCount > 1 && (
         <Pager
           className="border-t border-border/70 pt-4"
           page={page}
@@ -517,142 +458,117 @@ export default function CrawlDiscovered() {
   );
 }
 
+/* ── Why last week is, or is not, compared ────────────────────────── */
+
+type Baseline = {
+  /** The lines compare with last week: "new this week", last week, change. */
+  lines: boolean;
+  /** The totals compare: the deltas on the KPI rectangle. */
+  totals: boolean;
+  words: string;
+};
+
+const COMPARED_WORDS = "Across every publisher we scanned, against last week";
+const FIRST_WORDS = "First report, no earlier week to compare";
+const CUT_WORDS =
+  "Last week's list was cut short when that report was made, so there is nothing to compare this week";
+const UNKNOWN_WORDS = "Last week could not be compared";
+
+/**
+ * Reports from 2026-10-14 say it themselves (totals.baseline). An older
+ * report is read from its numbers: a previous count compares; zero last
+ * week beside lines this week means the baseline did not watch the domain
+ * (2026-10-11: read as growth, "+2,952 vs last week", on Truvid); no
+ * previous count is a first report only when the summary says there was
+ * no earlier crawl, else a week that could not be compared, which is not
+ * the same claim. A dropped or unwatched domain keeps its own sentence
+ * and turns the totals' deltas off.
+ */
+function readBaseline(totals: DiscoveredTotals | null, summary: Summary | null, settled: boolean): Baseline {
+  if (!totals) return { lines: false, totals: false, words: "" };
+  let lines: boolean;
+  let words: string;
+  if (totals.baseline) {
+    lines = totals.baseline === "compared";
+    words = totals.baseline === "cut" ? CUT_WORDS : totals.baseline === "none" ? FIRST_WORDS : COMPARED_WORDS;
+  } else if (totals.previous_lines === 0 && totals.lines > 0) {
+    lines = false;
+    words = "No lines carried this domain last week, so there is nothing to compare";
+  } else if (totals.previous_lines == null) {
+    lines = false;
+    words = settled && summary?.previous_job_id === null ? FIRST_WORDS : UNKNOWN_WORDS;
+  } else {
+    lines = true;
+    words = COMPARED_WORDS;
+  }
+  const unwatched = totals.unwatched_domains ?? [];
+  if (unwatched.length > 0) {
+    return {
+      lines,
+      totals: false,
+      words: `Last week's report did not watch ${unwatched.join(", ")}, so the totals are not compared`,
+    };
+  }
+  if (totals.scope_changed) {
+    return {
+      lines,
+      totals: false,
+      words: "Your discovery domains changed since last week, so the totals are not compared",
+    };
+  }
+  return { lines, totals: lines, words };
+}
+
 /* ── The card ──────────────────────────────────────────────────────── */
 
 /**
- * One line, built as a deliberate sibling of PublisherCard on the overview
- * page: same rounded-3xl white card, same shadow, same 44px disc on the
- * left, same right-aligned MiniStats, same chevron, same tinted expanded
- * body. A reader who has learned one row has learned both.
- *
- * The one difference is the family colour. Publishers wear the brand's
- * racing green (bg-accent / text-primary); a discovered line is not a
- * publisher, so it wears the design system's own blue, the `info` tone
- * (--tone-info in index.css), on both the disc and the expanded tint.
- *
- * The primary slot carries the whole ads.txt line, cert included, because
- * that string IS the unit of this page. It truncates rather than wraps: a
- * card that changes height with the length of a cert id stops reading as
- * a row in a list.
- *
- * The whole face is the button, so a click anywhere opens it, and the
- * chevron is decoration rather than a second, smaller target.
+ * One line, a deliberate sibling of PublisherCard on the overview: same
+ * rounded-3xl card, same 44px disc, same right-aligned MiniStats, same
+ * chevron, same tinted expanded body, in the `info` blue a line (not a
+ * publisher) wears. The whole face is the button; the badge inside it is
+ * the one thing that is not, when it links to the Sellers.json page.
  */
 function LineCard({
   token,
+  basePath,
   line,
-  origin,
-  compare = true,
-  canExport = true,
+  compare,
+  search,
+  canExport,
+  sellersPage,
   open,
   onToggle,
 }: {
   token: string;
+  basePath: string;
   line: DiscoveredLine;
-  /** False when last week did not watch this domain: no "new", no move. */
-  compare?: boolean;
+  /** False when last week cannot be set against this line: no "new", no move. */
+  compare: boolean;
+  /** The page's search term, carried into the roster when the card opens. */
+  search: string;
   /** A full report has an Excel export; a trial has none. */
-  canExport?: boolean;
-  /** Who brought the line; null when the report cannot say. */
-  origin: Origin | null;
+  canExport: boolean;
+  /** The report has the Sellers.json page, so the badge opens it. */
+  sellersPage: boolean;
   open: boolean;
   onToggle: () => void;
 }) {
-  // Embedded placements are authoritative when present; the wide lines
-  // arrive without them and are fetched once, on first expand, then kept.
-  const [fetched, setFetched] = useState<
-    DiscoveredPlacement[] | "loading" | "error" | "toolarge" | null
-  >(null);
-  const embedded = line.placements;
-  const placements = embedded ?? fetched;
-  const key = lineKey(line);
-
-  // Liveness, not per-run cancellation. A `let cancelled` closure would be
-  // wrong here: setFetched("loading") re-renders, which tears down the very
-  // effect run that owns the in-flight request, and the response would then
-  // be discarded as stale, leaving the panel on "Loading..." forever.
-  const alive = useRef(true);
-  useEffect(() => {
-    alive.current = true;
-    return () => {
-      alive.current = false;
-    };
-  }, []);
-
-  // One request per line, guarded by a ref rather than by state so the
-  // effect does not depend on the value it sets.
-  const requested = useRef<string | null>(null);
-  useEffect(() => {
-    if (!open || embedded) return;
-    if (requested.current === key) return;
-    requested.current = key;
-    setFetched("loading");
-    const lineId: DiscoveredLineKey = {
-      ssp_domain: line.ssp_domain,
-      publisher_id: line.publisher_id,
-      relationship: line.relationship,
-      cert_id: line.cert_id,
-    };
-    api
-      .discoveredLinePlacements(token, lineId, { page: 1, page_size: 500 })
-      .then((r) => {
-        if (alive.current) setFetched(r.rows);
-      })
-      .catch((e: unknown) => {
-        if (!alive.current) return;
-        // Let a re-open try again rather than pinning the error forever.
-        requested.current = null;
-        // 503 here means the report did not keep this line's list (too
-        // large), which a retry cannot change.
-        // Only the bake's own answer: a passing storage hiccup is a 503 too.
-        setFetched(e instanceof ApiError && e.status === 503 && /too large/i.test(e.message) ? "toolarge" : "error");
-      });
-  }, [open, token, key, embedded, line]);
-
+  const navigate = useNavigate();
   const delta: Delta = compare ? deltaOf(line) : { kind: "flat" };
   const measure = lineMeasure(line);
-  const initial = (line.ssp_domain.replace(/^www\./i, "").charAt(0) || "?")
-    .toUpperCase();
-  /* NEVER CRASH ON A NUMBER THAT IS NOT THERE.
-     The artifact is the source of truth and it is now guarded at the
-     freeze and at the probe -- but a page that dies on one undefined
-     field takes the whole report with it, and the customer sees a blank
-     screen instead of the rest of their week. An absent count renders as
-     an absent count. Defence in depth, not a substitute for the fix. */
   // Publishers once each where the report counts them; else files, and
-  // the words say listings (David, 2026-10-11: "2 publishers" for one).
+  // the words say listings.
   const byPublisher = measure.unit === "publishers";
   const count = measure.now;
   const lastWeek = compare ? measure.before : null;
   const isNew = delta.kind === "new";
-  const words = origin ? originWords(origin) : null;
+  const initial = (line.ssp_domain.replace(/^www\./i, "").charAt(0) || "?").toUpperCase();
+  const mark = markOf(line);
+  const openSellers = () => navigate(`${basePath}/sellers`);
 
-  /*
-   * NEWNESS, SIGNALLED BY THE GROUND RATHER THAN BY A BADGE.
-   *
-   * A new line now leads the list, so the reader meets a run of them first
-   * and needs to know where that run ENDS without reading a word. Three
-   * changes do it, all inside the existing `info` tone, no new colour:
-   *
-   *   - the card ground goes to info-bg at 60%, a cool tint that separates
-   *     cleanly from the warm ivory page and from the plain white of every
-   *     other card;
-   *   - the hairline goes to info-border, so the card is outlined in the
-   *     same family it is filled with;
-   *   - the disc inverts, solid info with white type, which makes it the
-   *     strongest blue on the page and the thing the eye lands on first.
-   *
-   * The small blue dot that used to sit beside "new this week" is gone: on
-   * a tinted card with a solid disc it was a fourth statement of the same
-   * fact, and four is a highlighter. The words stay, now in the info tone,
-   * because "new" is the one thing a pair of numbers cannot say.
-   *
-   * Restraint is load-bearing here. The tint is a tint, not a fill: ten new
-   * cards in a row have to read as a calm band at the top of the list, not
-   * as ten alerts.
-   */
   return (
     <div
+      data-discovered-line={lineKey(line)}
       className={cn(
         "overflow-hidden rounded-3xl border shadow-sm transition-colors",
         isNew ? "border-info-border bg-info-bg/60" : "border-border bg-white",
@@ -665,9 +581,6 @@ function LineCard({
         aria-expanded={open}
         className="flex w-full items-center gap-4 px-4 py-4 text-left sm:px-5"
       >
-        {/* The SSP's initial, in the info tone. Same disc as the publisher
-            rows, a different family colour, and solid rather than tinted
-            when the line is new. */}
         <div
           className={cn(
             "flex h-11 w-11 flex-shrink-0 items-center justify-center rounded-full text-base font-semibold",
@@ -678,83 +591,76 @@ function LineCard({
         </div>
 
         <div className="min-w-0 flex-1">
-          {/*
-            The line, verbatim and dominant. The cert id is appended inside
-            the same mono run rather than dropped onto a second line: it IS
-            the fourth field of this one physical ads.txt line, and splitting
-            it would misrepresent the file. Muting it instead lets the eye
-            stop after the relationship, which is where the meaning ends,
-            while the full line stays copyable as one string.
-
-            truncate, not wrap: this is the row's identity slot, and a row
-            whose height depends on the length of a hex string stops reading
-            as one of a list.
-          */}
+          {/* The line, verbatim and dominant; the cert id muted inside the
+              same mono run, since it IS the fourth field of this line. */}
           <code className="block truncate font-mono text-[13px] font-semibold tracking-tight text-slate-900 sm:text-[15px]">
             {line.ssp_domain}, {line.publisher_id}, {line.relationship}
-            {line.cert_id && (
-              <span className="font-normal text-slate-400">, {line.cert_id}</span>
-            )}
+            {line.cert_id && <span className="font-normal text-slate-400">, {line.cert_id}</span>}
           </code>
 
-          {/* The secondary line. On mobile the MiniStats are hidden, so the
-              publisher count moves here; "new this week" is the one fact a
-              pair of numbers cannot state, so it stays at every width. */}
           <div className="mt-0.5 flex items-center gap-2.5 truncate text-xs text-slate-500">
             <span className="sm:hidden">
-              <span className="font-mono tabular-nums text-slate-700">
-                {count.toLocaleString()}
-              </span>{" "}
+              <span className="font-mono tabular-nums text-slate-700">{count.toLocaleString()}</span>{" "}
               {byPublisher ? (count === 1 ? "publisher" : "publishers") : count === 1 ? "listing" : "listings"}
             </span>
-            {/* WHO BROUGHT IT (David, 2026-10-11): "You gave us" for a line
-                in their list, sellers.json imports included; the detail
-                says how and when. */}
-            {words && origin && (
-              <span className="flex min-w-0 items-center gap-1.5" title={words.detail}>
+            {/* THE BADGE. The Sellers.json page owns the story (to add, to
+                fix, not seen); here the badge only says which group the
+                seller ID is in, and opens that page when the report has
+                it. A click on it must not toggle the card. */}
+            {mark && (
+              <span className="flex min-w-0 items-center gap-1.5" title={mark.detail || undefined}>
                 <span
+                  role={sellersPage ? "link" : undefined}
+                  tabIndex={sellersPage ? 0 : undefined}
+                  title={sellersPage ? "Open your Sellers.json page" : undefined}
+                  onClick={
+                    sellersPage
+                      ? (e) => {
+                          e.stopPropagation();
+                          openSellers();
+                        }
+                      : undefined
+                  }
+                  onKeyDown={
+                    sellersPage
+                      ? (e) => {
+                          if (e.key !== "Enter" && e.key !== " ") return;
+                          e.preventDefault();
+                          e.stopPropagation();
+                          openSellers();
+                        }
+                      : undefined
+                  }
                   className={cn(
-                    "flex-shrink-0 rounded-full border px-1.5 py-px text-[10px] font-medium",
-                    origin.origin === "given"
-                      ? "border-border bg-slate-50 text-slate-700"
-                      : "border-info-border bg-info-bg text-info",
+                    "flex-shrink-0 rounded-full border px-1.5 py-px text-[10px] font-medium transition-colors",
+                    mark.tone === "warn"
+                      ? "border-warn-border bg-warn-bg text-warn"
+                      : "border-border bg-slate-50 text-slate-700",
+                    sellersPage && (mark.tone === "warn" ? "hover:bg-warn-border/60" : "hover:bg-slate-100"),
                   )}
                 >
-                  {words.pill}
+                  {mark.pill}
                 </span>
-                <span className="truncate text-[11px] text-slate-500">{words.detail}</span>
+                {mark.detail && <span className="truncate text-[11px] text-slate-500">{mark.detail}</span>}
               </span>
             )}
-            {isNew && (
-              <span className="flex-shrink-0 font-medium text-info">
-                new this week
-              </span>
-            )}
+            {isNew && <span className="flex-shrink-0 font-medium text-info">new this week</span>}
           </div>
         </div>
 
-        {/* Three reserved columns rather than three optional ones. A line
-            with no previous week, or no move, leaves its slot empty instead
-            of sliding the others across, so the numbers stack into a column
-            down the list rather than jittering card to card. */}
+        {/* Three reserved columns, so the numbers stack down the list
+            rather than jittering card to card. */}
         <div className="hidden items-center gap-6 text-right sm:flex">
-          <div className="w-[72px]">
-            {lastWeek != null && (
-              <MiniStat label="Last week" value={lastWeek} />
-            )}
-          </div>
+          <div className="w-[72px]">{lastWeek != null && <MiniStat label="Last week" value={lastWeek} />}</div>
           <div className="w-[72px]">
             <MiniStat label="This week" value={count} emphasis />
           </div>
           <div className="w-[72px]">
             {(delta.kind === "up" || delta.kind === "down") && (
               <>
-                <div className="text-[10px] font-medium tracking-wide text-slate-500">
-                  Change
-                </div>
+                <div className="text-[10px] font-medium tracking-wide text-slate-500">Change</div>
                 {/* Down is amber, not red: a publisher dropping a line is
-                    worth attention but is a normal fact about the market,
-                    not a failure. */}
+                    worth attention, not a failure. */}
                 <div
                   className={cn(
                     "font-mono text-sm tabular-nums",
@@ -771,10 +677,7 @@ function LineCard({
 
         <ChevronDown
           aria-hidden
-          className={cn(
-            "h-4 w-4 flex-shrink-0 text-slate-400 transition-transform",
-            open && "rotate-180",
-          )}
+          className={cn("h-4 w-4 flex-shrink-0 text-slate-400 transition-transform", open && "rotate-180")}
         />
       </button>
 
@@ -782,109 +685,209 @@ function LineCard({
         <div
           className={cn(
             "border-t px-4 pb-4 pt-3 sm:px-5",
-            // On a new card the body is already sitting on an info tint, so
-            // it deepens slightly and keeps the card's own hairline family
-            // rather than reverting to the neutral border mid-card.
-            isNew
-              ? "border-info-border bg-info-bg/80"
-              : "border-border bg-info-bg/40",
+            isNew ? "border-info-border bg-info-bg/80" : "border-border bg-info-bg/40",
           )}
         >
-          <div className="mb-1 flex items-baseline justify-between">
-            <span className="text-xs font-medium text-slate-700">
-              Where it was found
-            </span>
-            {Array.isArray(placements) && (
-              // One row per publisher file, so it says listings: a
-              // publisher with the line in both files has two rows.
-              <span className="text-[11px] text-slate-500">
-                <span className="font-mono tabular-nums">{placements.length.toLocaleString()}</span>{" "}
-                {placements.length === 1 ? "listing" : "listings"}
-              </span>
-            )}
-          </div>
-          {placements === "loading" || placements === null ? (
-            <SkeletonInlineRows rows={4} label="Loading publishers for this line" />
-          ) : placements === "toolarge" ? (
-            <p className="py-2 text-xs text-slate-500">
-              This line is on too many publishers to list here.
-              {canExport ? " The full list is in your Excel export." : ""}
-            </p>
-          ) : placements === "error" ? (
-            <p className="py-2 text-xs text-critical">
-              Could not load the publishers for this line.
-            </p>
-          ) : placements.length === 0 ? (
-            <p className="py-2 text-xs text-slate-500">
-              No publishers recorded.
-            </p>
-          ) : (
-            /* Capped and scrollable: a line on four hundred publishers would
-               otherwise run for thousands of pixels and push every other
-               card off the screen. */
-            /* The border and the rounding live on the SCROLLER, not the
-               list, so a capped list clips at a clean rounded edge instead
-               of running a half-row past the frame. */
-            <div className="scroll-y max-h-[320px] overflow-y-auto rounded-md border border-border bg-white">
-              <ul className="divide-y divide-border">
-                {placements.map((p, i) => (
-                  // Each placement opens the publisher's file at this line,
-                  // and the publisher's name opens their site (David,
-                  // 2026-10-11: clickable like every other page).
-                  <ActionableLine
-                    key={`${p.developer_domain}|${p.bundle_id ?? ""}|${p.found_in}|${i}`}
-                    line={line}
-                    publisherDomain={p.developer_domain}
-                    foundIn={p.found_in}
-                    shown
-                    className="flex items-baseline gap-2.5 px-3 py-1.5 text-[11px]"
-                  >
-                    {p.app_name ? (
-                      // An app placement: name the APP, tag its store in the
-                      // pink app tone, and keep the bundle id in mono so it
-                      // still reads as a value taken from a file. A website
-                      // placement stays the bare domain row below.
-                      <>
-                        <span className="truncate font-sans text-slate-800">
-                          {p.app_name}
-                        </span>
-                        <span className="flex-shrink-0 rounded-full border border-app-border bg-app-bg px-1.5 py-px text-[10px] font-medium text-app">
-                          {storeLabel(p.store)}
-                        </span>
-                        {p.bundle_id && (
-                          <span className="truncate font-mono text-[10px] tabular-nums text-slate-400">
-                            {p.bundle_id}
-                          </span>
-                        )}
-                      </>
-                    ) : (
-                      <PublisherDomainLink
-                        domain={p.developer_domain}
-                        shown
-                        className="font-mono tabular-nums"
-                      />
-                    )}
-                    <span data-line-text className="ml-auto flex-shrink-0 text-[10px] text-slate-400">
-                      {foundInLabel(p.found_in)}
-                    </span>
-                  </ActionableLine>
-                ))}
-              </ul>
-            </div>
+          {/* The face already says the first issue; the list appears only
+              when there is more than one to say. */}
+          {line.issues && line.issues.length > 1 && (
+            <ul className="mb-3 space-y-1 text-[12px] text-warn">
+              {line.issues.map((it) => (
+                <li key={it.kind} className="flex gap-1.5">
+                  <span aria-hidden>•</span>
+                  <span>{it.text}</span>
+                </li>
+              ))}
+            </ul>
           )}
+          {open && <Roster token={token} line={line} initialQ={search} canExport={canExport} />}
         </div>
       </Collapse>
     </div>
   );
 }
 
-/* ── Weekly delta ──────────────────────────────────────────────────── */
+/* ── The roster: whole, paged, searchable ─────────────────────────── */
 
-type Delta =
-  | { kind: "new" }
-  | { kind: "flat" }
-  | { kind: "up"; n: number }
-  | { kind: "down"; n: number };
+type RosterData = { rows: DiscoveredPlacement[]; total: number } | "loading" | "error" | "toolarge";
+
+function Roster({
+  token,
+  line,
+  initialQ,
+  canExport,
+}: {
+  token: string;
+  line: DiscoveredLine;
+  initialQ: string;
+  canExport: boolean;
+}) {
+  const [page, setPage] = useState(1);
+  const [q, setQ] = useState(initialQ);
+  const [data, setData] = useState<RosterData>("loading");
+  // Liveness, not per-run cancellation: setData("loading") re-renders, and
+  // a `let cancelled` closure would then discard the very response it
+  // waited for.
+  const alive = useRef(true);
+  useEffect(() => {
+    alive.current = true;
+    return () => {
+      alive.current = false;
+    };
+  }, []);
+  const needle = q.trim();
+  useEffect(() => setPage(1), [needle]);
+  const key = lineKey(line);
+  useEffect(() => {
+    setData("loading");
+    const [ssp_domain, publisher_id, relationship, cert_id] = key.split("|");
+    const lineId: DiscoveredLineKey = { ssp_domain, publisher_id, relationship, cert_id };
+    api
+      .discoveredLinePlacements(token, lineId, { page, page_size: ROSTER_PAGE, q: needle || undefined })
+      .then((r) => alive.current && setData({ rows: r.rows, total: r.total }))
+      .catch((e: unknown) => {
+        if (!alive.current) return;
+        // 503 with the bake's own words: the report did not keep this
+        // line's roster, which a retry cannot change. Any other failure,
+        // a passing storage hiccup included, is an error.
+        setData(e instanceof ApiError && e.status === 503 && /too large/i.test(e.message) ? "toolarge" : "error");
+      });
+  }, [token, key, page, needle]);
+
+  const total = typeof data === "object" ? data.total : null;
+  const pages = total != null ? Math.max(1, Math.ceil(total / ROSTER_PAGE)) : 1;
+  const from = total ? (page - 1) * ROSTER_PAGE + 1 : 0;
+  const to = total ? Math.min(total, page * ROSTER_PAGE) : 0;
+
+  return (
+    <>
+      <div className="mb-2 flex flex-wrap items-baseline justify-between gap-x-3 gap-y-1">
+        <span className="text-xs font-medium text-slate-700">Where it was found</span>
+        {/* Publishers once each and their files where the report counts
+            publishers; an older report counts files and says listings. */}
+        <span className="text-[11px] text-slate-500">
+          {line.publishers_count != null ? (
+            <>
+              <span className="font-mono tabular-nums">{line.publishers_count.toLocaleString()}</span>{" "}
+              {line.publishers_count === 1 ? "publisher" : "publishers"},{" "}
+              <span className="font-mono tabular-nums">{line.placements_count.toLocaleString()}</span>{" "}
+              {line.placements_count === 1 ? "file" : "files"}
+            </>
+          ) : (
+            <>
+              <span className="font-mono tabular-nums">{(line.placements_count ?? 0).toLocaleString()}</span>{" "}
+              {line.placements_count === 1 ? "listing" : "listings"}
+            </>
+          )}
+        </span>
+      </div>
+      {data !== "toolarge" && (
+        <div className="mb-2 flex items-center gap-2">
+          <label className="flex h-8 min-w-0 flex-1 items-center gap-2 rounded-md border border-border bg-white px-2.5 text-[12px] text-slate-500 focus-within:border-slate-400">
+            <Search aria-hidden className="h-3.5 w-3.5 flex-shrink-0 text-slate-400" />
+            <input
+              value={q}
+              onChange={(e) => setQ(e.target.value)}
+              placeholder="Find a publisher or app"
+              aria-label="Find a publisher or app on this line"
+              className="min-w-0 flex-1 bg-transparent text-slate-800 placeholder:text-slate-400 focus:outline-none"
+            />
+          </label>
+          {total != null && total > ROSTER_PAGE && (
+            <div className="flex flex-shrink-0 items-center gap-1 text-[11px] text-slate-500">
+              <span className="tabular-nums">
+                {from.toLocaleString()}–{to.toLocaleString()} of {total.toLocaleString()}
+              </span>
+              <button
+                type="button"
+                aria-label="Previous publishers"
+                disabled={page <= 1}
+                onClick={() => setPage((p) => p - 1)}
+                className="rounded-md border border-border bg-white p-1 text-slate-600 disabled:opacity-40"
+              >
+                <ChevronLeft className="h-3.5 w-3.5" />
+              </button>
+              <button
+                type="button"
+                aria-label="Next publishers"
+                disabled={page >= pages}
+                onClick={() => setPage((p) => p + 1)}
+                className="rounded-md border border-border bg-white p-1 text-slate-600 disabled:opacity-40"
+              >
+                <ChevronRight className="h-3.5 w-3.5" />
+              </button>
+            </div>
+          )}
+        </div>
+      )}
+      {/* A report frozen before 2026-10-14 kept only the first files of a
+          wide line (200). Under a card that counts 10,801, the list says
+          so, never passes for whole. */}
+      {typeof data === "object" && !needle && total != null && total < line.placements_count && (
+        <p className="mb-2 text-[11px] text-slate-500">
+          This report kept the first {total.toLocaleString()} of {line.placements_count.toLocaleString()} files for
+          this line.{canExport ? " The full list is in your Excel export." : ""}
+        </p>
+      )}
+      {data === "loading" ? (
+        <SkeletonInlineRows rows={4} label="Loading publishers for this line" />
+      ) : data === "toolarge" ? (
+        <p className="py-2 text-xs text-slate-500">
+          This line is on too many publishers to list here.
+          {canExport ? " The full list is in your Excel export." : ""}
+        </p>
+      ) : data === "error" ? (
+        <p className="py-2 text-xs text-critical">Could not load the publishers for this line.</p>
+      ) : data.rows.length === 0 ? (
+        <p className="py-2 text-xs text-slate-500">
+          {needle ? "No publisher or app on this line matches." : "No publishers recorded."}
+        </p>
+      ) : (
+        /* Capped and scrollable, the border on the scroller so a capped
+           list clips at a clean rounded edge. */
+        <div className="scroll-y max-h-[420px] overflow-y-auto rounded-md border border-border bg-white">
+          <ul className="divide-y divide-border">
+            {data.rows.map((p, i) => (
+              // Each row opens the publisher's file at this line, and the
+              // publisher's name opens their site.
+              <ActionableLine
+                key={`${p.developer_domain}|${p.bundle_id ?? ""}|${p.found_in}|${i}`}
+                line={line}
+                publisherDomain={p.developer_domain}
+                foundIn={p.found_in}
+                shown
+                className="flex items-baseline gap-2.5 px-3 py-1.5 text-[11px]"
+              >
+                {p.app_name ? (
+                  // An app placement: the app's name, its store in the app
+                  // tone, the bundle id in mono.
+                  <>
+                    <span className="truncate font-sans text-slate-800">{p.app_name}</span>
+                    <span className="flex-shrink-0 rounded-full border border-app-border bg-app-bg px-1.5 py-px text-[10px] font-medium text-app">
+                      {storeLabel(p.store)}
+                    </span>
+                    {p.bundle_id && (
+                      <span className="truncate font-mono text-[10px] tabular-nums text-slate-400">{p.bundle_id}</span>
+                    )}
+                  </>
+                ) : (
+                  <PublisherDomainLink domain={p.developer_domain} shown className="font-mono tabular-nums" />
+                )}
+                <span data-line-text className="ml-auto flex-shrink-0 text-[10px] text-slate-400">
+                  {foundInLabel(p.found_in)}
+                </span>
+              </ActionableLine>
+            ))}
+          </ul>
+        </div>
+      )}
+    </>
+  );
+}
+
+/* ── Marks, deltas, helpers ───────────────────────────────────────── */
+
+type Delta = { kind: "new" } | { kind: "flat" } | { kind: "up"; n: number } | { kind: "down"; n: number };
 
 function deltaOf(line: DiscoveredLine): Delta {
   if (line.previous_placements_count == null) return { kind: "new" };
@@ -897,19 +900,35 @@ function deltaOf(line: DiscoveredLine): Delta {
   return { kind: "flat" };
 }
 
-/* ── Summary ───────────────────────────────────────────────────────── */
+/** The pill and the words beside it: what the customer's own file says,
+ *  or what a publisher should fix. Null on a report without the check. */
+function markOf(line: DiscoveredLine): { pill: string; detail: string; tone: "warn" | "plain" } | null {
+  const issues = line.issues ?? [];
+  if (issues.length > 0) {
+    const first = issues[0].text;
+    const rest = issues.length - 1;
+    return {
+      pill: "Needs fixing",
+      detail: rest > 0 ? `${first}, and ${rest} more` : first,
+      tone: "warn",
+    };
+  }
+  const s = line.seller;
+  if (!s) return null;
+  if (s.status === "listed") {
+    return { pill: "In your sellers.json", detail: `${s.name}, ${s.seller_type.toLowerCase()}`, tone: "plain" };
+  }
+  return { pill: "Not in your sellers.json", detail: "", tone: "warn" };
+}
+
+/** A line's identity, and the React key for its card. */
+function lineKey(l: DiscoveredLine): string {
+  return [l.ssp_domain, l.publisher_id, l.relationship, l.cert_id].join("|");
+}
 
 /**
- * One row, three facts, hairlines instead of cards. The counts come from
- * the endpoint's `totals` block, which is scoped to the active filter, so
- * this row always describes exactly the cards underneath it.
- */
-/* ── Empty state ───────────────────────────────────────────────────── */
-
-/**
- * The seat-line-only crawl. An empty list would read as "discovery ran and
- * found nothing", which is the opposite of the truth: discovery never ran,
- * because this crawl was asked to look for exact seat lines only.
+ * The seat-line-only report. An empty list would read as "discovery ran
+ * and found nothing", which is the opposite of the truth.
  */
 function NoDiscoveryCard() {
   return (
@@ -918,42 +937,21 @@ function NoDiscoveryCard() {
         <Radar className="h-5 w-5 text-slate-400" />
       </div>
       <h2 className="mt-4 text-sm font-semibold text-slate-900">
-        This crawl did not use discovery domains
+        This report did not look for lines starting with your domain
       </h2>
       <p className="mx-auto mt-2 max-w-xl text-sm leading-relaxed text-slate-500">
-        It looked for your exact seat lines, so every line it kept is already
-        on the Results and Line changes pages. Nothing was discovered because
-        nothing was asked for.
-      </p>
-      <p className="mx-auto mt-3 max-w-xl text-sm leading-relaxed text-slate-500">
-        A discovery domain is an SSP you want to see in full, whatever the
-        publisher account number. Add one to the next crawl and every line
-        carrying it shows up here.
+        It looked for your exact seat lines, so every line it kept is already on the Overview and Changes pages.
       </p>
     </div>
   );
 }
 
-/* ── Helpers ───────────────────────────────────────────────────────── */
-
-/** A line's identity, and the React key for its card. */
-function lineKey(l: DiscoveredLine): string {
-  return [l.ssp_domain, l.publisher_id, l.relationship, l.cert_id].join("|");
-}
-
 /**
- * CSV export of what is on screen: one row per line, not per placement.
- * The screen groups, so the file groups, otherwise a reader who exports to
- * check a number finds a different set of rows than the one they were
- * looking at. Walks the pages with the same 20-page cap the sibling pages
- * use and carries the active SSP filter.
+ * CSV export of what is on screen: one row per line, not per placement,
+ * carrying the active search and Show filter. Walks every page; the cap
+ * that remains is a runaway guard far above any real report.
  */
-async function downloadCsv(
-  token: string,
-  ssp: string,
-  show: OriginFilter = "all",
-  fallback: ((l: DiscoveredLine) => Origin) | null = null,
-) {
+async function downloadCsv(token: string, q: string, show: ShowFilter) {
   const header = [
     "ssp_domain",
     "publisher_id",
@@ -962,52 +960,47 @@ async function downloadCsv(
     "placements_count",
     "previous_placements_count",
     "publishers_count",
+    "previous_publishers_count",
     "origin",
+    "in_sellers_json",
+    "seller_name",
+    "issues",
   ] as const;
-  const acc: DiscoveredLine[] = [];
+  const acc: string[][] = [];
   const pageSize = 200;
-  // Was 20 pages, so this CSV silently stopped at 4,000 lines. A customer
-  // exporting their discovered lines got a file that reads as complete and
-  // is not, which is the same fault the workbook had at 200,000 rows. The
-  // ceiling that remains is a runaway guard, far above any real crawl.
-  const cap = 2_000;
-  for (let pageNo = 1; pageNo <= cap; pageNo += 1) {
+  for (let pageNo = 1; pageNo <= 2_000; pageNo += 1) {
     const r = await api.discoveredLines(token, {
       page: pageNo,
       page_size: pageSize,
-      ssp_domain: ssp || undefined,
-      origin: show === "all" ? undefined : show,
+      q: q || undefined,
+      show: show === "all" ? undefined : show,
     });
-    // The marks the page shows, also where the API does not send them.
-    acc.push(...r.rows.map((row) => ({ ...row, origin: originOf(row, fallback)?.origin })));
+    for (const row of r.rows) {
+      acc.push([
+        row.ssp_domain,
+        row.publisher_id,
+        row.relationship,
+        row.cert_id,
+        String(row.placements_count),
+        row.previous_placements_count == null ? "" : String(row.previous_placements_count),
+        row.publishers_count == null ? "" : String(row.publishers_count),
+        row.previous_publishers_count == null ? "" : String(row.previous_publishers_count),
+        row.origin ?? "",
+        row.seller ? (row.seller.status === "listed" ? "yes" : "no") : "",
+        row.seller?.status === "listed" ? row.seller.name : "",
+        (row.issues ?? []).map((i) => i.text).join("; "),
+      ]);
+    }
     if (r.rows.length < r.page_size) break;
   }
-  const csv = [
-    header.join(","),
-    ...acc.map((row) =>
-      header
-        .map((h) => JSON.stringify(row[h] ?? (h === "cert_id" ? "" : null)))
-        .join(","),
-    ),
-  ].join("\n");
+  const csv = [header.join(","), ...acc.map((row) => row.map((v) => JSON.stringify(v)).join(","))].join("\n");
   const blob = new Blob([csv], { type: "text/csv;charset=utf-8" });
   const url = URL.createObjectURL(blob);
   const a = document.createElement("a");
   a.href = url;
-  a.download = `bottomlines-crawl-discovered-lines-${new Date()
-    .toISOString()
-    .slice(0, 10)}.csv`;
+  a.download = `bottomlines-crawl-discovered-lines-${new Date().toISOString().slice(0, 10)}.csv`;
   document.body.appendChild(a);
   a.click();
   document.body.removeChild(a);
   URL.revokeObjectURL(url);
 }
-
-type OriginFilter = "all" | "given" | "found";
-
-const ORIGIN_OPTIONS: { value: OriginFilter; label: string }[] = [
-  { value: "all", label: "All lines" },
-  { value: "found", label: "Found by Path Finder" },
-  { value: "given", label: "You gave us" },
-];
-

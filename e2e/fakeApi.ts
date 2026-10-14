@@ -30,7 +30,7 @@ import {
   mockSummaryFor,
 } from "../src/lib/mockData";
 import { pageFromGone } from "../src/lib/inactive";
-import type { InactiveKind } from "../src/lib/api";
+import type { DiscoveredLine, DiscoveredShow, DiscoveredTotals, InactiveKind } from "../src/lib/api";
 import {
   MOCK_CHECKED_AT,
   MOCK_SELLERS_DOMAIN,
@@ -55,9 +55,23 @@ export type Scenario = {
   schain?: "ok" | "none" | "no_sdks" | "error";
   /** false: this crawl discovered nothing (total 0). */
   discovery?: boolean;
-  /** "old": the discovered-lines answer of an API before 2026-10-11 (no
-   *  origin marks, no publisher counts, no split totals). */
-  discoveryApi?: "current" | "old" | "unwatched" | "unwatched_new" | "cut" | "scope_dropped";
+  /** "current": the contract of 2026-10-14 (seller check, issues,
+   *  baseline). "old": the answer of an API before 2026-10-11 (no origin
+   *  marks, no publisher counts, no split totals). "old_uncompared": that
+   *  API with no last week to count (previous_* null) while the summary
+   *  names a previous crawl. "baseline_cut" / "baseline_none": the report
+   *  says why last week is not compared. The others are the 2026-10-11
+   *  shapes; none of them carries the 2026-10-14 fields. */
+  discoveryApi?:
+    | "current"
+    | "old"
+    | "old_uncompared"
+    | "unwatched"
+    | "unwatched_new"
+    | "cut"
+    | "scope_dropped"
+    | "baseline_cut"
+    | "baseline_none";
   /** "toolarge": the report kept no roster for wide lines (503 with the
    *  bake's sentence). "hiccup": a passing 503 from storage. */
   placements?: "ok" | "toolarge" | "hiccup";
@@ -98,6 +112,25 @@ const TRIAL_CAPS = { publishers: 3, apps: 3, declarations: 3, discovered_lines: 
 
 function cut<T>(rows: T[], cap: number, total: number) {
   return { rows: rows.slice(0, cap), trial: { cap, shown: Math.min(cap, rows.length, total), full_total: total } };
+}
+
+/** An answer from before 2026-10-14: none of the own-domain fields. */
+function withoutOwnDomainFields(totals: DiscoveredTotals, rows: DiscoveredLine[]) {
+  const {
+    sellers_json: _sj,
+    in_file_lines: _in,
+    not_in_file_lines: _out,
+    needs_fixing: _fix,
+    baseline: _b,
+    ...rest
+  } = totals;
+  return {
+    totals: rest as DiscoveredTotals,
+    rows: rows.map((row) => {
+      const { seller: _s, issues: _i, ...kept } = row;
+      return kept as DiscoveredLine;
+    }),
+  };
 }
 
 function schainOverview(status: "ok") {
@@ -188,7 +221,9 @@ export async function installFakeApi(page: Page, scenario: Scenario = {}): Promi
           if (s.previousWeek === "error") return reply(500, { detail: "boom" });
           return reply(200, mockPreviousSummary);
         }
-        const dated = mockSummaryFor(lines);
+        const built = mockSummaryFor(lines);
+        // A report that discovered nothing looked for no domain.
+        const dated = s.discovery ? built : { ...built, watchlist: { ...built.watchlist!, discover: [] } };
         const full = s.crawlDates ? dated : { ...dated, crawl_at: undefined, compared_crawl_at: undefined };
         const withGone = s.gone ? full : { ...full, gone: undefined };
         const sum = s.inactive === "ok" ? withGone : { ...withGone, inactive_counts: undefined };
@@ -226,12 +261,23 @@ export async function installFakeApi(page: Page, scenario: Scenario = {}): Promi
       }
       case "discovered-lines": {
         if (!s.discovery) return reply(200, { page: 1, page_size: Number(q.get("page_size") ?? 50), total: 0, rows: [] });
+        const legacy = s.discoveryApi !== "current" && !s.discoveryApi.startsWith("baseline_");
         const r = mockDiscoveredLines({
           page: page_,
           page_size: Number(q.get("page_size") ?? 50),
           ssp_domain: q.get("ssp_domain") ?? undefined,
           origin: s.discoveryApi === "old" ? undefined : ((q.get("origin") as "given" | "found" | null) ?? undefined),
+          // An API from before 2026-10-14 does not know these.
+          show: legacy ? undefined : ((q.get("show") as DiscoveredShow | null) ?? undefined),
+          q: legacy ? undefined : (q.get("q") ?? undefined),
+          baseline:
+            s.discoveryApi === "baseline_cut" ? "cut" : s.discoveryApi === "baseline_none" ? "none" : "compared",
         });
+        if (legacy) {
+          const stripped = withoutOwnDomainFields(r.totals, r.rows);
+          r.totals = stripped.totals;
+          r.rows = stripped.rows;
+        }
         if (s.discoveryApi === "unwatched") {
           // An artifact frozen before 2026-10-11, served by today's API,
           // whose baseline did not watch the domain: zero last week, every
@@ -267,7 +313,7 @@ export async function installFakeApi(page: Page, scenario: Scenario = {}): Promi
             r.totals = { ...totals, listed_lines: r.total, lines: r.total + 100, placements: (r.totals.placements ?? 0) + 4_000 };
           }
         }
-        if (s.discoveryApi === "old") {
+        if (s.discoveryApi === "old" || s.discoveryApi === "old_uncompared") {
           // What the API answered before 2026-10-11, field for field.
           const { publishers: _p, previous_publishers: _pp, given_lines: _g, found_lines: _f, ...totals } = r.totals;
           r.totals = totals;
@@ -275,6 +321,12 @@ export async function installFakeApi(page: Page, scenario: Scenario = {}): Promi
             const { origin: _o, origin_source: _s, origin_added_at: _a, given_as: _ga, publishers_count: _c, previous_publishers_count: _pc, ...rest } = row;
             return rest;
           });
+        }
+        if (s.discoveryApi === "old_uncompared") {
+          // No last week to count, and no word on why: the summary still
+          // names a previous crawl (mockSummary.previous_job_id).
+          r.totals = { ...r.totals, previous_lines: null, previous_placements: null, new_lines: null };
+          r.rows = r.rows.map((row) => ({ ...row, previous_placements_count: null }));
         }
         return reply(200, s.trial ? { ...r, page: 1, ...cut(r.rows, TRIAL_CAPS.discovered_lines, r.total) } : r);
       }
@@ -288,18 +340,25 @@ export async function installFakeApi(page: Page, scenario: Scenario = {}): Promi
           // keys on "too large" (CrawlDiscovered LineCard).
           return reply(503, { detail: "This list is too large to display here. Please contact your admin for the full workbook." });
         }
-        return reply(
-          200,
-          mockDiscoveredLinePlacements(
-            {
-              ssp_domain: q.get("ssp_domain") ?? "",
-              publisher_id: q.get("publisher_id") ?? "",
-              relationship: (q.get("relationship") ?? "DIRECT") as "DIRECT",
-              cert_id: q.get("cert_id") ?? "",
-            },
-            { page: page_, page_size: Number(q.get("page_size") ?? 100) },
-          ),
-        );
+        {
+          const key = {
+            ssp_domain: q.get("ssp_domain") ?? "",
+            publisher_id: q.get("publisher_id") ?? "",
+            relationship: (q.get("relationship") ?? "DIRECT") as "DIRECT",
+            cert_id: q.get("cert_id") ?? "",
+          };
+          const size = Number(q.get("page_size") ?? 100);
+          const term = q.get("q") ?? undefined;
+          // A report frozen before 2026-10-14 kept at most the first 200
+          // files of a line, and the API serves exactly those.
+          const capped = s.discoveryApi !== "current" && !s.discoveryApi.startsWith("baseline_");
+          if (!capped) return reply(200, mockDiscoveredLinePlacements(key, { page: page_, page_size: size, q: term }));
+          const kept = mockDiscoveredLinePlacements(key, { page: 1, page_size: 100_000 }).rows.slice(0, 200);
+          const rows = term
+            ? kept.filter((p) => (p.developer_domain + " " + p.developer_name).toLowerCase().includes(term.toLowerCase()))
+            : kept;
+          return reply(200, { page: page_, page_size: size, total: rows.length, rows: rows.slice((page_ - 1) * size, page_ * size) });
+        }
       case "declarations":
         return reply(
           200,
