@@ -13,6 +13,7 @@ import {
 } from "@/components/ui/sidebar";
 import { pathfinderLogo } from "@/lib/brand";
 import { useReportScope } from "@/lib/reportScope";
+import { useSellersPage } from "@/lib/useSellersPage";
 
 /**
  * The report rail, trimmed from bottomlines-app's AppSidebar.
@@ -73,26 +74,9 @@ export function AppSidebar() {
     };
   }, [token]);
 
-  // Does this report carry the sellers.json page? Only once the crawler
-  // freezes the customer's file (or, with none, the sellers found under
-  // their domain) with the report; until then the endpoint answers 404 and
-  // the entry stays off the rail.
-  const [hasSellers, setHasSellers] = useState(false);
-  useEffect(() => {
-    if (!token) return;
-    let alive = true;
-    api
-      .sellersFix(token)
-      .then((d) => {
-        if (alive) setHasSellers(!!d?.file || (d?.sightings?.length ?? 0) > 0);
-      })
-      .catch(() => {
-        if (alive) setHasSellers(false);
-      });
-    return () => {
-      alive = false;
-    };
-  }, [token]);
+  // Does this report carry the sellers.json page? The same probe the
+  // Discovery badges link with (lib/useSellersPage).
+  const hasSellers = useSellersPage(token);
 
   /* Active nav state is signalled by a solid accent-tile fill (elevation),
      not by recoloring the text, the teal is reserved for the brand mark. */

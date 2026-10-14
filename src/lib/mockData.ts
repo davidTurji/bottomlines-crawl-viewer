@@ -24,7 +24,10 @@ import type {
   DiscoveredLinesPage,
   DiscoveredPlacement,
   DiscoveredPlacementsPage,
+  DiscoveredShow,
   DiscoveredTotals,
+  LineIssue,
+  SellerCheck,
   LineEventsPage,
   LineEvent,
   LineEventKind,
@@ -1568,7 +1571,13 @@ export function mockMatchedApps(page: number, q = "", lines: string[] = []): Mat
 /** The summary under a seat-line filter: the matched counters re-counted
  *  over what carries the selected lines. Everything else stays crawl-wide. */
 export function mockSummaryFor(lines: string[]): Summary {
-  const base: Summary = { ...mockSummary, watchlist: { seats: CUSTOMER_SEATS, discover: [] } };
+  // The discovery domains, as the API serves them; none with the
+  // ``?discovery=none`` escape hatch, where the report looked for none.
+  const discover =
+    typeof window !== "undefined" && new URLSearchParams(window.location.search).get("discovery") === "none"
+      ? []
+      : DISCOVERY_SSPS.map((s) => s.domain);
+  const base: Summary = { ...mockSummary, watchlist: { seats: CUSTOMER_SEATS, discover } };
   if (lines.length === 0) return base;
   const want = new Set(lines);
   const devs = MATCHED_DEVS.filter((d) => carries(d.matched_lines, lines));
@@ -1846,6 +1855,44 @@ const DISCOVERED_HEAD: MockLineSpec[] = [
     placements_count: 143,
     previous_placements_count: 158, // down 15
   },
+  // LINES THAT NEED FIXING (2026-10-14), each the shape seen on a real
+  // own-domain report: a seller ID with letters where the SSP's are digits,
+  // a placeholder ID with a cert id cut short, a cert id with pasted HTML,
+  // and the same seller ID as RESELLER where its DIRECT line is the wide
+  // one. The seller the file lists as PUBLISHER but publishers carry as
+  // RESELLER is cm41288 above (see SELLER_TYPE_PIN).
+  {
+    ssp_domain: "madeupmedia.com",
+    publisher_id: "l0p9531e427dc0a8",
+    relationship: "RESELLER",
+    cert_id: "4a7be0c1d9f23b58",
+    placements_count: 112,
+    previous_placements_count: 104,
+  },
+  {
+    ssp_domain: "madeupmedia.com",
+    publisher_id: "XXXXXXXXXXX",
+    relationship: "DIRECT",
+    cert_id: "4a7be0c1d9f23b5",
+    placements_count: 58,
+    previous_placements_count: 61,
+  },
+  {
+    ssp_domain: "madeupmedia.com",
+    publisher_id: "1042318",
+    relationship: "RESELLER",
+    cert_id: "4a7be0c1d9f23b58<br />",
+    placements_count: 23,
+    previous_placements_count: 19,
+  },
+  {
+    ssp_domain: "madeupmedia.com",
+    publisher_id: "2884190",
+    relationship: "RESELLER",
+    cert_id: "b1f4c72e5a08d9c3",
+    placements_count: 37,
+    previous_placements_count: 35,
+  },
 ];
 
 /*
@@ -1970,6 +2017,107 @@ function buildDiscoveredLines(): DiscoveredLine[] {
 
 const DISCOVERED_LINES = buildDiscoveredLines();
 
+/*
+ * OWN-DOMAIN DISCOVERY MARKS (2026-10-14). The customer's own sellers.json
+ * is the reference for a line that starts with their domain: its seller ID
+ * is either in that file (with the seller's name and type) or it is not.
+ * Deterministic by ID; the head's IDs are pinned so the first screen shows
+ * both states. Names come from the roster's invented pool, which was
+ * checked to belong to nobody.
+ */
+const ID_SHAPE: Record<string, RegExp> = {
+  "madeupmedia.com": /^\d{7}$/,
+  "madeupmedia.la": /^\d{6}$/,
+  "madeupmedia-ads.com": /^cm\d{5}$/,
+  "madeupmedia-video.com": /^sb-\d{5}$/,
+};
+
+function hashId(s: string): number {
+  let h = 2_166_136_261;
+  for (const c of s) {
+    h ^= c.charCodeAt(0);
+    h = Math.imul(h, 16_777_619) >>> 0;
+  }
+  return h;
+}
+
+const SELLER_LISTED = new Set(["1042318", "618402", "3390514", "cm41288"]);
+const SELLER_UNLISTED = new Set(["2884190", "774061", "XXXXXXXXXXX", "l0p9531e427dc0a8"]);
+/** The type the file gives a pinned seller. cm41288 is the mismatch on the
+ *  first screen: a PUBLISHER in the file, carried as RESELLER. */
+const SELLER_TYPE_PIN: Record<string, string> = {
+  "1042318": "INTERMEDIARY",
+  "618402": "INTERMEDIARY",
+  "3390514": "BOTH",
+  cm41288: "PUBLISHER",
+};
+
+function sellerCheckOf(id: string, relationship: string): SellerCheck {
+  const listed = SELLER_LISTED.has(id)
+    ? true
+    : SELLER_UNLISTED.has(id)
+      ? false
+      : hashId(id) % 100 < 58;
+  if (!listed) return { status: "unlisted" };
+  const h = hashId(`name:${id}`);
+  const name = `${DISCOVERED_PREFIX[h % DISCOVERED_PREFIX.length]} ${
+    DISCOVERED_SUFFIX[(h >>> 8) % DISCOVERED_SUFFIX.length]
+  }`;
+  // The file mostly agrees with the line (PUBLISHER sells DIRECT, an
+  // INTERMEDIARY resells); one seller in thirteen is typed the other way.
+  const agrees = relationship === "DIRECT" ? "PUBLISHER" : "INTERMEDIARY";
+  const disagrees = relationship === "DIRECT" ? "INTERMEDIARY" : "PUBLISHER";
+  const seller_type = SELLER_TYPE_PIN[id] ?? ((h >>> 16) % 13 === 0 ? disagrees : agrees);
+  return { status: "listed", name, seller_type };
+}
+
+/** The relationship a seller of this type should be carried with; null for
+ *  BOTH, which may be either. */
+function relationshipFor(sellerType: string): string | null {
+  const t = sellerType.toUpperCase();
+  return t === "PUBLISHER" ? "DIRECT" : t === "INTERMEDIARY" ? "RESELLER" : null;
+}
+
+function issuesOf(l: DiscoveredLine, all: DiscoveredLine[]): LineIssue[] {
+  const out: LineIssue[] = [];
+  const shape = ID_SHAPE[l.ssp_domain];
+  if (shape && !shape.test(l.publisher_id)) {
+    out.push({
+      kind: "bad_id",
+      text: /^X+$/.test(l.publisher_id)
+        ? "The seller ID is a placeholder, not one of yours"
+        : "The seller ID does not look like one of yours",
+    });
+  }
+  if (l.cert_id && !/^[0-9a-f]{16}$/.test(l.cert_id)) {
+    out.push({ kind: "bad_cert", text: `The cert id is corrupted: ${l.cert_id}` });
+  }
+  if (l.seller?.status === "listed") {
+    const wanted = relationshipFor(l.seller.seller_type);
+    if (wanted && wanted !== l.relationship) {
+      out.push({
+        kind: "relationship_mismatch",
+        text: `Listed as ${l.seller.seller_type.toUpperCase()} in your sellers.json, but carried as ${l.relationship}`,
+      });
+    }
+  }
+  const other = all.find(
+    (o) =>
+      o !== l &&
+      o.ssp_domain === l.ssp_domain &&
+      o.publisher_id === l.publisher_id &&
+      o.relationship !== l.relationship &&
+      (o.publishers_count ?? o.placements_count) >= (l.publishers_count ?? l.placements_count),
+  );
+  if (other) {
+    out.push({
+      kind: "both_relationships",
+      text: `Also listed as ${other.relationship} on ${(publishersOf(other.placements_count) ?? 0).toLocaleString()} publishers`,
+    });
+  }
+  return out;
+}
+
 /**
  * Lines that were in last week's crawl and are gone from this one, by
  * discovery domain. They exist only so the summary row's previous-week
@@ -1985,8 +2133,6 @@ const DISCOVERY_VANISHED: Record<string, { lines: number; placements: number }> 
   "madeupmedia-video.com": { lines: 0, placements: 0 },
 };
 
-/** Embed threshold, mirroring the rule stated in the api.ts contract. */
-const DISCOVERED_EMBED_MAX = 20;
 
 function discoveredTotals(pool: DiscoveredLine[]): DiscoveredTotals {
   let placements = 0;
@@ -2051,17 +2197,31 @@ const mockOrigin = originsFrom([...CUSTOMER_SEATS, ...DISCOVERY_SEATS])!;
  *  most publishers hold the line in one file, some in both. */
 const publishersOf = (listings: number | null) => (listings == null ? null : Math.max(1, Math.round(listings * 0.62)));
 
+/** Mock-only: ``?baseline=cut`` is a report whose baseline's list was cut
+ *  short (no comparison, and the page says why); ``?baseline=none`` is a
+ *  first report. Read from the page URL; the e2e fake passes it instead. */
+function mockBaselineParam(): DiscoveredTotals["baseline"] {
+  if (typeof window === "undefined") return "compared";
+  const v = new URLSearchParams(window.location.search).get("baseline");
+  return v === "cut" || v === "none" ? v : "compared";
+}
+
 export function mockDiscoveredLines(opts: {
   page?: number;
   page_size?: number;
   ssp_domain?: string;
   origin?: "given" | "found";
+  show?: DiscoveredShow;
+  q?: string;
+  /** The e2e fake's way to pick the baseline state without a page URL. */
+  baseline?: DiscoveredTotals["baseline"];
 }): DiscoveredLinesPage {
   const page = opts.page ?? 1;
   const pageSize = opts.page_size ?? 50;
   const emptied =
     typeof window !== "undefined" &&
     new URLSearchParams(window.location.search).get("discovery") === "none";
+  const baseline = opts.baseline ?? mockBaselineParam();
   let pool = emptied ? [] : DISCOVERED_LINES;
   if (opts.ssp_domain) {
     const needle = opts.ssp_domain.trim().toLowerCase();
@@ -2073,10 +2233,40 @@ export function mockDiscoveredLines(opts: {
     publishers_count: publishersOf(r.placements_count)!,
     previous_publishers_count: publishersOf(r.previous_placements_count),
   }));
+  // The seller check first, since one of the issues reads it.
+  pool = pool.map((r) => ({ ...r, seller: sellerCheckOf(r.publisher_id, r.relationship) }));
+  pool = pool.map((r) => ({ ...r, issues: issuesOf(r, pool) }));
+  if (baseline !== "compared") {
+    pool = pool.map((r) => ({ ...r, previous_placements_count: null, previous_publishers_count: null }));
+  }
+  if (opts.q) {
+    // The contract's search: the line itself, or any publisher in its
+    // roster by domain or name.
+    const needle = opts.q.trim().toLowerCase();
+    const has = (s: string | undefined) => (s ?? "").toLowerCase().includes(needle);
+    pool = pool.filter(
+      (r) =>
+        has(r.publisher_id) ||
+        has(r.ssp_domain) ||
+        has(r.cert_id) ||
+        (r.placements ?? []).some((p) => has(p.developer_domain) || has(p.developer_name)),
+    );
+  }
+  if (opts.origin) pool = pool.filter((r) => (r.origin === "given") === (opts.origin === "given"));
+  if (opts.show === "direct") pool = pool.filter((r) => r.relationship === "DIRECT");
+  if (opts.show === "reseller") pool = pool.filter((r) => r.relationship === "RESELLER");
+  if (opts.show === "new") pool = pool.filter((r) => r.previous_placements_count == null && baseline === "compared");
+  if (opts.show === "fixing") pool = pool.filter((r) => (r.issues ?? []).length > 0);
+  if (opts.show === "listed") pool = pool.filter((r) => r.seller?.status === "listed");
+  if (opts.show === "unlisted") pool = pool.filter((r) => r.seller?.status === "unlisted");
+  // Totals over the filtered set, as the endpoint's contract says, so the
+  // KPI rectangle always describes the cards under it.
   const whole = pool;
   const given = whole.filter((r) => r.origin === "given").length;
-  if (opts.origin) pool = pool.filter((r) => (r.origin === "given") === (opts.origin === "given"));
+  const listedIds = new Set(whole.filter((r) => r.seller?.status === "listed").map((r) => r.publisher_id));
+  const unlistedIds = new Set(whole.filter((r) => r.seller?.status === "unlisted").map((r) => r.publisher_id));
   const base = discoveredTotals(whole);
+  const compared = baseline === "compared";
   const start = (page - 1) * pageSize;
   return {
     page,
@@ -2084,33 +2274,53 @@ export function mockDiscoveredLines(opts: {
     total: pool.length,
     totals: {
       ...base,
+      previous_lines: compared ? base.previous_lines : null,
+      previous_placements: compared ? base.previous_placements : null,
+      new_lines: compared ? base.new_lines : null,
       given_lines: given,
       found_lines: whole.length - given,
-      // Distinct across lines: a publisher on several lines counts once.
       publishers: opts.ssp_domain ? null : Math.round(whole.reduce((n, r) => n + (r.publishers_count ?? 0), 0) * 0.7),
       previous_publishers:
-        opts.ssp_domain || base.previous_placements == null ? null : Math.round((publishersOf(base.previous_placements) ?? 0) * 0.7),
+        !compared || opts.ssp_domain || base.previous_placements == null
+          ? null
+          : Math.round((publishersOf(base.previous_placements) ?? 0) * 0.7),
+      sellers_json: {
+        url: "madeupmedia.com/sellers.json",
+        sellers: listedIds.size + 24,
+        read_at: MOCK_CRAWL_AT,
+        listed_ids: listedIds.size,
+        unlisted_ids: unlistedIds.size,
+      },
+      in_file_lines: whole.filter((r) => r.seller?.status === "listed").length,
+      not_in_file_lines: whole.filter((r) => r.seller?.status === "unlisted").length,
+      needs_fixing: whole.filter((r) => (r.issues ?? []).length > 0).length,
+      baseline,
     },
-    // Strip the embedded placements above the threshold, exactly as the
-    // proposed endpoint would, so the card's fetch-on-expand path is what
-    // a mock review actually exercises on the wide lines.
-    rows: pool.slice(start, start + pageSize).map((l) =>
-      l.placements && l.placements.length <= DISCOVERED_EMBED_MAX
-        ? l
-        : { ...l, placements: undefined },
-    ),
+    // The roster is never embedded: the page reads it whole, paged, from
+    // the placements endpoint.
+    rows: pool.slice(start, start + pageSize).map((l) => ({ ...l, placements: undefined })),
   };
 }
 
 export function mockDiscoveredLinePlacements(
   key: DiscoveredLineKey,
-  opts: { page?: number; page_size?: number },
+  opts: { page?: number; page_size?: number; q?: string },
 ): DiscoveredPlacementsPage {
   const page = opts.page ?? 1;
   const pageSize = opts.page_size ?? 100;
   const wanted = lineKeyOf(key);
   const line = DISCOVERED_LINES.find((l) => lineKeyOf(l) === wanted);
-  const rows = line?.placements ?? [];
+  let rows = line?.placements ?? [];
+  if (opts.q) {
+    const needle = opts.q.trim().toLowerCase();
+    rows = rows.filter(
+      (r) =>
+        r.developer_domain.toLowerCase().includes(needle) ||
+        (r.developer_name ?? "").toLowerCase().includes(needle) ||
+        (r.app_name ?? "").toLowerCase().includes(needle) ||
+        (r.bundle_id ?? "").toLowerCase().includes(needle),
+    );
+  }
   const start = (page - 1) * pageSize;
   return {
     page,

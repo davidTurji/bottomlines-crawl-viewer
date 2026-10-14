@@ -9,7 +9,8 @@
  */
 import { expect, test, type Page } from "@playwright/test";
 
-import { mockInactiveBlock } from "../src/lib/mockData";
+import { mockDiscoveredLinePlacements, mockDiscoveredLines, mockInactiveBlock } from "../src/lib/mockData";
+import { PAGE_SIZE } from "../src/lib/paging";
 import { installFakeApi, TOKEN, type Scenario } from "./fakeApi";
 
 const EXPIRED = "This report link is not valid or has expired.";
@@ -423,7 +424,7 @@ test.describe("inactive", () => {
   });
 });
 
-/* ── 2026-10-11: links everywhere, Discovery says who brought each line ── */
+/* ── 2026-10-11: links everywhere ── */
 
 test.describe("sellers.json links", () => {
   test("the file, every seller and every line link to their source", async ({ page }) => {
@@ -491,59 +492,189 @@ test.describe("sellers.json links", () => {
   });
 });
 
-test.describe("discovery says who brought each line", () => {
-  const card = (page: Page, line: string) => page.locator("div.rounded-3xl", { hasText: line });
+/* ── 2026-10-14: Discovery checks each line against the customer's own sellers.json ── */
+
+test.describe("discovery checks each line against your sellers.json", () => {
+  /** A card by the line's identity, never by its text: a cert id cut short
+   *  or with pasted HTML would otherwise match the clean line's card too. */
+  const keyOf = (ssp: string, id: string, rel: string, cert: string) => [ssp, id, rel, cert].join("|");
+  const card = (page: Page, key: string) => page.locator(`[data-discovered-line="${key}"]`);
+  const cards = (page: Page) => page.locator("[data-discovered-line]");
+  const WIDE = keyOf("madeupmedia.com", "1042318", "RESELLER", "4a7be0c1d9f23b58");
+  const WIDE_KEY = { ssp_domain: "madeupmedia.com", publisher_id: "1042318", relationship: "RESELLER", cert_id: "4a7be0c1d9f23b58" };
+  /** The mock's own answer for a line, so a test asserts what the API said. */
+  const rowOf = (key: string) => mockDiscoveredLines({ page: 1, page_size: 500 }).rows.find((r) => keyOf(r.ssp_domain, r.publisher_id, r.relationship, r.cert_id) === key)!;
   /** New lines sort first, so a line may sit on a later page. */
-  async function find(page: Page, line: string) {
+  async function find(page: Page, key: string) {
     const pager = page.getByRole("navigation", { name: "Pages" }).first();
-    for (let n = 2; n <= 8 && (await card(page, line).count()) === 0; n += 1) {
+    for (let n = 2; n <= 8 && (await card(page, key).count()) === 0; n += 1) {
       const btn = pager.getByRole("button", { name: `Page ${n}`, exact: true });
       if ((await btn.count()) === 0) break;
       await btn.click();
       // Wait for the page to be the current one, never a fixed sleep.
       await expect(pager.getByRole("button", { name: `Page ${n}`, exact: true })).toHaveAttribute("aria-current", "page");
-      await expect(page.locator("div.rounded-3xl").first()).toBeVisible();
+      await expect(cards(page).first()).toBeVisible();
     }
-    return card(page, line);
+    return card(page, key);
   }
   async function noTour(page: Page) {
     const no = page.getByRole("button", { name: "No thanks" });
     if (await no.isVisible().catch(() => false)) await no.click();
   }
+  const showMenu = (page: Page) => page.getByRole("button", { name: "Show which lines" });
+  /** Pick a Show option and wait for the list it asks for. */
+  async function pick(page: Page, option: string, value: string) {
+    await showMenu(page).click();
+    const answered = page.waitForResponse((r) => r.url().includes("/discovered-lines?") && r.url().includes(`show=${value}`));
+    await page.getByRole("menuitem", { name: option, exact: true }).click();
+    await answered;
+    await expect(cards(page).first()).toBeVisible();
+  }
 
-  test("lines they gave us and lines we found, apart and counted", async ({ page }) => {
+  test("says whether each seller ID is in your sellers.json, and the badge opens that page", async ({ page }) => {
     const errors = watchErrors(page);
-    await open(page, { discovery: true }, "/discovery");
-    // The three cards as they always were; who brought the lines is the
-    // middle card's caption.
-    const kpi = page.locator('[data-tour="discovery-kpi"]');
-    await expect(kpi.getByText(/\d+ given by you, \d+ found automatically by Path Finder/)).toBeVisible();
-    await expect(kpi.getByText("Lines with your domain")).toBeVisible();
-    await expect(page.getByText("With a line naming your domain, each counted once")).toBeVisible();
+    const calls = await open(page, { discovery: true, sellers: "page" }, "/discovery");
     await noTour(page);
-    await expect((await find(page, "madeupmedia.com, 2884190, DIRECT")).getByText("You gave us this seller ID as RESELLER")).toBeVisible();
-    const pager = page.getByRole("navigation", { name: "Pages" }).first();
-    await pager.getByRole("button", { name: "Page 1", exact: true }).click();
-    await expect(pager.getByRole("button", { name: "Page 1", exact: true })).toHaveAttribute("aria-current", "page");
-    await expect((await find(page, "madeupmedia.la, 618402, RESELLER")).getByText(/In your list since 16 Sept? 2026/)).toBeVisible();
+    // The subtitle names the domains the report looked for, from the summary.
+    await expect(page.locator("p", { hasText: "starts with your domain" })).toContainText("madeupmedia.com, madeupmedia.la");
+    // The three stats; the sellers.json coverage is the Lines caption and nothing else.
+    const kpi = page.locator('[data-tour="discovery-kpi"]');
+    await expect(kpi.getByText("Across every publisher we scanned, against last week")).toBeVisible();
+    await expect(kpi.getByText("New this week")).toBeVisible();
+    await expect(kpi.getByText(/^\d+ in your sellers\.json, \d+ not$/)).toBeVisible();
+    await expect(kpi.getByText("Each counted once, whichever of its files")).toBeVisible();
+    await expect(page.getByText(/in your sellers\.json, \d+ not/)).toHaveCount(1);
 
-    // Only what they gave us.
-    await page.getByRole("button", { name: "Show lines by who brought them" }).click();
-    await page.getByRole("menuitem", { name: "You gave us" }).click();
-    const given = card(page, "madeupmedia.com, 1042318, RESELLER");
-    await expect(given.getByText("You gave us", { exact: true })).toBeVisible();
-    await expect(given.getByText("From your sellers.json, 30 Aug 2026")).toBeVisible();
-    await expect(card(page, "madeupmedia.com, 3390514, RESELLER").getByText("You added it by hand, 4 Sept 2026")).toBeVisible();
-    const pills = page.locator("div.rounded-3xl").getByText(/^(You gave us|Found by Path Finder)$/);
-    await expect(pills.first()).toHaveText("You gave us");
-    expect(new Set(await pills.allTextContents())).toEqual(new Set(["You gave us"]));
+    // Not in the file: a warning badge, no words beside it.
+    const unlisted = await find(page, keyOf("madeupmedia.com", "2884190", "DIRECT", "b1f4c72e5a08d9c3"));
+    await expect(unlisted.getByRole("link", { name: "Not in your sellers.json" })).toBeVisible();
+    // Needs fixing: the first issue's words, and how many more.
+    const placeholder = await find(page, keyOf("madeupmedia.com", "XXXXXXXXXXX", "DIRECT", "4a7be0c1d9f23b5"));
+    await expect(placeholder.getByRole("link", { name: "Needs fixing" })).toBeVisible();
+    await expect(placeholder.getByText("The seller ID is a placeholder, not one of yours, and 1 more")).toBeVisible();
+    // A seller the file types the other way is a fix, with the file's word for it.
+    const mismatch = await find(page, keyOf("madeupmedia-ads.com", "cm41288", "RESELLER", "77d3b0e9c142a5fb"));
+    await expect(mismatch.getByText("Listed as PUBLISHER in your sellers.json, but carried as RESELLER")).toBeVisible();
+
+    // In the file: the seller's name and type beside the badge, as the API said them.
+    const wide = rowOf(WIDE);
+    expect(wide.seller).toMatchObject({ status: "listed", seller_type: "INTERMEDIARY" });
+    const c = await find(page, WIDE);
+    const badge = c.getByRole("link", { name: "In your sellers.json" });
+    await expect(badge).toBeVisible();
+    await expect(c.getByText(`${(wide.seller as { name: string }).name}, intermediary`)).toBeVisible();
+    // The badge opens the Sellers.json page; it never opens the card (no roster asked for).
+    await badge.click();
+    await expect(page).toHaveURL(new RegExp(`${BASE}/sellers$`));
+    expect(calls.filter((x) => x.path.endsWith("/discovered-lines/placements"))).toEqual([]);
+    expect(errors).toEqual([]);
+  });
+
+  test("without the Sellers.json page the badge is words, not a link", async ({ page }) => {
+    await open(page, { discovery: true, sellers: "none" }, "/discovery");
+    await noTour(page);
+    const c = await find(page, WIDE);
+    await expect(c.getByText("In your sellers.json", { exact: true })).toBeVisible();
+    await expect(c.getByRole("link", { name: "In your sellers.json" })).toHaveCount(0);
+    await expect(rail(page).getByRole("link", { name: "Sellers.json" })).toHaveCount(0);
+  });
+
+  test("the Show filter: in your file, not in it, needs fixing, DIRECT", async ({ page }) => {
+    await open(page, { discovery: true }, "/discovery");
+    await noTour(page);
+    await pick(page, "In your sellers.json", "listed");
+    await expect(cards(page).getByText("Not in your sellers.json")).toHaveCount(0);
+    await expect(cards(page).getByText("In your sellers.json", { exact: true }).first()).toBeVisible();
+
+    await pick(page, "Not in your sellers.json", "unlisted");
+    await expect(cards(page).getByText("In your sellers.json", { exact: true })).toHaveCount(0);
+    await expect(cards(page).getByText("Not in your sellers.json").first()).toBeVisible();
+
+    await pick(page, "Needs fixing", "fixing");
+    const fixing = await cards(page).count();
+    expect(fixing).toBeGreaterThan(0);
+    await expect(cards(page).getByText("Needs fixing", { exact: true })).toHaveCount(fixing);
+
+    await pick(page, "DIRECT lines", "direct");
+    await expect(cards(page).locator("code", { hasText: ", RESELLER" })).toHaveCount(0);
+    await expect(cards(page).locator("code", { hasText: ", DIRECT" }).first()).toBeVisible();
+  });
+
+  test("the search narrows the lines by a publisher's domain, and the roster box starts with it", async ({ page }) => {
+    const calls = await open(page, { discovery: true }, "/discovery");
+    await noTour(page);
+    const domain = mockDiscoveredLinePlacements(WIDE_KEY, { page: 1, page_size: 1 }).rows[0].developer_domain;
+    const all = mockDiscoveredLines({ page: 1, page_size: 500 }).total;
+    const narrowed = mockDiscoveredLines({ page: 1, page_size: 500, q: domain }).total;
+    expect(narrowed).toBeGreaterThan(0);
+    expect(narrowed).toBeLessThan(all);
+    const answered = page.waitForResponse((r) => r.url().includes("/discovered-lines?") && r.url().includes(`q=${encodeURIComponent(domain)}`));
+    await page.getByPlaceholder("Search seller IDs, publishers or apps").fill(domain);
+    await answered;
+    await expect(cards(page)).toHaveCount(Math.min(PAGE_SIZE, narrowed));
+    // The wide line carries this publisher, so it is still listed; its
+    // roster opens on the same search.
+    const c = await find(page, WIDE);
+    await c.getByRole("button", { expanded: false }).first().click();
+    await expect(c.getByRole("textbox", { name: "Find a publisher or app on this line" })).toHaveValue(domain);
+    const onLine = mockDiscoveredLinePlacements(WIDE_KEY, { page: 1, page_size: 500, q: domain }).total;
+    await expect(c.locator("div.scroll-y li")).toHaveCount(onLine);
+    await expect(c.locator("div.scroll-y").getByText(domain).first()).toBeVisible();
+    expect(calls.some((x) => x.path.endsWith("/discovered-lines/placements") && x.query.includes(`q=${encodeURIComponent(domain)}`))).toBe(true);
+  });
+
+  test("the roster under a line is whole, a hundred at a time", async ({ page }) => {
+    const calls = await open(page, { discovery: true }, "/discovery");
+    await noTour(page);
+    const wide = rowOf(WIDE);
+    const c = await find(page, WIDE);
+    await c.getByRole("button", { expanded: false }).first().click();
+    await expect(c.getByText(`${wide.publishers_count} publishers, ${wide.placements_count} files`)).toBeVisible();
+    await expect(c.getByText(`1–100 of ${wide.placements_count}`)).toBeVisible();
+    await expect(c.locator("div.scroll-y li")).toHaveCount(100);
+    await c.getByRole("button", { name: "Next publishers" }).click();
+    await expect(c.getByText(`101–200 of ${wide.placements_count}`)).toBeVisible();
+    await expect(c.locator("div.scroll-y li")).toHaveCount(100);
+    expect(calls.filter((x) => x.path.endsWith("/discovered-lines/placements") && /[?&]page=2(&|$)/.test(x.query))).toHaveLength(1);
+  });
+
+  test("a cut baseline says so, and nothing is new this week", async ({ page }) => {
+    const errors = watchErrors(page);
+    await open(page, { discovery: true, discoveryApi: "baseline_cut" }, "/discovery");
+    await noTour(page);
+    await expect(page.getByText("Last week's list was cut short when that report was made, so there is nothing to compare this week")).toBeVisible();
+    await expect(cards(page).first()).toBeVisible();
+    await expect(page.getByText(/new this week/i)).toHaveCount(0);
+    await expect(page.locator('[data-tour="discovery-kpi"]').getByText(/vs last week/)).toHaveCount(0);
+    await expect(page.getByText("Last week", { exact: true })).toHaveCount(0);
+    // The menu does not offer what the report cannot answer.
+    await showMenu(page).click();
+    await expect(page.getByRole("menuitem", { name: "New this week" })).toHaveCount(0);
+    await expect(page.getByRole("menuitem", { name: "Needs fixing" })).toBeVisible();
+    await page.keyboard.press("Escape");
+    expect(errors).toEqual([]);
+  });
+
+  test("a first report says so, from the report's own word", async ({ page }) => {
+    await open(page, { discovery: true, discoveryApi: "baseline_none" }, "/discovery");
+    await expect(page.getByText("First report, no earlier week to compare")).toBeVisible();
+    await expect(page.getByText(/new this week/i)).toHaveCount(0);
+  });
+
+  test("an older API with no last week to count says it could not be compared, never 'first report'", async ({ page }) => {
+    const errors = watchErrors(page);
+    await open(page, { discovery: true, discoveryApi: "old_uncompared" }, "/discovery");
+    await expect(page.getByText("Last week could not be compared")).toBeVisible();
+    await expect(cards(page).first()).toBeVisible();
+    await expect(page.getByText(/First report/)).toHaveCount(0);
+    await expect(page.getByText(/new this week/i)).toHaveCount(0);
     expect(errors).toEqual([]);
   });
 
   test("a publisher under a line opens their file at it", async ({ page }) => {
     await open(page, { discovery: true }, "/discovery");
     await noTour(page);
-    const c = await find(page, "madeupmedia.com, 1042318, RESELLER");
+    const c = await find(page, WIDE);
     await c.getByRole("button", { expanded: false }).first().click();
     const link = c.locator('a[href*="#:~:text=madeupmedia.com"]').first();
     await expect(link).toHaveAttribute("href", /^https:\/\/[^/]+\/(app-)?ads\.txt#:~:text=madeupmedia\.com%2C-,1042318&text=1042318$/);
@@ -554,9 +685,15 @@ test.describe("discovery says who brought each line", () => {
     await open(page, { discovery: true, discoveryApi: "old" }, "/discovery");
     await expect(page.getByText("Publisher listings")).toBeVisible();
     await expect(page.getByText("One per publisher file carrying a line")).toBeVisible();
-    await expect(page.locator('[data-tour="discovery-kpi"]').getByText(/you gave us/i)).toHaveCount(0);
-    // The browser marks lines from the summary's watchlist instead.
-    await expect(page.locator("div.rounded-3xl").getByText("Found by Path Finder").first()).toBeVisible();
+    await expect(cards(page).first()).toBeVisible();
+    // 2026-10-14: no "given by you / found" marks any more, and no
+    // sellers.json verdict on an answer that carries none.
+    await expect(cards(page).getByText(/sellers\.json|Needs fixing|Found by Path Finder|You gave us/)).toHaveCount(0);
+    // The menu offers only what this answer can filter by.
+    await showMenu(page).click();
+    await expect(page.getByRole("menuitem", { name: "In your sellers.json" })).toHaveCount(0);
+    await expect(page.getByRole("menuitem", { name: "DIRECT lines" })).toBeVisible();
+    await page.keyboard.press("Escape");
     await expect(page.getByText(CRASHED)).toHaveCount(0);
     expect(errors).toEqual([]);
   });
@@ -574,50 +711,30 @@ test.describe("discovery says who brought each line", () => {
     await open(page, { discovery: true, discoveryApi: "unwatched_new" }, "/discovery");
     await noTour(page);
     await expect(page.getByText("Last week's report did not watch madeupmedia.la, so the totals are not compared")).toBeVisible();
-    const c = await find(page, "madeupmedia.la, 774061, RESELLER");
+    const c = await find(page, keyOf("madeupmedia.la", "774061", "RESELLER", "9c02ea41b7d5f6a8"));
     await expect(c.getByText("new this week")).toHaveCount(0);
   });
 
   test("a line too wide to keep says so, not an error", async ({ page }) => {
     await open(page, { discovery: true, placements: "toolarge" }, "/discovery");
     await noTour(page);
-    // The widest line has no embedded roster in the mock, so it asks.
-    const first = page.locator("div.rounded-3xl").first();
+    const first = cards(page).first();
     await first.getByRole("button", { expanded: false }).first().click();
     await expect(first.getByText("This line is on too many publishers to list here.", { exact: false })).toBeVisible();
     await expect(first.getByText("Could not load the publishers for this line.")).toHaveCount(0);
   });
 
-  test("the Show filter never outlives its control", async ({ page }) => {
-    await open(page, { discovery: true, discoveryApi: "cut" }, "/discovery");
-    await noTour(page);
-    const show = page.getByRole("button", { name: "Show lines by who brought them" });
-    // A cut list: no split, so no Show control.
-    await expect(show).toHaveCount(0);
-    await expect(page.getByText(/The list below shows the/)).toBeVisible();
-    // Under an SSP filter the split comes back: pick "You gave us".
-    await page.getByPlaceholder("Filter by SSP domain").fill("madeupmedia.com");
-    await expect(show).toBeVisible();
-    await show.click();
-    await page.getByRole("menuitem", { name: "You gave us" }).click();
-    await expect(page.locator("div.rounded-3xl").getByText("Found by Path Finder")).toHaveCount(0);
-    // Clear it: the split goes, and the list must not stay filtered by a
-    // control that is no longer there.
-    await page.getByPlaceholder("Filter by SSP domain").fill("");
-    await expect(show).toHaveCount(0);
-    await expect(page.locator("div.rounded-3xl").getByText("Found by Path Finder").first()).toBeVisible();
-  });
-
-  test("a dropped domain says the totals are not compared, never 'first crawl'", async ({ page }) => {
+  test("a dropped domain says the totals are not compared, never 'first report'", async ({ page }) => {
     await open(page, { discovery: true, discoveryApi: "scope_dropped" }, "/discovery");
     await expect(page.getByText("Your discovery domains changed since last week, so the totals are not compared")).toBeVisible();
-    await expect(page.getByText("First crawl, no prior week to compare")).toHaveCount(0);
+    // 2026-10-14 wording: "First report, no earlier week to compare" (was "First crawl, no prior week to compare").
+    await expect(page.getByText(/First (report|crawl)/)).toHaveCount(0);
   });
 
   test("a passing storage hiccup is an error, not 'too many publishers'", async ({ page }) => {
     await open(page, { discovery: true, placements: "hiccup" }, "/discovery");
     await noTour(page);
-    const first = page.locator("div.rounded-3xl").first();
+    const first = cards(page).first();
     await first.getByRole("button", { expanded: false }).first().click();
     await expect(first.getByText("Could not load the publishers for this line.")).toBeVisible();
     await expect(first.getByText(/too many publishers/)).toHaveCount(0);
