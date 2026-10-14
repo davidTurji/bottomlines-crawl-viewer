@@ -29,6 +29,7 @@ import { PAGE_SIZE } from "@/lib/paging";
 import { useReportScope } from "@/lib/reportScope";
 import { useSellersPage } from "@/lib/useSellersPage";
 import { cn, foundInLabel, storeLabel } from "@/lib/utils";
+import { appDatesSentence } from "@/lib/appDates";
 import { computeDelta, SplitStat } from "./CrawlReport";
 
 /**
@@ -871,6 +872,13 @@ function Roster({
                     </span>
                     {p.bundle_id && (
                       <span className="truncate font-mono text-[10px] tabular-nums text-slate-400">{p.bundle_id}</span>
+                    )}
+                    {/* First seen / last seen / removed on, when this
+                        report carries them (from 2026-10-14). */}
+                    {appDatesSentence(p) && (
+                      <span data-app-dates-line className="hidden truncate text-[10px] text-slate-400 sm:inline">
+                        {appDatesSentence(p)}
+                      </span>
                     )}
                   </>
                 ) : (

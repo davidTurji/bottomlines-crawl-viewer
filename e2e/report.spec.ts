@@ -9,7 +9,14 @@
  */
 import { expect, test, type Page } from "@playwright/test";
 
-import { mockDiscoveredLinePlacements, mockDiscoveredLines, mockInactiveBlock } from "../src/lib/mockData";
+import { appDay } from "../src/lib/appDates";
+import {
+  MOCK_CRAWL_AT,
+  mockDiscoveredLinePlacements,
+  mockDiscoveredLines,
+  mockInactiveBlock,
+  mockMatchedApps,
+} from "../src/lib/mockData";
 import { PAGE_SIZE } from "../src/lib/paging";
 import { installFakeApi, TOKEN, type Scenario } from "./fakeApi";
 
@@ -218,6 +225,62 @@ test.describe("the matched list", () => {
     await page.getByRole("button", { name: /Matched publishers/ }).click();
     await expect(page.getByRole("heading", { name: "Matched publishers" })).toBeVisible();
     await expect(page.getByRole("tab", { name: "Removed" })).toHaveAttribute("aria-selected", "true");
+    expect(errors).toEqual([]);
+  });
+});
+
+test.describe("app dates: first seen, last seen, removed on", () => {
+  const cells = (page: Page, key: string) => page.locator(`[data-app-date="${key}"]`);
+  const openApps = async (page: Page, scenario: Scenario) => {
+    await open(page, scenario);
+    await expectOverview(page);
+    await page.getByRole("button", { name: /Matched apps/ }).click();
+    await expect(page.getByRole("heading", { name: "Matched apps" })).toBeVisible();
+    await expect(page.getByRole("button", { name: /Show the seat lines of/ }).first()).toBeVisible();
+  };
+
+  test("a new report shows when each matched app was first and last seen, with no empty Removed on column", async ({ page }) => {
+    const errors = watchErrors(page);
+    await openApps(page, {});
+    const rows = mockMatchedApps(1).rows;
+    await expect(cells(page, "first_seen_at")).toHaveCount(rows.length);
+    await expect(cells(page, "last_seen_at")).toHaveCount(rows.length);
+    // Every app is active: no row has a removal, so no column for it.
+    await expect(cells(page, "removed_at")).toHaveCount(0);
+    await expect(page.getByText("Removed on")).toHaveCount(0);
+    // Readable days, and the placeholder where an app has no date.
+    const dated = rows.find((r) => r.first_seen_at)!;
+    await expect(cells(page, "first_seen_at").getByText(appDay(dated.first_seen_at)!, { exact: true }).first()).toBeVisible();
+    await expect(cells(page, "last_seen_at").first()).toContainText(appDay(MOCK_CRAWL_AT)!);
+    await expect(cells(page, "first_seen_at").filter({ hasText: "—" })).toHaveCount(rows.filter((r) => !r.first_seen_at).length);
+    expect(errors).toEqual([]);
+  });
+
+  test("an older report without the dates shows no date column at all", async ({ page }) => {
+    const errors = watchErrors(page);
+    await openApps(page, { appDates: false });
+    await expect(page.locator("[data-app-date]")).toHaveCount(0);
+    await expect(page.locator("[data-app-dates-line]")).toHaveCount(0);
+    await expect(page.getByText("First seen")).toHaveCount(0);
+    await page.getByRole("tab", { name: "Inactive", exact: true }).click();
+    await page.getByTestId("inactive-section").getByRole("tab", { name: /^Apps/ }).click();
+    await expect(page.getByText("Glintfox Runner")).toBeVisible();
+    await expect(page.locator("[data-app-date]")).toHaveCount(0);
+    expect(errors).toEqual([]);
+  });
+
+  test("an inactive app says when it was removed, unless its strip already does", async ({ page }) => {
+    const errors = watchErrors(page);
+    await openApps(page, {});
+    await page.getByRole("tab", { name: "Inactive", exact: true }).click();
+    await page.getByTestId("inactive-section").getByRole("tab", { name: /^Apps/ }).click();
+    await expect(page.getByText("Glintfox Runner")).toBeVisible();
+    const apps = mockInactiveBlock.apps;
+    await expect(cells(page, "removed_at")).toHaveCount(apps.length);
+    const other = apps.find((a) => a.bundle !== "com.madeup.glintfox.runner")!;
+    await expect(cells(page, "removed_at").getByText(appDay(other.removed_at)!, { exact: true }).first()).toBeVisible();
+    // Glintfox Runner left the store the day its strip names: said once.
+    await expect(cells(page, "removed_at").filter({ hasText: "—" })).toHaveCount(1);
     expect(errors).toEqual([]);
   });
 });

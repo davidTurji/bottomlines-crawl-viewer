@@ -16,6 +16,7 @@ import {
   type InactivePublisher,
   type TrialCaps,
 } from "@/lib/api";
+import { appDateColumns, type AppDateKey } from "@/lib/appDates";
 import { INACTIVE_KINDS, inactiveNoun } from "@/lib/inactive";
 import { usePageCache } from "@/lib/pageCache";
 import { PAGE_SIZE } from "@/lib/paging";
@@ -41,7 +42,14 @@ import { cn } from "@/lib/utils";
 /** The matched cards, in their inactive dress. */
 export type InactiveCards = {
   Publisher: ComponentType<{ pub: InactivePublisher; open: boolean; onToggle: () => void; token: string }>;
-  App: ComponentType<{ app: InactiveApp; open: boolean; onToggle: () => void; token: string }>;
+  /** `dateColumns`: the app date columns this page shows (appDateColumns). */
+  App: ComponentType<{
+    app: InactiveApp;
+    dateColumns?: AppDateKey[];
+    open: boolean;
+    onToggle: () => void;
+    token: string;
+  }>;
 };
 
 const LABEL: Record<InactiveKind, string> = { publishers: "Publishers", apps: "Apps" };
@@ -156,6 +164,8 @@ export default function InactiveSection({
   const noun = inactiveNoun(kind);
   const nounOne = inactiveNoun(kind, 1);
   const toggle = (key: string) => setExpanded((k) => (k === key ? null : key));
+  // An app's date columns show only when a row on this page has the date.
+  const appColumns = kind === "apps" ? appDateColumns(rows as InactiveApp[]) : [];
 
   return (
     <div data-testid="inactive-section">
@@ -260,7 +270,13 @@ export default function InactiveSection({
               const key = `a:${a.store}:${a.bundle}`;
               return (
                 <Settle key={key} index={i}>
-                  <cards.App app={a} token={token} open={expanded === key} onToggle={() => toggle(key)} />
+                  <cards.App
+                    app={a}
+                    dateColumns={appColumns}
+                    token={token}
+                    open={expanded === key}
+                    onToggle={() => toggle(key)}
+                  />
                 </Settle>
               );
             })}
