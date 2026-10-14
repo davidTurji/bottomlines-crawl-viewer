@@ -340,18 +340,25 @@ export async function installFakeApi(page: Page, scenario: Scenario = {}): Promi
           // keys on "too large" (CrawlDiscovered LineCard).
           return reply(503, { detail: "This list is too large to display here. Please contact your admin for the full workbook." });
         }
-        return reply(
-          200,
-          mockDiscoveredLinePlacements(
-            {
-              ssp_domain: q.get("ssp_domain") ?? "",
-              publisher_id: q.get("publisher_id") ?? "",
-              relationship: (q.get("relationship") ?? "DIRECT") as "DIRECT",
-              cert_id: q.get("cert_id") ?? "",
-            },
-            { page: page_, page_size: Number(q.get("page_size") ?? 100), q: q.get("q") ?? undefined },
-          ),
-        );
+        {
+          const key = {
+            ssp_domain: q.get("ssp_domain") ?? "",
+            publisher_id: q.get("publisher_id") ?? "",
+            relationship: (q.get("relationship") ?? "DIRECT") as "DIRECT",
+            cert_id: q.get("cert_id") ?? "",
+          };
+          const size = Number(q.get("page_size") ?? 100);
+          const term = q.get("q") ?? undefined;
+          // A report frozen before 2026-10-14 kept at most the first 200
+          // files of a line, and the API serves exactly those.
+          const capped = s.discoveryApi !== "current" && !s.discoveryApi.startsWith("baseline_");
+          if (!capped) return reply(200, mockDiscoveredLinePlacements(key, { page: page_, page_size: size, q: term }));
+          const kept = mockDiscoveredLinePlacements(key, { page: 1, page_size: 100_000 }).rows.slice(0, 200);
+          const rows = term
+            ? kept.filter((p) => (p.developer_domain + " " + p.developer_name).toLowerCase().includes(term.toLowerCase()))
+            : kept;
+          return reply(200, { page: page_, page_size: size, total: rows.length, rows: rows.slice((page_ - 1) * size, page_ * size) });
+        }
       case "declarations":
         return reply(
           200,

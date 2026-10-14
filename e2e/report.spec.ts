@@ -668,6 +668,14 @@ test.describe("discovery checks each line against your sellers.json", () => {
     await expect(cards(page).first()).toBeVisible();
     await expect(page.getByText(/First report/)).toHaveCount(0);
     await expect(page.getByText(/new this week/i)).toHaveCount(0);
+    // Such a report kept only the first 200 files of a wide line, and the
+    // roster says so under a card that counts them all.
+    await noTour(page);
+    const wide = rowOf(WIDE);
+    const c = await find(page, WIDE);
+    await c.getByRole("button", { expanded: false }).first().click();
+    await expect(c.getByText(`This report kept the first 200 of ${wide.placements_count.toLocaleString()} files for this line.`)).toBeVisible();
+    await expect(c.getByText("1–100 of 200")).toBeVisible();
     expect(errors).toEqual([]);
   });
 

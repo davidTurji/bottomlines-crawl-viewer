@@ -820,6 +820,15 @@ function Roster({
           )}
         </div>
       )}
+      {/* A report frozen before 2026-10-14 kept only the first files of a
+          wide line (200). Under a card that counts 10,801, the list says
+          so, never passes for whole. */}
+      {typeof data === "object" && !needle && total != null && total < line.placements_count && (
+        <p className="mb-2 text-[11px] text-slate-500">
+          This report kept the first {total.toLocaleString()} of {line.placements_count.toLocaleString()} files for
+          this line.{canExport ? " The full list is in your Excel export." : ""}
+        </p>
+      )}
       {data === "loading" ? (
         <SkeletonInlineRows rows={4} label="Loading publishers for this line" />
       ) : data === "toolarge" ? (
