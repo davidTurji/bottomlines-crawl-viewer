@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 
-import { api } from "./api";
+import { api, type SellersFixPayload } from "./api";
 
 /**
  * Does this report carry the Sellers.json page? Only once the crawler
@@ -9,20 +9,31 @@ import { api } from "./api";
  * the answer is false. One rule for the rail's entry and for every link
  * into the page (the Discovery badges), so a link never points at a page
  * the rail does not list. Default false, so nothing flashes in and out.
+ *
+ * ONE REQUEST PER REPORT. The rail and the Discovery page both ask, and
+ * the answer is the page's whole evidence (the file and every sighting,
+ * megabytes on a busy domain), so the probe is shared: the first caller
+ * starts it, every later caller for the same token reads the same promise.
  */
+const probes = new Map<string, Promise<SellersFixPayload | null>>();
+
+function probe(token: string): Promise<SellersFixPayload | null> {
+  let p = probes.get(token);
+  if (!p) {
+    p = api.sellersFix(token).catch(() => null);
+    probes.set(token, p);
+  }
+  return p;
+}
+
 export function useSellersPage(token: string): boolean {
   const [has, setHas] = useState(false);
   useEffect(() => {
     if (!token) return;
     let alive = true;
-    api
-      .sellersFix(token)
-      .then((d) => {
-        if (alive) setHas(!!d?.file || (d?.sightings?.length ?? 0) > 0);
-      })
-      .catch(() => {
-        if (alive) setHas(false);
-      });
+    probe(token).then((d) => {
+      if (alive) setHas(!!d?.file || (d?.sightings?.length ?? 0) > 0);
+    });
     return () => {
       alive = false;
     };

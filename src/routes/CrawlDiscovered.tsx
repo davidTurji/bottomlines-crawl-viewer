@@ -278,7 +278,6 @@ export default function CrawlDiscovered() {
               </div>
               <div className="text-[11px] text-slate-500">{baseline.words}</div>
             </div>
-            {filtered && <span className="text-xs text-slate-500">this filter</span>}
           </div>
           {/* New this week leads, wider, in the info blue the new cards
               wear, only when the report compares. */}

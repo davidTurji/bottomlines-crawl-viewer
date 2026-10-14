@@ -554,7 +554,7 @@ test.describe("discovery checks each line against your sellers.json", () => {
     await expect(placeholder.getByText("The seller ID is a placeholder, not one of yours, and 1 more")).toBeVisible();
     // A seller the file types the other way is a fix, with the file's word for it.
     const mismatch = await find(page, keyOf("madeupmedia-ads.com", "cm41288", "RESELLER", "77d3b0e9c142a5fb"));
-    await expect(mismatch.getByText("Listed as PUBLISHER in your sellers.json, but carried as RESELLER")).toBeVisible();
+    await expect(mismatch.getByText("Your sellers.json lists this seller as PUBLISHER, the line says RESELLER")).toBeVisible();
 
     // In the file: the seller's name and type beside the badge, as the API said them.
     const wide = rowOf(WIDE);

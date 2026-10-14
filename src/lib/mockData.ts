@@ -2097,7 +2097,8 @@ function issuesOf(l: DiscoveredLine, all: DiscoveredLine[]): LineIssue[] {
     if (wanted && wanted !== l.relationship) {
       out.push({
         kind: "relationship_mismatch",
-        text: `Listed as ${l.seller.seller_type.toUpperCase()} in your sellers.json, but carried as ${l.relationship}`,
+        // Word for word the crawler's sentence (customer_snapshot._line_issues).
+        text: `Your sellers.json lists this seller as ${l.seller.seller_type.toUpperCase()}, the line says ${l.relationship}`,
       });
     }
   }
@@ -2239,6 +2240,11 @@ export function mockDiscoveredLines(opts: {
   if (baseline !== "compared") {
     pool = pool.map((r) => ({ ...r, previous_placements_count: null, previous_publishers_count: null }));
   }
+  // The totals are the REPORT's numbers, counted before the search and the
+  // Show filter, exactly as viewer_frozen.discovered_lines counts them: the
+  // list's own count line says how many lines the filter keeps. (Only the
+  // SSP-domain filter rescopes them, and this page no longer offers it.)
+  const whole = pool;
   if (opts.q) {
     // The contract's search: the line itself, or any publisher in its
     // roster by domain or name.
@@ -2259,9 +2265,6 @@ export function mockDiscoveredLines(opts: {
   if (opts.show === "fixing") pool = pool.filter((r) => (r.issues ?? []).length > 0);
   if (opts.show === "listed") pool = pool.filter((r) => r.seller?.status === "listed");
   if (opts.show === "unlisted") pool = pool.filter((r) => r.seller?.status === "unlisted");
-  // Totals over the filtered set, as the endpoint's contract says, so the
-  // KPI rectangle always describes the cards under it.
-  const whole = pool;
   const given = whole.filter((r) => r.origin === "given").length;
   const listedIds = new Set(whole.filter((r) => r.seller?.status === "listed").map((r) => r.publisher_id));
   const unlistedIds = new Set(whole.filter((r) => r.seller?.status === "unlisted").map((r) => r.publisher_id));
