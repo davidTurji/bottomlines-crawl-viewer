@@ -697,9 +697,12 @@ test.describe("discovery checks each line against your sellers.json", () => {
     // 2026-10-14: no "given by you / found" marks any more, and no
     // sellers.json verdict on an answer that carries none.
     await expect(cards(page).getByText(/sellers\.json|Needs fixing|Found by Path Finder|You gave us/)).toHaveCount(0);
-    // The menu offers only what this answer can filter by.
+    // The menu offers only what this answer can filter by: no sellers.json
+    // pair without the file, and no "Needs fixing" on a report that never
+    // checked its lines (an empty list would read as "nothing to fix").
     await showMenu(page).click();
     await expect(page.getByRole("menuitem", { name: "In your sellers.json" })).toHaveCount(0);
+    await expect(page.getByRole("menuitem", { name: "Needs fixing" })).toHaveCount(0);
     await expect(page.getByRole("menuitem", { name: "DIRECT lines" })).toBeVisible();
     await page.keyboard.press("Escape");
     await expect(page.getByText(CRASHED)).toHaveCount(0);
