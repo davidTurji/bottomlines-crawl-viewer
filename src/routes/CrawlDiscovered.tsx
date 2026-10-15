@@ -7,7 +7,7 @@ import TrialBanner from "@/components/TrialBanner";
 import { SkeletonInlineRows, SkeletonRows, SkeletonStatCards } from "@/components/Skeleton";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { ChevronDown, ChevronLeft, ChevronRight, Download, Radar, Search } from "lucide-react";
+import { BadgeCheck, ChevronDown, CircleAlert, Download, Radar, Search, Users, Wrench } from "lucide-react";
 
 import {
   ApiError,
@@ -65,7 +65,9 @@ import { computeDelta, SplitStat } from "./CrawlReport";
 
 type ShowFilter = "all" | DiscoveredShow;
 
-const ROSTER_PAGE = 100;
+/** Publisher cards shown when a line opens, and a page of them after. */
+const ROSTER_FIRST = 3;
+const ROSTER_PAGE = 25;
 
 export default function CrawlDiscovered() {
   const { token, basePath } = useReportScope();
@@ -206,11 +208,6 @@ export default function CrawlDiscovered() {
   // files and says so.
   const countsPublishers = totals?.publishers != null;
   const domains = summary?.watchlist?.discover ?? [];
-  // The sellers.json coverage lives in this caption only.
-  const linesCaption =
-    totals && totals.in_file_lines != null && totals.not_in_file_lines != null
-      ? `${totals.in_file_lines.toLocaleString()} in your sellers.json, ${totals.not_in_file_lines.toLocaleString()} not`
-      : "Each different line, counted once";
 
   // The Show menu offers only what the report can answer: "New this week"
   // needs a compared week, "Needs fixing" a report that checked its lines
@@ -258,6 +255,15 @@ export default function CrawlDiscovered() {
             </>
           )}
           .
+          {rows[0] && (
+            <>
+              {" "}For example{" "}
+              <span className="font-mono text-[13px] text-slate-700">
+                {rows[0].ssp_domain}, {rows[0].publisher_id}, {rows[0].relationship}
+              </span>
+              .
+            </>
+          )}
         </p>
         <WeekLine
           week={weekLabel}
@@ -282,29 +288,38 @@ export default function CrawlDiscovered() {
               <div className="text-[11px] text-slate-500">{baseline.words}</div>
             </div>
           </div>
-          {/* New this week leads, wider, in the info blue the new cards
-              wear, only when the report compares. */}
-          <div
-            className={cn(
-              "grid gap-px overflow-hidden rounded-xl border border-border bg-border",
-              newLines != null ? "grid-cols-1 sm:grid-cols-[1.4fr_1fr_1fr]" : "grid-cols-2",
-            )}
-          >
-            {newLines != null && (
-              <SplitStat
-                tone="info"
-                prefix={newLines > 0 ? "+" : undefined}
-                number={newLines}
-                label="New this week"
-                caption="Lines no publisher carried last week"
-                className="bg-white"
-              />
-            )}
+          {/* Three separate cards, every week (owner, 2026-10-14): new lines
+              discovered this week (on a first report, all of them), the
+              unique lines actually found with the domain, and the
+              publishers holding them. */}
+          <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
+            <SplitStat
+              tone="info"
+              prefix={newLines ? "+" : undefined}
+              number={newLines ?? 0}
+              label="New lines this week"
+              caption={newLines != null ? "No publisher carried them last week" : "No prior week to compare"}
+              className="rounded-xl border border-border bg-white"
+            />
             <SplitStat
               number={totals.lines}
-              label="Lines with your domain"
-              caption={linesCaption}
-              className="bg-white"
+              label="Lines found with your domain"
+              caption={
+                totals.in_file_lines != null && totals.not_in_file_lines != null
+                  ? `${totals.in_file_lines.toLocaleString()} in your sellers.json${
+                      totals.sellers_json?.sellers != null
+                        ? ` (${totals.sellers_json.sellers.toLocaleString()} sellers)`
+                        : ""
+                    }, ${totals.not_in_file_lines.toLocaleString()} not${
+                      // Only lines on the customer's own domain are checked
+                      // against their file; say how many sit elsewhere.
+                      totals.lines - totals.in_file_lines - totals.not_in_file_lines > 0
+                        ? `, ${(totals.lines - totals.in_file_lines - totals.not_in_file_lines).toLocaleString()} on your other domains`
+                        : ""
+                    }`
+                  : "Each line counted once"
+              }
+              className="rounded-xl border border-border bg-white"
               delta={
                 baseline.totals && totals.previous_lines != null
                   ? computeDelta(totals.lines, totals.previous_lines)
@@ -312,33 +327,26 @@ export default function CrawlDiscovered() {
               }
               note={baseline.totals ? undefined : "not compared"}
             />
-            {countsPublishers ? (
-              <SplitStat
-                number={totals.publishers ?? 0}
-                label="Publishers carrying your domain"
-                caption="Each counted once, whichever of its files"
-                className="bg-white"
-                delta={
-                  baseline.totals && totals.previous_publishers != null
-                    ? computeDelta(totals.publishers ?? 0, totals.previous_publishers)
-                    : null
-                }
-                note={baseline.totals ? undefined : "not compared"}
-              />
-            ) : (
-              <SplitStat
-                number={totals.placements}
-                label="Publisher listings"
-                caption="One per publisher file carrying a line"
-                className="bg-white"
-                delta={
-                  baseline.totals && totals.previous_placements != null
-                    ? computeDelta(totals.placements, totals.previous_placements)
-                    : null
-                }
-                note={baseline.totals ? undefined : "not compared"}
-              />
-            )}
+            <SplitStat
+              number={countsPublishers ? (totals.publishers ?? 0) : totals.placements}
+              label={countsPublishers ? "Unique publishers carrying them" : "Publisher listings"}
+              caption={
+                countsPublishers
+                  ? "Several of these lines, still one publisher"
+                  : "One per publisher file carrying a line"
+              }
+              className="rounded-xl border border-border bg-white"
+              delta={
+                baseline.totals &&
+                (countsPublishers ? totals.previous_publishers : totals.previous_placements) != null
+                  ? computeDelta(
+                      countsPublishers ? (totals.publishers ?? 0) : totals.placements,
+                      (countsPublishers ? totals.previous_publishers : totals.previous_placements) ?? 0,
+                    )
+                  : null
+              }
+              note={baseline.totals ? undefined : "not compared"}
+            />
           </div>
           {/* A list shorter than its numbers says so, never passes for
               whole. */}
@@ -404,7 +412,7 @@ export default function CrawlDiscovered() {
         </p>
       )}
 
-      {!error && !onTrial && total > 0 && pageCount > 1 && (
+      {!error && !onTrial && total > 0 && (
         <Pager
           placement="top"
           anchorRef={paging.topRef}
@@ -447,7 +455,7 @@ export default function CrawlDiscovered() {
           detail="line on the open web that starts with your domain, with every publisher carrying it"
         />
       )}
-      {!onTrial && total > 0 && pageCount > 1 && (
+      {!onTrial && total > 0 && (
         <Pager
           className="border-t border-border/70 pt-4"
           page={page}
@@ -635,13 +643,15 @@ function LineCard({
                       : undefined
                   }
                   className={cn(
-                    "flex-shrink-0 rounded-full border px-1.5 py-px text-[10px] font-medium transition-colors",
-                    mark.tone === "warn"
-                      ? "border-warn-border bg-warn-bg text-warn"
-                      : "border-border bg-slate-50 text-slate-700",
-                    sellersPage && (mark.tone === "warn" ? "hover:bg-warn-border/60" : "hover:bg-slate-100"),
+                    "inline-flex flex-shrink-0 items-center gap-1 rounded-full border px-2 py-0.5 text-[11px] font-semibold tracking-tight transition-colors",
+                    MARK_STYLE[mark.kind].cls,
+                    sellersPage && cn("cursor-pointer", MARK_STYLE[mark.kind].hover),
                   )}
                 >
+                  {(() => {
+                    const MarkIcon = MARK_STYLE[mark.kind].icon;
+                    return <MarkIcon aria-hidden className="h-3 w-3" strokeWidth={2.4} />;
+                  })()}
                   {mark.pill}
                 </span>
                 {mark.detail && <span className="truncate text-[11px] text-slate-500">{mark.detail}</span>}
@@ -725,9 +735,14 @@ function Roster({
   initialQ: string;
   canExport: boolean;
 }) {
+  /* No paging until asked (owner, 2026-10-15): a line opens on its first
+     three publishers and a card saying how many more carry it; "Show more"
+     turns the list into the Overview's pages. */
+  const [paged, setPaged] = useState(false);
   const [page, setPage] = useState(1);
   const [q, setQ] = useState(initialQ);
   const [data, setData] = useState<RosterData>("loading");
+  const [exporting, setExporting] = useState(false);
   // Liveness, not per-run cancellation: setData("loading") re-renders, and
   // a `let cancelled` closure would then discard the very response it
   // waited for.
@@ -742,7 +757,7 @@ function Roster({
   useEffect(() => setPage(1), [needle]);
   const key = lineKey(line);
   useEffect(() => {
-    setData("loading");
+    setData((prev) => (typeof prev === "object" ? prev : "loading"));
     const [ssp_domain, publisher_id, relationship, cert_id] = key.split("|");
     const lineId: DiscoveredLineKey = { ssp_domain, publisher_id, relationship, cert_id };
     api
@@ -758,69 +773,62 @@ function Roster({
   }, [token, key, page, needle]);
 
   const total = typeof data === "object" ? data.total : null;
-  const pages = total != null ? Math.max(1, Math.ceil(total / ROSTER_PAGE)) : 1;
-  const from = total ? (page - 1) * ROSTER_PAGE + 1 : 0;
-  const to = total ? Math.min(total, page * ROSTER_PAGE) : 0;
+  // A search shows every match, paged: the first three are for browsing.
+  const whole = paged || needle !== "";
+  const rows = typeof data === "object" ? (whole ? data.rows : data.rows.slice(0, ROSTER_FIRST)) : [];
+  const hidden = !whole && total != null ? Math.max(0, total - rows.length) : 0;
 
   return (
     <>
-      <div className="mb-2 flex flex-wrap items-baseline justify-between gap-x-3 gap-y-1">
+      <div className="mb-2 flex flex-wrap items-center justify-between gap-x-3 gap-y-1">
         <span className="text-xs font-medium text-slate-700">Where it was found</span>
-        {/* Publishers once each and their files where the report counts
-            publishers; an older report counts files and says listings. */}
-        <span className="text-[11px] text-slate-500">
-          {line.publishers_count != null ? (
-            <>
-              <span className="font-mono tabular-nums">{line.publishers_count.toLocaleString()}</span>{" "}
-              {line.publishers_count === 1 ? "publisher" : "publishers"},{" "}
-              <span className="font-mono tabular-nums">{line.placements_count.toLocaleString()}</span>{" "}
-              {line.placements_count === 1 ? "file" : "files"}
-            </>
-          ) : (
-            <>
-              <span className="font-mono tabular-nums">{(line.placements_count ?? 0).toLocaleString()}</span>{" "}
-              {line.placements_count === 1 ? "listing" : "listings"}
-            </>
+        <span className="flex items-center gap-4">
+          {/* Publishers once each and their files where the report counts
+              publishers; an older report counts files and says listings. */}
+          <span className="text-[11px] text-slate-500">
+            {line.publishers_count != null ? (
+              <>
+                <span className="font-mono tabular-nums">{line.publishers_count.toLocaleString()}</span>{" "}
+                {line.publishers_count === 1 ? "publisher" : "publishers"},{" "}
+                <span className="font-mono tabular-nums">{line.placements_count.toLocaleString()}</span>{" "}
+                {line.placements_count === 1 ? "file" : "files"}
+              </>
+            ) : (
+              <>
+                <span className="font-mono tabular-nums">{(line.placements_count ?? 0).toLocaleString()}</span>{" "}
+                {line.placements_count === 1 ? "listing" : "listings"}
+              </>
+            )}
+          </span>
+          {/* The page toolbar's Export, the same look, for this line alone. */}
+          {canExport && data !== "toolarge" && (
+            <button
+              type="button"
+              disabled={exporting || total === 0}
+              onClick={() => {
+                setExporting(true);
+                downloadLineCsv(token, line).finally(() => setExporting(false));
+              }}
+              className="inline-flex items-center gap-1.5 text-xs font-medium text-slate-700 transition-colors hover:text-primary disabled:opacity-50"
+              aria-label="Export every publisher and app carrying this line as CSV"
+            >
+              <Download className="h-3.5 w-3.5" />
+              {exporting ? "Preparing..." : "Export CSV"}
+            </button>
           )}
         </span>
       </div>
       {data !== "toolarge" && (
-        <div className="mb-2 flex items-center gap-2">
-          <label className="flex h-8 min-w-0 flex-1 items-center gap-2 rounded-md border border-border bg-white px-2.5 text-[12px] text-slate-500 focus-within:border-slate-400">
-            <Search aria-hidden className="h-3.5 w-3.5 flex-shrink-0 text-slate-400" />
-            <input
-              value={q}
-              onChange={(e) => setQ(e.target.value)}
-              placeholder="Find a publisher or app"
-              aria-label="Find a publisher or app on this line"
-              className="min-w-0 flex-1 bg-transparent text-slate-800 placeholder:text-slate-400 focus:outline-none"
-            />
-          </label>
-          {total != null && total > ROSTER_PAGE && (
-            <div className="flex flex-shrink-0 items-center gap-1 text-[11px] text-slate-500">
-              <span className="tabular-nums">
-                {from.toLocaleString()}–{to.toLocaleString()} of {total.toLocaleString()}
-              </span>
-              <button
-                type="button"
-                aria-label="Previous publishers"
-                disabled={page <= 1}
-                onClick={() => setPage((p) => p - 1)}
-                className="rounded-md border border-border bg-white p-1 text-slate-600 disabled:opacity-40"
-              >
-                <ChevronLeft className="h-3.5 w-3.5" />
-              </button>
-              <button
-                type="button"
-                aria-label="Next publishers"
-                disabled={page >= pages}
-                onClick={() => setPage((p) => p + 1)}
-                className="rounded-md border border-border bg-white p-1 text-slate-600 disabled:opacity-40"
-              >
-                <ChevronRight className="h-3.5 w-3.5" />
-              </button>
-            </div>
-          )}
+        /* The Overview's search: round, the icon inside. */
+        <div className="relative mb-3 w-full">
+          <Search className="pointer-events-none absolute left-3.5 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
+          <input
+            value={q}
+            onChange={(e) => setQ(e.target.value)}
+            placeholder="Search publishers or apps"
+            aria-label="Search the publishers and apps carrying this line"
+            className="h-10 w-full rounded-full border border-border bg-white pl-10 pr-4 text-sm text-slate-900 outline-none transition-colors placeholder:text-slate-400 focus:border-primary/40"
+          />
         </div>
       )}
       {/* A report frozen before 2026-10-14 kept only the first files of a
@@ -833,7 +841,7 @@ function Roster({
         </p>
       )}
       {data === "loading" ? (
-        <SkeletonInlineRows rows={4} label="Loading publishers for this line" />
+        <SkeletonInlineRows rows={3} label="Loading publishers for this line" />
       ) : data === "toolarge" ? (
         <p className="py-2 text-xs text-slate-500">
           This line is on too many publishers to list here.
@@ -846,45 +854,110 @@ function Roster({
           {needle ? "No publisher or app on this line matches." : "No publishers recorded."}
         </p>
       ) : (
-        /* Capped and scrollable, the border on the scroller so a capped
-           list clips at a clean rounded edge. */
-        <div className="scroll-y max-h-[420px] overflow-y-auto rounded-md border border-border bg-white">
-          <ul className="divide-y divide-border">
-            {data.rows.map((p, i) => (
-              // Each row opens the publisher's file at this line, and the
-              // publisher's name opens their site.
-              <ActionableLine
-                key={`${p.developer_domain}|${p.bundle_id ?? ""}|${p.found_in}|${i}`}
-                line={line}
-                publisherDomain={p.developer_domain}
-                foundIn={p.found_in}
-                shown
-                className="flex items-baseline gap-2.5 px-3 py-1.5 text-[11px]"
-              >
-                {p.app_name ? (
-                  // An app placement: the app's name, its store in the app
-                  // tone, the bundle id in mono.
-                  <>
-                    <span className="truncate font-sans text-slate-800">{p.app_name}</span>
-                    <span className="flex-shrink-0 rounded-full border border-app-border bg-app-bg px-1.5 py-px text-[10px] font-medium text-app">
-                      {storeLabel(p.store)}
-                    </span>
-                    {p.bundle_id && (
-                      <span className="truncate font-mono text-[10px] tabular-nums text-slate-400">{p.bundle_id}</span>
-                    )}
-                  </>
-                ) : (
-                  <PublisherDomainLink domain={p.developer_domain} shown className="font-mono tabular-nums" />
-                )}
-                <span data-line-text className="ml-auto flex-shrink-0 text-[10px] text-slate-400">
-                  {foundInLabel(p.found_in)}
-                </span>
-              </ActionableLine>
+        <div>
+          {whole && (
+            <Pager
+              placement="top"
+              className="mb-3"
+              page={page}
+              pageSize={ROSTER_PAGE}
+              total={total ?? 0}
+              onPage={setPage}
+              noun="publishers and apps"
+            />
+          )}
+          <ul className="space-y-2">
+            {rows.map((p, i) => (
+              <PlacementCard key={`${p.developer_domain}|${p.bundle_id ?? ""}|${p.found_in}|${i}`} line={line} p={p} />
             ))}
           </ul>
+          {hidden > 0 && (
+            /* The trial card's look (LockedTail), small: how many more carry
+               the line, and the one button that opens them. */
+            <div className="mt-3 overflow-hidden rounded-2xl border border-primary/20 bg-gradient-to-br from-primary/[0.06] via-white to-white p-4 shadow-sm">
+              <div className="flex flex-wrap items-center gap-3">
+                <span className="flex h-9 w-9 flex-shrink-0 items-center justify-center rounded-full bg-primary/10 text-primary">
+                  <Users className="h-4 w-4" />
+                </span>
+                <div className="min-w-0 flex-1">
+                  <p className="font-display text-[15px] font-semibold leading-snug tracking-tight text-slate-900">
+                    {hidden.toLocaleString()} more {hidden === 1 ? "publisher or app carries" : "publishers and apps carry"}{" "}
+                    this line
+                  </p>
+                  <p className="mt-0.5 text-[12px] text-slate-600">
+                    Showing {rows.length.toLocaleString()} of {(total ?? 0).toLocaleString()}.
+                  </p>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setPaged(true)}
+                  className="inline-flex items-center gap-1.5 rounded-full bg-primary px-4 py-2 text-[13px] font-semibold text-primary-foreground shadow-sm transition-colors hover:bg-primary/90"
+                >
+                  Show {Math.min(ROSTER_PAGE, total ?? 0).toLocaleString()} more
+                </button>
+              </div>
+            </div>
+          )}
+          {whole && (
+            <div className="mt-3">
+              <Pager
+                page={page}
+                pageSize={ROSTER_PAGE}
+                total={total ?? 0}
+                onPage={setPage}
+                noun="publishers and apps"
+              />
+            </div>
+          )}
         </div>
       )}
     </>
+  );
+}
+
+/** One publisher or app carrying a line: the Overview's card look. The card
+ *  opens the publisher's file at this line; the name opens their site. */
+function PlacementCard({ line, p }: { line: DiscoveredLine; p: DiscoveredPlacement }) {
+  const name = p.developer_name || p.developer_domain;
+  const initial = (name.replace(/^www\./i, "").charAt(0) || "?").toUpperCase();
+  return (
+    <ActionableLine
+      line={line}
+      publisherDomain={p.developer_domain}
+      foundIn={p.found_in}
+      shown
+      className="flex items-center gap-3 rounded-2xl border border-border bg-white px-4 py-3 shadow-sm"
+    >
+      <span
+        aria-hidden
+        className="flex h-9 w-9 flex-shrink-0 items-center justify-center rounded-full bg-accent text-sm font-semibold text-primary"
+      >
+        {initial}
+      </span>
+      <span className="min-w-0 flex-1">
+        <span className="block truncate text-sm font-semibold tracking-tight text-slate-900">
+          <PublisherDomainLink domain={p.developer_domain} label={name} shown />
+        </span>
+        <span className="mt-0.5 flex min-w-0 items-center gap-1.5 text-[11px] text-slate-500">
+          {p.app_name ? (
+            <>
+              <span className="truncate text-slate-700">{p.app_name}</span>
+              <span className="flex-shrink-0 rounded-full border border-app-border bg-app-bg px-1.5 py-px text-[10px] font-medium text-app">
+                {storeLabel(p.store)}
+              </span>
+              {p.bundle_id && (
+                <span className="truncate font-mono text-[10px] tabular-nums text-slate-400">{p.bundle_id}</span>
+              )}
+            </>
+          ) : name !== p.developer_domain ? (
+            <span className="truncate font-mono">{p.developer_domain}</span>
+          ) : null}
+        </span>
+      </span>
+      <span data-line-text className="flex-shrink-0 text-[11px] text-slate-400">
+        {foundInLabel(p.found_in)}
+      </span>
+    </ActionableLine>
   );
 }
 
@@ -905,7 +978,19 @@ function deltaOf(line: DiscoveredLine): Delta {
 
 /** The pill and the words beside it: what the customer's own file says,
  *  or what a publisher should fix. Null on a report without the check. */
-function markOf(line: DiscoveredLine): { pill: string; detail: string; tone: "warn" | "plain" } | null {
+type MarkKind = "fix" | "listed" | "unlisted";
+
+/** The badge per kind, in the system's tones (owner, 2026-10-15: "more
+ *  premium"): an icon that says what it is, the tone's own ground. */
+const MARK_STYLE: Record<MarkKind, { cls: string; hover: string; icon: typeof Wrench }> = {
+  listed: { cls: "border-ok-border bg-ok-bg text-ok", hover: "hover:border-ok", icon: BadgeCheck },
+  unlisted: { cls: "border-warn-border bg-warn-bg text-warn", hover: "hover:border-warn", icon: CircleAlert },
+  fix: { cls: "border-critical-border bg-critical-bg text-critical", hover: "hover:border-critical", icon: Wrench },
+};
+
+function markOf(
+  line: DiscoveredLine,
+): { pill: string; detail: string; tone: "warn" | "plain"; kind: MarkKind } | null {
   const issues = line.issues ?? [];
   if (issues.length > 0) {
     const first = issues[0].text;
@@ -914,14 +999,20 @@ function markOf(line: DiscoveredLine): { pill: string; detail: string; tone: "wa
       pill: "Needs fixing",
       detail: rest > 0 ? `${first}, and ${rest} more` : first,
       tone: "warn",
+      kind: "fix",
     };
   }
   const s = line.seller;
   if (!s) return null;
   if (s.status === "listed") {
-    return { pill: "In your sellers.json", detail: `${s.name}, ${s.seller_type.toLowerCase()}`, tone: "plain" };
+    return {
+      pill: "In your sellers.json",
+      detail: `${s.name}, ${s.seller_type.toLowerCase()}`,
+      tone: "plain",
+      kind: "listed",
+    };
   }
-  return { pill: "Not in your sellers.json", detail: "", tone: "warn" };
+  return { pill: "Not in your sellers.json", detail: "", tone: "warn", kind: "unlisted" };
 }
 
 /** A line's identity, and the React key for its card. */
@@ -954,20 +1045,91 @@ function NoDiscoveryCard() {
  * carrying the active search and Show filter. Walks every page; the cap
  * that remains is a runaway guard far above any real report.
  */
-async function downloadCsv(token: string, q: string, show: ShowFilter) {
+/** One CSV cell: always quoted, inner quotes doubled (RFC 4180). */
+const csvCell = (v: string) => `"${v.replace(/"/g, '""')}"`;
+
+/** Save rows as a CSV file Excel opens with accents intact (the BOM). */
+function saveCsv(name: string, header: readonly string[], rows: string[][]) {
+  const csv = "\uFEFF" + [header, ...rows].map((r) => r.map(csvCell).join(",")).join("\r\n");
+  const blob = new Blob([csv], { type: "text/csv;charset=utf-8" });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = name;
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  URL.revokeObjectURL(url);
+}
+
+const today = () => new Date().toISOString().slice(0, 10);
+const fileSafe = (s: string) => s.replace(/[^A-Za-z0-9._-]+/g, "-").replace(/^-+|-+$/g, "");
+
+/** Every publisher and app carrying one line, read whole from the
+ *  placements endpoint (500 a page, its cap), one row each. */
+async function downloadLineCsv(token: string, line: DiscoveredLine) {
   const header = [
     "ssp_domain",
-    "publisher_id",
+    "seller_id",
     "relationship",
     "cert_id",
-    "placements_count",
-    "previous_placements_count",
-    "publishers_count",
-    "previous_publishers_count",
+    "publisher_name",
+    "publisher_domain",
+    "found_in",
+    "app_name",
+    "store",
+    "bundle_id",
+  ] as const;
+  const id: DiscoveredLineKey = {
+    ssp_domain: line.ssp_domain,
+    publisher_id: line.publisher_id,
+    relationship: line.relationship,
+    cert_id: line.cert_id,
+  };
+  const rows: string[][] = [];
+  for (let pageNo = 1; pageNo <= 1_000; pageNo += 1) {
+    const r = await api.discoveredLinePlacements(token, id, { page: pageNo, page_size: 500 });
+    for (const p of r.rows) {
+      rows.push([
+        line.ssp_domain,
+        line.publisher_id,
+        line.relationship,
+        line.cert_id,
+        p.developer_name || p.developer_domain,
+        p.developer_domain,
+        p.found_in,
+        p.app_name ?? "",
+        p.app_name ? storeLabel(p.store) : "",
+        p.bundle_id ?? "",
+      ]);
+    }
+    if (r.rows.length === 0 || rows.length >= r.total) break;
+  }
+  // App columns only when the report carries apps (a report names
+  // publishers and their files; app details ride along only when present).
+  const hasApps = rows.some((r) => r[7] !== "");
+  saveCsv(
+    `discovery-${fileSafe(line.ssp_domain)}-${fileSafe(line.publisher_id)}-${line.relationship.toLowerCase()}-${today()}.csv`,
+    hasApps ? header : header.slice(0, 7),
+    hasApps ? rows : rows.map((r) => r.slice(0, 7)),
+  );
+}
+
+async function downloadCsv(token: string, q: string, show: ShowFilter) {
+  // Named the way the page says it: seller ID, files, publishers.
+  const header = [
+    "ssp_domain",
+    "seller_id",
+    "relationship",
+    "cert_id",
+    "files_this_week",
+    "files_last_week",
+    "publishers_this_week",
+    "publishers_last_week",
     "origin",
-    "in_sellers_json",
+    "in_your_sellers_json",
     "seller_name",
-    "issues",
+    "needs_fixing",
   ] as const;
   const acc: string[][] = [];
   const pageSize = 200;
@@ -994,16 +1156,9 @@ async function downloadCsv(token: string, q: string, show: ShowFilter) {
         (row.issues ?? []).map((i) => i.text).join("; "),
       ]);
     }
-    if (r.rows.length < r.page_size) break;
+    // Stop on a short page, and on the report's own count: a server that
+    // caps page_size below what was asked must not end the file early.
+    if (r.rows.length === 0 || acc.length >= r.total) break;
   }
-  const csv = [header.join(","), ...acc.map((row) => row.map((v) => JSON.stringify(v)).join(","))].join("\n");
-  const blob = new Blob([csv], { type: "text/csv;charset=utf-8" });
-  const url = URL.createObjectURL(blob);
-  const a = document.createElement("a");
-  a.href = url;
-  a.download = `bottomlines-crawl-discovered-lines-${new Date().toISOString().slice(0, 10)}.csv`;
-  document.body.appendChild(a);
-  a.click();
-  document.body.removeChild(a);
-  URL.revokeObjectURL(url);
+  saveCsv(`discovery-lines-${today()}.csv`, header, acc);
 }

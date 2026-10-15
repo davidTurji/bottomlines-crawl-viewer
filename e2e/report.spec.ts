@@ -540,10 +540,12 @@ test.describe("discovery checks each line against your sellers.json", () => {
     // The three stats; the sellers.json coverage is the Lines caption and nothing else.
     const kpi = page.locator('[data-tour="discovery-kpi"]');
     await expect(kpi.getByText("Across every publisher we scanned, against last week")).toBeVisible();
-    await expect(kpi.getByText("New this week")).toBeVisible();
-    await expect(kpi.getByText(/^\d+ in your sellers\.json, \d+ not$/)).toBeVisible();
-    await expect(kpi.getByText("Each counted once, whichever of its files")).toBeVisible();
-    await expect(page.getByText(/in your sellers\.json, \d+ not/)).toHaveCount(1);
+    // 2026-10-15 redesign: three separate cards, every week.
+    await expect(kpi.getByText("New lines this week")).toBeVisible();
+    await expect(kpi.getByText(/^\d+ in your sellers\.json \([\d,]+ sellers\), \d+ not(, [\d,]+ on your other domains)?$/)).toBeVisible();
+    await expect(kpi.getByText("Unique publishers carrying them")).toBeVisible();
+    await expect(kpi.getByText("Several of these lines, still one publisher")).toBeVisible();
+    await expect(page.getByText(/in your sellers\.json \([\d,]+ sellers\), \d+ not/)).toHaveCount(1);
 
     // Not in the file: a warning badge, no words beside it.
     const unlisted = await find(page, keyOf("madeupmedia.com", "2884190", "DIRECT", "b1f4c72e5a08d9c3"));
@@ -616,26 +618,64 @@ test.describe("discovery checks each line against your sellers.json", () => {
     // roster opens on the same search.
     const c = await find(page, WIDE);
     await c.getByRole("button", { expanded: false }).first().click();
-    await expect(c.getByRole("textbox", { name: "Find a publisher or app on this line" })).toHaveValue(domain);
+    await expect(c.getByRole("textbox", { name: "Search the publishers and apps carrying this line" })).toHaveValue(domain);
+    // A search shows every match (paged), not just the first three.
     const onLine = mockDiscoveredLinePlacements(WIDE_KEY, { page: 1, page_size: 500, q: domain }).total;
-    await expect(c.locator("div.scroll-y li")).toHaveCount(onLine);
-    await expect(c.locator("div.scroll-y").getByText(domain).first()).toBeVisible();
+    await expect(c.locator("li.rounded-2xl")).toHaveCount(Math.min(onLine, 25));
+    await expect(c.locator("li.rounded-2xl").first()).toBeVisible();
     expect(calls.some((x) => x.path.endsWith("/discovered-lines/placements") && x.query.includes(`q=${encodeURIComponent(domain)}`))).toBe(true);
   });
 
-  test("the roster under a line is whole, a hundred at a time", async ({ page }) => {
+  test("a line opens on its first three publishers, then the whole roster in pages", async ({ page }) => {
     const calls = await open(page, { discovery: true }, "/discovery");
     await noTour(page);
     const wide = rowOf(WIDE);
     const c = await find(page, WIDE);
     await c.getByRole("button", { expanded: false }).first().click();
     await expect(c.getByText(`${wide.publishers_count} publishers, ${wide.placements_count} files`)).toBeVisible();
-    await expect(c.getByText(`1–100 of ${wide.placements_count}`)).toBeVisible();
-    await expect(c.locator("div.scroll-y li")).toHaveCount(100);
-    await c.getByRole("button", { name: "Next publishers" }).click();
-    await expect(c.getByText(`101–200 of ${wide.placements_count}`)).toBeVisible();
-    await expect(c.locator("div.scroll-y li")).toHaveCount(100);
+    await expect(c.locator("li.rounded-2xl")).toHaveCount(3);
+    await expect(c.getByText(`${(wide.placements_count - 3).toLocaleString()} more publishers and apps carry this line`)).toBeVisible();
+    await c.getByRole("button", { name: /^Show \d+ more$/ }).click();
+    await expect(c.locator("li.rounded-2xl")).toHaveCount(25);
+    await expect(c.getByText(/more publishers and apps carry this line/)).toHaveCount(0);
+    await c.getByRole("navigation", { name: "Pages" }).first().getByRole("button", { name: "Page 2", exact: true }).click();
+    await expect(c.locator("li.rounded-2xl")).toHaveCount(25);
     expect(calls.filter((x) => x.path.endsWith("/discovered-lines/placements") && /[?&]page=2(&|$)/.test(x.query))).toHaveLength(1);
+  });
+
+  test("the page exports every line as CSV", async ({ page }) => {
+    await open(page, { discovery: true }, "/discovery");
+    await noTour(page);
+    await expect(cards(page).first()).toBeVisible();
+    const [dl] = await Promise.all([
+      page.waitForEvent("download"),
+      page.getByRole("button", { name: /^Export CSV$/ }).first().click(),
+    ]);
+    const body = await (await import("node:fs/promises")).readFile((await dl.path())!, "utf8");
+    expect(body.charCodeAt(0)).toBe(0xfeff);
+    const lines = body.slice(1).split("\r\n");
+    expect(lines[0].startsWith('"ssp_domain","seller_id","relationship","cert_id","files_this_week"')).toBe(true);
+    expect(lines.length - 1).toBe(mockDiscoveredLines({ page: 1, page_size: 1 }).totals.lines);
+    expect(dl.suggestedFilename()).toMatch(/^discovery-lines-\d{4}-\d{2}-\d{2}\.csv$/);
+  });
+
+  test("a line exports every publisher carrying it as CSV", async ({ page }) => {
+    await open(page, { discovery: true }, "/discovery");
+    await noTour(page);
+    const wide = rowOf(WIDE);
+    const c = await find(page, WIDE);
+    await c.getByRole("button", { expanded: false }).first().click();
+    const [dl] = await Promise.all([
+      page.waitForEvent("download"),
+      c.getByRole("button", { name: "Export every publisher and app carrying this line as CSV" }).click(),
+    ]);
+    const body = await (await import("node:fs/promises")).readFile((await dl.path())!, "utf8");
+    expect(body.charCodeAt(0)).toBe(0xfeff);
+    const lines = body.slice(1).split("\r\n");
+    expect(lines[0].startsWith('"ssp_domain","seller_id","relationship"')).toBe(true);
+    expect(lines.length - 1).toBe(mockDiscoveredLinePlacements(WIDE_KEY, { page: 1, page_size: 500 }).total);
+    expect(dl.suggestedFilename()).toMatch(/^discovery-.+\.csv$/);
+    void wide;
   });
 
   test("a cut baseline says so, and nothing is new this week", async ({ page }) => {
@@ -675,7 +715,7 @@ test.describe("discovery checks each line against your sellers.json", () => {
     const c = await find(page, WIDE);
     await c.getByRole("button", { expanded: false }).first().click();
     await expect(c.getByText(`This report kept the first 200 of ${wide.placements_count.toLocaleString()} files for this line.`)).toBeVisible();
-    await expect(c.getByText("1–100 of 200")).toBeVisible();
+    await expect(c.getByText("197 more publishers and apps carry this line")).toBeVisible();
     expect(errors).toEqual([]);
   });
 
