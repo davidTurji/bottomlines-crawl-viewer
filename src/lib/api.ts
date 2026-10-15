@@ -114,6 +114,12 @@ export function onLinkRefused(handler: (() => void) | null) {
 // epoch and stays silent (the page still gets its ApiError).
 let authEpoch = 0;
 
+/** Bumped by every successful sign-in. A cache of answers given to a
+ *  reader keys on it, so a "no" told before sign-in never outlives it. */
+export function currentAuthEpoch(): number {
+  return authEpoch;
+}
+
 async function req<T>(
   method: string,
   path: string,
