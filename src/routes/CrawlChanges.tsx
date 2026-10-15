@@ -1,3 +1,4 @@
+import { HoverHint } from "@/components/HoverHint";
 import { Pager, usePaging } from "@/components/ListControls";
 import { Collapse, Settle } from "@/components/Motion";
 import LockedTail from "@/components/LockedTail";
@@ -816,14 +817,16 @@ function ChangeCard({
         aria-expanded={open}
         className="flex w-full items-center gap-4 px-4 py-4 text-left sm:px-5"
       >
-        <div
-          className={cn(
-            "flex h-11 w-11 flex-shrink-0 items-center justify-center rounded-full",
-            tone.disc,
-          )}
-        >
-          <Icon aria-hidden className="h-5 w-5" />
-        </div>
+        <HoverHint text={tone.hint} side="right" className="flex-shrink-0">
+          <div
+            className={cn(
+              "flex h-11 w-11 flex-shrink-0 items-center justify-center rounded-full",
+              tone.disc,
+            )}
+          >
+            <Icon aria-hidden className="h-5 w-5" />
+          </div>
+        </HoverHint>
 
         <div className="min-w-0 flex-1">
           {/*
@@ -1022,6 +1025,8 @@ const TONES: Record<
     disc: string;
     tint: string;
     icon: typeof Plus;
+    /** What the round icon means, shown on hover (owner, 2026-10-15). */
+    hint: string;
   }
 > = {
   added: {
@@ -1031,6 +1036,7 @@ const TONES: Record<
     disc: "bg-ok-bg text-ok",
     tint: "bg-ok-bg/40",
     icon: Plus,
+    hint: "Line added: publishers started carrying it this week",
   },
   removed: {
     label: "Lines removed",
@@ -1039,6 +1045,7 @@ const TONES: Record<
     disc: "bg-critical-bg text-critical",
     tint: "bg-critical-bg/40",
     icon: Minus,
+    hint: "Line removed: publishers dropped it this week",
   },
   cert_changed: {
     label: "Cert changes",
@@ -1047,6 +1054,7 @@ const TONES: Record<
     disc: "bg-warn-bg text-warn",
     tint: "bg-warn-bg/40",
     icon: RefreshCw,
+    hint: "Cert changed: publishers changed this line's cert ID this week",
   },
   // Toned neutral on purpose. These are not good or bad news about the
   // market, they are a note about what we were looking at, and giving them
@@ -1064,6 +1072,7 @@ const TONES: Record<
     disc: "bg-info-bg text-info",
     tint: "bg-info-bg/40",
     icon: Eye,
+    hint: "Started watching: you added this line to your list this week",
   },
   monitoring_stopped: {
     label: "Stopped watching",
@@ -1074,6 +1083,7 @@ const TONES: Record<
     disc: "bg-warn-bg text-warn",
     tint: "bg-warn-bg/40",
     icon: EyeOff,
+    hint: "Stopped watching: you took this line off your list this week",
   },
   // Neutral for the same reason as the two above: this is news about our
   // crawl, not about the market, and colouring it as a gain would put it
@@ -1085,6 +1095,7 @@ const TONES: Record<
     disc: "bg-muted text-muted-foreground",
     tint: "bg-muted/40",
     icon: Sparkles,
+    hint: "First appearance: these publishers are in your report for the first time",
   },
 };
 
