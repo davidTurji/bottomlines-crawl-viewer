@@ -29,6 +29,8 @@ function probe(token: string): Promise<SellersFixPayload | null> {
   const key = `${currentAuthEpoch()}:${token}`;
   let p = probes.get(key);
   if (!p) {
+    // An answer kept from before this sign-in is never read again.
+    for (const k of probes.keys()) if (k.endsWith(`:${token}`)) probes.delete(k);
     const asked: Promise<SellersFixPayload | null> = api.sellersFix(token).catch(() => {
       if (probes.get(key) === asked) probes.delete(key);
       return null;

@@ -86,9 +86,11 @@ test.describe("the overview opens whatever the optional parts answer", () => {
 
 test.describe("the rail lists only what the report has", () => {
   test("every optional page on", async ({ page }) => {
-    await open(page, { sellers: "page", schain: "ok", discovery: true });
+    const calls = await open(page, { sellers: "page", schain: "ok", discovery: true });
     await expectOverview(page);
     await expect(rail(page).getByRole("link", { name: "Sellers.json" })).toBeVisible();
+    // Signed in already: the page's evidence is asked for once, never twice.
+    expect(calls.filter((c) => c.path.endsWith("/sellers-fix"))).toHaveLength(1);
     await expect(rail(page).getByRole("link", { name: "Schain" })).toBeVisible();
     await expect(rail(page).getByRole("link", { name: "Discovery" })).toBeVisible();
   });
