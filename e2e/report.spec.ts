@@ -86,9 +86,11 @@ test.describe("the overview opens whatever the optional parts answer", () => {
 
 test.describe("the rail lists only what the report has", () => {
   test("every optional page on", async ({ page }) => {
-    await open(page, { sellers: "page", schain: "ok", discovery: true });
+    const calls = await open(page, { sellers: "page", schain: "ok", discovery: true });
     await expectOverview(page);
     await expect(rail(page).getByRole("link", { name: "Sellers.json" })).toBeVisible();
+    // Signed in already: the page's evidence is asked for once, never twice.
+    expect(calls.filter((c) => c.path.endsWith("/sellers-fix"))).toHaveLength(1);
     await expect(rail(page).getByRole("link", { name: "Schain" })).toBeVisible();
     await expect(rail(page).getByRole("link", { name: "Discovery" })).toBeVisible();
   });
@@ -164,6 +166,30 @@ test.describe("sign-in", () => {
     await page.locator('input[type="password"]').fill("secret");
     await page.getByRole("button", { name: "Sign in" }).click();
     await expectOverview(page);
+  });
+
+  // 2026-10-15 (minute-ly.com): the rail asks for Sellers.json behind the
+  // form, meets a 401, and kept that "no" past the sign-in, so a fresh
+  // reader never saw the page. Only a reload showed it.
+  test("signed out on a report with Sellers.json: the rail lists it after sign-in", async ({ page }) => {
+    const calls = await open(page, { signedOut: true, sellers: "page" });
+    await page.locator('input[autocomplete="username"]').fill("andres");
+    await page.locator('input[type="password"]').fill("secret");
+    await page.getByRole("button", { name: "Sign in" }).click();
+    await expectOverview(page);
+    await expect(rail(page).getByRole("link", { name: "Sellers.json" })).toBeVisible();
+    expect(calls.filter((c) => c.path.endsWith("/sellers-fix")).map((c) => c.status)).toContain(200);
+  });
+
+  test("the email's sign-in link: the rail lists Sellers.json after one press", async ({ page }) => {
+    const errors = watchErrors(page);
+    const signin = Buffer.from("andres:secret").toString("base64url");
+    await open(page, { signedOut: true, sellers: "page" }, `#signin=${signin}`);
+    await expect(page.locator('input[autocomplete="username"]')).toHaveValue("andres");
+    await page.getByRole("button", { name: "Sign in" }).click();
+    await expectOverview(page);
+    await expect(rail(page).getByRole("link", { name: "Sellers.json" })).toBeVisible();
+    expect(errors).toEqual([]);
   });
 
   test("still signed in when the link expires: the expired card, on every page", async ({ page }) => {
