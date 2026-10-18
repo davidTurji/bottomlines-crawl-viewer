@@ -8,9 +8,9 @@
  *
  *   - 22 entries publishers agree with;
  *   - 3 PUBLISHER entries only ever listed as RESELLER, 1 INTERMEDIARY also
- *     listed as DIRECT (seller_type fixes);
+ *     listed as DIRECT (valid roles are preserved);
  *   - 2 entries whose domain is not the publisher listing them DIRECT, and
- *     3 whose domain is written wrong (a URL, a trailing dot, "N/A");
+ *     4 whose domain is written wrong (a URL, a trailing dot, "N/A");
  *   - 2 duplicated IDs: one copied twice exactly, one listed twice with
  *     different details;
  *   - a seller_type in lowercase, a seller_id written as a number, an
@@ -18,7 +18,7 @@
  *   - 1 confidential entry that still carries its name and domain;
  *   - an ID written in capitals where publishers write it in lowercase, and
  *     an entry with no seller_type that nobody lists;
- *   - 4 entries no crawled file lists (suggested removals);
+ *   - 4 entries no crawled file lists (check first);
  *   - 5 IDs publishers list that the file lacks (adds: three clear, one
  *     listed DIRECT by two publishers, one RESELLER only).
  */
@@ -81,13 +81,13 @@ export const mockSellersFile: SellersFile = {
       domain,
       seller_type: "INTERMEDIARY",
     })),
-    // seller_type wrong: marked PUBLISHER, only ever listed as RESELLER.
-    { seller_id: "300210", name: "Emberquay Media", domain: "emberquay-news.com", seller_type: "PUBLISHER" },
+    // A malformed domain is fixable; RESELLER sightings do not establish type.
+    { seller_id: "300210", name: "Emberquay Media", domain: "https://emberquay-news.com/", seller_type: "PUBLISHER" },
     { seller_id: "300224", name: "Thistlecove Partners", domain: "thistlecove-apps.com", seller_type: "PUBLISHER" },
     { seller_id: "300237", name: "Glimmerdale Sales", domain: "glimmerdale-tv.com", seller_type: "PUBLISHER" },
-    // Marked INTERMEDIARY, but also listed DIRECT: BOTH.
+    // Mixed declarations do not justify changing INTERMEDIARY to BOTH.
     { seller_id: "300249", name: "Rookhaven Sports", domain: "rookhaven-sports.com", seller_type: "INTERMEDIARY" },
-    // Domain wrong: the publisher listing it DIRECT is someone else.
+    // A different DIRECT publisher does not establish a wrong business domain.
     { seller_id: "300256", name: "Wrenmoor Media", domain: "oldsite-quokka.com", seller_type: "PUBLISHER" },
     { seller_id: "300263", name: "Quillbrook Games", domain: "tidepool-legacy.net", seller_type: "PUBLISHER" },
     // Confidential, yet its name and domain are still in the file.
