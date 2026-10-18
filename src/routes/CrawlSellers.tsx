@@ -24,6 +24,7 @@ import {
   buildExport,
   fillInFields,
   isEntry,
+  norm,
   SELLER_TYPES,
   suggest,
   unsafeNumbers,
@@ -198,7 +199,7 @@ export default function CrawlSellers() {
   const groupOf = (r: SellerRow): GroupKey | null => (r.kind === "keep" ? null : r.kind);
 
   /** An existing file with no version: fixed by a card of its own in Fix. */
-  const versionMissing = !creating && data?.file != null && !String(data.file.version ?? "").trim();
+  const versionMissing = !creating && data?.file != null && data.file.version !== "1.0";
 
   const groups = useMemo(() => {
     const keys: GroupKey[] = ["add", "fix", "remove"];
@@ -931,6 +932,9 @@ function SuggestionCard({
               domain a fix needs. */}
           {fields.length > 0 && (
             <div className={cn("grid grid-cols-1 gap-2", fields.length > 1 && "sm:grid-cols-2")}>
+              {fields.includes("seller_type") && (
+                <p className="sm:col-span-2">PUBLISHER sells owned inventory and is paid directly; INTERMEDIARY sells others' inventory or is not paid directly; BOTH transacts both kinds through this account. DIRECT/RESELLER declarations alone do not establish the role.</p>
+              )}
               {fields.map((f) =>
                 f === "seller_type" ? (
                   <select
@@ -954,7 +958,7 @@ function SuggestionCard({
                     key={f}
                     value={shownValue(f)}
                     onChange={(e) => onEdit(f, e.target.value)}
-                    placeholder={f === "name" ? "Seller name" : "their-domain.com"}
+                    placeholder={f === "name" ? "Seller name" : "Business domain (if it has a website)"}
                     aria-label={`${f === "name" ? "Name" : "Domain"} for seller ${row.seller_id}`}
                     className={cn(INPUT, "h-8 text-[12px]", f === "domain" && "font-mono", fields.length === 1 && "sm:max-w-xs")}
                   />
@@ -971,7 +975,7 @@ function SuggestionCard({
 /** A plain domain worth linking: no spaces, at least one dot. */
 const linkableDomain = (d: unknown): string | null => {
   const t = String(d ?? "").trim();
-  return t && /^[^\s/]+\.[^\s/]+/.test(t.replace(/^[a-z][a-z0-9+.-]*:\/\//i, "")) && linkable(t) ? t : null;
+  return t && /^[^\s/]+\.[^\s/]+/.test(t.replace(/^[a-z][a-z0-9+.-]*:\/\//i, "")) && linkable(t) ? norm(t) : null;
 };
 
 /** The seller's own domain, as the file (or the suggestion) writes it. */
@@ -1093,7 +1097,7 @@ function RowLinks({ row, domain, fileHref }: { row: SellerRow; domain: string; f
     firstListing();
   } else if (row.kind === "fix") {
     ownFile();
-    if (row.check) firstListing();
+    firstListing();
   }
   if (!items.length) return null;
   return (
@@ -1388,10 +1392,10 @@ function VersionCard({ on, onSet }: { on: boolean; onSet: (on: boolean) => void 
         <div className="min-w-0 flex-1">
           <span className="flex min-w-0 items-baseline gap-2">
             <code className="flex-shrink-0 font-mono text-[12.5px] font-semibold text-slate-900">version</code>
-            <span className="truncate text-[12px] text-slate-600">version: none → "1.0"</span>
+            <span className="truncate text-[12px] text-slate-600">version → "1.0"</span>
           </span>
           <span className="block truncate text-[11px] text-slate-400">
-            The top of your file has no version. sellers.json is version 1.0.
+            The file version must be the text "1.0".
           </span>
         </div>
         <div className="order-last flex basis-full items-center gap-2 pl-10 sm:order-none sm:basis-auto sm:pl-0">
@@ -1421,7 +1425,7 @@ function ProblemsLine({
     return (
       <div className="flex items-center gap-2.5 px-4 py-3 text-[13px] font-medium text-slate-800">
         <Check aria-hidden className="h-4 w-4 flex-shrink-0 text-ok" />
-        No known problems in the file you download
+        <span>No structural issues detected in the file you download. Confirm seller identities, account roles and business domains before publishing.</span>
       </div>
     );
   }

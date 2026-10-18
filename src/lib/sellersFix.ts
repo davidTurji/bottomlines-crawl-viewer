@@ -8,8 +8,8 @@
  *
  *   - add     an ID publishers list that the file does not have;
  *   - fix     an entry that is written wrong (a duplicate ID, a domain
- *             written as a URL, a seller_type in the wrong case, a missing
- *             value) or that disagrees with what publishers list;
+ *             written as a URL, an invalid seller_type, a missing
+ *             value); account roles and identity require confirmation;
  *   - remove  an entry no crawled file lists. The page calls these "not
  *             seen, check first" (David, 2026-10-11): the IAB spec does not
  *             ask a seller to appear in any ads.txt, and one selling on apps
@@ -165,12 +165,6 @@ function domainProblem(raw: string): string {
   return `The domain "${raw}" has ${list}; sellers.json wants the plain domain.`;
 }
 
-/** Words files use for "no domain" that are not one. */
-const PLACEHOLDER = /^(n\/?a|none|null|undefined|-+|tbd|unknown)$/i;
-
-/** seller_type values written the ads.txt way, and what sellers.json says. */
-const ADSTXT_TYPE: Record<string, SellerType> = { DIRECT: "PUBLISHER", RESELLER: "INTERMEDIARY" };
-
 const EMAIL = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 /** A plain domain, any script (an IDN is written in its own letters). */
 const DOMAIN = /^(?!-)[\p{L}\p{N}-]+(\.[\p{L}\p{N}-]+)+$/u;
@@ -190,11 +184,6 @@ function names(list: string[], total = list.length, max = 2) {
   return `${list.slice(0, max).join(", ")} and ${plural(total - Math.min(max, list.length), "more", "more")}`;
 }
 
-function expectedType(direct: string[], reseller: string[]): SellerType {
-  if (direct.length && reseller.length) return "BOTH";
-  return direct.length ? "PUBLISHER" : "INTERMEDIARY";
-}
-
 type Seen = {
   direct: Set<string>;
   reseller: Set<string>;
@@ -209,7 +198,7 @@ export function suggest(file: SellersFile, sightings: Sighting[], ownDomain: str
   // (the sent list may be the first of them; a count is never read off it).
   const seen = new Map<string, Seen>();
   for (const s of sightings) {
-    const id = String(s.seller_id).trim();
+    const id = String(s.seller_id).trim().toLowerCase();
     let e = seen.get(id);
     if (!e) {
       e = { direct: new Set(), reseller: new Set(), dN: 0, rN: 0, names: new Map(), listings: [] };
@@ -245,14 +234,9 @@ export function suggest(file: SellersFile, sightings: Sighting[], ownDomain: str
     byId.get(id)!.push(cur as Seller);
   }
 
-  // Publishers' spelling of an ID the file writes in another case: the
-  // same seller to a reader, two different IDs to a buyer's check.
-  const byLower = new Map<string, string[]>();
-  for (const id of seen.keys()) {
-    const k = id.toLowerCase();
-    byLower.set(k, [...(byLower.get(k) ?? []), id]);
-  }
-  const claimed = new Set<string>(byId.keys());
+  // Same comparison key as canonical_seller_id in the crawler. Keep the
+  // file's spelling for display/export; fold only when joining evidence.
+  const claimed = new Set([...byId.keys()].map((id) => id.toLowerCase()));
 
   for (const [id, entries] of byId) {
     const copies = entries.length;
@@ -278,16 +262,7 @@ export function suggest(file: SellersFile, sightings: Sighting[], ownDomain: str
       continue;
     }
 
-    // The evidence: publishers' lines under this exact ID, else under the
-    // same ID in another case.
-    let evidenceId = id;
-    if (!seen.has(id)) {
-      const alt = (byLower.get(id.toLowerCase()) ?? []).filter((x) => !claimed.has(x));
-      if (alt.length) {
-        evidenceId = alt.sort((a, b) => (seen.get(b)!.dN + seen.get(b)!.rN) - (seen.get(a)!.dN + seen.get(a)!.rN))[0];
-        claimed.add(evidenceId);
-      }
-    }
+    const evidenceId = id.toLowerCase();
     const e = seen.get(evidenceId);
     const direct = e ? [...e.direct].sort() : [];
     const reseller = e ? [...e.reseller].sort() : [];
@@ -295,12 +270,11 @@ export function suggest(file: SellersFile, sightings: Sighting[], ownDomain: str
     const rN = e ? Math.max(e.rN, reseller.length) : 0;
     const oneDirect = dN === 1 && direct.length === 1 ? direct[0] : null;
 
-    // The entry kept: the one publishers agree with, else the most complete,
-    // else the first.
+    // Prefer the most complete entry, with conflicting duplicates marked
+    // for review. ads.txt does not establish the paid entity's identity.
     const complete = (x: Seller) =>
       (String(x.name ?? "").trim() ? 1 : 0) + (String(x.domain ?? "").trim() ? 1 : 0);
     const cur =
-      entries.find((x) => direct.includes(norm(x.domain))) ??
       [...entries].sort((a, b) => complete(b) - complete(a))[0];
     const dropped = entries.filter((x) => x !== cur);
 
@@ -320,24 +294,14 @@ export function suggest(file: SellersFile, sightings: Sighting[], ownDomain: str
       reasons.push(
         !differ
           ? `Listed ${copies} times in your file; one entry is kept.`
-          : direct.includes(norm(cur.domain))
-            ? `Listed ${copies} times in your file with different details; the entry publishers agree with is kept.`
-            : `Listed ${copies} times in your file with different details; the most complete entry is kept.`,
+          : `Listed ${copies} times with different details; check the paid legal entity before keeping the most complete entry.`,
       );
+      if (differ) check = true;
     }
 
-    // THE ID. Publishers' spelling when only the case differs (a check:
-    // which spelling is right is the customer's to say); else as text,
-    // trimmed. A number too long for a browser is never rewritten: its
-    // digits are already lost here (the page says so and holds the export).
-    if (evidenceId !== id) {
-      change(
-        "seller_id",
-        evidenceId,
-        `Publishers write this ID as ${evidenceId}, your file as ${id}. IDs must match exactly; check which spelling is right.`,
-        true,
-      );
-    } else if (unsafeNumber(cur.seller_id)) {
+    // Preserve the file's ID case; trim surrounding whitespace only. An
+    // unsafe number is never rewritten: its digits are already lost here.
+    if (unsafeNumber(cur.seller_id)) {
       // Left as it is; see unsafeNumbers().
     } else if (typeof cur.seller_id !== "string") {
       change("seller_id", id, "The seller_id is a number; sellers.json wants it as text.");
@@ -353,46 +317,17 @@ export function suggest(file: SellersFile, sightings: Sighting[], ownDomain: str
       if (to !== null) change(f, to, `${f} is written ${JSON.stringify(cur[f])}; sellers.json wants ${to}.`);
     }
 
-    // THE TYPE. A written-wrong type is fixed; a valid type publishers
-    // disagree with is a check, and BOTH is never narrowed: a role the crawl
-    // did not see is not proof the seller lacks it.
+    // ads.txt relationships establish account control, not inventory ownership
+    // or who gets paid. They cannot establish any seller_type, including BOTH.
     const confidential = Number(cur.is_confidential ?? 0) === 1;
     const typed = String(cur.seller_type ?? "").trim().toUpperCase();
-    // No type is read off a seller seen only in its own file.
-    const want = e && (direct.length || reseller.length) ? expectedType(direct, reseller) : null;
-    if (TYPES.includes(typed)) {
-      if (want && typed !== want && typed !== "BOTH") {
-        change(
-          "seller_type",
-          want,
-          want === "BOTH"
-            ? `Listed as DIRECT by ${plural(dN, "publisher", "publishers")} and as RESELLER by ${rN.toLocaleString()}, so maybe BOTH; check before changing.`
-            : want === "INTERMEDIARY"
-              ? `Only ever listed as RESELLER (by ${plural(rN, "publisher", "publishers")}), so maybe INTERMEDIARY; check before changing.`
-              : `Only ever listed as DIRECT (by ${names(direct, dN)}), so maybe PUBLISHER; check before changing.`,
-          true,
-        );
-      } else if (cur.seller_type !== typed) {
-        change("seller_type", typed, `The seller_type is written "${cur.seller_type}"; sellers.json wants ${typed}.`);
-      }
-    } else if (ADSTXT_TYPE[typed]) {
-      const to = want ?? ADSTXT_TYPE[typed];
-      change("seller_type", to, `The seller_type is written ${cur.seller_type}, the ads.txt word; sellers.json says ${to}.`);
-    } else if (want) {
-      change(
-        "seller_type",
-        want,
-        typed
-          ? `"${cur.seller_type}" is not a seller_type; publishers' lines say ${want}.`
-          : `Your file has no seller_type for it; publishers' lines say ${want}.`,
-      );
-    } else {
-      ask.push("seller_type");
-      reasons.push(
-        typed ? `"${cur.seller_type}" is not a seller_type. Pick the right one.` : "Your file has no seller_type for it. Pick one.",
-      );
+    if (TYPES.includes(typed) && String(cur.seller_type) !== String(cur.seller_type).trim()) {
+      change("seller_type", String(cur.seller_type).trim(), "The seller_type has spaces around it.");
     }
-    const finalType = String(changes.find((c) => c.field === "seller_type")?.to ?? typed);
+    if (!TYPES.includes(typed)) {
+      ask.push("seller_type");
+      reasons.push("Choose the account's seller_type from inventory ownership and payment arrangements. DIRECT and RESELLER declarations do not determine it.");
+    }
 
     if (confidential) {
       // The spec lets a confidential entry carry its name and domain; taking
@@ -411,40 +346,20 @@ export function suggest(file: SellersFile, sightings: Sighting[], ownDomain: str
       const raw = cur.domain === undefined || cur.domain === null ? "" : String(cur.domain);
       const clean = norm(raw);
       const valid = DOMAIN.test(clean);
-      const needsDomain = finalType !== "INTERMEDIARY";
+      // The domain identifies the paid legal entity. A DIRECT listing alone
+      // does not establish that entity (for example a sales house or manager).
       if (!raw.trim()) {
-        // A missing domain, filled from the one publisher selling it DIRECT.
-        if (needsDomain && oneDirect) {
-          change("domain", oneDirect, `Your file has no domain for it; only ${oneDirect} lists it as DIRECT.`);
-        } else if (needsDomain) {
-          ask.push("domain");
-          reasons.push(`A ${finalType || "PUBLISHER"} needs its domain and your file has none. Type it.`);
-        }
-      } else if (valid) {
-        if (needsDomain && oneDirect && clean !== oneDirect) {
-          // A valid domain publishers disagree with: a check.
-          change("domain", oneDirect, `Only ${oneDirect} lists it as DIRECT; your file says ${raw}. Check before changing.`, true);
-        } else if (clean !== raw) {
-          change("domain", clean, domainProblem(raw));
-        }
-      } else if (needsDomain && oneDirect) {
-        change("domain", oneDirect, `"${raw}" is not a domain; only ${oneDirect} lists it as DIRECT.`);
-      } else if (needsDomain) {
         ask.push("domain");
-        reasons.push(`"${raw}" is not a domain. Type the seller's domain.`);
+        reasons.push("The seller's business domain is required if it has a web presence; confirm it before publishing.");
+      } else if (valid) {
+        if (clean !== raw) change("domain", clean, domainProblem(raw));
       } else {
-        // An intermediary's domain is optional: a broken one is better out.
-        change(
-          "domain",
-          null,
-          PLACEHOLDER.test(raw.trim())
-            ? `"${raw}" is a placeholder, not a domain. An INTERMEDIARY may leave the domain out.`
-            : `"${raw}" is not a domain. An INTERMEDIARY may leave the domain out.`,
-        );
+        ask.push("domain");
+        reasons.push(`"${raw}" is not a domain. Type the seller's business domain.`);
       }
 
       const name = String(cur.name ?? "");
-      if (!name.trim()) {
+      if (typeof cur.name !== "string" || !name.trim()) {
         // Never filled in for them (David, 2026-10-06): the name is typed.
         const onRecord = oneDirect ? e?.names.get(oneDirect) : undefined;
         ask.push("name");
@@ -508,7 +423,6 @@ export function suggest(file: SellersFile, sightings: Sighting[], ownDomain: str
       ...(dropped.length ? { dropped } : {}),
       ...(ask.length ? { ask } : {}),
       ...(check ? { check } : {}),
-      ...(evidenceId !== id ? { listedAs: evidenceId } : {}),
     });
   }
 
@@ -519,14 +433,13 @@ export function suggest(file: SellersFile, sightings: Sighting[], ownDomain: str
     const reseller = [...e.reseller].sort();
     const dN = Math.max(e.dN, direct.length);
     const rN = Math.max(e.rN, reseller.length);
-    const type = expectedType(direct, reseller);
+
     const oneDirect = dN === 1 && direct.length === 1 ? direct[0] : null;
     const onRecord = oneDirect ? e.names.get(oneDirect) : undefined;
     // Never named for them (David, 2026-10-06): the customer confirms the
-    // account is theirs and types its name. A domain is filled only when
-    // one publisher alone sells it DIRECT.
+    // account is theirs, names the paid entity and chooses its role.
     const reason = oneDirect
-      ? `Listed as DIRECT by ${oneDirect}${onRecord ? ` (on record as ${onRecord})` : ""}, but missing from your file. Type the seller's name to add it.`
+      ? `Listed as DIRECT by ${oneDirect}${onRecord ? ` (on record as ${onRecord})` : ""}, but missing from your file. Confirm the seller's name, business domain and account role to add it.`
       : dN > 1
         ? `Listed as DIRECT by ${plural(dN, "publisher", "publishers")} (${names(direct, dN)}), but missing from your file. Type who it is to add it.`
         : `Listed as RESELLER by ${plural(rN, "publisher", "publishers")}, but missing from your file. Type who the reseller is to add it.`;
@@ -534,14 +447,14 @@ export function suggest(file: SellersFile, sightings: Sighting[], ownDomain: str
       seller_id: id,
       kind: "add",
       current: null,
-      suggested: { seller_id: id, name: "", ...(oneDirect && type !== "INTERMEDIARY" ? { domain: oneDirect } : {}), seller_type: type },
+      suggested: { seller_id: id, name: "", seller_type: "" },
       changes: [],
       reason,
       direct,
       reseller,
       listings: e.listings,
       listingsTotal: dN + rN,
-      ask: ["name", "domain"],
+      ask: ["name", "domain", "seller_type"],
     });
   }
   return rows;
@@ -615,7 +528,7 @@ export type Issue = {
  * reader is about to export: a version in the header (and, for a file built
  * here, a contact email); per seller a unique ID written as text, a
  * seller_type of PUBLISHER, INTERMEDIARY or BOTH, and (unless confidential)
- * a name, plus a plain domain for a PUBLISHER or BOTH.
+ * a name, plus a plain business domain when the seller has a web presence.
  */
 export function validate(file: SellersFile, opts: { creating?: boolean } = {}): Issue[] {
   const issues: Issue[] = [];
@@ -623,8 +536,8 @@ export function validate(file: SellersFile, opts: { creating?: boolean } = {}): 
   if (opts.creating && !EMAIL.test(String(file.contact_email ?? "").trim())) {
     issues.push({ key: "contact_email", field: "contact_email", text: "Add a contact email for the file's header." });
   }
-  if (!String(file.version ?? "").trim()) {
-    issues.push({ key: "version", field: "version", text: "The file has no version. sellers.json is version 1.0." });
+  if (file.version !== "1.0") {
+    issues.push({ key: "version", field: "version", text: "The file version must be the text \"1.0\"." });
   }
   // A contact email the live file already carries: fixed there, not here.
   const email = file.contact_email;
@@ -668,17 +581,15 @@ export function validate(file: SellersFile, opts: { creating?: boolean } = {}): 
     for (const f of FLAGS) {
       if (!flagOk(s[f])) at(f, `Seller ${id}'s ${f} must be 0 or 1, not ${JSON.stringify(s[f])}.`);
     }
-    const type = String(s.seller_type ?? "");
+    const type = String(s.seller_type ?? "").toUpperCase();
     if (!TYPES.includes(type)) {
       at("type", `Seller ${id} needs a seller_type of PUBLISHER, INTERMEDIARY or BOTH${type ? `, not "${type}"` : ""}.`);
     }
     if (Number(s.is_confidential ?? 0) === 1) continue;
     const name = String(s.name ?? "");
-    if (!name.trim()) at("name", `Seller ${id} needs a name.`);
+    if (typeof s.name !== "string" || !name.trim()) at("name", `Seller ${id} needs a name written as text.`);
     const domain = s.domain === undefined || s.domain === null ? "" : String(s.domain);
-    if (type.toUpperCase() !== "INTERMEDIARY" && !domain.trim()) {
-      at("domain", `Seller ${id} needs its domain.`);
-    } else if (domain && !DOMAIN.test(domain)) {
+    if (domain && !DOMAIN.test(domain)) {
       at("bad", `Seller ${id}'s domain "${domain}" is not a plain domain.`);
     }
   }
