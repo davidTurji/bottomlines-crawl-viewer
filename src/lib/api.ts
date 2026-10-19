@@ -191,7 +191,8 @@ export const api = {
    * the JSON body only confirms who signed in.
    */
   auth: async (token: string, username: string, password: string) => {
-    if (MOCK) return { ok: true, email: "you@publisherstudios.com", customer_id: 42 };
+    if (MOCK)
+      return { ok: true, email: "you@publisherstudios.com", customer_id: 42 };
     const out = await req<{ ok: boolean; email: string; customer_id: number }>(
       "POST",
       `/v1/viewer/auth`,
@@ -214,10 +215,16 @@ export const api = {
    */
   exportInfo: async (token: string): Promise<ExportInfo> => {
     if (MOCK) {
-      if (trialMock()) return { format: "none", line_export: false, trial: true };
+      if (trialMock())
+        return { format: "none", line_export: false, trial: true };
       const big = new URLSearchParams(window.location.search).has("bigapps");
       return big
-        ? { format: "zip", line_export: true, excel_row_limit: 1_048_576, apps_rows: 3_682_524 }
+        ? {
+            format: "zip",
+            line_export: true,
+            excel_row_limit: 1_048_576,
+            apps_rows: 3_682_524,
+          }
         : { format: "xlsx", line_export: true, excel_row_limit: 1_048_576 };
     }
     const fallback: ExportInfo = { format: "xlsx", line_export: false };
@@ -264,7 +271,10 @@ export const api = {
     }
     const q = linesQuery(lines);
     try {
-      return await req<Summary>("GET", `/v1/viewer/${token}/summary${q ? `?${q.slice(1)}` : ""}`);
+      return await req<Summary>(
+        "GET",
+        `/v1/viewer/${token}/summary${q ? `?${q.slice(1)}` : ""}`,
+      );
     } catch (e) {
       // A signed-in reader whose link expired or was revoked: the API
       // refuses the link itself with 403 (see "Dead links" above).
@@ -320,12 +330,81 @@ export const api = {
       const { mockDeveloperEvents } = await import("./mockData");
       const r = mockDeveloperEvents(event, page, lines ?? []);
       return trialMock()
-        ? { ...r, page: 1, ...cutRows(r.rows, TRIAL_CAPS_MOCK.publishers, r.total) }
+        ? {
+            ...r,
+            page: 1,
+            ...cutRows(r.rows, TRIAL_CAPS_MOCK.publishers, r.total),
+          }
         : r;
     }
     return req<DeveloperEventsPage>(
       "GET",
       `/v1/viewer/${token}/developer-events?event=${event}&page=${page}&page_size=${PAGE_SIZE}${q ? `&q=${encodeURIComponent(q)}` : ""}${linesQuery(lines)}`,
+    );
+  },
+  changeGroups: async (
+    token: string,
+    filters: ChangeFilters = {},
+    signal?: AbortSignal,
+  ): Promise<ChangeGroupsPage> => {
+    if (MOCK) {
+      const { mockLineEvents } = await import("./mockData");
+      const { pageChangeGroups } = await import("./changeGroups");
+      const raw = mockLineEvents({
+        ...filters,
+        event: undefined,
+        page: 1,
+        page_size: 1_000_000,
+      });
+      const rows = trialMock() ? raw.rows.slice(0, 12) : raw.rows;
+      return pageChangeGroups(
+        rows,
+        filters,
+        trialMock()
+          ? { cap: 12, shown: rows.length, full_total: raw.total }
+          : null,
+      );
+    }
+    return req<ChangeGroupsPage>(
+      "GET",
+      `/v1/viewer/${token}/change-groups?${changeQuery(filters)}`,
+      undefined,
+      signal,
+    );
+  },
+  changePublishers: async (
+    token: string,
+    key: string,
+    filters: ChangeFilters = {},
+    signal?: AbortSignal,
+  ): Promise<LineEventsPage> => {
+    if (MOCK) {
+      const { mockLineEvents } = await import("./mockData");
+      const { groupByLine } = await import("./changeGroups");
+      const raw = mockLineEvents({
+        ...filters,
+        event: undefined,
+        page: 1,
+        page_size: 1_000_000,
+      });
+      const rows =
+        groupByLine(trialMock() ? raw.rows.slice(0, 12) : raw.rows).find(
+          (g) => g.key === key,
+        )?.publishers ?? [];
+      const page = filters.page ?? 1,
+        size = filters.page_size ?? 50;
+      return {
+        page,
+        page_size: size,
+        total: rows.length,
+        rows: rows.slice((page - 1) * size, page * size),
+      };
+    }
+    return req<LineEventsPage>(
+      "GET",
+      `/v1/viewer/${token}/change-groups/${encodeURIComponent(key)}/publishers?${changeQuery(filters)}`,
+      undefined,
+      signal,
     );
   },
   lineEvents: async (
@@ -346,9 +425,7 @@ export const api = {
       const r = mockLineEvents(filters);
       // The server keeps the events of the visible publishers only; the
       // mock keeps a dozen and says how many there are in full.
-      return trialMock()
-        ? { ...r, ...cutRows(r.rows, 12, r.total) }
-        : r;
+      return trialMock() ? { ...r, ...cutRows(r.rows, 12, r.total) } : r;
     }
     const { lines, ...rest } = filters;
     const q = new URLSearchParams();
@@ -374,12 +451,21 @@ export const api = {
    * `total` on the response is the FILTERED total, so the pager below the
    * list counts what the search found rather than what the section holds.
    */
-  matchedDevelopers: async (token: string, page = 1, q = "", lines?: string[]) => {
+  matchedDevelopers: async (
+    token: string,
+    page = 1,
+    q = "",
+    lines?: string[],
+  ) => {
     if (MOCK) {
       const { mockMatchedDevelopers } = await import("./mockData");
       const r = mockMatchedDevelopers(page, q, lines ?? []);
       return trialMock()
-        ? { ...r, page: 1, ...cutRows(r.rows, TRIAL_CAPS_MOCK.publishers, r.total) }
+        ? {
+            ...r,
+            page: 1,
+            ...cutRows(r.rows, TRIAL_CAPS_MOCK.publishers, r.total),
+          }
         : r;
     }
     return req<MatchedDevelopersPage>(
@@ -416,7 +502,9 @@ export const api = {
     if (MOCK) {
       const { mockMatchedApps } = await import("./mockData");
       const r = mockMatchedApps(page, q, lines ?? []);
-      return trialMock() ? { ...r, page: 1, ...cutRows(r.rows, TRIAL_CAPS_MOCK.apps, r.total) } : r;
+      return trialMock()
+        ? { ...r, page: 1, ...cutRows(r.rows, TRIAL_CAPS_MOCK.apps, r.total) }
+        : r;
     }
     return req<MatchedAppsPage>(
       "GET",
@@ -451,13 +539,24 @@ export const api = {
         // nothing), exactly what the 404 fallback below builds.
         const { mockGone } = await import("./mockData");
         return pageFromGone(variant === "legacy" ? mockGone : null, kind, {
-          page, pageSize: PAGE_SIZE, q: opts.q, lines: opts.lines,
+          page,
+          pageSize: PAGE_SIZE,
+          q: opts.q,
+          lines: opts.lines,
         });
       }
       const { mockInactive } = await import("./mockData");
-      return mockInactive(kind, { page, q: opts.q, lines: opts.lines }, trialMock());
+      return mockInactive(
+        kind,
+        { page, q: opts.q, lines: opts.lines },
+        trialMock(),
+      );
     }
-    const q = new URLSearchParams({ kind, page: String(page), page_size: String(PAGE_SIZE) });
+    const q = new URLSearchParams({
+      kind,
+      page: String(page),
+      page_size: String(PAGE_SIZE),
+    });
     if (opts.q) q.set("q", opts.q);
     // Appended raw, as every list does: the keys are encoded once by
     // serializeLines, and the API splits them without decoding again.
@@ -468,7 +567,12 @@ export const api = {
       );
     } catch (e) {
       if (e instanceof ApiError && e.status === 404) {
-        return pageFromGone(legacy, kind, { page, pageSize: PAGE_SIZE, q: opts.q, lines: opts.lines });
+        return pageFromGone(legacy, kind, {
+          page,
+          pageSize: PAGE_SIZE,
+          q: opts.q,
+          lines: opts.lines,
+        });
       }
       throw e;
     }
@@ -677,7 +781,11 @@ export const api = {
       const { mockDiscoveredLines } = await import("./mockData");
       const r = mockDiscoveredLines(opts);
       return trialMock()
-        ? { ...r, page: 1, ...cutRows(r.rows, TRIAL_CAPS_MOCK.discovered_lines, r.total) }
+        ? {
+            ...r,
+            page: 1,
+            ...cutRows(r.rows, TRIAL_CAPS_MOCK.discovered_lines, r.total),
+          }
         : r;
     }
     const q = new URLSearchParams();
@@ -738,9 +846,15 @@ export const api = {
     if (MOCK) {
       // `?legacy=1` exercises the grouped shape older links answer with.
       const legacy = new URLSearchParams(window.location.search).has("legacy");
-      const { mockDeclarations, mockDeclarationRows } = await import("./mockData");
+      const { mockDeclarations, mockDeclarationRows } = await import(
+        "./mockData"
+      );
       if (trialMock() && !legacy) {
-        const cut = cutRows(mockDeclarationRows.rows, TRIAL_CAPS_MOCK.declarations, mockDeclarationRows.total);
+        const cut = cutRows(
+          mockDeclarationRows.rows,
+          TRIAL_CAPS_MOCK.declarations,
+          mockDeclarationRows.total,
+        );
         return { ...mockDeclarationRows, ...cut };
       }
       return legacy ? mockDeclarations : mockDeclarationRows;
@@ -765,7 +879,11 @@ export const api = {
       // notes about a live file that is not strict JSON, or that holds a
       // null and a number too long for a browser.
       const q = new URLSearchParams(window.location.search);
-      let file = q.has("nofile") ? null : q.has("broken") ? m.brokenFile(m.mockSellersFile) : m.mockSellersFile;
+      let file = q.has("nofile")
+        ? null
+        : q.has("broken")
+          ? m.brokenFile(m.mockSellersFile)
+          : m.mockSellersFile;
       // `?noversion=1`: a file whose header has no version.
       if (file && q.has("noversion")) {
         const { version: _drop, ...rest } = file;
@@ -784,11 +902,16 @@ export const api = {
     // means exactly that, so it is answered here as null. Before 2026-10-06
     // req() read a 404 as a dead link, which took every report without the
     // page down.
-    const res = await fetch(`${BASE}/v1/viewer/${token}/sellers-fix`, { credentials: "include" });
+    const res = await fetch(`${BASE}/v1/viewer/${token}/sellers-fix`, {
+      credentials: "include",
+    });
     if (res.status === 404) return null;
     if (!res.ok) {
       const detail = await res.text().catch(() => "");
-      throw new ApiError(res.status, detail || `GET sellers-fix → ${res.status}`);
+      throw new ApiError(
+        res.status,
+        detail || `GET sellers-fix → ${res.status}`,
+      );
     }
     return (await res.json()) as SellersFixPayload;
   },
@@ -827,29 +950,40 @@ export const api = {
       const { mockSchainReadSdk } = await import("./mockSchain");
       return mockSchainReadSdk(sdk, !!opts.refresh);
     }
-    return req<SchainSdkRead>(
-      "POST",
-      `/v1/viewer/${token}/schain/sdk`,
-      { sdk, refresh: !!opts.refresh },
-    );
+    return req<SchainSdkRead>("POST", `/v1/viewer/${token}/schain/sdk`, {
+      sdk,
+      refresh: !!opts.refresh,
+    });
   },
   /** Per seat line, how many publishers and apps close a chain through
    *  this SDK. Read after the SDK's file, so a line with none is greyed. */
-  schainSeatCounts: async (token: string, sdk: string, live = false): Promise<SchainSeatCount[]> => {
+  schainSeatCounts: async (
+    token: string,
+    sdk: string,
+    live = false,
+  ): Promise<SchainSeatCount[]> => {
     if (MOCK) {
       const { mockSchainSeatCounts } = await import("./mockSchain");
       return mockSchainSeatCounts(sdk);
     }
     const q = new URLSearchParams({ sdk });
     if (live) q.set("live", "true");
-    return req<SchainSeatCount[]>("GET", `/v1/viewer/${token}/schain/seat-counts?${q.toString()}`);
+    return req<SchainSeatCount[]>(
+      "GET",
+      `/v1/viewer/${token}/schain/seat-counts?${q.toString()}`,
+    );
   },
   /** The funnel, the totals and one page of the Apps rows for one
    *  selection: SDK, seat line and reseller line. */
   schainPreview: async (
     token: string,
     sel: SchainSelection,
-    opts: { page: number; page_size: number; q?: string; view?: "apps" | "publishers" },
+    opts: {
+      page: number;
+      page_size: number;
+      q?: string;
+      view?: "apps" | "publishers";
+    },
   ): Promise<SchainPreview> => {
     if (MOCK) {
       const { mockSchainPreview } = await import("./mockSchain");
@@ -865,7 +999,10 @@ export const api = {
     if (sel.live) q.set("live", "true");
     if (opts.q) q.set("q", opts.q);
     if (opts.view) q.set("view", opts.view);
-    return req<SchainPreview>("GET", `/v1/viewer/${token}/schain/preview?${q.toString()}`);
+    return req<SchainPreview>(
+      "GET",
+      `/v1/viewer/${token}/schain/preview?${q.toString()}`,
+    );
   },
   /**
    * Download the schain file for a selection. Counts against the link's 3
@@ -884,12 +1021,19 @@ export const api = {
       const { mockSchainExport } = await import("./mockSchain");
       return mockSchainExport(sel, format);
     }
-    const q = new URLSearchParams({ sdk: sel.sdk, seat: sel.seat, sid2: sel.sid2 });
-    if (sel.live) q.set("live", "true");
-    const res = await fetch(`${BASE}/v1/viewer/${token}/schain/export.${format}?${q.toString()}`, {
-      credentials: "include",
-      redirect: "follow",
+    const q = new URLSearchParams({
+      sdk: sel.sdk,
+      seat: sel.seat,
+      sid2: sel.sid2,
     });
+    if (sel.live) q.set("live", "true");
+    const res = await fetch(
+      `${BASE}/v1/viewer/${token}/schain/export.${format}?${q.toString()}`,
+      {
+        credentials: "include",
+        redirect: "follow",
+      },
+    );
     if (!res.ok) {
       let detail = "";
       try {
@@ -903,8 +1047,9 @@ export const api = {
     const limit = Number(res.headers.get("X-Schain-Downloads-Limit") ?? 3);
     const blob = await res.blob();
     const name =
-      /filename="?([^";]+)"?/.exec(res.headers.get("Content-Disposition") ?? "")?.[1] ??
-      `schain.${format}`;
+      /filename="?([^";]+)"?/.exec(
+        res.headers.get("Content-Disposition") ?? "",
+      )?.[1] ?? `schain.${format}`;
     const url = URL.createObjectURL(blob);
     const a = document.createElement("a");
     a.href = url;
@@ -1873,4 +2018,40 @@ export type SellersFixPayload = {
   file_url?: string | null;
   /** What is wrong with the live file beyond its entries, in sentences. */
   file_warnings?: string[];
+};
+
+
+export type ChangeFilters = {
+  event?: LineEventKind;
+  ssp_domain?: string;
+  lines?: string[];
+  page?: number;
+  page_size?: number;
+};
+function changeQuery({ lines, ...filters }: ChangeFilters): string {
+  const q = new URLSearchParams();
+  for (const [key, value] of Object.entries(filters))
+    if (value !== undefined && value !== "") q.set(key, String(value));
+  if (lines?.length) q.set(LINES_PARAM, serializeLines(lines));
+  return q.toString();
+}
+export type ChangeGroup = Omit<
+  import("./changeGroups").LocalChangeGroup,
+  "publishers"
+> & { publisher_count: number };
+export type ChangeKpi = {
+  lines: number;
+  placements: number;
+  byEvent: Record<LineEventKind, number>;
+  publishers: number;
+  apps: number;
+};
+export type ChangeGroupsPage = {
+  page: number;
+  page_size: number;
+  total: number;
+  rows: ChangeGroup[];
+  counts: Record<LineEventKind, number>;
+  kpi: ChangeKpi;
+  trial?: TrialSlice | null;
 };
