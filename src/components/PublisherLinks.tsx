@@ -12,7 +12,7 @@
  * file at the top.
  */
 import { useEffect, useRef, useState, type KeyboardEvent, type MouseEvent, type PointerEvent } from "react";
-import { ArrowUpRight } from "lucide-react";
+import { ArrowUpRight, Check, Copy } from "lucide-react";
 
 import {
   DropdownMenu,
@@ -22,7 +22,7 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import type { MatchedSeatLine } from "@/lib/api";
-import { cn } from "@/lib/utils";
+import { cn, foundInLabel } from "@/lib/utils";
 
 export type PublisherFile = "ads.txt" | "app-ads.txt";
 
@@ -109,6 +109,12 @@ export async function copyText(text: string): Promise<boolean> {
       return false;
     }
   }
+}
+
+/** Selecting part of a line to copy it by hand is not a click on the line. */
+function selecting(): boolean {
+  const sel = window.getSelection();
+  return !!sel && !sel.isCollapsed && sel.toString().trim() !== "";
 }
 
 function openTab(url: string) {
@@ -262,7 +268,7 @@ function useCopied(): [boolean, () => void] {
     () => {
       setCopied(true);
       window.clearTimeout(timer.current);
-      timer.current = window.setTimeout(() => setCopied(false), 1600);
+      timer.current = window.setTimeout(() => setCopied(false), 1800);
     },
   ];
 }
@@ -314,11 +320,6 @@ export function ActionableLine({
   const at = gone ? null : line;
   const copy = () => {
     void copyText(text).then((ok) => ok && flash());
-  };
-  // Selecting part of a line to copy it by hand is not a request to open it.
-  const selecting = () => {
-    const sel = window.getSelection();
-    return !!sel && !sel.isCollapsed && sel.toString().trim() !== "";
   };
   const where = (f: PublisherFile) => `${host(domain)}/${f}`;
   const label =
@@ -458,5 +459,110 @@ export function ShownLink({
       <span className="truncate">{children}</span>
       <ArrowUpRight aria-hidden className={SHOWN_ARROW} />
     </a>
+  );
+}
+
+/**
+ * A removed line copies on click (David, 2026-10-20). It has left the
+ * publisher's file, so opening the file at it finds nothing; what a reader
+ * wants is the line itself, to search for it or send it on. The click copies
+ * it and the row says "Copied". The file stays one click away on the row's
+ * margin (`FoundInLinks`), a link of its own above the copy control.
+ */
+export function CopyableLine({
+  line,
+  className,
+  children,
+}: {
+  line: Pick<MatchedSeatLine, "ssp_domain" | "publisher_id" | "relationship" | "cert_id">;
+  className?: string;
+  /** The row's content: the line text and whatever sits at its margin. */
+  children: React.ReactNode;
+}) {
+  const [copied, flash] = useCopied();
+  const text = lineText(line);
+  return (
+    <li
+      className={cn(
+        "group/line relative transition-colors hover:bg-accent/40 focus-within:bg-accent/40",
+        "[&_[data-line-text]]:decoration-primary/40 [&_[data-line-text]]:underline-offset-2",
+        "[&:hover_[data-line-text]]:text-primary [&:hover_[data-line-text]]:underline",
+        "[&:focus-within_[data-line-text]]:text-primary [&:focus-within_[data-line-text]]:underline",
+        className,
+      )}
+    >
+      <button
+        type="button"
+        aria-label={`Copy ${text}`}
+        title="Copy this line"
+        className="absolute inset-0 z-0 cursor-pointer rounded-[inherit] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-primary/40"
+        onClick={(e) => {
+          e.stopPropagation();
+          if (selecting()) return;
+          void copyText(text).then((ok) => ok && flash());
+        }}
+      />
+      <span className="pointer-events-none contents">{children}</span>
+      {copied ? (
+        <span className="pointer-events-none flex flex-shrink-0 items-center gap-1 self-center text-[10px] font-medium text-ok">
+          <Check aria-hidden className="h-3 w-3" />
+          Copied
+        </span>
+      ) : (
+        <Copy
+          aria-hidden
+          className="pointer-events-none h-3 w-3 flex-shrink-0 self-center text-primary opacity-0 transition-opacity group-focus-within/line:opacity-100 group-hover/line:opacity-100"
+        />
+      )}
+      <span role="status" className="sr-only">
+        {copied ? "Line copied" : ""}
+      </span>
+    </li>
+  );
+}
+
+/**
+ * "Found in app-ads.txt" with each file a quiet link to the publisher's copy,
+ * opened at the top. For a row whose own click does something else (a removed
+ * line copies). Without a publisher domain it is the plain label.
+ */
+export function FoundInLinks({
+  publisherDomain,
+  foundIn,
+  className,
+}: {
+  publisherDomain: string | null | undefined;
+  foundIn: string | null | undefined;
+  className?: string;
+}) {
+  const label = foundInLabel(foundIn);
+  if (!label) return null;
+  if (!linkable(publisherDomain)) return <span className={className}>{label}</span>;
+  const domain = publisherDomain;
+  const stop = (e: MouseEvent | KeyboardEvent | PointerEvent) => e.stopPropagation();
+  return (
+    <span className={className}>
+      Found in{" "}
+      {filesOf(foundIn).map((f, i) => (
+        <span key={f}>
+          {i > 0 && " + "}
+          <a
+            href={fileUrl(domain, f)}
+            target="_blank"
+            rel="noopener noreferrer"
+            title={`Open ${host(domain)}/${f}`}
+            onClick={stop}
+            onKeyDown={stop}
+            onPointerDown={stop}
+            className={cn(
+              NESTED,
+              "rounded-[2px] underline decoration-slate-300 underline-offset-2 hover:text-primary hover:decoration-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40",
+            )}
+          >
+            {f}
+          </a>
+        </span>
+      ))}
+    </span>
   );
 }

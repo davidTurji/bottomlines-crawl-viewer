@@ -246,6 +246,30 @@ test.describe("the matched list", () => {
     await expect(page.getByRole("tab", { name: "Removed" })).toHaveAttribute("aria-selected", "true");
     expect(errors).toEqual([]);
   });
+
+  test("a removed line copies on click, says Copied, and opens no tab; its file is its own link", async ({ page }) => {
+    const errors = watchErrors(page);
+    await page.context().grantPermissions(["clipboard-read", "clipboard-write"]);
+    await open(page, {});
+    await expectOverview(page);
+    await page.getByRole("tab", { name: "Removed" }).click();
+    await page.getByText(/-[1-9]/).first().click();
+    const removed = page.locator("section", { hasText: "Removed lines" }).first();
+    const row = removed.locator("li").first();
+    const line = (await row.locator("[data-line-text]").innerText()).trim();
+    const tabs = page.context().pages().length;
+    await row.getByRole("button", { name: /^Copy / }).click();
+    await expect(row.getByText("Copied", { exact: true })).toBeVisible();
+    expect(await page.evaluate(() => navigator.clipboard.readText())).toBe(line);
+    expect(page.context().pages().length).toBe(tabs);
+    await expect(row.getByRole("link", { name: /ads\.txt$/ }).first()).toHaveAttribute(
+      "href",
+      /^https:\/\/[^#]+\/(app-)?ads\.txt$/,
+    );
+    // The confirmation settles back, as every Copied in the report does.
+    await expect(row.getByText("Copied", { exact: true })).toHaveCount(0, { timeout: 4000 });
+    expect(errors).toEqual([]);
+  });
 });
 
 test.describe("inactive", () => {
