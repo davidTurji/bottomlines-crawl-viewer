@@ -14,8 +14,11 @@ for(const scenario of ["browser", "proxy", "gb", "blocked"] as const) {
     await page.goto(`/crawl-report/${TOKEN}/sellers`);
     await expect(page.getByRole('heading',{name:'Sellers.json',exact:true})).toBeVisible();
     await expect(page.getByRole('checkbox',{name:'Remove from file',exact:true})).toHaveCount(0);
-    const unknown=page.locator('details').filter({has:page.locator('summary').filter({hasText:'Unreachable files'})});
-    await expect(unknown.locator('summary')).toContainText('Info');
+    const group=page.getByTestId('seller-info');
+    const unknown=page.getByTestId('seller-info-unreachable');
+    await expect(unknown).not.toBeVisible();
+    await group.locator(':scope > summary').click();
+    await expect(unknown.locator('summary')).toContainText('Unreachable files');
     await expect(page.getByText('Needs checking', {exact:true})).toHaveCount(0);
     await expect(page.getByText('Not seen in checked files', {exact:true}).locator('..')).toContainText('0');
     await unknown.locator('summary').click();
@@ -26,7 +29,7 @@ for(const scenario of ["browser", "proxy", "gb", "blocked"] as const) {
       await expect(unknown).toContainText('no removal recommendation');
       await expect(unknown).toContainText('This does not mean the seller is missing');
     }
-    const checks=page.locator('details').filter({has:page.locator('summary').filter({hasText:'File checks'})});
+    const checks=page.getByTestId('seller-info-checks');
     await checks.locator('summary').click();
     const app=checks.locator('div.flex').filter({has:page.getByRole('link',{name:'sega.com/app-ads.txt',exact:true})});
     await expect(app).toContainText(recovered?`Read · ${scenario === 'browser' ? 'browser retry' : scenario === 'gb' ? 'proxy retry (GB)' : 'proxy retry'} · HTTP 200`:'Couldn’t fetch · proxy retry · HTTP 429');
@@ -40,14 +43,19 @@ test('full viewer distinguishes read outcomes from seller fixes', async ({page})
   await installFakeApi(page,{sellers:'page'});
   await page.route('**/api/v1/viewer/*/sellers-fix',route=>route.fulfill({json:verificationReport()}));
   await page.goto(`/crawl-report/${TOKEN}/sellers`);
-  const info=page.locator('details').filter({has:page.locator('summary').filter({hasText:'Unreachable files'})});
-  await info.locator('summary').click();
+  const group=page.getByTestId('seller-info');
+  const info=page.getByTestId('seller-info-unreachable');
+  const checks=page.getByTestId('seller-info-checks');
+  await expect(info).not.toBeVisible();
+  await expect(checks).not.toBeVisible();
+  await expect(page.getByRole('button',{name:'Download fixed file',exact:true})).toHaveCount(2);
+  await group.locator(':scope > summary').click();
+  await info.locator(':scope > summary').click();
   await expect(info).toContainText('Fogharbor News');
   await expect(info).toContainText('Bramblemist TV');
   await expect(info).toContainText('Cloudwillow Media');
   await expect(info).toContainText('Ferncloud Audio');
   await expect(info.getByRole('checkbox')).toHaveCount(0);
-  const checks=page.locator('details').filter({has:page.locator('summary').filter({hasText:'File checks'})});
   await checks.locator('summary').click();
   for(const label of ['HTTP 403','HTTP 429','Timed out','Read · browser retry · HTTP 200','Read · proxy retry (GB) · HTTP 200','File absent · direct · HTTP 404','File absent · direct · HTTP 410','No readable file','Couldn’t connect']) {
     await expect(checks.getByText(label,{exact:false}).first()).toBeVisible();
