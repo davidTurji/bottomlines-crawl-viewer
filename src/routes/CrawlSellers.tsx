@@ -5,6 +5,7 @@ import {
   Copy,
   Download,
   EyeOff,
+  Info,
   Plus,
   RefreshCw,
   RotateCcw,
@@ -96,6 +97,8 @@ const day = (iso: string | null | undefined) =>
 
 /** How many cards a group shows before "Show all". */
 const PEEK = 3;
+const SECTION_CARD = "rounded-2xl border border-border bg-white p-5 shadow-sm";
+const SECTION_TITLE = "flex items-center gap-2 font-display text-sm font-medium text-slate-700";
 
 type Header = { contact_email: string; contact_address: string; tag_id: string };
 
@@ -366,7 +369,7 @@ export default function CrawlSellers() {
         {data && (
           <div className="flex flex-wrap items-center gap-2 self-start">
             <CopyButton text={exportText} label={creating ? "Copy new file" : "Copy fixed file"} disabled={blocked} />
-            <ExportButton onClick={download} label={creating ? "Download new sellers.json" : "Download fixed sellers.json"} disabled={blocked} />
+            <ExportButton onClick={download} label={creating ? "Download new file" : "Download fixed file"} disabled={blocked} />
           </div>
         )}
       </div>
@@ -459,10 +462,10 @@ export default function CrawlSellers() {
                 />
                 <SplitStat
                   className="bg-white"
-                  tone="warn"
-                  number={counts.remove + rows.filter(r => r.unverified).length}
-                  label="Needs checking"
-                  caption="Unverified or not seen; kept unchanged"
+                  tone={counts.remove ? "warn" : undefined}
+                  number={counts.remove}
+                  label="Not seen in checked files"
+                  caption="Review before removing"
                 />
               </div>
             )}
@@ -539,23 +542,44 @@ export default function CrawlSellers() {
             ))}
           </div>
 
-          {rows.some(r => r.unverified) && <details className="rounded-2xl border border-border bg-white p-5 shadow-sm">
-            <summary className="cursor-pointer text-sm font-medium">Couldn’t verify · {rows.filter(r => r.unverified).length}</summary>
-            <p className="mt-2 text-xs text-muted-foreground">Some files could not be checked. These sellers stay in your file and are not offered for removal.</p>
-            <div className="mt-3 divide-y divide-border">{rows.filter(r => r.unverified).slice(0, 50).map(r => <div key={r.seller_id} className="py-3 text-xs">
-              <span className="font-medium">{r.seller_id}</span> · <SellerWho seller={r.current}/>
-              <p className="mt-1 text-muted-foreground">{r.reason}</p>
-            </div>)}</div>
-            {rows.filter(r => r.unverified).length > 50 && <p className="text-xs text-muted-foreground">Showing the first 50; all unverified sellers are preserved in the file below.</p>}
-          </details>}
+          {rows.some(r => r.unverified) && (
+            <details className={cn(SECTION_CARD, "group/info")} data-testid="seller-info">
+              <summary className="cursor-pointer list-none [&::-webkit-details-marker]:hidden">
+                <div className="flex items-start justify-between gap-3">
+                  <div>
+                    <h2 className={SECTION_TITLE}>
+                      <span className="flex h-4 w-4 items-center justify-center rounded-full bg-slate-100 text-slate-500">
+                        <Info aria-hidden className="h-2.5 w-2.5" strokeWidth={3} />
+                      </span>
+                      Info
+                      <span className="font-mono text-[12px] font-normal tabular-nums text-slate-400">
+                        1
+                      </span>
+                    </h2>
+                    <p className="text-[11px] text-slate-500">File status, no changes to your file</p>
+                  </div>
+                  <ChevronDown aria-hidden className="mt-0.5 h-3.5 w-3.5 text-slate-500 transition-transform group-open/info:rotate-180" />
+                </div>
+              </summary>
+              <div className="mt-3 divide-y divide-border overflow-hidden rounded-xl border border-border">
+                {rows.some(r => r.unverified) && <details data-testid="seller-info-unreachable" className="group/unreachable">
+                  <summary className="flex cursor-pointer list-none items-center justify-between gap-3 px-4 py-3 text-[12.5px] font-medium text-slate-700 [&::-webkit-details-marker]:hidden">
+                    <span>Unreachable files <span className="ml-2 font-mono text-[11px] font-normal text-slate-400">{rows.filter(r => r.unverified).length} sellers kept</span></span>
+                    <ChevronDown aria-hidden className="h-3.5 w-3.5 shrink-0 text-slate-400 transition-transform group-open/unreachable:rotate-180" />
+                  </summary>
+                  <div className="border-t border-border px-4 pb-3">
+                    <p className="mt-3 text-xs text-slate-500">Some files couldn’t be fetched or verified. This does not mean the seller is missing; no removal recommendation is made.</p>
+                    <div className="mt-2 divide-y divide-border">{rows.filter(r => r.unverified).slice(0, 50).map(r => <div key={r.seller_id} className="py-3 text-xs">
+                      <span className="font-medium">{r.seller_id}</span> · <SellerWho seller={r.current}/>
+                      <p className="mt-1 text-slate-500">{r.reason}</p>
+                    </div>)}</div>
+                    {rows.filter(r => r.unverified).length > 50 && <p className="text-xs text-slate-500">Showing the first 50; all unverified sellers are preserved.</p>}
+                  </div>
+                </details>}
 
-          {!!data.file_checks?.length && <details className="rounded-2xl border border-border bg-white p-5 shadow-sm">
-            <summary className="cursor-pointer text-sm font-medium">File checks · {data.file_checks.filter(c => c.status === "checked").length} read · {data.file_checks.filter(c => c.status === "unverified").length} unverified</summary>
-            <div className="mt-3 divide-y divide-border">{data.file_checks.slice(0, 100).map(c => <div key={c.url} className="flex flex-wrap items-center justify-between gap-2 py-2 text-xs">
-              <a className="text-primary underline" href={c.url} target="_blank" rel="noopener noreferrer">{c.url.replace("https://", "")}</a>
-              <span className="text-muted-foreground">{c.status === "checked" ? "Read" : c.status === "absent" ? "File absent" : "Couldn’t verify"} · {c.via === "proxy" ? "proxy retry" : "direct"}{c.http_status ? ` · HTTP ${c.http_status}` : ""}</span>
-            </div>)}</div>
-          </details>}
+              </div>
+            </details>
+          )}
 
           {/* THE FILE, after the panels that change it: live against the
               export, as GitHub shows a diff. Rebuilt on every tick and every
@@ -629,7 +653,7 @@ export default function CrawlSellers() {
               </p>
               <div className="flex flex-wrap items-center gap-2">
                 <CopyButton text={exportText} label={creating ? "Copy new file" : "Copy fixed file"} disabled={blocked} />
-                <ExportButton onClick={download} label={creating ? "Download new sellers.json" : "Download fixed sellers.json"} disabled={blocked} />
+                <ExportButton onClick={download} label={creating ? "Download new file" : "Download fixed file"} disabled={blocked} />
               </div>
             </div>
           </div>
@@ -691,10 +715,10 @@ function SuggestionGroup({
   // card's head (a quiet title and a line under it) over one bordered
   // list of plain rows, never boxes inside a box.
   return (
-    <section className="rounded-2xl border border-border bg-white p-5 shadow-sm">
+    <section className={SECTION_CARD}>
       <div className="mb-3 flex flex-wrap items-start justify-between gap-3">
         <div className="min-w-0">
-          <h2 className="flex items-center gap-2 font-display text-sm font-medium text-slate-700">
+          <h2 className={SECTION_TITLE}>
             <span className={cn("flex h-4 w-4 items-center justify-center rounded-full", g.disc)}>
               <Icon aria-hidden className="h-2.5 w-2.5" strokeWidth={3} />
             </span>

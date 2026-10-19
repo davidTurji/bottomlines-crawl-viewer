@@ -880,6 +880,7 @@ export const api = {
       // null and a number too long for a browser.
       const q = new URLSearchParams(window.location.search);
       if(q.has("sega")) return m.segaReport(q.get("sega") !== "blocked");
+      if(token === "verification-demo" || q.get("verification") === "all") return m.verificationReport();
       let file = q.has("nofile")
         ? null
         : q.has("broken")

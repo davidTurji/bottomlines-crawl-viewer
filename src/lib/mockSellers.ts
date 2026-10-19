@@ -189,7 +189,7 @@ export const segaReport = (recovered: boolean) => ({
   sightings: recovered ? [{seller_id:"10360",relationship:"DIRECT" as const,publishers_total:1,publishers:[{domain:"sega.com",found_in:"app-ads.txt",own_file:true}]}] : [],
   file_checks: [
     {url:"https://sega.com/ads.txt",seller_ids:["10360"],status:"absent" as const,via:"direct",http_status:404},
-    {url:"https://sega.com/app-ads.txt",seller_ids:["10360"],status: recovered ? "checked" as const : "unverified" as const,via:"proxy",http_status:recovered?200:429},
+    {url:"https://sega.com/app-ads.txt",seller_ids:["10360"],status: recovered ? "checked" as const : "unverified" as const,via:"proxy",proxy_country:recovered?"gb":null,http_status:recovered?200:429},
     {url:"https://cas.ai/ads.txt",seller_ids:["10391"],status:"unverified" as const,via:"proxy",http_status:429},
     {url:"https://cas.ai/app-ads.txt",seller_ids:["10391"],status:"unverified" as const,via:"proxy",http_status:429},
   ],
@@ -202,3 +202,45 @@ export const mockCompletedChecks = mockSellersFile.sellers.flatMap(s => {
     return ["ads.txt","app-ads.txt"].map(path=>({url:`https://${host}/${path}`,seller_ids:[String(s.seller_id).trim().toLowerCase()],status:"checked" as const,via:"direct"}));
   } catch { return []; }
 });
+
+/** Full viewer fixture: every read outcome, with no live fetches. */
+export function verificationReport() {
+  const paths = ["ads.txt", "app-ads.txt"];
+  const examples = [
+    {id:"400105", host:"fogharbor-news7.com", status:"unverified", http:429, reason:"http_429", via:"proxy"},
+    {id:"400112", host:"bramblemist-tv.tv", status:"unverified", http:null, reason:"report_deadline", via:"direct"},
+    {id:"400118", host:"pebblecrest-apps.com", status:"checked", http:200, reason:null, via:"browser"},
+    {id:"400126", host:"cinderloft-games.com", status:"checked", http:200, reason:null, via:"proxy", country:"gb"},
+    {id:"400133", host:"quietfern.tv", status:"absent", http:404, reason:null, via:"direct"},
+    {id:"400180", host:"cloudwillow.example", status:"unverified", http:200, reason:"no_valid_file", via:"direct"},
+    {id:"400181", host:"ferncloud.example", status:"unverified", http:null, reason:"network_error", via:"direct"},
+  ] as const;
+  const ids = new Set<string>(examples.map(e=>e.id));
+  const file = {...mockSellersFile, sellers:[...mockSellersFile.sellers,
+    {seller_id:"400180", name:"Cloudwillow Media", domain:"cloudwillow.example", seller_type:"PUBLISHER"},
+    {seller_id:"400181", name:"Ferncloud Audio", domain:"ferncloud.example", seller_type:"PUBLISHER"},
+  ]};
+  const sightings:Sighting[] = [...mockSellerSightings,
+    ...examples.filter(e=>e.status === "checked").map(e=>({seller_id:e.id, relationship:"DIRECT" as const,
+      publishers:[{domain:e.host, found_in:"app-ads.txt", own_file:true}]})),
+  ];
+  const file_checks:import('./sellersFix').FileCheck[] = [
+    ...examples.flatMap(e=>paths.map(path=>({url:`https://${e.host}/${path}`,seller_ids:[e.id],
+      status:e.status, http_status:e.id === "400105" && path === "ads.txt" ? 403 : e.id === "400133" && path === "app-ads.txt" ? 410 : e.http, reason:e.reason, via:e.via,
+      proxy_country:'country' in e ? e.country : null,
+    }))),
+    ...mockCompletedChecks.filter(c=>!c.seller_ids.some(id=>ids.has(id))).map(c=>({...c,http_status:200})),
+  ];
+  const uniqueChecks = new Map<string, import('./sellersFix').FileCheck>();
+  for(const check of file_checks) {
+    const url = new URL(check.url);
+    url.hostname = url.hostname.replace(/\.$/, "");
+    if(!url.hostname.includes('.')) continue;
+    const normalized = url.toString();
+    const prior = uniqueChecks.get(normalized);
+    if(prior) prior.seller_ids = [...new Set([...prior.seller_ids, ...check.seller_ids])];
+    else uniqueChecks.set(normalized, {...check, url:normalized});
+  }
+  return {domain:MOCK_SELLERS_DOMAIN, file, sightings, file_checks:[...uniqueChecks.values()],
+    checked_at:MOCK_CHECKED_AT, file_url:`https://${MOCK_SELLERS_DOMAIN}/sellers.json`,file_warnings:[]};
+}
