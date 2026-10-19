@@ -1,3 +1,5 @@
+import { groupByLine, pageChangeGroups } from "../src/lib/changeGroups";
+import type { ChangeFilters } from "../src/lib/api";
 /**
  * A fake crawler API for the browser tests, answered inside Playwright.
  *
@@ -213,6 +215,48 @@ export async function installFakeApi(page: Page, scenario: Scenario = {}): Promi
       return reply(403, { detail: "This link has expired. Please contact your admin for a new one." });
     if (s.missing.includes(tail)) return notFound();
     if (s.forbidden.includes(tail)) return reply(403, { detail: "Not part of this link." });
+
+    if (
+      tail === "change-groups" ||
+      /^change-groups\/.+\/publishers$/.test(tail)
+    ) {
+      const filters = {
+        event: q.get("event") || undefined,
+        ssp_domain: q.get("ssp_domain") || undefined,
+        lines,
+        page: Number(q.get("page") || 1),
+        page_size: Number(q.get("page_size") || 25),
+      } as ChangeFilters;
+      const raw = mockLineEvents({
+        ...filters,
+        event: undefined,
+        page: 1,
+        page_size: 1_000_000,
+      });
+      const visible = s.trial ? raw.rows.slice(0, 12) : raw.rows;
+      if (tail === "change-groups")
+        return reply(
+          200,
+          pageChangeGroups(
+            visible,
+            filters,
+            s.trial
+              ? { cap: 12, shown: visible.length, full_total: raw.total }
+              : null,
+          ),
+        );
+      const key = decodeURIComponent(tail.split("/")[1]);
+      const rows =
+        groupByLine(visible).find((g) => g.key === key)?.publishers ?? [];
+      const size = filters.page_size!,
+        p = filters.page!;
+      return reply(200, {
+        page: p,
+        page_size: size,
+        total: rows.length,
+        rows: rows.slice((p - 1) * size, p * size),
+      });
+    }
 
     switch (tail) {
       case "summary": {

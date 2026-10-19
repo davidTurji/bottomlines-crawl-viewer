@@ -1,10 +1,11 @@
+import type { ChangeGroup, ChangeGroupsPage } from "@/lib/api";
 import { HoverHint } from "@/components/HoverHint";
 import { Pager, usePaging } from "@/components/ListControls";
 import { Collapse, Settle } from "@/components/Motion";
 import LockedTail from "@/components/LockedTail";
 import TrialBanner from "@/components/TrialBanner";
 import { SkeletonRows, SkeletonStatCards } from "@/components/Skeleton";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { Dots } from "@/components/Dots";
 import { LineFilter } from "@/components/LineFilter";
 import { PAGE_SIZE } from "@/lib/paging";
@@ -28,7 +29,10 @@ import { useReportScope } from "@/lib/reportScope";
 import { PageShell } from "@/components/PageShell";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { cn, foundInLabel } from "@/lib/utils";
-import { ActionableLine, PublisherDomainLink } from "@/components/PublisherLinks";
+import {
+  ActionableLine,
+  PublisherDomainLink,
+} from "@/components/PublisherLinks";
 import { computeDelta, MiniStat, SplitStat } from "./CrawlReport";
 import { BEAT_PAUSE_MS, landsAfterMs } from "@/components/CountUp";
 
@@ -67,25 +71,6 @@ import { BEAT_PAUSE_MS, landsAfterMs } from "@/components/CountUp";
  * event in words, which is what a colourblind reader reads.
  */
 
-
-/**
- * How many pages of line events to walk before giving up.
- *
- * This was 12 pages of 500, so a crawl with more than 6,000 line changes
- * showed the first 6,000 and said so in small grey text. That is the same
- * fault the export had at 200,000 rows: a partial answer to "what changed
- * this week" reads exactly like a complete one, and the crawls it happens
- * on are the large ones, which is to say the paying ones.
- *
- * The page fetches everything now. The cap that remains is a runaway
- * guard rather than a policy, set far above any real crawl, and the page
- * still says plainly when it bites. Each page is a small JSON slice and
- * the whole set is served from the frozen snapshot with no database
- * behind it, so the cost of walking them is bounded and local.
- */
-const FETCH_CAP = 400;
-const FETCH_PAGE_SIZE = 500;
-
 type Bucket = "all" | EventKind;
 /** What happened to a line between the two crawls.
  *
@@ -102,9 +87,6 @@ type EventKind =
   | "newly_monitored"
   | "monitoring_stopped"
   | "first_appearance";
-
-/** The kinds that describe the world, and so carry an honest delta. */
-const FOUND_KINDS: EventKind[] = ["added", "removed", "cert_changed"];
 
 export default function CrawlChanges() {
   const { token } = useReportScope();
@@ -128,8 +110,8 @@ export default function CrawlChanges() {
       .map((k) => [k, TONES[k].label]);
   }, [summary]);
   const [ssp, setSsp] = useState("");
-  const [rows, setRows] = useState<LineEvent[]>([]);
-  const [truncated, setTruncated] = useState(false);
+  const [result, setResult] = useState<ChangeGroupsPage | null>(null);
+  const rows = result?.rows ?? [];
   /** Present on a trial: the server cut the line events to the visible
    *  publishers' and says how many there are in full. */
   const [trial, setTrial] = useState<TrialSlice | null>(null);
@@ -141,25 +123,25 @@ export default function CrawlChanges() {
   // Bumps each time a list lands, so the new cards ease in as one piece.
   const [settled, setSettled] = useState(0);
 
-  const filter = ssp.trim();
-  // WHICH SELECTION THE ROWS ON SCREEN WERE READ UNDER. While it lags the
-  // applied one, everything on this page describes the previous filter, so
-  // it is sketched rather than dimmed: applying a filter re-reads the whole
-  // page, and a 60% fade over last selection's numbers reads as a page that
-  // is merely faded, not one whose contents are being replaced.
-  //
-  // Kept distinct from `settled` so that typing in the SSP search still
-  // gets the light treatment (dim plus dots). A keystroke is not a new
-  // question about the report; a different set of seat lines is.
+  const [filter, setFilter] = useState("");
+  useEffect(() => {
+    const timer = window.setTimeout(() => setFilter(ssp.trim()), 250);
+    return () => window.clearTimeout(timer);
+  }, [ssp]);
+  // Which query produced the displayed counters. A server-paged tab or
+  // filter must never put old totals under a newly selected label.
   const [settledFor, setSettledFor] = useState<string | null>(null);
   /* The seat-line filter, shared with the overview through the URL. The
      events are re-fetched under it, and every KPI on this page is counted
      from the rows, so the numbers follow the filter by construction. */
   const { selected: lines, setSelected: setLines } = useLineFilter();
   const linesKey = lines.join(",");
-  const refiltering = settledFor !== null && settledFor !== linesKey;
+  const selectionKey = JSON.stringify([token, linesKey, filter, bucket]);
+  const refiltering = settledFor !== null && settledFor !== selectionKey;
   // The cold open and the refilter share one treatment.
-  const showSkeleton = !error && loading && (settled === 0 || refiltering);
+  const showSkeleton = !error && (refiltering || (loading && settled === 0));
+  const showListSkeleton =
+    showSkeleton || (!error && (loading || result?.page !== page));
 
   useEffect(() => {
     let cancelled = false;
@@ -189,56 +171,45 @@ export default function CrawlChanges() {
     };
   }, [token]);
 
-  // One fetch covers every bucket. The page groups rows into lines, and a
-  // line's placements can straddle a server page boundary, so grouping a
-  // single 50-row window would invent lines that are smaller than they are.
-  // Switching tabs is then instant and the tab counts describe exactly the
-  // cards underneath them.
+  // The server groups BEFORE paging and counts the entire filtered set.
+  // Abort an obsolete read; it must not continue walking old pages.
   useEffect(() => {
-    let cancelled = false;
+    const controller = new AbortController();
     setLoading(true);
     setError(null);
-    fetchAllEvents(token, {
-      ssp_domain: filter || undefined,
-      lines: lines.length ? lines : undefined,
-    })
+    api
+      .changeGroups(
+        token,
+        {
+          event: bucket === "all" ? undefined : bucket,
+          ssp_domain: filter || undefined,
+          lines: lines.length ? lines : undefined,
+          page,
+          page_size: PAGE_SIZE,
+        },
+        controller.signal,
+      )
       .then((r) => {
-        if (cancelled) return;
-        setRows(r.rows);
-        setTruncated(r.truncated);
-        setTrial(r.trial);
+        if (controller.signal.aborted) return;
+        setResult(r);
+        setTrial(r.trial ?? null);
         setOpen(new Set());
         setSettled((n) => n + 1);
-        setSettledFor(linesKey);
+        setSettledFor(selectionKey);
       })
-      .catch((e: Error) => !cancelled && setError(e.message))
-      .finally(() => !cancelled && setLoading(false));
-    return () => {
-      cancelled = true;
-    };
-  }, [token, filter, lines, linesKey]);
+      .catch(
+        (e: Error) =>
+          !controller.signal.aborted && setError(changeErrorMessage(e)),
+      )
+      .finally(() => !controller.signal.aborted && setLoading(false));
+    return () => controller.abort();
+  }, [token, filter, lines, linesKey, bucket, page, selectionKey]);
 
   useEffect(() => setPage(1), [bucket, filter, lines]);
-
-
-  const groups = useMemo(() => groupByLine(rows), [rows]);
-
-  // In All the three buckets are woven together in proportion, so the first
-  // screen shows added, removed and cert changes side by side instead of the
-  // server's added-then-removed-then-cert ordering. Within a bucket the
-  // widest changes come first.
-  const visible = useMemo(
-    () =>
-      bucket === "all"
-        ? interleave(groups)
-        : sortBucket(groups.filter((g) => g.event === bucket)),
-    [groups, bucket],
-  );
-
-  const total = visible.length;
+  const total = result?.total ?? 0;
   const pageCount = Math.max(1, Math.ceil(total / PAGE_SIZE));
   const safePage = Math.min(page, pageCount);
-  const shown = visible.slice((safePage - 1) * PAGE_SIZE, safePage * PAGE_SIZE);
+  const shown = rows;
 
   const weekLabel = summary?.finished_at
     ? formatWeek(new Date(summary.finished_at))
@@ -251,49 +222,20 @@ export default function CrawlChanges() {
   // describe the cards underneath them rather than the whole week. Picking
   // "Removed" and reading a total that still counts additions was the old
   // page's worst lie.
-  const kpi = useMemo(() => {
-    const selected =
-      bucket === "all" ? groups : groups.filter((g) => g.event === bucket);
-    const publishers = new Set<string>();
-    // "Apps" is app-ads.txt inventory: the same developer identity, counted
-    // only where the change landed in its app file. Same split the overview
-    // draws between matched developers and matched applications, so the two
-    // pages count the same way.
-    const apps = new Set<string>();
-    let placements = 0;
-    // Per event, in the SAME unit the summary's hero_diff uses: one count
-    // per (line x publisher file), not per distinct line. See the KPI's
-    // comment on why the distinction decides which number gets a delta.
-    const byEvent: Record<EventKind, number> = {
+  const kpi = result?.kpi ?? {
+    lines: 0,
+    placements: 0,
+    publishers: 0,
+    apps: 0,
+    byEvent: {
       added: 0,
       removed: 0,
       cert_changed: 0,
       newly_monitored: 0,
       monitoring_stopped: 0,
       first_appearance: 0,
-    };
-    // These describe "the lines shown below", which is what the card says
-    // and what the tab selects — so on a scope tab they describe the scope
-    // rows, and on All they describe everything on screen. Excluding scope
-    // rows here instead would zero the KPI on the scope tabs, where those
-    // rows are the entire subject.
-    for (const g of selected) {
-      placements += g.publishers.length;
-      byEvent[g.event] += g.publishers.length;
-      for (const p of g.publishers) {
-        const id = p.developer_domain ?? String(p.developer_id);
-        publishers.add(id);
-        if (fileLabel(p.file_kind) === "app-ads.txt") apps.add(id);
-      }
-    }
-    return {
-      lines: selected.length,
-      placements,
-      byEvent,
-      publishers: publishers.size,
-      apps: apps.size,
-    };
-  }, [groups, bucket]);
+    },
+  };
 
   /** No previous crawl at all. Distinct from "no changes": one is a
    *  starting point, the other is a result. */
@@ -315,19 +257,13 @@ export default function CrawlChanges() {
   // Suppressed under a filter for the same reason: the counts on screen
   // then describe a slice while last week's describe the whole week.
   //
-  // And suppressed when the fetch was TRUNCATED, which is the same fault
-  // with a worse disguise. This page walks at most FETCH_CAP pages, so a
-  // crawl with more than 6,000 line events is counted only as far as the
-  // cap, while last week's figure is the whole week. That produces a
-  // confident percentage from a partial numerator, and the crawls it
-  // happens on are the large ones, which is to say the real customers'.
-  // The "showing the first N" note below stays either way.
+  // Incomplete frozen artifacts are refused by the grouped endpoint.
   // A seat-line filter makes every current count a slice of the week while
   // last week's figures are the whole week, so nothing is comparable.
   // Not on a trial either: this week's figures are counted on the cut
   // rows while last week's are whole, and a delta between the two would
   // be confident and wrong.
-  const comparable = !filter && !truncated && lines.length === 0 && !trial;
+  const comparable = !filter && lines.length === 0 && !trial;
   const prevCounts = useMemo<Record<EventKind, number | null>>(
     () => ({
       added: previous?.hero_diff.line_totals.added ?? null,
@@ -415,7 +351,9 @@ export default function CrawlChanges() {
           <>
             Only changes on{" "}
             <span className="font-mono text-slate-700">
-              {lines.length === 1 ? "the selected line" : `${lines.length} selected lines`}
+              {lines.length === 1
+                ? "the selected line"
+                : `${lines.length} selected lines`}
             </span>
             .
           </>
@@ -461,10 +399,10 @@ export default function CrawlChanges() {
                         ? "New to your report, nothing to compare against"
                         : bucket === "newly_monitored"
                           ? "Their first week on your seat lines"
-                          // Not "first week": these lines came OFF the list,
-                          // so the week they are having is their last. The
-                          // publishers still carry them.
-                          : bucket === "monitoring_stopped"
+                          : // Not "first week": these lines came OFF the list,
+                            // so the week they are having is their last. The
+                            // publishers still carry them.
+                            bucket === "monitoring_stopped"
                             ? "Came off your seat lines, still carried"
                             : "This tab only"}
                 </div>
@@ -492,54 +430,60 @@ export default function CrawlChanges() {
                 </div>
               </div>
             ) : (
-            <div className="grid grid-cols-2 divide-x divide-border overflow-hidden rounded-xl border border-border">
-              {bucket === "all" ? (
-                <>
-                  <SplitStat
-                    tone="ok"
-                    prefix="+"
-                    number={kpi.byEvent.added}
-                    label="Lines added"
-                    delta={deltaFor("added", kpi.byEvent.added)}
-                    note={lines.length ? "under the selected lines" : undefined}
-                  />
-                  <SplitStat
-                    tone="critical"
-                    prefix="-"
-                    number={kpi.byEvent.removed}
-                    label="Lines removed"
-                    delta={deltaFor("removed", kpi.byEvent.removed)}
-                    note={lines.length ? "under the selected lines" : undefined}
-                  />
-                </>
-              ) : (
-                <>
-                  <SplitStat
-                    tone={
-                      bucket === "added"
-                        ? "ok"
-                        : bucket === "removed"
-                          ? "critical"
-                          : bucket === "newly_monitored"
-                            ? "info"
-                            : bucket === "monitoring_stopped"
-                              ? "warn"
-                              // First appearance stays neutral, matching
-                              // its cards: news about our crawl, not the
-                              // market.
-                              : isScopeKind(bucket)
-                                ? undefined
-                                : "warn"
-                    }
-                    number={kpi.placements}
-                    label={TONES[bucket].label}
-                    delta={deltaFor(bucket, kpi.placements)}
-                    note={lines.length ? "under the selected lines" : undefined}
-                  />
-                  <SplitStat number={kpi.lines} label="Distinct lines" />
-                </>
-              )}
-            </div>
+              <div className="grid grid-cols-2 divide-x divide-border overflow-hidden rounded-xl border border-border">
+                {bucket === "all" ? (
+                  <>
+                    <SplitStat
+                      tone="ok"
+                      prefix="+"
+                      number={kpi.byEvent.added}
+                      label="Lines added"
+                      delta={deltaFor("added", kpi.byEvent.added)}
+                      note={
+                        lines.length ? "under the selected lines" : undefined
+                      }
+                    />
+                    <SplitStat
+                      tone="critical"
+                      prefix="-"
+                      number={kpi.byEvent.removed}
+                      label="Lines removed"
+                      delta={deltaFor("removed", kpi.byEvent.removed)}
+                      note={
+                        lines.length ? "under the selected lines" : undefined
+                      }
+                    />
+                  </>
+                ) : (
+                  <>
+                    <SplitStat
+                      tone={
+                        bucket === "added"
+                          ? "ok"
+                          : bucket === "removed"
+                            ? "critical"
+                            : bucket === "newly_monitored"
+                              ? "info"
+                              : bucket === "monitoring_stopped"
+                                ? "warn"
+                                : // First appearance stays neutral, matching
+                                  // its cards: news about our crawl, not the
+                                  // market.
+                                  isScopeKind(bucket)
+                                  ? undefined
+                                  : "warn"
+                      }
+                      number={kpi.placements}
+                      label={TONES[bucket].label}
+                      delta={deltaFor(bucket, kpi.placements)}
+                      note={
+                        lines.length ? "under the selected lines" : undefined
+                      }
+                    />
+                    <SplitStat number={kpi.lines} label="Distinct lines" />
+                  </>
+                )}
+              </div>
             )}
           </div>
 
@@ -556,7 +500,9 @@ export default function CrawlChanges() {
                 </div>
               </div>
               <span className="text-xs text-slate-500">
-                {isFirstCrawl ? "first crawl" : `${kpi.lines.toLocaleString()} lines`}
+                {isFirstCrawl
+                  ? "first crawl"
+                  : `${kpi.lines.toLocaleString()} lines`}
               </span>
             </div>
             {/* "0 publishers affected" is true and useless on a first crawl:
@@ -576,28 +522,28 @@ export default function CrawlChanges() {
                 </div>
               </div>
             ) : (
-            <div className="grid grid-cols-2 divide-x divide-border overflow-hidden rounded-xl border border-border">
-              {/* Same tones as the overview's matched cards: publishers in the
+              <div className="grid grid-cols-2 divide-x divide-border overflow-hidden rounded-xl border border-border">
+                {/* Same tones as the overview's matched cards: publishers in the
                   brand green, apps in pink, so the two pages read as one. */}
-              <SplitStat
-                tone="publisher"
-                number={kpi.publishers}
-                label="Publishers affected"
-                // Second beat: a second after the left card has landed.
-                delayMs={landsAfterMs() + BEAT_PAUSE_MS}
-                delta={publishersAffectedDelta}
-                note={lines.length ? "under the selected lines" : undefined}
-              />
-              <SplitStat
-                tone="app"
-                number={kpi.apps}
-                label="Apps affected"
-                // Second beat: a second after the left card has landed.
-                delayMs={landsAfterMs() + BEAT_PAUSE_MS}
-                delta={appsAffectedDelta}
-                note={lines.length ? "under the selected lines" : undefined}
-              />
-            </div>
+                <SplitStat
+                  tone="publisher"
+                  number={kpi.publishers}
+                  label="Publishers affected"
+                  // Second beat: a second after the left card has landed.
+                  delayMs={landsAfterMs() + BEAT_PAUSE_MS}
+                  delta={publishersAffectedDelta}
+                  note={lines.length ? "under the selected lines" : undefined}
+                />
+                <SplitStat
+                  tone="app"
+                  number={kpi.apps}
+                  label="Apps affected"
+                  // Second beat: a second after the left card has landed.
+                  delayMs={landsAfterMs() + BEAT_PAUSE_MS}
+                  delta={appsAffectedDelta}
+                  note={lines.length ? "under the selected lines" : undefined}
+                />
+              </div>
             )}
           </div>
         </div>
@@ -619,7 +565,10 @@ export default function CrawlChanges() {
             from them, and disturbs nothing above it. */}
         {!isFirstCrawl && scopeTabs.length > 0 && (
           <p className="mb-2 flex items-start gap-1.5 text-[12px] leading-relaxed text-slate-500">
-            <Eye aria-hidden className="mt-[3px] h-3.5 w-3.5 flex-shrink-0 text-slate-400" />
+            <Eye
+              aria-hidden
+              className="mt-[3px] h-3.5 w-3.5 flex-shrink-0 text-slate-400"
+            />
             <span>
               Your seat lines changed since last week. Lines you started or
               stopped watching are on their own tabs, and are not counted as
@@ -632,17 +581,17 @@ export default function CrawlChanges() {
               row scrolls sideways on its own, so the tabs never push the
               whole page into a sideways scroll (it did, by about 100px). */}
           <div className="min-w-0 overflow-x-auto">
-          <Tabs value={bucket} onValueChange={(v) => setBucket(v as Bucket)}>
-            {/* max-w-none: the base layer caps every element at 100% of its
+            <Tabs value={bucket} onValueChange={(v) => setBucket(v as Bucket)}>
+              {/* max-w-none: the base layer caps every element at 100% of its
                 parent, which squeezed this strip to the screen and, being
                 centred, pushed All and Added off its left edge where no
                 scroll could reach them. */}
-            <TabsList className="w-max max-w-none">
-              <TabsTrigger value="all">All</TabsTrigger>
-              <TabsTrigger value="added">Added</TabsTrigger>
-              <TabsTrigger value="removed">Removed</TabsTrigger>
-              <TabsTrigger value="cert_changed">Cert changes</TabsTrigger>
-              {/* THE WATCHLIST MOVED, so the lines it moved get somewhere to
+              <TabsList className="w-max max-w-none">
+                <TabsTrigger value="all">All</TabsTrigger>
+                <TabsTrigger value="added">Added</TabsTrigger>
+                <TabsTrigger value="removed">Removed</TabsTrigger>
+                <TabsTrigger value="cert_changed">Cert changes</TabsTrigger>
+                {/* THE WATCHLIST MOVED, so the lines it moved get somewhere to
                   be. Shown only on a week that has them -- the ordinary week
                   keeps four tabs -- and counted from the summary rather than
                   from the rows on screen, which are already scoped to the
@@ -653,13 +602,13 @@ export default function CrawlChanges() {
                   see the note above and then have no way to find which
                   fifty: the rows sit in All, mixed into a week of real
                   market movement. */}
-              {scopeTabs.map(([kind, label]) => (
-                <TabsTrigger key={kind} value={kind}>
-                  {label}
-                </TabsTrigger>
-              ))}
-            </TabsList>
-          </Tabs>
+                {scopeTabs.map(([kind, label]) => (
+                  <TabsTrigger key={kind} value={kind}>
+                    {label}
+                  </TabsTrigger>
+                ))}
+              </TabsList>
+            </Tabs>
           </div>
           {loading && rows.length > 0 && <Dots />}
         </div>
@@ -676,7 +625,9 @@ export default function CrawlChanges() {
         </div>
       </div>
 
-      {showSkeleton && <SkeletonRows rows={6} label="Loading line changes" />}
+      {showListSkeleton && (
+        <SkeletonRows rows={6} label="Loading line changes" />
+      )}
       {error && <p className="py-4 text-sm text-critical">{error}</p>}
 
       {/* An empty list has two very different causes and they must not
@@ -701,7 +652,7 @@ export default function CrawlChanges() {
         </p>
       )}
 
-      {!showSkeleton && total > PAGE_SIZE && (
+      {!showListSkeleton && total > PAGE_SIZE && (
         <Pager
           placement="top"
           anchorRef={paging.topRef}
@@ -715,7 +666,7 @@ export default function CrawlChanges() {
 
       {/* Not while the skeleton is up: the previous filter's rows are
           still in state and would render underneath it. */}
-      {!showSkeleton && !error && shown.length > 0 && (
+      {!showListSkeleton && !error && shown.length > 0 && (
         <div
           key={settled}
           className={cn(
@@ -727,6 +678,8 @@ export default function CrawlChanges() {
             <Settle key={g.key} index={i}>
               <ChangeCard
                 group={g}
+                token={token}
+                filters={{ ssp_domain: filter || undefined, lines }}
                 open={open.has(g.key)}
                 onToggle={() => toggle(g.key)}
               />
@@ -735,16 +688,9 @@ export default function CrawlChanges() {
         </div>
       )}
 
-      {truncated && !loading && (
-        <p className="text-xs text-slate-400">
-          Showing the first {(FETCH_CAP * FETCH_PAGE_SIZE).toLocaleString()}{" "}
-          line events for this crawl.
-        </p>
-      )}
-
       {/* Counts the PREVIOUS filter's groups while a new one is in
           flight, so it stays down with the list it describes. */}
-      {!showSkeleton && !loading && (summary?.trial || trial) && (
+      {!showListSkeleton && !loading && (summary?.trial || trial) && (
         <LockedTail
           slice={trial}
           caps={summary?.trial ?? null}
@@ -752,10 +698,9 @@ export default function CrawlChanges() {
           detail="change, on every publisher, week after week"
         />
       )}
-      {/* This pager is client-side (every served row is already here), so
-          it stays on a trial: the locked tail above counts what the server
-          kept back, the pager turns the pages of what it sent. */}
-      {!showSkeleton && total > PAGE_SIZE && (
+      {/* The locked tail describes hidden trial placements. Paging below
+          stays within the server's already-cut, entitled publisher set. */}
+      {!showListSkeleton && total > PAGE_SIZE && (
         <Pager
           className="border-t border-border/70 pt-4"
           page={safePage}
@@ -783,16 +728,86 @@ export default function CrawlChanges() {
  */
 function ChangeCard({
   group,
+  token,
+  filters,
   open,
   onToggle,
 }: {
   group: ChangeGroup;
+  token: string;
+  filters: { ssp_domain?: string; lines?: string[] };
   open: boolean;
   onToggle: () => void;
 }) {
   const tone = TONES[group.event];
   const Icon = tone.icon;
-  const count = group.publishers.length;
+  const count = group.publisher_count;
+  const [publishers, setPublishers] = useState<LineEvent[]>([]);
+  const [publisherPage, setPublisherPage] = useState(1);
+  const [rosterLoading, setRosterLoading] = useState(false);
+  const [rosterError, setRosterError] = useState<string | null>(null);
+  const [exporting, setExporting] = useState(false);
+  const linesKey = filters.lines?.join(",") ?? "";
+  useEffect(() => {
+    if (!open) return;
+    const controller = new AbortController();
+    setRosterLoading(true);
+    setRosterError(null);
+    api
+      .changePublishers(
+        token,
+        group.key,
+        {
+          ssp_domain: filters.ssp_domain,
+          lines: linesKey ? linesKey.split(",") : undefined,
+          page: publisherPage,
+          page_size: 50,
+        },
+        controller.signal,
+      )
+      .then((r) => {
+        if (!controller.signal.aborted) setPublishers(r.rows);
+      })
+      .catch(
+        (e: Error) =>
+          !controller.signal.aborted && setRosterError(changeErrorMessage(e)),
+      )
+      .finally(() => !controller.signal.aborted && setRosterLoading(false));
+    return () => controller.abort();
+  }, [token, group.key, open, publisherPage, filters.ssp_domain, linesKey]);
+  const exportController = useRef<AbortController | null>(null);
+  useEffect(() => () => exportController.current?.abort(), []);
+  async function downloadRoster() {
+    const controller = new AbortController();
+    exportController.current = controller;
+    setExporting(true);
+    setRosterError(null);
+    try {
+      const all: LineEvent[] = [];
+      for (let p = 1; all.length < count; p++) {
+        const r = await api.changePublishers(
+          token,
+          group.key,
+          { ...filters, page: p, page_size: 500 },
+          controller.signal,
+        );
+        if (controller.signal.aborted) return;
+        if (!r.rows.length || r.total !== count)
+          throw new Error(
+            "The publisher list changed. Reload before exporting.",
+          );
+        all.push(...r.rows);
+      }
+      if (all.length !== count)
+        throw new Error("Incomplete publisher list; export cancelled.");
+      exportPublishers(group, all);
+    } catch (e) {
+      if (!controller.signal.aborted)
+        setRosterError(changeErrorMessage(e as Error));
+    } finally {
+      if (!controller.signal.aborted) setExporting(false);
+    }
+  }
 
   // The cert that belongs to the line as it stands. A rotation has two, and
   // gets its own row below rather than a fourth field that cannot show a
@@ -838,7 +853,9 @@ function ChangeCard({
             <code className="min-w-0 truncate font-mono text-[13px] font-semibold tracking-tight text-slate-900 sm:text-[15px]">
               {group.ssp_domain}, {group.publisher_id}, {group.relationship}
               {inlineCert && (
-                <span className="font-normal text-slate-400">, {inlineCert}</span>
+                <span className="font-normal text-slate-400">
+                  , {inlineCert}
+                </span>
               )}
             </code>
             {/* PROVENANCE, only when it is not the ordinary kind. A line
@@ -951,11 +968,12 @@ function ChangeCard({
                 partner) needs it in a spreadsheet, not in a scroll box. */}
             <button
               type="button"
-              onClick={() => exportPublishers(group)}
+              onClick={downloadRoster}
+              disabled={exporting}
               className="inline-flex flex-shrink-0 items-center gap-1.5 rounded-full border border-border bg-white px-2.5 py-1 text-[11px] font-medium text-slate-600 shadow-sm transition-colors hover:bg-muted"
             >
               <Download aria-hidden className="h-3 w-3" />
-              Export
+              {exporting ? "Preparing…" : "Export"}
             </button>
           </div>
           {/* Who vouched for this line's developer. One quiet sentence, not
@@ -968,46 +986,73 @@ function ChangeCard({
           )}
           {/* Capped and scrollable: a line that moved on hundreds of
               publishers would otherwise push every other card off screen. */}
+          {rosterLoading && (
+            <p role="status" className="py-3 text-xs text-slate-500">
+              Loading publishers…
+            </p>
+          )}
+          {rosterError && (
+            <p role="alert" className="py-3 text-xs text-critical">
+              {rosterError}
+            </p>
+          )}
           <div className="scroll-y max-h-[320px] overflow-y-auto rounded-md border border-border bg-white">
             <ul className="divide-y divide-border">
-              {group.publishers.map((p, i) => (
-                // Click the row: the line is copied and this publisher's
-                // file opens at it (David, 2026-10-06). The domain itself
-                // links to their site.
-                <ActionableLine
-                  key={`${p.developer_id}|${p.file_kind}|${i}`}
-                  line={{ ...group, cert_id: inlineCert ?? undefined }}
-                  publisherDomain={p.developer_domain}
-                  foundIn={fileLabel(p.file_kind)}
-                  gone={group.event === "removed" || group.event === "monitoring_stopped"}
-                  className="flex items-baseline gap-3 px-3 py-1.5 text-[11px]"
-                >
-                  {/* Never the internal id (David, 2026-10-06): the domain,
+              {!rosterLoading &&
+                !rosterError &&
+                publishers.map((p, i) => (
+                  // Click the row: the line is copied and this publisher's
+                  // file opens at it (David, 2026-10-06). The domain itself
+                  // links to their site.
+                  <ActionableLine
+                    key={`${p.developer_id}|${p.file_kind}|${i}`}
+                    line={{ ...group, cert_id: inlineCert ?? undefined }}
+                    publisherDomain={p.developer_domain}
+                    foundIn={fileLabel(p.file_kind)}
+                    gone={
+                      group.event === "removed" ||
+                      group.event === "monitoring_stopped"
+                    }
+                    className="flex items-baseline gap-3 px-3 py-1.5 text-[11px]"
+                  >
+                    {/* Never the internal id (David, 2026-10-06): the domain,
                       else the name, else a plain word. */}
-                  <span className="min-w-0 truncate font-mono tabular-nums text-slate-800">
-                    {p.developer_domain ? (
-                      <PublisherDomainLink domain={p.developer_domain} />
-                    ) : (
-                      p.developer_name || "Unnamed publisher"
-                    )}
-                  </span>
-                  {p.developer_domain && p.developer_name && (
-                    <span className="hidden truncate text-slate-500 sm:inline">
-                      {p.developer_name}
+                    <span className="min-w-0 truncate font-mono tabular-nums text-slate-800">
+                      {p.developer_domain ? (
+                        <PublisherDomainLink domain={p.developer_domain} />
+                      ) : (
+                        p.developer_name || "Unnamed publisher"
+                      )}
                     </span>
-                  )}
-                  {/* Rendered, never the raw enum: this is a customer's
+                    {p.developer_domain && p.developer_name && (
+                      <span className="hidden truncate text-slate-500 sm:inline">
+                        {p.developer_name}
+                      </span>
+                    )}
+                    {/* Rendered, never the raw enum: this is a customer's
                       screen, and "APP_ADS_TXT" is not a file name. Said as
                       a sentence, the same one every other surface uses, so
                       a bare filename is never left to explain itself. */}
-                  {/* The file this row opens, so it is what reads as the link. */}
-                  <span data-line-text className="ml-auto flex-shrink-0 text-[10px] text-slate-400">
-                    {foundInLabel(fileLabel(p.file_kind))}
-                  </span>
-                </ActionableLine>
-              ))}
+                    {/* The file this row opens, so it is what reads as the link. */}
+                    <span
+                      data-line-text
+                      className="ml-auto flex-shrink-0 text-[10px] text-slate-400"
+                    >
+                      {foundInLabel(fileLabel(p.file_kind))}
+                    </span>
+                  </ActionableLine>
+                ))}
             </ul>
           </div>
+          {count > 50 && (
+            <Pager
+              page={publisherPage}
+              pageSize={50}
+              total={count}
+              onPage={setPublisherPage}
+              noun="publishers"
+            />
+          )}
         </div>
       </Collapse>
     </div>
@@ -1102,13 +1147,11 @@ const TONES: Record<
 /**
  * One line's publisher roster, as a CSV download.
  *
- * Built client-side from the rows already on screen rather than round-
- * tripping the API: the expansion holds the complete roster for that line
- * (the page fetches every event page up front and groups locally), so there
- * is nothing the server could add, and this works while the crawl database
- * is asleep.
+ * Requested only on an explicit export click. Every roster page must
+ * reconcile to the group's full count before a CSV can be downloaded.
+ * Frozen artifact reads work while the crawl database is asleep.
  */
-function exportPublishers(group: ChangeGroup) {
+function exportPublishers(group: ChangeGroup, publishers: LineEvent[]) {
   const line = [
     group.ssp_domain,
     group.publisher_id,
@@ -1117,8 +1160,14 @@ function exportPublishers(group: ChangeGroup) {
   ]
     .filter(Boolean)
     .join(", ");
-  const header = ["publisher_domain", "publisher_name", "file", "change", "line"];
-  const body = group.publishers.map((p) => [
+  const header = [
+    "publisher_domain",
+    "publisher_name",
+    "file",
+    "change",
+    "line",
+  ];
+  const body = publishers.map((p) => [
     p.developer_domain ?? "",
     p.developer_name ?? "",
     fileLabel(p.file_kind),
@@ -1144,25 +1193,6 @@ function exportPublishers(group: ChangeGroup) {
 
 /* ── Grouping ──────────────────────────────────────────────────────── */
 
-type ChangeGroup = {
-  key: string;
-  event: EventKind;
-  /** Earliest known sighting of this line, across its publishers. */
-  first_seen_at: string | null;
-  ssp_domain: string;
-  publisher_id: string;
-  relationship: string;
-  old_cert_id: string | null;
-  new_cert_id: string | null;
-  /** How the line was tied to its developer. Absent on old data is "file",
-   *  which is also the case that gets no chip. */
-  matched_via: "file" | "ipd" | "subdomain";
-  /** Domains whose files vouched for this line's developer as their
-   *  inventory partner. Non-empty even on "file" matches sometimes. */
-  ipd_declared_by: string[];
-  publishers: LineEvent[];
-};
-
 /** The declarer roster as a sentence fragment. Cut at five: past that the
  *  useful fact is the count, not the names, and the API itself caps the
  *  list at 25 so "and N more" is measured against what was sent. */
@@ -1184,16 +1214,6 @@ function formatSeen(iso: string): string {
     : d.toLocaleDateString(undefined, { month: "short", year: "numeric" });
 }
 
-/** Anything unrecognised is a cert rotation, the least alarming reading. */
-function eventKind(raw: string): EventKind {
-  if (raw === "added") return "added";
-  if (raw === "removed") return "removed";
-  if (raw === "newly_monitored") return "newly_monitored";
-  if (raw === "monitoring_stopped") return "monitoring_stopped";
-  if (raw === "first_appearance") return "first_appearance";
-  return "cert_changed";
-}
-
 /** True for the kinds that mean the watchlist moved rather than the world. */
 /** Kinds that describe OUR coverage rather than the market: we started or
  *  stopped watching a line, or met a publisher for the first time. None of
@@ -1205,98 +1225,6 @@ function isScopeKind(event: EventKind): boolean {
     event === "monitoring_stopped" ||
     event === "first_appearance"
   );
-}
-
-/**
- * (line x publisher) rows in, one group per line out. The identity of a
- * line is the four fields of the file plus what happened to it: the same
- * ads.txt line added on one publisher and removed on another is two facts,
- * not one, and must not collapse into a single card.
- */
-function groupByLine(rows: LineEvent[]): ChangeGroup[] {
-  const byKey = new Map<string, ChangeGroup>();
-  for (const r of rows) {
-    const event = eventKind(r.event);
-    const key = [
-      event,
-      r.ssp_domain,
-      r.publisher_id,
-      r.relationship,
-      r.old_cert_id ?? "",
-      r.new_cert_id ?? "",
-    ].join("|");
-    let g = byKey.get(key);
-    if (!g) {
-      g = {
-        key,
-        event,
-        ssp_domain: r.ssp_domain,
-        publisher_id: r.publisher_id,
-        relationship: r.relationship,
-        old_cert_id: r.old_cert_id,
-        new_cert_id: r.new_cert_id,
-        first_seen_at: r.first_seen_at ?? null,
-        matched_via: r.matched_via ?? "file",
-        ipd_declared_by: r.ipd_declared_by ?? [],
-        publishers: [],
-      };
-      byKey.set(key, g);
-    }
-    // The EARLIEST sighting across the line's publishers. The card speaks
-    // for the whole line, so "already live since" has to be the date the
-    // line was first seen anywhere, not on whichever publisher happened to
-    // sort first.
-    if (r.first_seen_at && (!g.first_seen_at || r.first_seen_at < g.first_seen_at)) {
-      g.first_seen_at = r.first_seen_at;
-    }
-    // Same idea for provenance: the card speaks for the line, so if ANY of
-    // its rows arrived via a declaration, the chip says so, and the first
-    // roster that names declarers wins over an empty one.
-    if (g.matched_via === "file" && r.matched_via && r.matched_via !== "file") {
-      g.matched_via = r.matched_via;
-    }
-    if (g.ipd_declared_by.length === 0 && r.ipd_declared_by?.length) {
-      g.ipd_declared_by = r.ipd_declared_by;
-    }
-    g.publishers.push(r);
-  }
-  return [...byKey.values()];
-}
-
-/** Widest change first, then a stable alphabetical tiebreak. */
-function sortBucket(groups: ChangeGroup[]): ChangeGroup[] {
-  return [...groups].sort(
-    (a, b) =>
-      b.publishers.length - a.publishers.length ||
-      a.ssp_domain.localeCompare(b.ssp_domain) ||
-      a.publisher_id.localeCompare(b.publisher_id),
-  );
-}
-
-/**
- * Weave the three buckets together in proportion.
- *
- * The endpoint returns its rows grouped by event, so a naive All tab is a
- * run of added cards, then a run of removed cards, then the cert changes,
- * and a reader who never scrolls past the first screen concludes that
- * nothing was removed. Giving every card a position of (index + 0.5) /
- * bucket size and sorting on it spreads each bucket evenly across the whole
- * list, so any window of cards holds roughly the week's real mix.
- */
-function interleave(groups: ChangeGroup[]): ChangeGroup[] {
-  // Scope kinds sort last: they are context for the week, not its news.
-  const order: EventKind[] = [
-    ...FOUND_KINDS, "newly_monitored", "monitoring_stopped", "first_appearance",
-  ];
-  const placed: { g: ChangeGroup; pos: number; rank: number }[] = [];
-  order.forEach((event, rank) => {
-    const bucket = sortBucket(groups.filter((g) => g.event === event));
-    bucket.forEach((g, i) => {
-      placed.push({ g, pos: (i + 0.5) / bucket.length, rank });
-    });
-  });
-  placed.sort((a, b) => a.pos - b.pos || a.rank - b.rank);
-  return placed.map((p) => p.g);
 }
 
 /* ── Helpers ───────────────────────────────────────────────────────── */
@@ -1312,30 +1240,14 @@ export function fileLabel(kind: string): string {
   return kind;
 }
 
-/**
- * Every line event for the crawl, under the active filters. Walks the pages
- * with the same cap the sibling pages use; `truncated` says whether the cap
- * was hit, so the page can admit it rather than quietly under-report.
- */
-async function fetchAllEvents(
-  token: string,
-  filters: { ssp_domain?: string; lines?: string[] },
-): Promise<{ rows: LineEvent[]; truncated: boolean; trial: TrialSlice | null }> {
-  const acc: LineEvent[] = [];
-  // The cut, when there is one, is stamped on every page; the first
-  // page's stamp is kept and shown under the list.
-  let trial: TrialSlice | null = null;
-  for (let p = 1; p <= FETCH_CAP; p += 1) {
-    const r = await api.lineEvents(token, {
-      ...filters,
-      page: p,
-      page_size: FETCH_PAGE_SIZE,
-    });
-    if (p === 1) trial = r.trial ?? null;
-    acc.push(...r.rows);
-    if (r.rows.length < FETCH_PAGE_SIZE) {
-      return { rows: acc, truncated: false, trial };
-    }
+/** Display the API's explanation as a sentence, never its JSON envelope. */
+function changeErrorMessage(error: Error): string {
+  try {
+    const detail = JSON.parse(error.message)?.detail;
+    return typeof detail === "string"
+      ? detail
+      : "Could not load this change. Please try again.";
+  } catch {
+    return error.message;
   }
-  return { rows: acc, truncated: true, trial };
 }
