@@ -29,10 +29,8 @@ for(const scenario of ["browser", "proxy", "gb", "blocked"] as const) {
       await expect(unknown).toContainText('no removal recommendation');
       await expect(unknown).toContainText('This does not mean the seller is missing');
     }
-    const checks=page.getByTestId('seller-info-checks');
-    await checks.locator('summary').click();
-    const app=checks.locator('div.flex').filter({has:page.getByRole('link',{name:'sega.com/app-ads.txt',exact:true})});
-    await expect(app).toContainText(recovered?`Read · ${scenario === 'browser' ? 'browser retry' : scenario === 'gb' ? 'proxy retry (GB)' : 'proxy retry'} · HTTP 200`:'Couldn’t fetch · proxy retry · HTTP 429');
+    await expect(page.getByTestId('seller-info-checks')).toHaveCount(0);
+    await expect(page.getByText('File checks',{exact:true})).toHaveCount(0);
     await expect(page.getByRole('heading',{name:/Not seen, check first/})).toHaveCount(0);
   });
 }
@@ -45,9 +43,7 @@ test('full viewer distinguishes read outcomes from seller fixes', async ({page})
   await page.goto(`/crawl-report/${TOKEN}/sellers`);
   const group=page.getByTestId('seller-info');
   const info=page.getByTestId('seller-info-unreachable');
-  const checks=page.getByTestId('seller-info-checks');
   await expect(info).not.toBeVisible();
-  await expect(checks).not.toBeVisible();
   await expect(page.getByRole('button',{name:'Download fixed file',exact:true})).toHaveCount(2);
   await group.locator(':scope > summary').click();
   await info.locator(':scope > summary').click();
@@ -56,10 +52,23 @@ test('full viewer distinguishes read outcomes from seller fixes', async ({page})
   await expect(info).toContainText('Cloudwillow Media');
   await expect(info).toContainText('Ferncloud Audio');
   await expect(info.getByRole('checkbox')).toHaveCount(0);
-  await checks.locator('summary').click();
-  for(const label of ['HTTP 403','HTTP 429','Timed out','Read · browser retry · HTTP 200','Read · proxy retry (GB) · HTTP 200','File absent · direct · HTTP 404','File absent · direct · HTTP 410','No readable file','Couldn’t connect']) {
-    await expect(checks.getByText(label,{exact:false}).first()).toBeVisible();
-  }
+  await expect(page.getByTestId('seller-info-checks')).toHaveCount(0);
+  await expect(page.getByText('File checks',{exact:true})).toHaveCount(0);
+  await expect(page.getByText(/HTTP \d{3}/)).toHaveCount(0);
   await page.getByRole('link',{name:'Overview',exact:true}).click();
   await expect(page).not.toHaveURL(/sellers$/);
+});
+
+
+test('successful checks do not create an empty customer Info section', async ({page}) => {
+  await page.addInitScript(()=>localStorage.setItem('pf_report_walkthrough_v1',JSON.stringify({status:'completed',stepId:null,open:false})));
+  await installFakeApi(page,{sellers:'page'});
+  const payload=segaReport(true);
+  payload.file.sellers=payload.file.sellers.filter(s=>s.seller_id === '10360');
+  payload.file_checks=payload.file_checks.filter(c=>c.seller_ids.includes('10360'));
+  await page.route('**/api/v1/viewer/*/sellers-fix',route=>route.fulfill({json:payload}));
+  await page.goto(`/crawl-report/${TOKEN}/sellers`);
+  await expect(page.getByRole('heading',{name:'Sellers.json',exact:true})).toBeVisible();
+  await expect(page.getByTestId('seller-info')).toHaveCount(0);
+  await expect(page.getByRole('checkbox',{name:'Remove from file',exact:true})).toHaveCount(0);
 });

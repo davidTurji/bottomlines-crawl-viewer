@@ -542,7 +542,7 @@ export default function CrawlSellers() {
             ))}
           </div>
 
-          {(rows.some(r => r.unverified) || !!data.file_checks?.length) && (
+          {rows.some(r => r.unverified) && (
             <details className={cn(SECTION_CARD, "group/info")} data-testid="seller-info">
               <summary className="cursor-pointer list-none [&::-webkit-details-marker]:hidden">
                 <div className="flex items-start justify-between gap-3">
@@ -553,7 +553,7 @@ export default function CrawlSellers() {
                       </span>
                       Info
                       <span className="font-mono text-[12px] font-normal tabular-nums text-slate-400">
-                        {(rows.some(r => r.unverified) ? 1 : 0) + (data.file_checks?.length ? 1 : 0)}
+                        1
                       </span>
                     </h2>
                     <p className="text-[11px] text-slate-500">File status, no changes to your file</p>
@@ -576,16 +576,7 @@ export default function CrawlSellers() {
                     {rows.filter(r => r.unverified).length > 50 && <p className="text-xs text-slate-500">Showing the first 50; all unverified sellers are preserved.</p>}
                   </div>
                 </details>}
-                {!!data.file_checks?.length && <details data-testid="seller-info-checks" className="group/checks">
-                  <summary className="flex cursor-pointer list-none items-center justify-between gap-3 px-4 py-3 text-[12.5px] font-medium text-slate-700 [&::-webkit-details-marker]:hidden">
-                    <span>File checks <span className="ml-2 text-[11px] font-normal text-slate-400">{data.file_checks.filter(c => c.status === "checked").length} read · {data.file_checks.filter(c => c.status === "unverified").length} unverified</span></span>
-                    <ChevronDown aria-hidden className="h-3.5 w-3.5 shrink-0 text-slate-400 transition-transform group-open/checks:rotate-180" />
-                  </summary>
-                  <div className="divide-y divide-border border-t border-border px-4">{data.file_checks.slice(0, 100).map(c => <div key={c.url} className="flex flex-wrap items-center justify-between gap-2 py-3 text-xs">
-                    <a className="min-w-0 break-all text-primary underline" href={c.url} target="_blank" rel="noopener noreferrer">{c.url.replace("https://", "")}</a>
-                    <span className="text-slate-500">{c.status === "checked" ? "Read" : c.status === "absent" ? "File absent" : c.reason === "report_deadline" ? "Timed out" : c.reason === "network_error" ? "Couldn’t connect" : c.http_status === 200 ? "No readable file" : "Couldn’t fetch"} · {c.via === "proxy" ? `proxy retry${c.proxy_country ? ` (${c.proxy_country.toUpperCase()})` : ""}` : c.via === "browser" ? "browser retry" : "direct"}{c.http_status ? ` · HTTP ${c.http_status}` : ""}</span>
-                  </div>)}</div>
-                </details>}
+
               </div>
             </details>
           )}
