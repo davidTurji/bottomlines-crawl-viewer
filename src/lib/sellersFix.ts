@@ -463,16 +463,25 @@ export function suggest(file: SellersFile, sightings: Sighting[], ownDomain: str
   // Legacy snapshots have no per-file outcomes: lack of evidence is unknown,
   // never proof of absence. Only two successfully checked own-file paths can
   // support the existing cautious "not seen" review, never an automatic edit.
-  if (checks !== undefined) return rows.map(row => {
+  if (checks !== undefined) {
+    const checksBySeller = new Map<string, FileCheck[]>();
+    for (const check of checks) for (const raw of check.seller_ids ?? []) {
+      const key = String(raw).trim().toLowerCase();
+      const entries = checksBySeller.get(key) ?? [];
+      entries.push(check);
+      checksBySeller.set(key, entries);
+    }
+    return rows.map(row => {
     if (row.kind !== "remove" || !row.current || !String(row.current.seller_id ?? "").trim()) return row;
     const id = String(row.seller_id).trim().toLowerCase();
-    const own = checks.filter(c => c.seller_ids.includes(id));
+    const own = checksBySeller.get(id) ?? [];
     const complete = ["ads.txt", "app-ads.txt"].every(path => own.some(c =>
       c.url === `https://${norm(row.current!.domain)}/${path}` && ["checked", "absent"].includes(c.status)));
     if (complete) return row;
     return {...row, kind: "keep" as const, unverified: true, suggested: row.current,
       changes: [], reason: "Couldn’t verify both files during report generation. Kept unchanged; this is not evidence to remove the seller."};
-  });
+    });
+  }
   return rows;
 }
 
