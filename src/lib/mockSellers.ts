@@ -189,7 +189,7 @@ export const segaReport = (recovered: boolean) => ({
   sightings: recovered ? [{seller_id:"10360",relationship:"DIRECT" as const,publishers_total:1,publishers:[{domain:"sega.com",found_in:"app-ads.txt",own_file:true}]}] : [],
   file_checks: [
     {url:"https://sega.com/ads.txt",seller_ids:["10360"],status:"absent" as const,via:"direct",http_status:404},
-    {url:"https://sega.com/app-ads.txt",seller_ids:["10360"],status: recovered ? "checked" as const : "unverified" as const,via:"proxy",http_status:recovered?200:429},
+    {url:"https://sega.com/app-ads.txt",seller_ids:["10360"],status: recovered ? "checked" as const : "unverified" as const,via:recovered?"browser":"proxy",http_status:recovered?200:429},
     {url:"https://cas.ai/ads.txt",seller_ids:["10391"],status:"unverified" as const,via:"proxy",http_status:429},
     {url:"https://cas.ai/app-ads.txt",seller_ids:["10391"],status:"unverified" as const,via:"proxy",http_status:429},
   ],

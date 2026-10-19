@@ -479,7 +479,7 @@ export function suggest(file: SellersFile, sightings: Sighting[], ownDomain: str
       c.url === `https://${norm(row.current!.domain)}/${path}` && ["checked", "absent"].includes(c.status)));
     if (complete) return row;
     return {...row, kind: "keep" as const, unverified: true, suggested: row.current,
-      changes: [], reason: "Couldn’t verify both files during report generation. Kept unchanged; this is not evidence to remove the seller."};
+      changes: [], reason: "Files unavailable for validation: we couldn’t fetch or verify all required files during report generation. Seller kept unchanged; no removal recommendation."};
     });
   }
   return rows;
