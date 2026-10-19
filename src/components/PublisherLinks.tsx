@@ -268,7 +268,7 @@ function useCopied(): [boolean, () => void] {
     () => {
       setCopied(true);
       window.clearTimeout(timer.current);
-      timer.current = window.setTimeout(() => setCopied(false), 1600);
+      timer.current = window.setTimeout(() => setCopied(false), 1800);
     },
   ];
 }
