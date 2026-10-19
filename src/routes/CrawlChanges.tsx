@@ -128,24 +128,20 @@ export default function CrawlChanges() {
     const timer = window.setTimeout(() => setFilter(ssp.trim()), 250);
     return () => window.clearTimeout(timer);
   }, [ssp]);
-  // WHICH SELECTION THE ROWS ON SCREEN WERE READ UNDER. While it lags the
-  // applied one, everything on this page describes the previous filter, so
-  // it is sketched rather than dimmed: applying a filter re-reads the whole
-  // page, and a 60% fade over last selection's numbers reads as a page that
-  // is merely faded, not one whose contents are being replaced.
-  //
-  // Kept distinct from `settled` so that typing in the SSP search still
-  // gets the light treatment (dim plus dots). A keystroke is not a new
-  // question about the report; a different set of seat lines is.
+  // Which query produced the displayed counters. A server-paged tab or
+  // filter must never put old totals under a newly selected label.
   const [settledFor, setSettledFor] = useState<string | null>(null);
   /* The seat-line filter, shared with the overview through the URL. The
      events are re-fetched under it, and every KPI on this page is counted
      from the rows, so the numbers follow the filter by construction. */
   const { selected: lines, setSelected: setLines } = useLineFilter();
   const linesKey = lines.join(",");
-  const refiltering = settledFor !== null && settledFor !== linesKey;
+  const selectionKey = JSON.stringify([token, linesKey, filter, bucket]);
+  const refiltering = settledFor !== null && settledFor !== selectionKey;
   // The cold open and the refilter share one treatment.
-  const showSkeleton = !error && loading && (settled === 0 || refiltering);
+  const showSkeleton = !error && (refiltering || (loading && settled === 0));
+  const showListSkeleton =
+    showSkeleton || (!error && (loading || result?.page !== page));
 
   useEffect(() => {
     let cancelled = false;
@@ -199,12 +195,15 @@ export default function CrawlChanges() {
         setTrial(r.trial ?? null);
         setOpen(new Set());
         setSettled((n) => n + 1);
-        setSettledFor(linesKey);
+        setSettledFor(selectionKey);
       })
-      .catch((e: Error) => !controller.signal.aborted && setError(e.message))
+      .catch(
+        (e: Error) =>
+          !controller.signal.aborted && setError(changeErrorMessage(e)),
+      )
       .finally(() => !controller.signal.aborted && setLoading(false));
     return () => controller.abort();
-  }, [token, filter, lines, linesKey, bucket, page]);
+  }, [token, filter, lines, linesKey, bucket, page, selectionKey]);
 
   useEffect(() => setPage(1), [bucket, filter, lines]);
   const total = result?.total ?? 0;
@@ -626,7 +625,9 @@ export default function CrawlChanges() {
         </div>
       </div>
 
-      {showSkeleton && <SkeletonRows rows={6} label="Loading line changes" />}
+      {showListSkeleton && (
+        <SkeletonRows rows={6} label="Loading line changes" />
+      )}
       {error && <p className="py-4 text-sm text-critical">{error}</p>}
 
       {/* An empty list has two very different causes and they must not
@@ -651,7 +652,7 @@ export default function CrawlChanges() {
         </p>
       )}
 
-      {!showSkeleton && total > PAGE_SIZE && (
+      {!showListSkeleton && total > PAGE_SIZE && (
         <Pager
           placement="top"
           anchorRef={paging.topRef}
@@ -665,7 +666,7 @@ export default function CrawlChanges() {
 
       {/* Not while the skeleton is up: the previous filter's rows are
           still in state and would render underneath it. */}
-      {!showSkeleton && !error && shown.length > 0 && (
+      {!showListSkeleton && !error && shown.length > 0 && (
         <div
           key={settled}
           className={cn(
@@ -689,7 +690,7 @@ export default function CrawlChanges() {
 
       {/* Counts the PREVIOUS filter's groups while a new one is in
           flight, so it stays down with the list it describes. */}
-      {!showSkeleton && !loading && (summary?.trial || trial) && (
+      {!showListSkeleton && !loading && (summary?.trial || trial) && (
         <LockedTail
           slice={trial}
           caps={summary?.trial ?? null}
@@ -699,7 +700,7 @@ export default function CrawlChanges() {
       )}
       {/* The locked tail describes hidden trial placements. Paging below
           stays within the server's already-cut, entitled publisher set. */}
-      {!showSkeleton && total > PAGE_SIZE && (
+      {!showListSkeleton && total > PAGE_SIZE && (
         <Pager
           className="border-t border-border/70 pt-4"
           page={safePage}
@@ -768,7 +769,8 @@ function ChangeCard({
         if (!controller.signal.aborted) setPublishers(r.rows);
       })
       .catch(
-        (e: Error) => !controller.signal.aborted && setRosterError(e.message),
+        (e: Error) =>
+          !controller.signal.aborted && setRosterError(changeErrorMessage(e)),
       )
       .finally(() => !controller.signal.aborted && setRosterLoading(false));
     return () => controller.abort();
@@ -800,7 +802,8 @@ function ChangeCard({
         throw new Error("Incomplete publisher list; export cancelled.");
       exportPublishers(group, all);
     } catch (e) {
-      if (!controller.signal.aborted) setRosterError((e as Error).message);
+      if (!controller.signal.aborted)
+        setRosterError(changeErrorMessage(e as Error));
     } finally {
       if (!controller.signal.aborted) setExporting(false);
     }
@@ -1235,4 +1238,16 @@ export function fileLabel(kind: string): string {
   if (k === "appadstxt") return "app-ads.txt";
   if (k === "adstxt") return "ads.txt";
   return kind;
+}
+
+/** Display the API's explanation as a sentence, never its JSON envelope. */
+function changeErrorMessage(error: Error): string {
+  try {
+    const detail = JSON.parse(error.message)?.detail;
+    return typeof detail === "string"
+      ? detail
+      : "Could not load this change. Please try again.";
+  } catch {
+    return error.message;
+  }
 }
