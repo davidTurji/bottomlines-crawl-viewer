@@ -96,7 +96,10 @@ const flagOk = (v: unknown) => v === undefined || v === 0 || v === 1;
 /** What the reader can type on a row. */
 export type FillField = "name" | "domain" | "seller_type";
 
+export type FileCheck = { url: string; seller_ids: string[]; status: "checked" | "absent" | "unverified"; via?: string; http_status?: number | null; reason?: string | null };
+
 export type SellerRow = {
+  unverified?: boolean;
   seller_id: string;
   kind: "add" | "fix" | "remove" | "keep";
   /** The entry in the file today; null for an add. */
@@ -193,7 +196,7 @@ type Seen = {
   listings: Listing[];
 };
 
-export function suggest(file: SellersFile, sightings: Sighting[], ownDomain: string): SellerRow[] {
+export function suggest(file: SellersFile, sightings: Sighting[], ownDomain: string, checks?: FileCheck[]): SellerRow[] {
   // Per ID: the publishers we were sent, and how many there are in all
   // (the sent list may be the first of them; a count is never read off it).
   const seen = new Map<string, Seen>();
@@ -457,6 +460,19 @@ export function suggest(file: SellersFile, sightings: Sighting[], ownDomain: str
       ask: ["name", "domain", "seller_type"],
     });
   }
+  // Legacy snapshots have no per-file outcomes: lack of evidence is unknown,
+  // never proof of absence. Only two successfully checked own-file paths can
+  // support the existing cautious "not seen" review, never an automatic edit.
+  if (checks !== undefined) return rows.map(row => {
+    if (row.kind !== "remove" || !row.current || !String(row.current.seller_id ?? "").trim()) return row;
+    const id = String(row.seller_id).trim().toLowerCase();
+    const own = checks.filter(c => c.seller_ids.includes(id));
+    const complete = ["ads.txt", "app-ads.txt"].every(path => own.some(c =>
+      c.url === `https://${norm(row.current!.domain)}/${path}` && ["checked", "absent"].includes(c.status)));
+    if (complete) return row;
+    return {...row, kind: "keep" as const, unverified: true, suggested: row.current,
+      changes: [], reason: "Couldn’t verify both files during report generation. Kept unchanged; this is not evidence to remove the seller."};
+  });
   return rows;
 }
 

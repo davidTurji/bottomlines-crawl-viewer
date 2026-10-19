@@ -38,6 +38,7 @@ import {
   MOCK_SELLERS_DOMAIN,
   mockSellerSightings,
   mockSellersFile,
+  mockCompletedChecks,
 } from "../src/lib/mockSellers";
 
 // mockDiscoveredLines reads ?discovery= from the page URL; in Node there is
@@ -436,6 +437,7 @@ export async function installFakeApi(page: Page, scenario: Scenario = {}): Promi
           domain: MOCK_SELLERS_DOMAIN,
           file: mockSellersFile,
           sightings: mockSellerSightings,
+          file_checks: mockCompletedChecks,
           checked_at: MOCK_CHECKED_AT,
           file_url: `https://${MOCK_SELLERS_DOMAIN}/sellers.json`,
           file_warnings: [],
