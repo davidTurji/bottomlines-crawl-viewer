@@ -554,7 +554,7 @@ export default function CrawlSellers() {
             <summary className="cursor-pointer text-sm font-medium">File checks · {data.file_checks.filter(c => c.status === "checked").length} read · {data.file_checks.filter(c => c.status === "unverified").length} unverified</summary>
             <div className="mt-3 divide-y divide-border">{data.file_checks.slice(0, 100).map(c => <div key={c.url} className="flex flex-wrap items-center justify-between gap-2 py-2 text-xs">
               <a className="text-primary underline" href={c.url} target="_blank" rel="noopener noreferrer">{c.url.replace("https://", "")}</a>
-              <span className="text-muted-foreground">{c.status === "checked" ? "Read" : c.status === "absent" ? "File absent" : c.http_status === 200 ? "No readable file" : "Couldn’t fetch"} · {c.via === "proxy" ? `proxy retry${c.proxy_country ? ` (${c.proxy_country.toUpperCase()})` : ""}` : c.via === "browser" ? "browser retry" : "direct"}{c.http_status ? ` · HTTP ${c.http_status}` : ""}</span>
+              <span className="text-muted-foreground">{c.status === "checked" ? "Read" : c.status === "absent" ? "File absent" : c.reason === "report_deadline" ? "Timed out" : c.reason === "network_error" ? "Couldn’t connect" : c.http_status === 200 ? "No readable file" : "Couldn’t fetch"} · {c.via === "proxy" ? `proxy retry${c.proxy_country ? ` (${c.proxy_country.toUpperCase()})` : ""}` : c.via === "browser" ? "browser retry" : "direct"}{c.http_status ? ` · HTTP ${c.http_status}` : ""}</span>
             </div>)}</div>
           </details>}
 

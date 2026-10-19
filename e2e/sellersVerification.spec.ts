@@ -1,6 +1,6 @@
 import {test,expect} from '@playwright/test';
 import {installFakeApi,TOKEN} from './fakeApi';
-import {segaReport} from '../src/lib/mockSellers';
+import {segaReport, verificationReport} from '../src/lib/mockSellers';
 
 for(const scenario of ["browser", "proxy", "gb", "blocked"] as const) {
   const recovered = scenario !== "blocked";
@@ -33,3 +33,25 @@ for(const scenario of ["browser", "proxy", "gb", "blocked"] as const) {
     await expect(page.getByRole('heading',{name:/Not seen, check first/})).toHaveCount(0);
   });
 }
+
+
+test('full viewer distinguishes read outcomes from seller fixes', async ({page}) => {
+  await page.addInitScript(()=>localStorage.setItem('pf_report_walkthrough_v1',JSON.stringify({status:'completed',stepId:null,open:false})));
+  await installFakeApi(page,{sellers:'page'});
+  await page.route('**/api/v1/viewer/*/sellers-fix',route=>route.fulfill({json:verificationReport()}));
+  await page.goto(`/crawl-report/${TOKEN}/sellers`);
+  const info=page.locator('details').filter({has:page.locator('summary').filter({hasText:'Unreachable files'})});
+  await info.locator('summary').click();
+  await expect(info).toContainText('Fogharbor News');
+  await expect(info).toContainText('Bramblemist TV');
+  await expect(info).toContainText('Cloudwillow Media');
+  await expect(info).toContainText('Ferncloud Audio');
+  await expect(info.getByRole('checkbox')).toHaveCount(0);
+  const checks=page.locator('details').filter({has:page.locator('summary').filter({hasText:'File checks'})});
+  await checks.locator('summary').click();
+  for(const label of ['HTTP 403','HTTP 429','Timed out','Read · browser retry · HTTP 200','Read · proxy retry (GB) · HTTP 200','File absent · direct · HTTP 404','File absent · direct · HTTP 410','No readable file','Couldn’t connect']) {
+    await expect(checks.getByText(label,{exact:false}).first()).toBeVisible();
+  }
+  await page.getByRole('link',{name:'Overview',exact:true}).click();
+  await expect(page).not.toHaveURL(/sellers$/);
+});
