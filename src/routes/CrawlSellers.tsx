@@ -5,6 +5,7 @@ import {
   Copy,
   Download,
   EyeOff,
+  Info,
   Plus,
   RefreshCw,
   RotateCcw,
@@ -459,10 +460,10 @@ export default function CrawlSellers() {
                 />
                 <SplitStat
                   className="bg-white"
-                  tone="warn"
-                  number={counts.remove + rows.filter(r => r.unverified).length}
-                  label="Needs checking"
-                  caption="Unverified or not seen; kept unchanged"
+                  tone={counts.remove ? "warn" : undefined}
+                  number={counts.remove}
+                  label="Not seen in checked files"
+                  caption="Review before removing"
                 />
               </div>
             )}
@@ -540,7 +541,7 @@ export default function CrawlSellers() {
           </div>
 
           {rows.some(r => r.unverified) && <details className="rounded-2xl border border-border bg-white p-5 shadow-sm">
-            <summary className="cursor-pointer text-sm font-medium">Files unavailable · {rows.filter(r => r.unverified).length}</summary>
+            <summary className="cursor-pointer text-sm font-medium"><span className="inline-flex items-center gap-2"><Info className="h-4 w-4 text-muted-foreground" aria-hidden="true" />Unreachable files<span className="text-xs font-normal text-muted-foreground">{rows.filter(r => r.unverified).length} sellers kept</span><span className="rounded-full border border-border px-2 py-0.5 text-[10px] font-normal text-muted-foreground">Info</span></span></summary>
             <p className="mt-2 text-xs text-muted-foreground">We couldn’t fetch or verify some files. Access may be blocked or temporarily unavailable. This does not mean the seller is missing. No removal recommendation is made for these sellers.</p>
             <div className="mt-3 divide-y divide-border">{rows.filter(r => r.unverified).slice(0, 50).map(r => <div key={r.seller_id} className="py-3 text-xs">
               <span className="font-medium">{r.seller_id}</span> · <SellerWho seller={r.current}/>
@@ -553,7 +554,7 @@ export default function CrawlSellers() {
             <summary className="cursor-pointer text-sm font-medium">File checks · {data.file_checks.filter(c => c.status === "checked").length} read · {data.file_checks.filter(c => c.status === "unverified").length} unverified</summary>
             <div className="mt-3 divide-y divide-border">{data.file_checks.slice(0, 100).map(c => <div key={c.url} className="flex flex-wrap items-center justify-between gap-2 py-2 text-xs">
               <a className="text-primary underline" href={c.url} target="_blank" rel="noopener noreferrer">{c.url.replace("https://", "")}</a>
-              <span className="text-muted-foreground">{c.status === "checked" ? "Read" : c.status === "absent" ? "File absent" : c.http_status === 200 ? "No readable file" : "Couldn’t fetch"} · {c.via === "proxy" ? "proxy retry" : c.via === "browser" ? "browser retry" : "direct"}{c.http_status ? ` · HTTP ${c.http_status}` : ""}</span>
+              <span className="text-muted-foreground">{c.status === "checked" ? "Read" : c.status === "absent" ? "File absent" : c.http_status === 200 ? "No readable file" : "Couldn’t fetch"} · {c.via === "proxy" ? `proxy retry${c.proxy_country ? ` (${c.proxy_country.toUpperCase()})` : ""}` : c.via === "browser" ? "browser retry" : "direct"}{c.http_status ? ` · HTTP ${c.http_status}` : ""}</span>
             </div>)}</div>
           </details>}
 

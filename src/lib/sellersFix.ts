@@ -96,7 +96,7 @@ const flagOk = (v: unknown) => v === undefined || v === 0 || v === 1;
 /** What the reader can type on a row. */
 export type FillField = "name" | "domain" | "seller_type";
 
-export type FileCheck = { url: string; seller_ids: string[]; status: "checked" | "absent" | "unverified"; via?: string; http_status?: number | null; reason?: string | null };
+export type FileCheck = { url: string; seller_ids: string[]; status: "checked" | "absent" | "unverified"; via?: string; proxy_country?: string | null; http_status?: number | null; reason?: string | null };
 
 export type SellerRow = {
   unverified?: boolean;
