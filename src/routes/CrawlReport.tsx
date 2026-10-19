@@ -51,7 +51,13 @@ import InlineAskAI from "@/components/InlineAskAI";
 import { PageShell } from "@/components/PageShell";
 import { formatWeek } from "@/components/WeekLine";
 import { cn, foundInLabel, storeLabel } from "@/lib/utils";
-import { ActionableLine, PublisherAvatarLink, PublisherDomainLink } from "@/components/PublisherLinks";
+import {
+  ActionableLine,
+  CopyableLine,
+  FoundInLinks,
+  PublisherAvatarLink,
+  PublisherDomainLink,
+} from "@/components/PublisherLinks";
 import { useReportScope } from "@/lib/reportScope";
 
 const OVERVIEW_SUGGESTIONS = [
@@ -1900,11 +1906,39 @@ function SeatLineRow({
 }: {
   line: MatchedSeatLine;
   muted?: boolean;
-  /** The line has left the publisher's file: its link opens the file, not the line. */
+  /** The line has left the publisher's file: a click copies it. */
   gone?: boolean;
   /** Whose line this is: with it, the line opens their file at it. */
   publisherDomain?: string | null;
 }) {
+  const text = (
+    <code
+      data-line-text
+      className={cn(
+        "min-w-0 flex-1 truncate font-mono text-[11px] tabular-nums",
+        muted ? "text-slate-500" : "text-slate-800",
+      )}
+    >
+      {line.ssp_domain}, {line.publisher_id}, {line.relationship}
+      {line.cert_id && (
+        <span className="font-normal text-slate-400">, {line.cert_id}</span>
+      )}
+    </code>
+  );
+  const row = "flex items-baseline gap-3 px-3 py-1.5";
+  // A removed line copies on click (David, 2026-10-20): it is no longer in
+  // the file, so the file opens from its own link at the margin instead.
+  if (gone)
+    return (
+      <CopyableLine line={line} className={row}>
+        {text}
+        <FoundInLinks
+          publisherDomain={publisherDomain}
+          foundIn={line.found_in}
+          className="flex-shrink-0 text-[10px] text-slate-400"
+        />
+      </CopyableLine>
+    );
   return (
     // THE FILE GOES TO THE RIGHT MARGIN (David, 2026-09-26). Trailing the
     // line, it read as a fourth field of the ads.txt record, which it is
@@ -1915,21 +1949,9 @@ function SeatLineRow({
       line={line}
       publisherDomain={publisherDomain}
       foundIn={line.found_in}
-      gone={gone}
-      className="flex items-baseline gap-3 px-3 py-1.5"
+      className={row}
     >
-      <code
-        data-line-text
-        className={cn(
-          "min-w-0 flex-1 truncate font-mono text-[11px] tabular-nums",
-          muted ? "text-slate-500" : "text-slate-800",
-        )}
-      >
-        {line.ssp_domain}, {line.publisher_id}, {line.relationship}
-        {line.cert_id && (
-          <span className="font-normal text-slate-400">, {line.cert_id}</span>
-        )}
-      </code>
+      {text}
       {foundInLabel(line.found_in) && (
         <span className={"flex-shrink-0 text-[10px] text-slate-400"}>
           {foundInLabel(line.found_in)}
