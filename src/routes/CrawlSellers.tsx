@@ -162,7 +162,7 @@ export default function CrawlSellers() {
   // The suggestions themselves do not depend on the header, so typing an
   // email does not reset the reader's ticks.
   const plain = useMemo(
-    () => (data ? suggest(data.file ?? { sellers: [] }, data.sightings, data.domain) : []),
+    () => (data ? suggest(data.file ?? { sellers: [] }, data.sightings, data.domain, data.file_checks ?? []) : []),
     [data],
   );
   const rows = useMemo(() => withEdits(plain, edits), [plain, edits]);
@@ -404,7 +404,7 @@ export default function CrawlSellers() {
                 <div className="text-[11px] text-slate-500">
                   {creating
                     ? `No file at ${data.domain}/sellers.json${readOn ? ` when we checked on ${readOn}` : ""}. Built from every ads.txt and app-ads.txt line naming ${data.domain}`
-                    : `${readOn ? `Read on ${readOn}` : "Read"}${readFrom ? ` from ${readFrom}` : ""}, checked against every ads.txt and app-ads.txt line naming ${data.domain}`}
+                    : `${readOn ? `Read on ${readOn}` : "Read"}${readFrom ? ` from ${readFrom}` : ""}, compared with crawl evidence and this report’s file checks`}
                 </div>
               </div>
               <span className="text-xs text-slate-500">
@@ -460,9 +460,9 @@ export default function CrawlSellers() {
                 <SplitStat
                   className="bg-white"
                   tone="warn"
-                  number={counts.remove}
-                  label="Not seen"
-                  caption="In no file we crawled, check first"
+                  number={counts.remove + rows.filter(r => r.unverified).length}
+                  label="Needs checking"
+                  caption="Unverified or not seen; kept unchanged"
                 />
               </div>
             )}
@@ -538,6 +538,24 @@ export default function CrawlSellers() {
               />
             ))}
           </div>
+
+          {rows.some(r => r.unverified) && <details className="rounded-2xl border border-border bg-white p-5 shadow-sm">
+            <summary className="cursor-pointer text-sm font-medium">Couldn’t verify · {rows.filter(r => r.unverified).length}</summary>
+            <p className="mt-2 text-xs text-muted-foreground">Some files could not be checked. These sellers stay in your file and are not offered for removal.</p>
+            <div className="mt-3 divide-y divide-border">{rows.filter(r => r.unverified).slice(0, 50).map(r => <div key={r.seller_id} className="py-3 text-xs">
+              <span className="font-medium">{r.seller_id}</span> · <SellerWho seller={r.current}/>
+              <p className="mt-1 text-muted-foreground">{r.reason}</p>
+            </div>)}</div>
+            {rows.filter(r => r.unverified).length > 50 && <p className="text-xs text-muted-foreground">Showing the first 50; all unverified sellers are preserved in the file below.</p>}
+          </details>}
+
+          {!!data.file_checks?.length && <details className="rounded-2xl border border-border bg-white p-5 shadow-sm">
+            <summary className="cursor-pointer text-sm font-medium">File checks · {data.file_checks.filter(c => c.status === "checked").length} read · {data.file_checks.filter(c => c.status === "unverified").length} unverified</summary>
+            <div className="mt-3 divide-y divide-border">{data.file_checks.slice(0, 100).map(c => <div key={c.url} className="flex flex-wrap items-center justify-between gap-2 py-2 text-xs">
+              <a className="text-primary underline" href={c.url} target="_blank" rel="noopener noreferrer">{c.url.replace("https://", "")}</a>
+              <span className="text-muted-foreground">{c.status === "checked" ? "Read" : c.status === "absent" ? "File absent" : "Couldn’t verify"} · {c.via === "proxy" ? "proxy retry" : "direct"}{c.http_status ? ` · HTTP ${c.http_status}` : ""}</span>
+            </div>)}</div>
+          </details>}
 
           {/* THE FILE, after the panels that change it: live against the
               export, as GitHub shows a diff. Rebuilt on every tick and every
@@ -767,7 +785,7 @@ function shown(v: unknown, quote: boolean): string {
  *  (read off the entry itself, so a typed-in name or domain shows too). */
 function summaryOf(r: SellerRow): string {
   const who = (s: SellerRow["current"]) =>
-    s ? [s.name || null, s.domain || null, s.seller_type || null].filter(Boolean).join(", ") : "";
+    s ? [s.name || null, s.domain || null, s.seller_type ? `${r.current ? "From your file" : "Selected type"}: ${s.seller_type}` : null].filter(Boolean).join(", ") : "";
   if (r.kind === "fix" && r.current && r.suggested) {
     const parts: string[] = [];
     if (r.dropped?.length) parts.push(`listed ${r.dropped.length + 1} times, kept once`);
@@ -872,7 +890,7 @@ function SuggestionCard({
               </code>
             )}
             <span className={cn("min-w-0 truncate text-[12px] text-slate-600", row.kind === "remove" && on && "line-through")}>
-              {row.kind === "fix" ? summaryOf(row) : <SellerWho seller={row.kind === "remove" ? row.current : row.suggested} />}
+              {row.kind === "fix" ? summaryOf(row) : <SellerWho seller={row.kind === "remove" ? row.current : row.suggested} fromFile={row.kind !== "add"} />}
             </span>
             {missing.length > 0 && (
               <span className="flex-shrink-0 text-[11px] font-medium text-warn">needs a {missing.join(" and a ")}</span>
@@ -985,14 +1003,14 @@ function sellerDomainOf(r: SellerRow): string | null {
 
 /** Who a seller is on the card's one line: name, domain (a link to their
  *  site) and type. */
-function SellerWho({ seller }: { seller: Seller | null }) {
+function SellerWho({ seller, fromFile = true }: { seller: Seller | null; fromFile?: boolean }) {
   if (!seller || !isEntry(seller)) return null;
   const d = linkableDomain(seller.domain);
   const parts: React.ReactNode[] = [];
   if (seller.name) parts.push(String(seller.name));
   if (d) parts.push(<PublisherDomainLink key="d" domain={d} label={String(seller.domain)} shown />);
   else if (seller.domain) parts.push(String(seller.domain));
-  if (seller.seller_type) parts.push(String(seller.seller_type));
+  if (seller.seller_type) parts.push(`${fromFile ? "From your file" : "Selected type"}: ${String(seller.seller_type)}`);
   return (
     <>
       {parts.map((p, i) => (

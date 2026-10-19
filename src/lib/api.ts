@@ -879,6 +879,7 @@ export const api = {
       // notes about a live file that is not strict JSON, or that holds a
       // null and a number too long for a browser.
       const q = new URLSearchParams(window.location.search);
+      if(q.has("sega")) return m.segaReport(q.get("sega") !== "blocked");
       let file = q.has("nofile")
         ? null
         : q.has("broken")
@@ -893,6 +894,7 @@ export const api = {
         domain: m.MOCK_SELLERS_DOMAIN,
         file,
         sightings: m.mockSellerSightings,
+        file_checks: m.mockCompletedChecks,
         checked_at: m.MOCK_CHECKED_AT,
         file_url: `https://${m.MOCK_SELLERS_DOMAIN}/sellers.json`,
         file_warnings: q.has("warnings") ? m.MOCK_FILE_WARNINGS : [],
@@ -2006,6 +2008,7 @@ export type SchainPreview = {
 /** GET /v1/viewer/{token}/sellers-fix: frozen with the report when the
  *  customer's plan has the Sellers.json validator (never on a trial). */
 export type SellersFixPayload = {
+  file_checks?: import("./sellersFix").FileCheck[];
   /** The customer domain the sellers.json is published on. */
   domain: string;
   /** The file exactly as published; null when the domain serves none. */

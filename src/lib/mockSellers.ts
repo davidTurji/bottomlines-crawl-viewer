@@ -176,3 +176,29 @@ export function brokenFile(file: SellersFile): SellersFile {
     ],
   };
 }
+
+/** Local SEGA regression demo: no real account or network requests. */
+export const segaReport = (recovered: boolean) => ({
+  domain: "kinetix.tv",
+  file: {version: "1.0", sellers: [
+    {seller_id:"10360",name:"Sega",domain:"sega.com",seller_type:"PUBLISHER"},
+    {seller_id:"10391",name:"CAS.AI",domain:"cas.ai",seller_type:"BOTH"},
+  ]},
+  checked_at: "2026-10-19T11:11:18Z",
+  file_url: "https://kinetix.tv/Sellers.json",
+  sightings: recovered ? [{seller_id:"10360",relationship:"DIRECT" as const,publishers_total:1,publishers:[{domain:"sega.com",found_in:"app-ads.txt",own_file:true}]}] : [],
+  file_checks: [
+    {url:"https://sega.com/ads.txt",seller_ids:["10360"],status:"absent" as const,via:"direct",http_status:404},
+    {url:"https://sega.com/app-ads.txt",seller_ids:["10360"],status: recovered ? "checked" as const : "unverified" as const,via:"proxy",http_status:recovered?200:429},
+    {url:"https://cas.ai/ads.txt",seller_ids:["10391"],status:"unverified" as const,via:"proxy",http_status:429},
+    {url:"https://cas.ai/app-ads.txt",seller_ids:["10391"],status:"unverified" as const,via:"proxy",http_status:429},
+  ],
+});
+
+export const mockCompletedChecks = mockSellersFile.sellers.flatMap(s => {
+  if(!s?.domain) return [];
+  try {
+    const host=new URL(`https://${String(s.domain).replace(/^https?:\/\//, "")}`).hostname.replace(/^www\./, "");
+    return ["ads.txt","app-ads.txt"].map(path=>({url:`https://${host}/${path}`,seller_ids:[String(s.seller_id).trim().toLowerCase()],status:"checked" as const,via:"direct"}));
+  } catch { return []; }
+});

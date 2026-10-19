@@ -72,3 +72,24 @@ test("version is exactly 1.0 and missing web presence is not invented", () => {
   expect(validate({ version: "2.0", sellers: [] }).some(i => i.field === "version")).toBe(true);
   expect(validate({ version: "1.0", sellers: [{ ...seller, domain: undefined }] })).toEqual([]);
 });
+
+test("unreadable and legacy evidence never offer a seller for removal", () => {
+  const file = {version:"1.0", sellers:[{...seller, seller_id:"10360",domain:"sega.com"}]};
+  const blocked = [{url:"https://sega.com/ads.txt",seller_ids:["10360"],status:"absent" as const},
+    {url:"https://sega.com/app-ads.txt",seller_ids:["10360"],status:"unverified" as const}];
+  for (const checks of [[], blocked]) {
+    const rows=suggest(file,[],"kinetix.tv",checks);
+    expect(rows[0].unverified).toBe(true);
+    expect(rows[0].kind).toBe("keep");
+    expect(buildExport(file,rows,new Set(["10360"]))).toEqual(file);
+  }
+});
+
+test("only complete checked paths can support a not-seen review", () => {
+  const file={sellers:[seller]};
+  const checks=["ads.txt","app-ads.txt"].map(path=>({url:`https://owner.example/${path}`,seller_ids:["abc123"],status:"checked" as const}));
+  expect(suggest(file,[],"exchange.example",checks)[0].kind).toBe("remove");
+  const seen=suggest(file,sightings,"exchange.example",checks)[0];
+  expect(seen.kind).toBe("keep");
+  expect(seen.current?.seller_type).toBe("PUBLISHER");
+});
