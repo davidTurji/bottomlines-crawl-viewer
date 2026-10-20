@@ -50,6 +50,11 @@ export const TOKEN = "e2e-token";
 
 /** How each optional part of the report answers. Defaults: a full report. */
 export type Scenario = {
+  /** true: the crawl reports no predecessor (``previous_job_id`` null)
+   *  while the summary still carries ``compared_crawl_at``, the shape a
+   *  first report had before the crawler stopped stamping that date
+   *  (Select One Off, 2026-10-20). */
+  firstReport?: boolean;
   /** "page": has a Sellers.json page. "none": 404 (the common case). */
   sellers?: "page" | "none" | "error";
   /** "ok": schain on. "none": off, 200 {status:"off"} as the real route
@@ -271,7 +276,8 @@ export async function installFakeApi(page: Page, scenario: Scenario = {}): Promi
         const dated = s.discovery ? built : { ...built, watchlist: { ...built.watchlist!, discover: [] } };
         const full = s.crawlDates ? dated : { ...dated, crawl_at: undefined, compared_crawl_at: undefined };
         const withGone = s.gone ? full : { ...full, gone: undefined };
-        const sum = s.inactive === "ok" ? withGone : { ...withGone, inactive_counts: undefined };
+        const withInactive = s.inactive === "ok" ? withGone : { ...withGone, inactive_counts: undefined };
+        const sum = s.firstReport ? { ...withInactive, previous_job_id: null } : withInactive;
         return reply(200, s.trial ? { ...sum, trial: TRIAL_CAPS } : sum);
       }
       case "export-info":

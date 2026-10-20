@@ -269,8 +269,13 @@ export default function CrawlReport() {
     const current = formatDateTime(crawlAt);
     const compared = formatDateTime(comparedAt);
     if (!current) return `Crawl #${summary.crawl_id}, crawl dates not available.`;
-    if (compared) return `Data current as of ${current}, compared with the crawl of ${compared}.`;
+    // The crawl's own word comes first: a first report's summary carried a
+    // compared date from the Inactive window (which starts at the previous
+    // crawl even then), and the page said "compared with the crawl of ..."
+    // over a pair of zeros while the workbook said "None, first report"
+    // (Select One Off, report 328, 2026-10-20).
     if (isFirstCrawl) return `Data current as of ${current}. First report, nothing to compare with yet.`;
+    if (compared) return `Data current as of ${current}, compared with the crawl of ${compared}.`;
     return `Data current as of ${current}.`;
   })();
 
