@@ -161,6 +161,7 @@ export type Calls = { method: string; path: string; status: number; query: strin
 
 export async function installFakeApi(page: Page, scenario: Scenario = {}): Promise<Calls> {
   const s: Required<Scenario> = {
+    firstReport: false,
     sellers: "none",
     schain: "none",
     discovery: true,
