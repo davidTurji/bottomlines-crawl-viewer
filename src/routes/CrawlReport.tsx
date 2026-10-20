@@ -52,6 +52,15 @@ import { PageShell } from "@/components/PageShell";
 import { formatWeek } from "@/components/WeekLine";
 import { cn, foundInLabel, storeLabel } from "@/lib/utils";
 import {
+  addedDates,
+  certDates,
+  dateTitle,
+  formatDateTime,
+  removedDates,
+  unconfirmedSentence,
+  WEEKLY_READ_NOTE,
+} from "@/lib/changeDates";
+import {
   ActionableLine,
   CopyableLine,
   FoundInLinks,
@@ -210,8 +219,6 @@ export default function CrawlReport() {
   // week's summary's finished_at.
   const crawlAt = validDate(summary.crawl_at ?? summary.finished_at);
   const comparedAt = validDate(summary.compared_crawl_at ?? previous?.finished_at);
-  const weekLabel = crawlAt ? formatWeek(crawlAt) : `crawl #${summary.crawl_id}`;
-  const prevWeekLabel = comparedAt ? formatWeek(comparedAt) : null;
 
   const added = summary.hero_diff.line_totals.added;
   const removed = summary.hero_diff.line_totals.removed;
@@ -252,6 +259,26 @@ export default function CrawlReport() {
   // a pair of zeros presented as this week's result.
   const isFirstCrawl = summary.previous_job_id === null;
 
+  // UNTIL WHEN THE DATA IS CURRENT (David, 2026-10-20). Files are read once
+  // a week, so the report is a comparison of two reads, and the header
+  // says both to the minute. "First report" is claimed only when the crawl
+  // itself reports no predecessor: a compared date can also be missing
+  // because last week's summary failed to load, and that is not a first
+  // report.
+  const currentLine = (() => {
+    const current = formatDateTime(crawlAt);
+    const compared = formatDateTime(comparedAt);
+    if (!current) return `Crawl #${summary.crawl_id}, crawl dates not available.`;
+    if (compared) return `Data current as of ${current}, compared with the crawl of ${compared}.`;
+    if (isFirstCrawl) return `Data current as of ${current}. First report, nothing to compare with yet.`;
+    return `Data current as of ${current}.`;
+  })();
+
+  // UNCONFIRMED (2026-10-20): lines the crawler could not verify. Never in
+  // added or removed, never a card: one quiet line under this week's
+  // changes, and a tab on the Changes page. Missing on older reports is 0.
+  const unconfirmed = summary.hero_diff.line_totals.unconfirmed ?? 0;
+
   // INACTIVE (2026-10-08): the headline numbers count active only; what
   // stopped counting is a tab of the list and one quiet line, never a card.
   // An older link without the section counts from its No longer live block.
@@ -289,10 +316,7 @@ export default function CrawlReport() {
           <h1 className="font-display text-xl font-semibold leading-tight tracking-tight text-slate-900 sm:text-2xl">
             Your weekly crawl
           </h1>
-          <p className="mt-1 text-sm text-slate-500">
-            Week of {weekLabel}
-            {prevWeekLabel && `, compared with ${prevWeekLabel}`}.
-          </p>
+          <p className="mt-1 text-sm text-slate-500">{currentLine}</p>
           {refreshing ? (
             // The figures below are reloading for a new line selection;
             // a sentence about the old one would be wrong for a moment.
@@ -428,6 +452,14 @@ export default function CrawlReport() {
               onClick={() => showLinesOf("removed")}
             />
           </div>
+          )}
+          {/* A side finding is a line, never a card (David, 2026-10-20):
+              what could not be checked sits under the figures it is kept
+              out of, in the same quiet voice as the inactive line. */}
+          {!isFirstCrawl && unconfirmed > 0 && (
+            <p data-testid="unconfirmed-quiet" className="mt-3 text-[12px] leading-snug text-slate-500">
+              {unconfirmedSentence(unconfirmed)}
+            </p>
           )}
         </div>
 
@@ -1903,6 +1935,7 @@ function SeatLineRow({
   muted,
   gone,
   publisherDomain,
+  change,
 }: {
   line: MatchedSeatLine;
   muted?: boolean;
@@ -1910,20 +1943,45 @@ function SeatLineRow({
   gone?: boolean;
   /** Whose line this is: with it, the line opens their file at it. */
   publisherDomain?: string | null;
+  /** Set inside a change window: the row says WHEN, under the line. A
+   *  removed line says when it was last seen and first not found, an added
+   *  one when it was first seen and last absent, a cert change when the new
+   *  cert was seen. A date the report does not carry reads "date not
+   *  available", never the crawl's time dressed up as the file's. */
+  change?: ChangeKind;
 }) {
+  const dates =
+    change === "removed"
+      ? removedDates(line)
+      : change === "added"
+        ? addedDates(line)
+        : change === "cert"
+          ? certDates(line)
+          : null;
   const text = (
-    <code
-      data-line-text
-      className={cn(
-        "min-w-0 flex-1 truncate font-mono text-[11px] tabular-nums",
-        muted ? "text-slate-500" : "text-slate-800",
+    <div className="min-w-0 flex-1">
+      <code
+        data-line-text
+        className={cn(
+          "block truncate font-mono text-[11px] tabular-nums",
+          muted ? "text-slate-500" : "text-slate-800",
+        )}
+      >
+        {line.ssp_domain}, {line.publisher_id}, {line.relationship}
+        {line.cert_id && (
+          <span className="font-normal text-slate-400">, {line.cert_id}</span>
+        )}
+      </code>
+      {dates && (
+        <div
+          data-line-dates
+          title={dateTitle(line.date_source)}
+          className="text-[10px] leading-snug text-slate-500"
+        >
+          {dates}
+        </div>
       )}
-    >
-      {line.ssp_domain}, {line.publisher_id}, {line.relationship}
-      {line.cert_id && (
-        <span className="font-normal text-slate-400">, {line.cert_id}</span>
-      )}
-    </code>
+    </div>
   );
   const row = "flex items-baseline gap-3 px-3 py-1.5";
   // A removed line copies on click (David, 2026-10-20): it is no longer in
@@ -2008,6 +2066,12 @@ function ChangeWindow({
           {lines.length}
         </span>
       </div>
+      {/* Why a removal carries two dates, said once where the dates are. */}
+      {kind === "removed" && (
+        <p className="border-b border-border px-3 py-1 text-[10px] leading-snug text-slate-500">
+          {WEEKLY_READ_NOTE}
+        </p>
+      )}
       <ul className="divide-y divide-border">
         {shown.map((l, i) => (
           <SeatLineRow
@@ -2016,6 +2080,7 @@ function ChangeWindow({
             muted={s.muted}
             gone={kind === "removed"}
             publisherDomain={publisherDomain}
+            change={kind}
           />
         ))}
       </ul>

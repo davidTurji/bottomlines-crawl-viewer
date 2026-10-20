@@ -1,5 +1,6 @@
 import type {
   LineEvent,
+  LineEventCounts,
   LineEventKind,
   ChangeFilters,
   ChangeGroupsPage,
@@ -31,6 +32,7 @@ function eventKind(raw: string): LineEventKind {
   if (raw === "newly_monitored") return "newly_monitored";
   if (raw === "monitoring_stopped") return "monitoring_stopped";
   if (raw === "first_appearance") return "first_appearance";
+  if (raw === "unconfirmed") return "unconfirmed";
   return "cert_changed";
 }
 
@@ -109,6 +111,8 @@ export function sortBucket(groups: LocalChangeGroup[]): LocalChangeGroup[] {
  */
 export function interleave(groups: LocalChangeGroup[]): LocalChangeGroup[] {
   // Scope kinds sort last: they are context for the week, not its news.
+  // Unconfirmed lines after those: not news at all, only what could not
+  // be checked.
   const order: LineEventKind[] = [
     "added",
     "removed",
@@ -116,6 +120,7 @@ export function interleave(groups: LocalChangeGroup[]): LocalChangeGroup[] {
     "newly_monitored",
     "monitoring_stopped",
     "first_appearance",
+    "unconfirmed",
   ];
   const placed: { g: LocalChangeGroup; pos: number; rank: number }[] = [];
   order.forEach((event, rank) => {
@@ -135,6 +140,7 @@ const CHANGE_EVENTS: LineEventKind[] = [
   "newly_monitored",
   "monitoring_stopped",
   "first_appearance",
+  "unconfirmed",
 ];
 const changeKind = eventKind;
 const PAGE_SIZE = 25;
@@ -153,10 +159,10 @@ export function pageChangeGroups(
       e,
       chosen.filter((r) => changeKind(r.event) === e).length,
     ]),
-  ) as Record<LineEventKind, number>;
+  ) as LineEventCounts;
   const counts = Object.fromEntries(
     CHANGE_EVENTS.map((e) => [e, groups.filter((g) => g.event === e).length]),
-  ) as Record<LineEventKind, number>;
+  ) as LineEventCounts;
   const page = filters.page ?? 1,
     size = filters.page_size ?? PAGE_SIZE;
   return {

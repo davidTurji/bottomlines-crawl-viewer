@@ -13,6 +13,7 @@ import { useLineFilter } from "@/lib/lineFilter";
 import {
   ArrowRight,
   ChevronDown,
+  CircleHelp,
   Download,
   Minus,
   Plus,
@@ -22,6 +23,15 @@ import {
   RefreshCw,
   Search,
 } from "lucide-react";
+import {
+  addedDates,
+  certDates,
+  dateTitle,
+  removedDates,
+  unconfirmedDates,
+  unconfirmedSentence,
+  WEEKLY_READ_NOTE,
+} from "@/lib/changeDates";
 
 import { api, type LineEvent, type Summary, type TrialSlice } from "../lib/api";
 import { formatWeek, WeekLine } from "@/components/WeekLine";
@@ -86,7 +96,11 @@ type EventKind =
   | "cert_changed"
   | "newly_monitored"
   | "monitoring_stopped"
-  | "first_appearance";
+  | "first_appearance"
+  /** The crawler could not verify the line this crawl (David, 2026-10-20:
+   *  1000 percent honesty). Not added, not removed, kept as matched; its
+   *  own tab, with the reason and the dates, and never a big card. */
+  | "unconfirmed";
 
 export default function CrawlChanges() {
   const { token } = useReportScope();
@@ -109,6 +123,16 @@ export default function CrawlChanges() {
       .filter((k) => (t[k] ?? 0) > 0)
       .map((k) => [k, TONES[k].label]);
   }, [summary]);
+  // UNCONFIRMED (2026-10-20): lines the crawler could not verify this
+  // crawl. Counted from the summary, like the scope tabs, so the tab that
+  // reveals them does not vanish once it is open. Missing on a report
+  // frozen before the kind existed, which reads as 0: no tab, no line.
+  const unconfirmedCount = summary?.hero_diff?.line_totals?.unconfirmed ?? 0;
+  // The tab exists only while something is unconfirmed; a page left on it
+  // (a line filter that narrowed them away) falls back to All.
+  useEffect(() => {
+    if (bucket === "unconfirmed" && summary && unconfirmedCount === 0) setBucket("all");
+  }, [bucket, summary, unconfirmedCount]);
   const [ssp, setSsp] = useState("");
   const [result, setResult] = useState<ChangeGroupsPage | null>(null);
   const rows = result?.rows ?? [];
@@ -275,13 +299,15 @@ export default function CrawlChanges() {
       newly_monitored: null,
       monitoring_stopped: null,
       first_appearance: null,
+      // Not a change at all, so nothing to be a percentage of.
+      unconfirmed: null,
     }),
     [previous],
   );
   const deltaFor = (event: EventKind, current: number) => {
     // Scope kinds never carry a delta, whatever else is true. Everything
     // else keeps the existing suppression rules.
-    if (isScopeKind(event)) return null;
+    if (isScopeKind(event) || event === "unconfirmed") return null;
     const prev = prevCounts[event];
     return comparable && prev != null ? computeDelta(current, prev) : null;
   };
@@ -404,7 +430,9 @@ export default function CrawlChanges() {
                             // publishers still carry them.
                             bucket === "monitoring_stopped"
                             ? "Came off your seat lines, still carried"
-                            : "This tab only"}
+                            : bucket === "unconfirmed"
+                              ? "Not counted as added or removed"
+                              : "This tab only"}
                 </div>
               </div>
               <span className="text-xs text-slate-500">
@@ -427,6 +455,19 @@ export default function CrawlChanges() {
                   There is nothing to compare against yet. This week is your
                   baseline, and the next crawl will list what publishers added,
                   dropped and re-certified against it.
+                </div>
+              </div>
+            ) : bucket === "unconfirmed" ? (
+              // NEVER A BIG NUMBER (David, 2026-10-20). What could not be
+              // checked is not a result, so this tab's card says what the
+              // lines below are instead of counting them in a KPI.
+              <div className="rounded-xl border border-border bg-muted/30 px-5 py-6 text-center">
+                <div className="text-sm font-medium text-slate-700">
+                  {unconfirmedSentence(unconfirmedCount)}
+                </div>
+                <div className="mx-auto mt-1 max-w-md text-[12px] leading-relaxed text-slate-500">
+                  Each line below says why, when it was last seen, when its
+                  file was read this crawl and whether it was verified.
                 </div>
               </div>
             ) : (
@@ -496,7 +537,9 @@ export default function CrawlChanges() {
                 <div className="text-[11px] text-slate-500">
                   {isFirstCrawl
                     ? "No prior week to compare against"
-                    : "Across the lines shown below"}
+                    : bucket === "unconfirmed"
+                      ? "Carrying the unconfirmed lines below"
+                      : "Across the lines shown below"}
                 </div>
               </div>
               <span className="text-xs text-slate-500">
@@ -607,11 +650,28 @@ export default function CrawlChanges() {
                     {label}
                   </TabsTrigger>
                 ))}
+                {/* WHAT COULD NOT BE CHECKED, last, and only on a week
+                    that has any: the ordinary week keeps its tabs. */}
+                {!isFirstCrawl && unconfirmedCount > 0 && (
+                  <TabsTrigger value="unconfirmed">Unconfirmed</TabsTrigger>
+                )}
               </TabsList>
             </Tabs>
           </div>
           {loading && rows.length > 0 && <Dots />}
         </div>
+        {/* ONE QUIET LINE, NEVER A CARD (David, 2026-10-20): the lines the
+            crawler could not verify, under the tabs, on every tab but their
+            own, where the card above already says it. */}
+        {!isFirstCrawl && unconfirmedCount > 0 && bucket !== "unconfirmed" && (
+          <p data-testid="unconfirmed-quiet" className="text-[12px] leading-relaxed text-slate-500">
+            {unconfirmedSentence(unconfirmedCount)}
+          </p>
+        )}
+        {/* Why every removal carries two dates, said once where they are. */}
+        {!isFirstCrawl && bucket === "removed" && (
+          <p className="text-[12px] leading-relaxed text-slate-500">{WEEKLY_READ_NOTE}</p>
+        )}
 
         <div className="relative w-full">
           <Search className="pointer-events-none absolute left-3.5 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
@@ -817,7 +877,22 @@ function ChangeCard({
       ? group.new_cert_id
       : group.event === "removed" || group.event === "monitoring_stopped"
         ? group.old_cert_id
-        : null;
+        : group.event === "unconfirmed"
+          ? (group.new_cert_id ?? group.old_cert_id)
+          : null;
+  // WHEN, per publisher (David, 2026-10-20): the dates are a fact of the
+  // read of THAT publisher's file, so they sit on the roster row, not on
+  // the card, which speaks for the line across all of them.
+  const rowDates = (p: LineEvent): string | null =>
+    group.event === "removed"
+      ? removedDates(p)
+      : group.event === "added"
+        ? addedDates(p)
+        : group.event === "cert_changed"
+          ? certDates(p)
+          : group.event === "unconfirmed"
+            ? unconfirmedDates(p)
+            : null;
 
   return (
     <div
@@ -1015,20 +1090,39 @@ function ChangeCard({
                     }
                     className="flex items-baseline gap-3 px-3 py-1.5 text-[11px]"
                   >
-                    {/* Never the internal id (David, 2026-10-06): the domain,
-                      else the name, else a plain word. */}
-                    <span className="min-w-0 truncate font-mono tabular-nums text-slate-800">
-                      {p.developer_domain ? (
-                        <PublisherDomainLink domain={p.developer_domain} />
-                      ) : (
-                        p.developer_name || "Unnamed publisher"
+                    <div className="min-w-0 flex-1">
+                      <div className="flex min-w-0 items-baseline gap-3">
+                        {/* Never the internal id (David, 2026-10-06): the domain,
+                          else the name, else a plain word. */}
+                        <span className="min-w-0 truncate font-mono tabular-nums text-slate-800">
+                          {p.developer_domain ? (
+                            <PublisherDomainLink domain={p.developer_domain} />
+                          ) : (
+                            p.developer_name || "Unnamed publisher"
+                          )}
+                        </span>
+                        {p.developer_domain && p.developer_name && (
+                          <span className="hidden truncate text-slate-500 sm:inline">
+                            {p.developer_name}
+                          </span>
+                        )}
+                      </div>
+                      {/* Why, in the crawler's words, before the dates. */}
+                      {group.event === "unconfirmed" && (
+                        <div className="text-[10px] leading-snug text-slate-600">
+                          {p.reason || "No reason recorded."}
+                        </div>
                       )}
-                    </span>
-                    {p.developer_domain && p.developer_name && (
-                      <span className="hidden truncate text-slate-500 sm:inline">
-                        {p.developer_name}
-                      </span>
-                    )}
+                      {rowDates(p) && (
+                        <div
+                          data-line-dates
+                          title={dateTitle(p.date_source)}
+                          className="text-[10px] leading-snug text-slate-500"
+                        >
+                          {rowDates(p)}
+                        </div>
+                      )}
+                    </div>
                     {/* Rendered, never the raw enum: this is a customer's
                       screen, and "APP_ADS_TXT" is not a file name. Said as
                       a sentence, the same one every other surface uses, so
@@ -1142,6 +1236,18 @@ const TONES: Record<
     icon: Sparkles,
     hint: "First appearance: these publishers are in your report for the first time",
   },
+  // Neutral, like the three above: not a verdict on the market, only on
+  // our read of it. Green or red here would be the very claim the kind
+  // exists to avoid.
+  unconfirmed: {
+    label: "Unconfirmed",
+    preposition: "on",
+    expandedTitle: "Publishers whose file could not be verified for this line",
+    disc: "bg-muted text-muted-foreground",
+    tint: "bg-muted/40",
+    icon: CircleHelp,
+    hint: "Unconfirmed: the crawler could not verify this line this crawl, so it is kept as matched",
+  },
 };
 
 /**
@@ -1160,12 +1266,49 @@ function exportPublishers(group: ChangeGroup, publishers: LineEvent[]) {
   ]
     .filter(Boolean)
     .join(", ");
+  // THE DATES RIDE ALONG (David, 2026-10-20), as the ISO UTC the API
+  // sent, one column each, only the ones this kind of change has.
+  const iso = (v: string | null | undefined) => v ?? "";
+  const dated: [string, (p: LineEvent) => string][] =
+    group.event === "removed"
+      ? [
+          ["last_seen_at", (p) => iso(p.last_seen_at)],
+          ["not_found_at", (p) => iso(p.not_found_at)],
+          ["date_source", (p) => iso(p.date_source)],
+        ]
+      : group.event === "added"
+        ? [
+            ["first_seen_at", (p) => iso(p.first_seen_at)],
+            [
+              "last_absent_at",
+              (p) =>
+                p.last_absent_at === null
+                  ? "not read in the compared crawl"
+                  : iso(p.last_absent_at),
+            ],
+            ["date_source", (p) => iso(p.date_source)],
+          ]
+        : group.event === "cert_changed"
+          ? [
+              ["seen_at", (p) => iso(p.seen_at)],
+              ["date_source", (p) => iso(p.date_source)],
+            ]
+          : group.event === "unconfirmed"
+            ? [
+                ["reason", (p) => iso(p.reason)],
+                ["last_seen_at", (p) => iso(p.last_seen_at)],
+                ["read_at", (p) => iso(p.read_at)],
+                ["verified_at", (p) => iso(p.verified_at)],
+                ["tries", (p) => (p.tries == null ? "" : String(p.tries))],
+              ]
+            : [];
   const header = [
     "publisher_domain",
     "publisher_name",
     "file",
     "change",
     "line",
+    ...dated.map(([name]) => name),
   ];
   const body = publishers.map((p) => [
     p.developer_domain ?? "",
@@ -1173,6 +1316,7 @@ function exportPublishers(group: ChangeGroup, publishers: LineEvent[]) {
     fileLabel(p.file_kind),
     TONES[group.event].label,
     line,
+    ...dated.map(([, read]) => read(p)),
   ]);
   const csv = [header, ...body]
     .map((row) =>
