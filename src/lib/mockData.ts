@@ -456,6 +456,10 @@ export const mockSummary: Summary = {
       newly_monitored: 61,
       monitoring_stopped: 9,
       first_appearance: 7,
+      // Two lines the crawler could not verify this week (see
+      // LINE_EVENTS_BY_EVENT.unconfirmed): a tab and a quiet line, never
+      // a card, and never inside added or removed.
+      unconfirmed: 2,
     },
     line_totals_matched_seat: {
       added: 12,
@@ -761,7 +765,7 @@ const DEV_TABLES: Record<string, DeveloperEvent[]> = {
 };
 
 export function mockDeveloperEvents(
-  event: "added" | "removed" | "changed",
+  event: "added" | "removed" | "changed" | "unconfirmed",
   page: number,
   lines: string[] = [],
 ): DeveloperEventsPage {
@@ -983,6 +987,7 @@ function seededLines(
             : null,
         matched_via: matchedVia,
         ipd_declared_by: declaredBy,
+        ...changeDatesFor(event, line, j),
       });
     }
     line += 1;
@@ -1017,6 +1022,105 @@ function seededLines(
   return rows;
 }
 
+/**
+ * A file read time, offset from one of the two crawls' times, so every row
+ * carries its own minute rather than the crawl's: a weekly crawl reads
+ * files over hours, and the dates on a line are the read's, not the job's.
+ */
+function readAt(crawl: string, offsetSeconds: number): string {
+  return new Date(new Date(crawl).getTime() + offsetSeconds * 1000).toISOString();
+}
+
+/**
+ * THE DATES BEHIND A CHANGE (2026-10-20), stamped per row so a preview
+ * shows every state the live report can be in:
+ *
+ *   - most rows carry exact read times from the two crawls ("fetch");
+ *   - some carry the crawl's own time, the read time not stored ("crawl"),
+ *     which the row hints on hover and otherwise prints the same;
+ *   - one added line in five was not read in the compared crawl at all
+ *     (last_absent_at null), and says so instead of a date;
+ *   - one row in four carries no dates, which is what every row on a
+ *     report frozen before the dates existed looks like. It must print
+ *     "date not available", never a guess.
+ */
+function changeDatesFor(
+  event: LineEventKind,
+  line: number,
+  j: number,
+): Pick<LineEvent, "first_seen_at" | "last_absent_at" | "last_seen_at" | "not_found_at" | "seen_at" | "date_source"> {
+  if (line % 4 === 3) return {};
+  const fromCrawl = line % 6 === 1;
+  const offset = fromCrawl ? 0 : (line * 97 + j * 41) % 5400;
+  const thisRead = readAt(MOCK_CRAWL_AT, offset);
+  const lastRead = readAt(MOCK_COMPARED_CRAWL_AT, offset);
+  const date_source: LineEvent["date_source"] = fromCrawl ? "crawl" : "fetch";
+  if (event === "removed")
+    return { last_seen_at: lastRead, not_found_at: thisRead, date_source };
+  if (event === "added")
+    return {
+      first_seen_at: thisRead,
+      last_absent_at: line % 5 === 2 ? null : lastRead,
+      date_source,
+    };
+  if (event === "cert_changed") return { seen_at: thisRead, date_source };
+  return {};
+}
+
+/**
+ * Lines the crawler could not verify this week. Two, by hand: one whose
+ * file never read (so nothing was verified), one whose file read too short
+ * to trust (verified on an earlier try, then unreadable). Both sit on the
+ * customer's own madeupmedia.com seats and publishers the roster already
+ * knows, so the tab reads like the rest of the report.
+ */
+const UNCONFIRMED_LINES: LineEvent[] = [
+  {
+    developer_id: 4_411,
+    developer_name: "Riverstone Publishers",
+    developer_domain: "riverstone.com",
+    file_kind: "ads_txt",
+    ssp_domain: "madeupmedia.com",
+    publisher_id: "2020000103",
+    relationship: "DIRECT",
+    event: "unconfirmed",
+    old_cert_id: null,
+    new_cert_id: certId(4_411),
+    matched_seat: true,
+    occurred_at: "2026-08-25T09:18:30Z",
+    matched_via: "file",
+    ipd_declared_by: [],
+    reason: "The file did not answer in three tries, so the line could not be checked.",
+    last_seen_at: readAt(MOCK_COMPARED_CRAWL_AT, 1_260),
+    read_at: readAt(MOCK_CRAWL_AT, 2_140),
+    verified_at: null,
+    tries: 3,
+    date_source: "fetch",
+  },
+  {
+    developer_id: 60_118,
+    developer_name: "Harbor Point Media",
+    developer_domain: "harborpoint.com",
+    file_kind: "app_ads_txt",
+    ssp_domain: "madeupmedia.com",
+    publisher_id: "2020000121",
+    relationship: "RESELLER",
+    event: "unconfirmed",
+    old_cert_id: null,
+    new_cert_id: null,
+    matched_seat: true,
+    occurred_at: "2026-08-25T09:18:30Z",
+    matched_via: "file",
+    ipd_declared_by: [],
+    reason: "The file read far shorter than last week, so its lines were not trusted.",
+    last_seen_at: readAt(MOCK_COMPARED_CRAWL_AT, 3_005),
+    read_at: readAt(MOCK_CRAWL_AT, 3_311),
+    verified_at: readAt(MOCK_CRAWL_AT, 3_349),
+    tries: 2,
+    date_source: "fetch",
+  },
+];
+
 const LINE_EVENTS_BY_EVENT: Record<string, LineEvent[]> = {
   added: seededLines(SSPS_ADDED, "added", 127),
   removed: seededLines(SSPS_REMOVED, "removed", 184),
@@ -1026,6 +1130,7 @@ const LINE_EVENTS_BY_EVENT: Record<string, LineEvent[]> = {
   // a happy-path mock would hide.
   newly_monitored: seededLines(SSPS_ADDED, "newly_monitored", 61),
   monitoring_stopped: seededLines(SSPS_REMOVED, "monitoring_stopped", 9),
+  unconfirmed: UNCONFIRMED_LINES,
 };
 
 export function mockLineEvents(
@@ -1052,6 +1157,7 @@ export function mockLineEvents(
       ...LINE_EVENTS_BY_EVENT.newly_monitored,
       ...LINE_EVENTS_BY_EVENT.monitoring_stopped,
       ...LINE_EVENTS_BY_EVENT.first_appearance,
+      ...LINE_EVENTS_BY_EVENT.unconfirmed,
     ];
   }
   if (filters.ssp_domain) {
@@ -1217,7 +1323,7 @@ const CHANGE_LINE_SSPS = [
 function changeLinesFor(
   seed: number,
   count: number,
-  alwaysCert = false,
+  kind: "added" | "removed" | "cert_changed",
 ): MatchedSeatLine[] {
   const out: MatchedSeatLine[] = [];
   for (let i = 0; i < count; i += 1) {
@@ -1227,7 +1333,7 @@ function changeLinesFor(
       1000 + ((seed * 7 + i * 131) % 8999)
     }`;
     const line: MatchedSeatLine = { ssp_domain: ssp, publisher_id, relationship };
-    if (alwaysCert || (seed + i) % 4 === 0) {
+    if (kind === "cert_changed" || (seed + i) % 4 === 0) {
       line.cert_id = certId(seed * 13 + i * 7 + 3);
     }
     // WHERE IT MOVED. The crawler started writing this onto the change
@@ -1235,6 +1341,9 @@ function changeLinesFor(
     // all behind those counts, and this mock invented them WITHOUT the
     // file, which is exactly how the gap stayed invisible in preview.
     line.found_in = (seed + i) % 5 === 0 ? "both" : (seed + i) % 2 === 0 ? "ads.txt" : "app-ads.txt";
+    // WHEN IT MOVED (2026-10-20): the same dates the Changes page prints,
+    // in the same mix of states (see changeDatesFor).
+    Object.assign(line, changeDatesFor(kind, seed + i, i));
     out.push(line);
   }
   return out;
@@ -1254,9 +1363,9 @@ function changeArrays(
   cert_changed_lines: MatchedSeatLine[];
 } {
   return {
-    added_lines: changeLinesFor(id * 2 + 1, added),
-    removed_lines: changeLinesFor(id * 2 + 501, removed),
-    cert_changed_lines: changeLinesFor(id * 2 + 907, cert, true),
+    added_lines: changeLinesFor(id * 2 + 1, added, "added"),
+    removed_lines: changeLinesFor(id * 2 + 501, removed, "removed"),
+    cert_changed_lines: changeLinesFor(id * 2 + 907, cert, "cert_changed"),
   };
 }
 
@@ -1605,6 +1714,7 @@ export function mockSummaryFor(lines: string[]): Summary {
         added: count("added"),
         removed: count("removed"),
         cert_changed: count("cert_changed"),
+        unconfirmed: count("unconfirmed"),
       },
     },
   };

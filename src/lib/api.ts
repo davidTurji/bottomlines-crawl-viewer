@@ -321,7 +321,7 @@ export const api = {
   },
   developerEvents: async (
     token: string,
-    event: "added" | "removed" | "changed",
+    event: "added" | "removed" | "changed" | "unconfirmed",
     page = 1,
     q = "",
     lines?: string[],
@@ -1338,6 +1338,9 @@ export type DeveloperEvent = {
   lines_cert_changed: number;
   lines_newly_monitored: number;
   lines_monitoring_stopped: number;
+  /** Lines the crawler could not verify this crawl (see ``unconfirmed`` on
+   *  LineEventKind). Optional: absent on reports frozen before it. */
+  lines_unconfirmed?: number;
   top_ssps: { ssp_domain: string; count: number }[];
   occurred_at: string | null;
   /**
@@ -1381,10 +1384,24 @@ export type LineEventKind =
    *  seats. New to the REPORT, which is all we can honestly claim: we were
    *  not looking at them last week, so we cannot say the line is new to
    *  the world. */
-  | "first_appearance";
+  | "first_appearance"
+  /** The crawler could not verify this line this crawl (the file did not
+   *  read, or read too short to trust). Never counted as added or removed:
+   *  the line stays matched until a later read settles it. Each row says
+   *  why, and when it was last seen, read and verified. Reports frozen
+   *  before 2026-10-20 never carry it. */
+  | "unconfirmed";
 
-/** Counts keyed by every event kind, as the API sends them. */
-export type LineEventCounts = Record<LineEventKind, number>;
+/** Counts keyed by every event kind, as the API sends them. ``unconfirmed``
+ *  is optional: a report frozen before the kind existed omits it, and a
+ *  missing key reads as 0. */
+export type LineEventCounts = Record<Exclude<LineEventKind, "unconfirmed">, number> & {
+  unconfirmed?: number;
+};
+
+/** How a line's dates were taken: from the file read itself, or from the
+ *  crawl's time when the exact read time was not stored. */
+export type LineDateSource = "fetch" | "crawl";
 
 export type LineEvent = {
   developer_id: number;
@@ -1400,9 +1417,35 @@ export type LineEvent = {
   matched_seat: boolean;
   occurred_at: string | null;
   /** When this line was FIRST seen in the wild, from the watchlist-
-   *  independent book. Set only on `newly_monitored` rows, and only when
-   *  the book knows: null means "we cannot say", never "it is new". */
+   *  independent book. On `newly_monitored` rows, only when the book
+   *  knows: null means "we cannot say", never "it is new". On an `added`
+   *  row, when this crawl first read it (the honest date of the addition).
+   *  Absent means unknown. */
   first_seen_at?: string | null;
+  /* THE DATES BEHIND A CHANGE (David, 2026-10-20: a change is shown only
+     when verified, and every one carries dates). All ISO UTC; every field
+     is optional because a report frozen before it was written has none,
+     and a missing field means unknown, never a guess. */
+  /** Removed: when we last read the line in the file. */
+  last_seen_at?: string | null;
+  /** Removed: the read that first did not find it. */
+  not_found_at?: string | null;
+  /** Added: the last read that did not have it. Null (not absent) when the
+   *  compared crawl did not read this file at all. */
+  last_absent_at?: string | null;
+  /** Cert changed: the read that saw the new cert. */
+  seen_at?: string | null;
+  /** Whether the dates above are exact file read times ("fetch") or the
+   *  crawl's time standing in for them ("crawl"). Absent means unknown. */
+  date_source?: LineDateSource;
+  /** Unconfirmed: why the crawler could not verify the line, in a sentence. */
+  reason?: string | null;
+  /** Unconfirmed: when the file was read this crawl, and when the line was
+   *  last verified (null: not verified). */
+  read_at?: string | null;
+  verified_at?: string | null;
+  /** Unconfirmed: how many reads were attempted. */
+  tries?: number | null;
   /** How this row was tied to the developer: found in their own file
    *  ("file"), through an inventorypartnerdomain declaration ("ipd"), or in
    *  a subdomain's file ("subdomain"). Absent on old data means "file". */
@@ -1451,6 +1494,19 @@ export type MatchedSeatLine = {
    * Absent on artifacts frozen before 2026-09-10.
    */
   found_in?: string;
+  /**
+   * The dates behind the change, when this line sits in a change window
+   * (added, removed or cert changed): the same fields a LineEvent carries,
+   * so the Overview's windows print what the Changes page prints. Absent
+   * on a standing matched line and on artifacts frozen before 2026-10-20,
+   * where the window says the date is not available rather than guessing.
+   */
+  first_seen_at?: string | null;
+  last_absent_at?: string | null;
+  last_seen_at?: string | null;
+  not_found_at?: string | null;
+  seen_at?: string | null;
+  date_source?: LineDateSource;
 };
 
 export type MatchedDeveloper = {
@@ -2046,7 +2102,7 @@ export type ChangeGroup = Omit<
 export type ChangeKpi = {
   lines: number;
   placements: number;
-  byEvent: Record<LineEventKind, number>;
+  byEvent: LineEventCounts;
   publishers: number;
   apps: number;
 };
@@ -2055,7 +2111,7 @@ export type ChangeGroupsPage = {
   page_size: number;
   total: number;
   rows: ChangeGroup[];
-  counts: Record<LineEventKind, number>;
+  counts: LineEventCounts;
   kpi: ChangeKpi;
   trial?: TrialSlice | null;
 };

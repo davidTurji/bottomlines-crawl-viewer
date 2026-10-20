@@ -372,7 +372,11 @@ test.describe("inactive", () => {
   test("the header says the two crawls the summary names", async ({ page }) => {
     await open(page, {});
     await expectOverview(page);
-    await expect(page.getByText(/Week of Aug 25, 2026, compared with Aug 18, 2026\./)).toBeVisible();
+    // Local date and 24 hour time, so the day can slip by one either side
+    // of UTC on the machine running this.
+    await expect(
+      page.getByText(/Data current as of 2[456] Aug 2026, \d{2}:\d{2}, compared with the crawl of 1[789] Aug 2026, \d{2}:\d{2}\./),
+    ).toBeVisible();
   });
 
   test("without the summary's dates the window starts at last week's crawl", async ({ page }) => {
