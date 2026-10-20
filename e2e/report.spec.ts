@@ -379,6 +379,15 @@ test.describe("inactive", () => {
     ).toBeVisible();
   });
 
+  test("a first report says so even when the summary carries a compared date", async ({ page }) => {
+    await open(page, { firstReport: true });
+    await expectOverview(page);
+    await expect(
+      page.getByText(/Data current as of 2[456] Aug 2026, \d{2}:\d{2}\. First report, nothing to compare with yet\./),
+    ).toBeVisible();
+    await expect(page.getByText(/compared with the crawl of/)).toHaveCount(0);
+  });
+
   test("without the summary's dates the window starts at last week's crawl", async ({ page }) => {
     await open(page, { crawlDates: false });
     await expectOverview(page);
