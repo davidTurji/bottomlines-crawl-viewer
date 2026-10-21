@@ -112,6 +112,8 @@ export function fileSourceLabel(source: FileSource | string | null | undefined):
       return "the publisher's app-ads.txt (host has no file)";
     case "parent_host_unread":
       return "the publisher's app-ads.txt (host not read yet)";
+    case "other_site":
+      return "no file: the store listing names another site";
     case "no_website":
       return "no website in the store listing";
     default:

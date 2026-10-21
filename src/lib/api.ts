@@ -1537,7 +1537,8 @@ export type MatchedSeatLine = {
  * publisher's own app-ads.txt. host: the app-ads.txt at the host its store
  * listing declares. parent_no_file: the publisher's file, because the host
  * has no file. parent_host_unread: the publisher's file, because the host
- * was not read yet. no_website: the store listing names no developer
+ * was not read yet. other_site: the store listing names another site, so
+ * the publisher's file is not this app's. no_website: the store listing names no
  * website, so no file applies and the app is credited with nothing.
  */
 export type FileSource =
@@ -1545,6 +1546,7 @@ export type FileSource =
   | "host"
   | "parent_no_file"
   | "parent_host_unread"
+  | "other_site"
   | "no_website";
 
 export type MatchedDeveloper = {
