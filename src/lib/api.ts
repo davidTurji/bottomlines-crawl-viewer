@@ -1192,6 +1192,9 @@ export type InactivePublisherLine = {
   last_seen?: string | null;
   ended_at?: string | null;
   reason_code?: string | null;
+  /** The declared host whose app-ads.txt holds the line (IAB app-ads.txt
+   *  spec, 2026-10-21); null or absent: the publisher's own domain file. */
+  host?: string | null;
 };
 
 export type InactivePublisher = {
@@ -1238,6 +1241,10 @@ export type InactiveApp = {
    *  them: the card then reads them by ``developer_id``, as a matched app
    *  card does. A trial keeps them and withholds the publisher's name. */
   lines?: InactivePublisherLine[];
+  /** The host whose app-ads.txt authorized this app (see MatchedApp).
+   *  Absent on a row frozen before 2026-10-21. */
+  file_host?: string | null;
+  file_source?: FileSource;
 };
 
 export type InactiveRow = InactivePublisher | InactiveApp;
@@ -1438,8 +1445,17 @@ export type LineEvent = {
   /** Whether the dates above are exact file read times ("fetch") or the
    *  crawl's time standing in for them ("crawl"). Absent means unknown. */
   date_source?: LineDateSource;
-  /** Unconfirmed: why the crawler could not verify the line, in a sentence. */
+  /** Unconfirmed: why the crawler could not verify the line, in a sentence.
+   *  Newly monitored / monitoring stopped: "host first read" (the file at
+   *  this host was read for the first time this crawl, so its lines are
+   *  newly monitored, not added) or "host not read" (the file at this host
+   *  was not read this crawl, so its lines are no longer monitored, not
+   *  removed); null is a watchlist change, as before. */
   reason?: string | null;
+  /** The host whose file holds this line (IAB app-ads.txt spec,
+   *  2026-10-21): a declared sub-domain host, or the publisher's own domain
+   *  for its own file. Absent on reports frozen before it. */
+  host?: string | null;
   /** Unconfirmed: when the file was read this crawl, and when the line was
    *  last verified (null: not verified). */
   read_at?: string | null;
@@ -1507,7 +1523,29 @@ export type MatchedSeatLine = {
   not_found_at?: string | null;
   seen_at?: string | null;
   date_source?: LineDateSource;
+  /**
+   * The host whose app-ads.txt holds this line, when it is a declared
+   * sub-domain host (IAB app-ads.txt spec, 2026-10-21: an app is credited
+   * from the file at the host its store listing declares, e.g.
+   * "ftmj.fortunemo.com"). Null or absent: the publisher's own domain file.
+   */
+  host?: string | null;
 };
+
+/**
+ * Which file an app was credited from (2026-10-21). own_domain: the
+ * publisher's own app-ads.txt. host: the app-ads.txt at the host its store
+ * listing declares. parent_no_file: the publisher's file, because the host
+ * has no file. parent_host_unread: the publisher's file, because the host
+ * was not read yet. no_website: the store listing names no developer
+ * website, so no file applies and the app is credited with nothing.
+ */
+export type FileSource =
+  | "own_domain"
+  | "host"
+  | "parent_no_file"
+  | "parent_host_unread"
+  | "no_website";
 
 export type MatchedDeveloper = {
   developer_id: number;
@@ -1535,6 +1573,9 @@ export type MatchedDeveloper = {
   added_lines?: MatchedSeatLine[];
   removed_lines?: MatchedSeatLine[];
   cert_changed_lines?: MatchedSeatLine[];
+  /** The declared hosts among this publisher's lines (may be empty).
+   *  Absent on reports frozen before 2026-10-21. */
+  file_hosts?: string[];
 };
 
 export type MatchedDevelopersPage = {
@@ -1566,6 +1607,10 @@ export type MatchedBundle = {
   developer_name: string | null;
   developer_domain: string | null;
   line_count: number;
+  /** The host whose app-ads.txt authorized this app (see MatchedApp).
+   *  Absent on reports frozen before 2026-10-21. */
+  file_host?: string | null;
+  file_source?: FileSource;
 };
 
 export type MatchedBundlesPage = {
@@ -1621,6 +1666,7 @@ export type MatchedApp = {
   lines_added?: number;
   lines_removed?: number;
   lines_cert_changed?: number;
+  /** Since 2026-10-21 the lines of THIS app's file only (see file_host). */
   matched_lines?: MatchedSeatLine[];
   /**
    * The exact seat lines behind the change counts above, so the expanded row
@@ -1631,6 +1677,15 @@ export type MatchedApp = {
   added_lines?: MatchedSeatLine[];
   removed_lines?: MatchedSeatLine[];
   cert_changed_lines?: MatchedSeatLine[];
+  /**
+   * The host whose app-ads.txt authorizes this app (2026-10-21): the
+   * publisher's own domain when it is the publisher's file, a declared host
+   * otherwise, null when the app is credited with nothing. Absent on
+   * reports frozen before it.
+   */
+  file_host?: string | null;
+  /** Which file that is, in one word (see FileSource). */
+  file_source?: FileSource;
 };
 
 export type MatchedAppsPage = {

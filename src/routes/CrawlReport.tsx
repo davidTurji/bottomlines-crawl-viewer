@@ -50,7 +50,7 @@ import { Card } from "@/components/ui/card";
 import InlineAskAI from "@/components/InlineAskAI";
 import { PageShell } from "@/components/PageShell";
 import { formatWeek } from "@/components/WeekLine";
-import { cn, foundInLabel, storeLabel } from "@/lib/utils";
+import { appFileLine, cn, fileHostsLabel, foundInLabel, lineHostLabel, storeLabel } from "@/lib/utils";
 import {
   addedDates,
   certDates,
@@ -1333,6 +1333,9 @@ type Row = {
   added_lines: MatchedSeatLine[];
   removed_lines: MatchedSeatLine[];
   cert_changed_lines: MatchedSeatLine[];
+  /** The declared hosts whose app-ads.txt hold some of this publisher's
+   *  lines (2026-10-21); empty on its own file alone or on an older report. */
+  file_hosts: string[];
 };
 
 function DrilldownList({
@@ -1419,6 +1422,7 @@ function DrilldownList({
                 added_lines: d.added_lines ?? [],
                 removed_lines: d.removed_lines ?? [],
                 cert_changed_lines: d.cert_changed_lines ?? [],
+                file_hosts: d.file_hosts ?? [],
               }),
             ),
             total: r.total,
@@ -1441,6 +1445,8 @@ function DrilldownList({
                 added_lines: d.added_lines ?? [],
                 removed_lines: d.removed_lines ?? [],
                 cert_changed_lines: d.cert_changed_lines ?? [],
+                // A change row names no hosts: the standing row does.
+                file_hosts: [],
               }),
             ),
             total: r.total,
@@ -1809,6 +1815,14 @@ function PublisherCard({
               />
             </div>
           )}
+          {/* WHERE ITS FILES ARE (2026-10-21): the declared hosts whose
+              app-ads.txt hold some of this publisher's lines. One quiet
+              line, only when there are any; the lines below say which. */}
+          {fileHostsLabel(row.file_hosts) && (
+            <div data-file-hosts className="truncate text-[11px] text-slate-400">
+              {fileHostsLabel(row.file_hosts)}
+            </div>
+          )}
         </div>
         {inactive ? (
           <div className="hidden items-center gap-6 text-right sm:flex">
@@ -1989,6 +2003,17 @@ function SeatLineRow({
     </div>
   );
   const row = "flex items-baseline gap-3 px-3 py-1.5";
+  // THE FILE'S HOST (2026-10-21): a line credited from a declared host's
+  // app-ads.txt lives in THAT file, so the row opens it there and says so
+  // at the margin, after the file name. The publisher's own file, or a
+  // host that is the publisher's domain, says nothing extra.
+  const fileDomain = line.host || publisherDomain;
+  const hostLabel = lineHostLabel(line.host, publisherDomain);
+  const host = hostLabel && (
+    <span data-line-host className="flex-shrink-0 text-[10px] text-slate-400">
+      {hostLabel}
+    </span>
+  );
   // A removed line copies on click (David, 2026-10-20): it is no longer in
   // the file, so the file opens from its own link at the margin instead.
   if (gone)
@@ -1996,10 +2021,11 @@ function SeatLineRow({
       <CopyableLine line={line} className={row}>
         {text}
         <FoundInLinks
-          publisherDomain={publisherDomain}
+          publisherDomain={fileDomain}
           foundIn={line.found_in}
           className="flex-shrink-0 text-[10px] text-slate-400"
         />
+        {host}
       </CopyableLine>
     );
   return (
@@ -2010,7 +2036,7 @@ function SeatLineRow({
     // down. The cert stays inline, because that one IS part of the line.
     <ActionableLine
       line={line}
-      publisherDomain={publisherDomain}
+      publisherDomain={fileDomain}
       foundIn={line.found_in}
       className={row}
     >
@@ -2020,6 +2046,7 @@ function SeatLineRow({
           {foundInLabel(line.found_in)}
         </span>
       )}
+      {host}
     </ActionableLine>
   );
 }
@@ -2288,6 +2315,9 @@ function lineEventToSeatLine(e: LineEvent): MatchedSeatLine {
     publisher_id: e.publisher_id,
     relationship: e.relationship,
     cert_id: e.new_cert_id || e.old_cert_id || undefined,
+    // The file's host: the publisher's own domain on its own file, which
+    // the row then keeps quiet about.
+    ...(e.host ? { host: e.host } : {}),
   };
 }
 
@@ -2589,6 +2619,10 @@ function MatchedAppCard({
     (app.added_lines ?? []).length > 0 ||
     (app.removed_lines ?? []).length > 0 ||
     (app.cert_changed_lines ?? []).length > 0;
+  // WHICH FILE CREDITED THIS APP (2026-10-21): the app-ads.txt at the host
+  // its store listing declares, or the publisher's own, in plain words.
+  // Null on a report frozen before the crawler said.
+  const fileLine = appFileLine(app.file_host, app.file_source);
   return (
     <div
       className={cn(
@@ -2653,6 +2687,11 @@ function MatchedAppCard({
                   , {inactive.publisherLive ? "still live" : "inactive too"}
                 </span>
               )}
+            </div>
+          )}
+          {fileLine && (
+            <div data-app-file className="truncate text-[11px] text-slate-400">
+              {fileLine}
             </div>
           )}
         </div>
@@ -2772,6 +2811,7 @@ const inactiveSeatLine = (l: InactivePublisherLine): MatchedSeatLine => ({
   publisher_id: l.publisher_id,
   relationship: l.relationship,
   ...(l.file ? { found_in: l.file } : {}),
+  ...(l.host ? { host: l.host } : {}),
 });
 
 function InactivePublisherCard({
@@ -2800,6 +2840,7 @@ function InactivePublisherCard({
     added_lines: [],
     removed_lines: [],
     cert_changed_lines: [],
+    file_hosts: [],
   };
   return (
     <PublisherCard
@@ -2838,6 +2879,8 @@ function InactiveAppCard({
     line_count: lines?.length ?? 0,
     ...(app.developer_id != null ? { developer_id: app.developer_id } : {}),
     ...(lines ? { matched_lines: lines } : {}),
+    ...(app.file_host !== undefined ? { file_host: app.file_host } : {}),
+    ...(app.file_source ? { file_source: app.file_source } : {}),
   };
   return (
     <MatchedAppCard

@@ -11,7 +11,7 @@ import { expect, test, type Page } from "@playwright/test";
 
 import { mockDiscoveredLinePlacements, mockDiscoveredLines, mockInactiveBlock } from "../src/lib/mockData";
 import { PAGE_SIZE } from "../src/lib/paging";
-import { installFakeApi, TOKEN, type Scenario } from "./fakeApi";
+import { DECLARED_HOST, declaredHostApp, installFakeApi, TOKEN, type Scenario } from "./fakeApi";
 
 const EXPIRED = "This report link is not valid or has expired.";
 /** The page error boundary's card: a page threw while rendering. */
@@ -871,5 +871,77 @@ test.describe("a seller seen only in its own file", () => {
     await row.getByRole("button", { name: "Seller 400160, details" }).click();
     await expect(row.getByText(/in the seller's own file on/)).toBeVisible();
     await expect(row.getByText(/The name has spaces around it/).first()).toBeVisible();
+  });
+});
+
+/* WHERE THE FILES ARE (IAB app-ads.txt hosts, 2026-10-21): the crawler reads
+   an app's app-ads.txt at the host its store listing declares and credits
+   the app from that file only. The report says which file credited an app,
+   where a line's file is when it is not the publisher's own, which hosts a
+   publisher's files are at, and why a line is newly monitored when a host's
+   file was read for the first time. A report of own-domain files, and a
+   report frozen before the fields existed, says nothing extra. */
+test.describe("where the files are", () => {
+  const appFile = (page: Page, text: string) => page.locator("[data-app-file]", { hasText: text });
+  const expand = async (page: Page, name: string) => {
+    // The first row may already be open (the list opens it on landing).
+    const closed = page.getByRole("button", { name: `Show the seat lines of ${name}` });
+    if (await closed.count()) await closed.click();
+    await expect(page.getByRole("button", { name: `Hide the seat lines of ${name}` })).toBeVisible();
+  };
+
+  test("an app credited from its declared host, its publisher's hosts, and a host's first read", async ({ page }) => {
+    const errors = watchErrors(page);
+    await open(page, { declaredHost: true });
+    await expectOverview(page);
+    const app = declaredHostApp();
+
+    // The app says which file credited it, and its lines say where they are.
+    await page.getByRole("button", { name: /Matched apps/ }).click();
+    await expect(page.getByRole("heading", { name: "Matched apps" })).toBeVisible();
+    await expect(appFile(page, `File: ${DECLARED_HOST}, its host's app-ads.txt`)).toHaveCount(1);
+    await expand(page, app.app_name);
+    await expect(page.locator("[data-line-host]", { hasText: `at ${DECLARED_HOST}` }).first()).toBeVisible();
+    // Every other app is credited from its publisher's own file, and says so.
+    await expect(appFile(page, "the publisher's app-ads.txt").first()).toBeVisible();
+
+    // Its publisher names the host its files are at.
+    await page.getByRole("button", { name: /Matched publishers/ }).click();
+    await expect(page.getByRole("heading", { name: "Matched publishers" })).toBeVisible();
+    await page.getByRole("textbox", { name: "Search matched publishers" }).fill(app.owner_domain);
+    await expect(page.locator("[data-file-hosts]", { hasText: `Files at: ${DECLARED_HOST}` })).toHaveCount(1);
+
+    // A newly monitored line says why, in plain words, and where its file is.
+    await page.goto(`${BASE}/changes`);
+    await page.getByRole("tab", { name: "Started watching" }).click();
+    await page.locator("button[aria-expanded]").filter({ has: page.locator("code") }).first().click();
+    await expect(page.getByText("Loading publishers…")).toHaveCount(0);
+    await expect(page.locator("[data-line-reason]", { hasText: "first read of this file this crawl" })).toHaveCount(1);
+    await expect(page.locator("[data-line-host]", { hasText: `at ${DECLARED_HOST}` })).toHaveCount(1);
+    expect(errors).toEqual([]);
+  });
+
+  test("a report of own-domain files says nothing extra", async ({ page }) => {
+    const errors = watchErrors(page);
+    await open(page, {});
+    await expectOverview(page);
+    const app = declaredHostApp();
+    await page.getByRole("button", { name: /Matched apps/ }).click();
+    await expect(page.getByRole("heading", { name: "Matched apps" })).toBeVisible();
+    await expect(appFile(page, `File: ${app.owner_domain}, the publisher's app-ads.txt`)).toHaveCount(1);
+    await expand(page, app.app_name);
+    await expect(page.locator("[data-line-text]").first()).toBeVisible();
+    await expect(page.locator("[data-line-host]")).toHaveCount(0);
+    await page.getByRole("button", { name: /Matched publishers/ }).click();
+    await expect(page.getByRole("heading", { name: "Matched publishers" })).toBeVisible();
+    await expect(page.locator("[data-file-hosts]")).toHaveCount(0);
+    await page.goto(`${BASE}/changes`);
+    await page.getByRole("tab", { name: "Started watching" }).click();
+    await page.locator("button[aria-expanded]").filter({ has: page.locator("code") }).first().click();
+    await expect(page.getByText("Loading publishers…")).toHaveCount(0);
+    await expect(page.locator("[data-line-text]").first()).toBeVisible();
+    await expect(page.locator("[data-line-reason]")).toHaveCount(0);
+    await expect(page.locator("[data-line-host]")).toHaveCount(0);
+    expect(errors).toEqual([]);
   });
 });

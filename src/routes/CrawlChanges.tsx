@@ -38,7 +38,7 @@ import { formatWeek, WeekLine } from "@/components/WeekLine";
 import { useReportScope } from "@/lib/reportScope";
 import { PageShell } from "@/components/PageShell";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { cn, foundInLabel } from "@/lib/utils";
+import { cn, foundInLabel, lineHostLabel, scopeReasonText } from "@/lib/utils";
 import {
   ActionableLine,
   PublisherDomainLink,
@@ -1082,7 +1082,9 @@ function ChangeCard({
                   <ActionableLine
                     key={`${p.developer_id}|${p.file_kind}|${i}`}
                     line={{ ...group, cert_id: inlineCert ?? undefined }}
-                    publisherDomain={p.developer_domain}
+                    // The file is at its host (2026-10-21): a declared
+                    // sub-domain's, or the publisher's own domain.
+                    publisherDomain={p.host || p.developer_domain}
                     foundIn={fileLabel(p.file_kind)}
                     gone={
                       group.event === "removed" ||
@@ -1106,6 +1108,13 @@ function ChangeCard({
                             {p.developer_name}
                           </span>
                         )}
+                        {/* The file's host, when it is not the publisher's
+                            own domain (2026-10-21). */}
+                        {lineHostLabel(p.host, p.developer_domain) && (
+                          <span data-line-host className="truncate text-[10px] text-slate-400">
+                            {lineHostLabel(p.host, p.developer_domain)}
+                          </span>
+                        )}
                       </div>
                       {/* Why, in the crawler's words, before the dates. */}
                       {group.event === "unconfirmed" && (
@@ -1113,6 +1122,18 @@ function ChangeCard({
                           {p.reason || "No reason recorded."}
                         </div>
                       )}
+                      {/* WHY THE WATCH MOVED ON THIS FILE (2026-10-21): a
+                          host's file read for the first time this crawl, or
+                          not read this crawl. Said in plain words; a change
+                          to the customer's list carries no reason and says
+                          nothing here. */}
+                      {(group.event === "newly_monitored" ||
+                        group.event === "monitoring_stopped") &&
+                        scopeReasonText(p.reason) && (
+                          <div data-line-reason className="text-[10px] leading-snug text-slate-600">
+                            {scopeReasonText(p.reason)}
+                          </div>
+                        )}
                       {rowDates(p) && (
                         <div
                           data-line-dates
@@ -1301,11 +1322,17 @@ function exportPublishers(group: ChangeGroup, publishers: LineEvent[]) {
                 ["verified_at", (p) => iso(p.verified_at)],
                 ["tries", (p) => (p.tries == null ? "" : String(p.tries))],
               ]
-            : [];
+            : group.event === "newly_monitored" ||
+                group.event === "monitoring_stopped"
+              ? [["reason", (p) => iso(p.reason)]]
+              : [];
+  // The file's host rides along too (2026-10-21): the declared sub-domain
+  // whose app-ads.txt holds the line, or the publisher's own domain.
   const header = [
     "publisher_domain",
     "publisher_name",
     "file",
+    "host",
     "change",
     "line",
     ...dated.map(([name]) => name),
@@ -1314,6 +1341,7 @@ function exportPublishers(group: ChangeGroup, publishers: LineEvent[]) {
     p.developer_domain ?? "",
     p.developer_name ?? "",
     fileLabel(p.file_kind),
+    p.host ?? "",
     TONES[group.event].label,
     line,
     ...dated.map(([, read]) => read(p)),

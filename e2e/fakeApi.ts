@@ -32,7 +32,22 @@ import {
   mockSummaryFor,
 } from "../src/lib/mockData";
 import { pageFromGone } from "../src/lib/inactive";
-import type { DiscoveredLine, DiscoveredShow, DiscoveredTotals, InactiveKind } from "../src/lib/api";
+import type {
+  DeveloperEvent,
+  DiscoveredLine,
+  DiscoveredShow,
+  DiscoveredTotals,
+  InactiveApp,
+  InactiveKind,
+  InactivePublisher,
+  InactivePublisherLine,
+  InactiveRow,
+  LineEvent,
+  MatchedApp,
+  MatchedBundle,
+  MatchedDeveloper,
+  MatchedSeatLine,
+} from "../src/lib/api";
 import {
   MOCK_CHECKED_AT,
   MOCK_SELLERS_DOMAIN,
@@ -114,7 +129,89 @@ export type Scenario = {
   /** false: a summary without ``crawl_at`` / ``compared_crawl_at`` (the API
    *  today), so the window's start comes from last week's summary. */
   crawlDates?: boolean;
+  /** true: the crawler credited the first matched app from the app-ads.txt
+   *  at the host its store listing declares (IAB app-ads.txt spec,
+   *  2026-10-21), its publisher names that host under ``file_hosts``, and
+   *  every newly monitored line's first publisher carries the "host first
+   *  read" reason. Default false: every file is the publisher's own. */
+  declaredHost?: boolean;
 };
+
+/* ── THE FILE-HOST FIELDS (snapshot version 5, 2026-10-21) ────────────
+   Every seat line, publisher, app and line event now says where its file
+   is. The fixtures predate the fields, so every answer is given the
+   defaults a crawl of own-domain files sends: host null on a seat line,
+   file_hosts [] on a publisher, file_host = the publisher's domain and
+   file_source "own_domain" on an app, host = the publisher's domain and
+   reason null on a line event. A fixture that already carries a field
+   keeps it (an unconfirmed line keeps its reason). Reports frozen before
+   the fields lack them altogether, and the SPA renders both. */
+
+/** The declared host of the ``declaredHost`` scenario. */
+export const DECLARED_HOST = "ftmj.fortunemo.com";
+
+/** The app the ``declaredHost`` scenario credits from that host: the
+ *  first of the matched apps list, so a test can name it. */
+export function declaredHostApp(): MatchedApp {
+  return mockMatchedApps(1).rows[0];
+}
+
+const seatLine = (l: MatchedSeatLine): MatchedSeatLine => ({ host: null, ...l });
+const atHost = (l: MatchedSeatLine): MatchedSeatLine => ({ ...l, host: DECLARED_HOST });
+
+type LineArrays = {
+  matched_lines?: MatchedSeatLine[];
+  added_lines?: MatchedSeatLine[];
+  removed_lines?: MatchedSeatLine[];
+  cert_changed_lines?: MatchedSeatLine[];
+};
+function mapLines<T extends LineArrays>(row: T, f: (l: MatchedSeatLine) => MatchedSeatLine): T {
+  return {
+    ...row,
+    ...(row.matched_lines ? { matched_lines: row.matched_lines.map(f) } : {}),
+    ...(row.added_lines ? { added_lines: row.added_lines.map(f) } : {}),
+    ...(row.removed_lines ? { removed_lines: row.removed_lines.map(f) } : {}),
+    ...(row.cert_changed_lines ? { cert_changed_lines: row.cert_changed_lines.map(f) } : {}),
+  };
+}
+
+const publisherRow = (d: MatchedDeveloper): MatchedDeveloper => mapLines({ file_hosts: [], ...d }, seatLine);
+const eventRow = (d: DeveloperEvent): DeveloperEvent => mapLines(d, seatLine);
+const appRow = (a: MatchedApp): MatchedApp =>
+  mapLines({ file_host: a.owner_domain, file_source: "own_domain", ...a }, seatLine);
+const bundleRow = (b: MatchedBundle): MatchedBundle => ({
+  file_host: b.developer_domain,
+  file_source: "own_domain",
+  ...b,
+});
+const lineEvent = (r: LineEvent): LineEvent => ({ host: r.developer_domain, reason: null, ...r });
+const inactiveLine = (l: InactivePublisherLine): InactivePublisherLine => ({ host: null, ...l });
+function inactiveRow(kind: InactiveKind, r: InactiveRow): InactiveRow {
+  if (kind === "apps") {
+    const a = r as InactiveApp;
+    return {
+      file_host: a.publisher || null,
+      file_source: "own_domain",
+      ...a,
+      ...(a.lines ? { lines: a.lines.map(inactiveLine) } : {}),
+    };
+  }
+  const p = r as InactivePublisher;
+  return { ...p, lines: (p.lines ?? []).map(inactiveLine) };
+}
+
+/** The ``declaredHost`` scenario's app: credited from the host's file,
+ *  every line of it at that host. */
+const appAtHost = (a: MatchedApp): MatchedApp =>
+  mapLines({ ...a, file_host: DECLARED_HOST, file_source: "host" }, atHost);
+/** Its publisher: names the host, and its first line sits there. */
+const publisherWithHost = (d: MatchedDeveloper): MatchedDeveloper => ({
+  ...d,
+  file_hosts: [DECLARED_HOST],
+  ...(d.matched_lines?.length
+    ? { matched_lines: [atHost(d.matched_lines[0]), ...d.matched_lines.slice(1)] }
+    : {}),
+});
 
 const TRIAL_CAPS = { publishers: 3, apps: 3, declarations: 3, discovered_lines: 3 };
 
@@ -178,8 +275,11 @@ export async function installFakeApi(page: Page, scenario: Scenario = {}): Promi
     gone: true,
     inactive: "ok",
     crawlDates: true,
+    declaredHost: false,
     ...scenario,
   };
+  const hostApp = s.declaredHost ? declaredHostApp() : null;
+  const appKey = (a: MatchedApp) => `${a.store}:${a.bundle_id}`;
   let signedIn = !s.signedOut && !s.expired;
   const calls: Calls = [];
 
@@ -253,8 +353,14 @@ export async function installFakeApi(page: Page, scenario: Scenario = {}): Promi
           ),
         );
       const key = decodeURIComponent(tail.split("/")[1]);
-      const rows =
-        groupByLine(visible).find((g) => g.key === key)?.publishers ?? [];
+      const group = groupByLine(visible).find((g) => g.key === key);
+      const rows = (group?.publishers ?? []).map((r, i) =>
+        // The host's file, read for the first time this crawl: its lines
+        // are newly monitored, not added (the first publisher of each).
+        s.declaredHost && group?.event === "newly_monitored" && i === 0
+          ? { ...lineEvent(r), host: DECLARED_HOST, reason: "host first read" }
+          : lineEvent(r),
+      );
       const size = filters.page_size!,
         p = filters.page!;
       return reply(200, {
@@ -289,26 +395,35 @@ export async function installFakeApi(page: Page, scenario: Scenario = {}): Promi
       case "developer-events": {
         const event = (q.get("event") ?? "added") as "added" | "removed" | "changed";
         const r = mockDeveloperEvents(event, page_, lines);
+        r.rows = r.rows.map(eventRow);
         return reply(200, s.trial ? { ...r, page: 1, ...cut(r.rows, TRIAL_CAPS.publishers, r.total) } : r);
       }
       case "line-events": {
         const filters: Record<string, unknown> = {};
         for (const [k, v] of q.entries()) if (k !== "lines") filters[k] = /^\d+$/.test(v) ? Number(v) : v;
         if (filters.developer_id !== undefined) {
-          const rows = linesForDeveloper(Number(filters.developer_id));
+          const rows = linesForDeveloper(Number(filters.developer_id)).map(lineEvent);
           return reply(200, { page: 1, page_size: rows.length || 1, total: rows.length, rows });
         }
-        return reply(200, mockLineEvents(filters as Parameters<typeof mockLineEvents>[0]));
+        const r = mockLineEvents(filters as Parameters<typeof mockLineEvents>[0]);
+        return reply(200, { ...r, rows: r.rows.map(lineEvent) });
       }
       case "matched-developers": {
         const r = mockMatchedDevelopers(page_, q.get("q") ?? "", lines);
+        r.rows = r.rows.map((d) =>
+          hostApp && d.domain === hostApp.owner_domain ? publisherWithHost(publisherRow(d)) : publisherRow(d),
+        );
         return reply(200, s.trial ? { ...r, page: 1, ...cut(r.rows, TRIAL_CAPS.publishers, r.total) } : r);
       }
       case "matched-bundles": {
-        return reply(200, mockMatchedBundles(page_, q.get("q") ?? ""));
+        const r = mockMatchedBundles(page_, q.get("q") ?? "");
+        return reply(200, { ...r, rows: r.rows.map(bundleRow) });
       }
       case "matched-apps": {
         const r = mockMatchedApps(page_, q.get("q") ?? "", lines);
+        r.rows = r.rows.map((a) =>
+          hostApp && appKey(a) === appKey(hostApp) ? appAtHost(appRow(a)) : appRow(a),
+        );
         return reply(200, s.trial ? { ...r, page: 1, ...cut(r.rows, TRIAL_CAPS.apps, r.total) } : r);
       }
       case "discovered-lines": {
@@ -432,10 +547,11 @@ export async function installFakeApi(page: Page, scenario: Scenario = {}): Promi
         if (rawKind !== "publishers" && rawKind !== "apps") return reply(422, { detail: "unknown kind" });
         const kind = rawKind as InactiveKind;
         const opts = { page: page_, q: q.get("q") ?? "", lines };
-        if (s.inactive === "legacy") {
-          return reply(200, pageFromGone(s.gone ? mockGone : null, kind, { ...opts, pageSize: Number(q.get("page_size") ?? 50) }));
-        }
-        return reply(200, mockInactive(kind, opts, s.trial));
+        const r =
+          s.inactive === "legacy"
+            ? pageFromGone(s.gone ? mockGone : null, kind, { ...opts, pageSize: Number(q.get("page_size") ?? 50) })
+            : mockInactive(kind, opts, s.trial);
+        return reply(200, { ...r, rows: r.rows.map((row) => inactiveRow(kind, row)) });
       }
       case "sellers-fix":
         if (s.sellers === "none") return notFound("This report has no sellers.json page.");
