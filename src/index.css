@@ -870,3 +870,26 @@ All colors MUST be HSL.
   [style*="kpi-payoff"], [style*="kpi-wake"] { animation: none !important; }
 }
 
+/* The matched tiles' corner (MatchedTile, 2026-10-25). Column one holds
+   the number and, under it, the label; column two the found/lost corner,
+   spanning both rows at the top right, a fixed gap between. Column one is
+   as wide as the label, so the corner can never run over it; the corner
+   is shorter than the two rows, so the tile keeps the Lines tiles'
+   height. On a tile too narrow for the two columns (a phone, or a window
+   under about 1,250px) the corner moves under the label. */
+.mtile { container-type: inline-size; }
+.mtile-grid {
+  display: grid;
+  grid-template-columns: auto max-content;
+  grid-template-areas: "num corner" "label corner";
+  column-gap: 0.5rem;
+  align-items: start;
+}
+.mtile-num { grid-area: num; }
+.mtile-label { grid-area: label; }
+.mtile-corner { grid-area: corner; justify-self: end; }
+@container (max-width: 194px) {
+  .mtile-grid { grid-template-columns: minmax(0, 1fr); grid-template-areas: "num" "label" "corner"; }
+  .mtile-corner { justify-self: start; align-items: flex-start; text-align: left; margin-top: 0.5rem; }
+}
+

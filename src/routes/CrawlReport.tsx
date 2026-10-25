@@ -12,6 +12,7 @@ import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { BEAT_PAUSE_MS, CountUp, landsAfterMs, payoffStyle } from "@/components/CountUp";
 import { LineFilter } from "@/components/LineFilter";
 import { Dots } from "@/components/Dots";
+import { HoverHint } from "@/components/HoverHint";
 import {
   appSubject,
   IpdChip,
@@ -461,7 +462,6 @@ export default function CrawlReport() {
               note={filtered ? "under the selected lines" : undefined}
               active={drillTab === "added"}
               onClick={() => showLinesOf("added")}
-              lines={2}
             />
             <SplitStat
               tone="critical"
@@ -474,7 +474,6 @@ export default function CrawlReport() {
               note={filtered ? "under the selected lines" : undefined}
               active={drillTab === "removed"}
               onClick={() => showLinesOf("removed")}
-              lines={2}
             />
           </div>
           )}
@@ -509,12 +508,14 @@ export default function CrawlReport() {
               {summary.counters.matched.lines.toLocaleString()} lines total
             </span>
           </div>
-          {/* Two premium tiles that double as the selector for the list
-              below: publishers in the brand's racing green, apps in pink.
-              Same number, label and delta rhythm as the left card's split
-              stats, so the two hero panels line up. Click one to switch the
-              list underneath; the selected tile carries a toned ring. */}
-          <div className="grid grid-cols-2 gap-3">
+          {/* Two tiles that double as the selector for the list below:
+              publishers in the brand's racing green, apps in pink. THE SAME
+              SPLIT AS THE LEFT CARD (David, 2026-10-25): one bordered box,
+              a hairline between, the same padding, so all four tiles are
+              the same width to the pixel and the two hero panels line up.
+              Click one to switch the list underneath; the selected tile
+              carries its tint. */}
+          <div className="grid grid-cols-2 divide-x divide-border overflow-hidden rounded-xl border border-border">
             <MatchedTile
               tone="publisher"
               icon={Globe}
@@ -827,7 +828,6 @@ export function SplitStat({
   className,
   hintClassName,
   delayMs = 0,
-  lines = 1,
 }: {
   number: number;
   label: string;
@@ -854,11 +854,6 @@ export function SplitStat({
   active?: boolean;
   /** Makes the stat a button that opens the list below on its lines. */
   onClick?: () => void;
-  /** How many quiet lines the slot under the label reserves: 2 on the
-   *  overview's Lines tiles, so they stand at the matched tiles' height
-   *  (MatchedTile says found and lost on one line and the move on the
-   *  next); 1 everywhere else. */
-  lines?: 1 | 2;
 }) {
   const numberCls = tone ? STAT_TONE_TEXT[tone] : "text-slate-900";
   const body = (
@@ -897,7 +892,7 @@ export function SplitStat({
           so the page above the list does not move. */}
       <div
         key={number}
-        className={cn("text-[11px] leading-[17px]", lines === 2 ? "min-h-[34px]" : "min-h-[17px]")}
+        className="min-h-[17px] text-[11px] leading-[17px]"
         // The change line is the payoff: it rises in once the figure lands.
         style={payoffStyle(delayMs + landsAfterMs())}
       >
@@ -949,14 +944,15 @@ export function SplitStat({
  *
  * ONE RHYTHM WITH THE LINES TILES ON THE LEFT (David, 2026-10-25, "1000%
  * symmetric"): the same padding, corner radius and big-number row as
- * SplitStat, the label on the same second line, then the same two-line
- * quiet slot under it, so all four tiles stand at one height. Nothing
- * stands beside the number, so nothing can run over it. The two quiet
- * lines: what we found and what went ("▲ 380 found, ▼ 29 lost this week",
- * the value found, never only the net; kpis-show-value-found), then the
- * week's move ("+351 (+4.4%) vs last week"). Last week's count is not
- * printed, it is the number minus the move: it lives in that line's
- * tooltip. The selected tile carries a toned ring and tint.
+ * SplitStat, the label on the same second line, the same 17px quiet slot
+ * under it, so all four tiles stand at one height. What this tile adds is
+ * found and lost this week (the value found, never only the net;
+ * kpis-show-value-found), in the tile's top-right corner: a tiny "This
+ * week" caption over "▲ 380 found" and "▼ 29 lost", small muted type, the
+ * figures softly tinted, shorter than the number and label beside it.
+ * Last week's count is not printed, it is the number minus the move: it
+ * lives in a hint above the move line. The selected tile carries its
+ * tint, as the Lines tiles do.
  */
 export function MatchedTile({
   tone,
@@ -972,7 +968,7 @@ export function MatchedTile({
   delayMs = 0,
 }: {
   tone: "publisher" | "app";
-  /** Found / lost behind the net, said under the label when the report has them. */
+  /** Found / lost behind the net, when the report has them. */
   move?: MatchedMove | null;
   icon: typeof Globe;
   number: number;
@@ -980,7 +976,7 @@ export function MatchedTile({
   delta?: Delta | null;
   /** When this figure starts rolling (the overview's second beat). */
   delayMs?: number;
-  /** Last week's count. With it the change line says the week's move and
+  /** Last week's count. With it the move line says the week's move and
    *  keeps last week's figure in its tooltip. */
   previous?: number | null;
   /** Said in the quiet slot when there is no delta; the slot keeps its
@@ -990,72 +986,85 @@ export function MatchedTile({
   onClick: () => void;
 }) {
   const isApp = tone === "app";
-  // The pair the change line reads, narrowed once for the type checker.
+  // The pair the move line reads, narrowed once for the type checker.
   const w = delta != null && previous != null ? { delta, previous } : null;
   const numberCls = isApp ? "text-app" : "text-primary";
   const iconCls = isApp ? "text-app" : "text-primary";
-  const activeGround = isApp
-    ? "border-app-border bg-app-bg/70 ring-1 ring-app/40"
-    : "border-ok-border bg-ok-bg/60 ring-1 ring-primary/30";
-  const idleGround =
-    "border-border bg-white hover:border-primary/20 hover:bg-muted/30";
+  // Toned to the tile when its list is the one below, as SplitStat does.
+  const activeGround = isApp ? "bg-app-bg/70" : "bg-ok-bg/60";
+  const idleGround = "hover:bg-muted/40";
+  // The change lines are the payoff: they rise in once the figure lands.
+  const payoff = payoffStyle(delayMs + landsAfterMs());
+  const numberRow = (
+    // The Lines tiles' number row to the pixel: the same baseline row, its
+    // sign slot present but empty and zero wide, so the row stands at the
+    // same height as "+127" over there.
+    <span className="flex items-baseline">
+      <span aria-hidden className="invisible w-0 select-none font-mono text-2xl font-semibold tabular-nums sm:text-3xl">
+        +
+      </span>
+      <span
+        // Keyed on the value: a new figure counts up again.
+        key={number}
+        className={cn(
+          "font-mono text-3xl font-semibold leading-none tabular-nums tracking-tight sm:text-4xl",
+          numberCls,
+        )}
+      >
+        <CountUp value={number} delayMs={delayMs} />
+      </span>
+    </span>
+  );
+  const labelRow = (
+    <span className="mt-2 flex items-center gap-1.5 text-[12px] font-medium text-slate-700">
+      <Icon aria-hidden className={cn("h-3.5 w-3.5 flex-shrink-0", iconCls)} />
+      {label}
+    </span>
+  );
+  const moveLine = w ? (
+    // Last week's count rides in a hint anchored to this line (a native
+    // title floats wherever the pointer is, half a card away).
+    <HoverHint text={`${w.previous.toLocaleString()} last week`}>
+      <span className="text-slate-500">
+        {w.delta.abs === 0 ? (
+          "no change vs last week"
+        ) : (
+          <>
+            <span className="font-mono font-medium tabular-nums text-slate-600">{moveText(w.delta)}</span>{" "}
+            vs last week
+          </>
+        )}
+      </span>
+    </HoverHint>
+  ) : delta ? (
+    <DeltaChip delta={delta} />
+  ) : note ? (
+    <span className="text-slate-400">{note}</span>
+  ) : null;
   return (
     <button
       type="button"
       onClick={onClick}
       aria-pressed={active}
       className={cn(
-        "block w-full rounded-xl border px-5 py-4 text-left shadow-sm transition-colors",
+        "mtile group block w-full px-5 py-4 text-left transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring",
         active ? activeGround : idleGround,
       )}
     >
-      {/* The Lines tiles' number row to the pixel: the same baseline row,
-          its sign slot present but empty and zero wide, so the row stands
-          at the same height as "+127" over there. */}
-      <span className="flex items-baseline">
-        <span aria-hidden className="invisible w-0 select-none font-mono text-2xl font-semibold tabular-nums sm:text-3xl">
-          +
-        </span>
-        <span
-          // Keyed on the value: a new figure counts up again.
-          key={number}
-          className={cn(
-            "font-mono text-3xl font-semibold leading-none tabular-nums tracking-tight sm:text-4xl",
-            numberCls,
-          )}
-        >
-          <CountUp value={number} delayMs={delayMs} />
-        </span>
+      {/* A small grid (index.css, .mtile-grid): the number and the label
+          in the first column, the corner in the second, a fixed gap
+          between, never overlapping. The corner is shorter than the two
+          rows beside it, so the tile keeps the Lines tiles' height. Too
+          narrow for the two columns (a phone), the corner moves under the
+          label. */}
+      <span className="mtile-grid">
+        <span className="mtile-num">{numberRow}</span>
+        <span className="mtile-label">{labelRow}</span>
+        {w && move && <FoundLostCorner move={move} style={payoff} />}
       </span>
-      <span className="mt-2 flex items-center gap-1.5 text-[12px] font-medium text-slate-700">
-        <Icon aria-hidden className={cn("h-3.5 w-3.5 flex-shrink-0", iconCls)} />
-        {label}
-      </span>
-      {/* TWO QUIET LINES, ALWAYS THE SAME HEIGHT, the Lines tiles' slot
-          (SplitStat lines={2}). The change lines are the payoff: they rise
-          in once the figure lands. */}
-      <span
-        key={number}
-        className="block min-h-[34px] text-[11px] leading-[17px]"
-        style={payoffStyle(delayMs + landsAfterMs())}
-      >
-        {w && move && <FoundLostLine move={move} />}
-        {w ? (
-          <span className="block text-slate-500" title={`${w.previous.toLocaleString()} last week`}>
-            {w.delta.abs === 0 ? (
-              "no change vs last week"
-            ) : (
-              <>
-                <span className="font-mono font-medium tabular-nums text-slate-600">{moveText(w.delta)}</span>{" "}
-                vs last week
-              </>
-            )}
-          </span>
-        ) : delta ? (
-          <DeltaChip delta={delta} />
-        ) : note ? (
-          <span className="text-slate-400">{note}</span>
-        ) : null}
+      {/* ONE SLOT, ALWAYS THE SAME HEIGHT, as on the Lines tiles. */}
+      <span key={number} className="block min-h-[17px] text-[11px] leading-[17px]" style={payoff}>
+        {moveLine}
       </span>
     </button>
   );
@@ -1072,22 +1081,26 @@ const SOFT_OK = "text-[hsl(152_38%_38%)]";
 const SOFT_CRITICAL = "text-[hsl(0_46%_54%)]";
 
 /**
- * "▲ 380 found, ▼ 29 lost this week": one quiet line in the Lines tiles'
- * subline grammar (glyph, tabular figure, muted words). A figure of nought
- * goes grey.
+ * The tile's corner: a tiny muted "This week" over "▲ 380 found" and
+ * "▼ 29 lost", short right-aligned lines in small muted type, the figures
+ * softly tinted. "This week" is a caption rather than on each line so the
+ * corner stays narrow enough to sit beside the number on a 1,280px window.
  */
-function FoundLostLine({ move }: { move: MatchedMove }) {
-  const part = (glyph: string, n: number, tint: string) => (
-    <>
-      <span className={cn("text-[9px]", n > 0 ? tint : "text-slate-400")}>{glyph}</span>{" "}
+function FoundLostCorner({ move, style }: { move: MatchedMove; style?: React.CSSProperties }) {
+  const line = (glyph: string, n: number, word: string, tint: string) => (
+    <span className="whitespace-nowrap">
+      <span className={cn("text-[8px]", n > 0 ? tint : "text-slate-400")}>{glyph}</span>{" "}
       <span className={cn("font-mono font-medium tabular-nums", n > 0 ? tint : "text-slate-400")}>
         {n.toLocaleString()}
-      </span>
-    </>
+      </span>{" "}
+      {word}
+    </span>
   );
   return (
-    <span data-found-lost className="block text-slate-500">
-      {part("▲", move.found, SOFT_OK)} found, {part("▼", move.lost, SOFT_CRITICAL)} lost this week
+    <span data-found-lost className="mtile-corner flex flex-col items-end text-right text-[10px] leading-[1.6] text-slate-500" style={style}>
+      <span className="text-[9px] leading-[1.4] text-slate-400">This week</span>
+      {line("▲", move.found, "found", SOFT_OK)}
+      {line("▼", move.lost, "lost", SOFT_CRITICAL)}
     </span>
   );
 }
