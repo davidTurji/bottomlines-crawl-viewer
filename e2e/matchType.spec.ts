@@ -22,6 +22,7 @@ import {
   MT_PLATFORM,
 } from "../src/lib/mockData";
 import type { MatchTypeFields } from "../src/lib/api";
+import { PAGE_SIZE } from "../src/lib/paging";
 import { inconclusiveSentence } from "../src/components/MatchType";
 import { installFakeApi, TOKEN, type Calls, type Scenario } from "./fakeApi";
 
@@ -36,11 +37,10 @@ const CONTRACT_ROW_KEYS = [
   "alert",
 ] as const;
 const CONTRACT_LIST_KEYS = ["match_type_counts", "ipd_inconclusive"] as const;
-const APP_NOTE = inconclusiveSentence({ count: 2, examples: MT_INCONCLUSIVE }, { one: "app", many: "apps" });
-const PUBLISHER_NOTE = inconclusiveSentence(
-  { count: 1, examples: MT_INCONCLUSIVE },
-  { one: "publisher", many: "publishers" },
-);
+const APP_NOTE = inconclusiveSentence({ count: 2, examples: MT_INCONCLUSIVE }, "apps");
+const PUBLISHER_NOTE = inconclusiveSentence({ count: 1, examples: MT_INCONCLUSIVE }, "publishers");
+const APP_WHERE = `Via ${MT_PARTNER}, inventory partner of Samsung TV Plus`;
+const PUBLISHER_WHERE = `Via ${MT_PARTNER}, inventory partner of this publisher`;
 
 function watchErrors(page: Page): string[] {
   const errors: string[] = [];
@@ -151,17 +151,25 @@ test.describe("the contract the client reads", () => {
     }
   });
 
-  test("the note's sentence, word for word", () => {
+  test("the note's sentence, word for word, in each view's shape", () => {
     expect(APP_NOTE).toBe(
-      "Not counted: 2 inconclusive IPD apps (northfold-tv.com on Tidewick TV). This crawl could not read northfold-tv.com's ads.txt.",
+      "Not counted: 2 inconclusive IPD apps via northfold-tv.com, inventory partner of Tidewick TV. This crawl could not read northfold-tv.com's ads.txt.",
     );
     expect(PUBLISHER_NOTE).toBe(
-      "Not counted: 1 inconclusive IPD publisher (northfold-tv.com on Tidewick TV). This crawl could not read northfold-tv.com's ads.txt.",
+      "Not counted: 1 inconclusive IPD publisher (Tidewick TV, via northfold-tv.com, its inventory partner). This crawl could not read northfold-tv.com's ads.txt.",
+    );
+    expect(
+      inconclusiveSentence(
+        { count: 3, examples: [...MT_INCONCLUSIVE, { partner: "example-b.tv", platform: "Platform B" }] },
+        "apps",
+      ),
+    ).toBe(
+      "Not counted: 3 inconclusive IPD apps via northfold-tv.com, inventory partner of Tidewick TV; example-b.tv, inventory partner of Platform B. This crawl could not read northfold-tv.com's ads.txt and example-b.tv's ads.txt.",
     );
   });
 });
 
-test.describe("an old report looks exactly as it did", () => {
+test.describe("an old report shows nothing of this", () => {
   test("no Match type, no chip, no roles, no note, and no list is asked for a match type", async ({ page }) => {
     const errors = watchErrors(page);
     const calls = await open(page, {});
@@ -175,9 +183,13 @@ test.describe("an old report looks exactly as it did", () => {
         await expect(page.locator("[data-ipd-chip], [data-ipd-where], [data-ipd-inconclusive]")).toHaveCount(0);
       }
       await page.getByRole("tab", { name: "All matched" }).click();
-      // The tabs row is the one it always was: the tabs, then the count.
+      // Row 1 is the tabs alone; row 2 the search and the count with the pager.
       const row = page.getByRole("tablist").first().locator("xpath=../../..");
-      await expect(row).toHaveText(/^All matchedAddedRemovedChangedInactive[\d,]+ matched$/);
+      await expect(row).toHaveText(/^All matchedAddedRemovedChangedInactive$/);
+      await expect(page.locator("[data-list-count] p")).toHaveText(
+        new RegExp(`^1–${PAGE_SIZE} of [\\d,]+ ${view}$`),
+      );
+      await expect(page.locator("[data-list-count]").getByRole("navigation", { name: "Pages" })).toBeVisible();
       // An expanded row has its lines and nothing above them.
       await page.locator('button[aria-label^="Show the seat lines of"]').first().click();
       await expect(page.locator("[data-line-text]").first()).toBeVisible();
@@ -200,20 +212,19 @@ test.describe("match type on a report that has it", () => {
     await expect(pill(page, "All")).toHaveAttribute("title", `${counts.all.toLocaleString()} matched`);
     await expect(pill(page, "Own")).toHaveAttribute("title", `${counts.own.toLocaleString()} own`);
     await expect(pill(page, "IPD")).toHaveAttribute("title", `${counts.ipd.toLocaleString()} IPD`);
-    // The one Matched number counts IPD too.
-    await expect(page.getByText(`${counts.all.toLocaleString()} matched`, { exact: true })).toBeVisible();
+    // The one Matched number counts IPD too: the count on the search row.
+    await expect(page.locator("[data-list-count] p")).toHaveText(`1–${PAGE_SIZE} of ${counts.all.toLocaleString()} apps`);
 
     // Under All (found by search: it is not on the first page).
     await page.getByRole("textbox", { name: "Search matched apps" }).fill("Samsung TV Plus");
     await expect(card(page, "Samsung TV Plus")).toHaveCount(1);
     const chip = page.locator("[data-ipd-chip]").first();
     await expect(chip).toHaveText("IPD");
-    await expect(chip).toHaveAttribute(
-      "title",
-      `${MT_PARTNER} on Samsung TV Plus. Declared in samsungtvplus.com's app-ads.txt`,
-    );
-    await expect(page.locator("[data-ipd-where]")).toHaveText([`${MT_PARTNER} on Samsung TV Plus`]);
+    await expect(chip).toHaveAttribute("title", `${APP_WHERE}. Declared in samsungtvplus.com's app-ads.txt`);
+    await expect(page.locator("[data-ipd-where]")).toHaveText([APP_WHERE]);
     await expect(page.locator("[data-ipd-inconclusive]")).toHaveText(APP_NOTE);
+    // One row: the count alone, no pager.
+    await expect(page.locator("[data-list-count] p")).toHaveText("1 app");
 
     // Under IPD.
     await pill(page, "IPD").click();
@@ -240,8 +251,13 @@ test.describe("match type on a report that has it", () => {
     await open(page, { matchType: true });
     await pill(page, "IPD").click();
     await expect(card(page, "Samsung TV Plus")).toHaveCount(1);
-    await expect(page.locator("[data-ipd-where]")).toHaveText([`${MT_PARTNER} on Samsung TV Plus`]);
+    await expect(page.locator("[data-ipd-where]")).toHaveText([PUBLISHER_WHERE]);
+    await expect(page.locator("[data-ipd-chip]")).toHaveAttribute(
+      "title",
+      `${PUBLISHER_WHERE}. Declared in samsungtvplus.com's app-ads.txt`,
+    );
     await expect(page.locator("[data-ipd-inconclusive]")).toHaveText(PUBLISHER_NOTE);
+    await expect(page.locator("[data-list-count] p")).toHaveText("1 publisher");
     const closed = page.getByRole("button", { name: "Show the seat lines of Samsung TV Plus" });
     if (await closed.count()) await closed.click();
     await expect(page.locator("[data-row-roles]")).toContainText("Seller role:Reseller");

@@ -13,6 +13,7 @@ import { BEAT_PAUSE_MS, CountUp, landsAfterMs, payoffStyle } from "@/components/
 import { LineFilter } from "@/components/LineFilter";
 import { Dots } from "@/components/Dots";
 import {
+  appSubject,
   IpdChip,
   IpdInconclusiveNote,
   IpdWhere,
@@ -1374,16 +1375,72 @@ function matchTypeFieldsOf(d: MatchTypeFields): MatchTypeFields {
   return out;
 }
 
-/** The status tabs on the left, Match type on the right of ONE row. On a
- *  phone the pills wrap under the tabs. Without match types (every report
- *  frozen before crawler #348) the right side is empty and the row is the
- *  one it always was. */
+/* ── THE LIST'S CONTROLS, TWO ROWS AND NOTHING ELSE (David, 2026-10-25) ──
+   Row 1: the status tabs on the left; "Match type" and its pills on the
+   right, the tabs' height. Row 2: the search box on the left, held to a
+   sensible width; "1–25 of 262 publishers" and the pager on the right,
+   centred on the search box. The count lives on row 2 only (the pills
+   keep theirs in their tooltips), and the standalone count-and-pager line
+   that used to sit above the rows is gone; the pager under the list
+   stays. On a phone row 1 wraps the pills under the tabs and row 2 stacks
+   the search above the count and pager. Nothing in either row moves when
+   a tab or a pill changes: the tabs and pills have fixed widths, the
+   search box keeps its width whatever lands on its right, and the right
+   side is right-aligned so only its left edge grows. Without match types
+   (every report frozen before crawler #348) row 1's right side is empty. */
 function ListTabsRow({ left, right }: { left: ReactNode; right: ReactNode }) {
   return (
     <div className="flex flex-wrap items-center justify-between gap-x-4 gap-y-2">
       <div className="flex min-w-0 max-w-full flex-wrap items-center gap-3">{left}</div>
       {right}
     </div>
+  );
+}
+
+function ListSearchRow({
+  query,
+  setQuery,
+  placeholder,
+  label,
+  right,
+}: {
+  query: string;
+  setQuery: (next: string) => void;
+  placeholder: string;
+  label: string;
+  /** The count and pager; null while nothing has landed (the row keeps its
+   *  height: the search box is as tall as the pager). */
+  right: ReactNode;
+}) {
+  return (
+    <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between sm:gap-x-4">
+      <div className="relative w-full sm:max-w-sm sm:flex-1">
+        <Search className="pointer-events-none absolute left-3.5 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
+        <input
+          value={query}
+          onChange={(e) => setQuery(e.target.value)}
+          placeholder={placeholder}
+          aria-label={label}
+          className="h-10 w-full rounded-full border border-border bg-white pl-10 pr-4 text-sm text-slate-900 outline-none transition-colors placeholder:text-slate-400 focus:border-primary/40"
+        />
+      </div>
+      {right && (
+        <div data-list-count className="flex min-h-10 items-center justify-end sm:ml-auto sm:flex-shrink-0">
+          {right}
+        </div>
+      )}
+    </div>
+  );
+}
+
+/** The plain count for a list that cannot be paged here: a trial's cut
+ *  list, or the app change tabs, which filter the loaded page in the
+ *  browser. */
+function CountLine({ count, noun }: { count: number; noun: string }) {
+  return (
+    <p className="whitespace-nowrap text-xs text-slate-500">
+      {count.toLocaleString()} {noun}
+    </p>
   );
 }
 
@@ -1573,9 +1630,9 @@ function DrilldownList({
 
   return (
     <div>
-      {/* Tabs, then a full-width search, in the Changes page's grammar,
-          so the two pages read as one product. */}
-      <div className="mb-3 space-y-2">
+      {/* The two control rows (see ListTabsRow). A page turned from the
+          pager under the list scrolls back up to here. */}
+      <div ref={paging.topRef} className="mb-3 space-y-2">
         <ListTabsRow
           left={
             <>
@@ -1589,16 +1646,8 @@ function DrilldownList({
               {inactive && <TabsTrigger value="inactive">Inactive</TabsTrigger>}
             </TabsList>
           </Tabs>
-          {/* Silent until a list has landed. While a new tab or filter is
-              in flight this still holds the PREVIOUS total, and printing
-              "260 matched" over a skeleton states a number for a question
-              that is still being asked. */}
-          {settled > 0 && tab !== "inactive" && (
-            <span className="text-xs text-slate-500">
-              {total.toLocaleString()}{" "}
-              {tab === "all" ? "matched" : "with changes"}
-            </span>
-          )}
+          {/* The dots say new rows are on the way while the old ones stay
+              in place (a search); the count itself sits on row 2. */}
           {loading && settled > 0 && tab !== "inactive" && <Dots />}
             </>
           }
@@ -1611,16 +1660,34 @@ function DrilldownList({
           }
         />
         {tab !== "inactive" && (
-        <div className="relative w-full">
-          <Search className="pointer-events-none absolute left-3.5 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
-          <input
-            value={query}
-            onChange={(e) => setQuery(e.target.value)}
+          <ListSearchRow
+            query={query}
+            setQuery={setQuery}
             placeholder="Search publishers"
-            aria-label="Search matched publishers"
-            className="h-10 w-full rounded-full border border-border bg-white pl-10 pr-4 text-sm text-slate-900 outline-none transition-colors placeholder:text-slate-400 focus:border-primary/40"
+            label="Search matched publishers"
+            right={
+              // Silent until a list has landed. While a new tab or filter
+              // is in flight `total` still holds the PREVIOUS answer, and
+              // printing "262 publishers" over a skeleton states a number
+              // for a question that is still being asked.
+              settled > 0 && !error && rows.length > 0
+                ? trial || caps
+                  // A trial's list is cut: the count, no pages.
+                  ? <CountLine count={total} noun={tab === "all" ? "publishers" : "with changes"} />
+                  : (
+                    <Pager
+                      placement="inline"
+                      page={page}
+                      pageSize={PAGE_SIZE}
+                      total={total}
+                      onPage={paging.onPage}
+                      noun={tab === "all" ? "publishers" : "with changes"}
+                      nounOne={tab === "all" ? "publisher" : undefined}
+                    />
+                  )
+                : null
+            }
           />
-        </div>
         )}
       </div>
       {/* TWO WEIGHTS OF RELOAD, and which one a change gets is the whole
@@ -1660,18 +1727,6 @@ function DrilldownList({
             <EmptyResult query={query} noun="publishers" />
           </div>
         )}
-        {settled > 0 && !error && rows.length > 0 && !trial && !caps && (
-          <Pager
-            placement="top"
-            anchorRef={paging.topRef}
-            className="mb-3"
-            page={page}
-            pageSize={PAGE_SIZE}
-            total={total}
-            onPage={paging.onPage}
-            noun={tab === "all" ? "publishers" : "with changes"}
-          />
-        )}
         {/* `settled > 0` as well as rows: while a new tab or filter is
             in flight the previous list is still in state, and without
             this guard it would render underneath the skeleton. */}
@@ -1707,22 +1762,28 @@ function DrilldownList({
             detail="publisher, every line it carries and every change, week after week"
           />
         )}
+        {/* The pager under the list, for the reader who has scrolled past
+            every row. On a single page it would only repeat the count the
+            search row already carries, so it stands only when there are
+            pages to turn. */}
         {settled > 0 && !error && rows.length > 0 && !trial && !caps && (
           <div className="mt-4">
-            <Pager
-              page={page}
-              pageSize={PAGE_SIZE}
-              total={total}
-              onPage={paging.onPage}
-              noun={tab === "all" ? "publishers" : "with changes"}
-            />
+            {total > PAGE_SIZE && (
+              <Pager
+                page={page}
+                pageSize={PAGE_SIZE}
+                total={total}
+                onPage={paging.onPage}
+                noun={tab === "all" ? "publishers" : "with changes"}
+              />
+            )}
             {truncated && <TruncatedNotice shown={total} noun="publishers" />}
           </div>
         )}
         {/* IPD matches this crawl could not confirm: not rows, not
             counted, one quiet line (All matched, never under Own). */}
         {settled > 0 && !error && tab === "all" && matchType !== "own" && (
-          <IpdInconclusiveNote data={inconclusive} noun={{ one: "publisher", many: "publishers" }} />
+          <IpdInconclusiveNote data={inconclusive} view="publishers" />
         )}
       </div>
       )}
@@ -2562,7 +2623,8 @@ function MatchedAppsList({
 
   return (
     <div>
-      <div className="mb-3 space-y-2">
+      {/* The two control rows, as on the publishers list. */}
+      <div ref={paging.topRef} className="mb-3 space-y-2">
         <ListTabsRow
           left={
             <>
@@ -2576,13 +2638,6 @@ function MatchedAppsList({
               {inactive && <TabsTrigger value="inactive">Inactive</TabsTrigger>}
             </TabsList>
           </Tabs>
-          {/* Same rule as the publishers list: silent until one lands. */}
-          {settled > 0 && tab !== "inactive" && (
-            <span className="text-xs text-slate-500">
-              {(tab === "all" ? total : rows.length).toLocaleString()}{" "}
-              {tab === "all" ? "matched" : "with changes"}
-            </span>
-          )}
           {loading && settled > 0 && tab !== "inactive" && <Dots />}
             </>
           }
@@ -2601,16 +2656,35 @@ function MatchedAppsList({
           }
         />
         {tab !== "inactive" && (
-        <div className="relative w-full">
-          <Search className="pointer-events-none absolute left-3.5 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
-          <input
-            value={query}
-            onChange={(e) => setQuery(e.target.value)}
+          <ListSearchRow
+            query={query}
+            setQuery={setQuery}
             placeholder="Search apps"
-            aria-label="Search matched apps"
-            className="h-10 w-full rounded-full border border-border bg-white pl-10 pr-4 text-sm text-slate-900 outline-none transition-colors placeholder:text-slate-400 focus:border-primary/40"
+            label="Search matched apps"
+            right={
+              // The pager counts the SERVER's total, which is why it shows
+              // on All matched only. The change tabs filter the loaded page
+              // in the browser, so their count is a count of this page and
+              // paging it would be a claim the data cannot support.
+              settled > 0 && !failed && rows.length > 0
+                ? tab !== "all"
+                  ? <CountLine count={rows.length} noun="with changes" />
+                  : trial || caps
+                    ? <CountLine count={total} noun="apps" />
+                    : (
+                      <Pager
+                        placement="inline"
+                        page={page}
+                        pageSize={PAGE_SIZE}
+                        total={total}
+                        onPage={paging.onPage}
+                        noun="apps"
+                        nounOne="app"
+                      />
+                    )
+                : null
+            }
           />
-        </div>
         )}
       </div>
       {tab === "inactive" && inactive ? (
@@ -2641,18 +2715,6 @@ function MatchedAppsList({
           )}
         </div>
       )}
-      {settled > 0 && !failed && tab === "all" && rows.length > 0 && !trial && !caps && (
-        <Pager
-          placement="top"
-          anchorRef={paging.topRef}
-          className="mb-3"
-          page={page}
-          pageSize={PAGE_SIZE}
-          total={total}
-          onPage={paging.onPage}
-          noun="apps"
-        />
-      )}
       {/* `settled > 0` as well: the previous list is still in state while a
           new filter is in flight, and would render under the skeleton. */}
       {settled > 0 && rows.length > 0 && (
@@ -2677,10 +2739,6 @@ function MatchedAppsList({
           ))}
         </div>
       )}
-      {/* The pager counts the SERVER's total, which is why it only shows on
-          All matched. The change tabs filter the loaded page in the browser,
-          so their count is a count of this page and paging it would be a
-          claim the data cannot support. */}
       {settled > 0 && !failed && (caps || trial) && (
         <LockedTail
           slice={trial}
@@ -2689,20 +2747,24 @@ function MatchedAppsList({
           detail="app, its store listing and every line it carries"
         />
       )}
+      {/* The pager under the list, only when there are pages to turn (the
+          search row carries the count). */}
       {settled > 0 && !failed && tab === "all" && rows.length > 0 && !trial && !caps && (
         <div className="mt-4">
-          <Pager
-            page={page}
-            pageSize={PAGE_SIZE}
-            total={total}
-            onPage={paging.onPage}
-            noun="apps"
-          />
+          {total > PAGE_SIZE && (
+            <Pager
+              page={page}
+              pageSize={PAGE_SIZE}
+              total={total}
+              onPage={paging.onPage}
+              noun="apps"
+            />
+          )}
           {truncated && <TruncatedNotice shown={total} noun="apps" />}
         </div>
       )}
       {settled > 0 && !failed && tab === "all" && matchType !== "own" && (
-        <IpdInconclusiveNote data={inconclusive} noun={{ one: "app", many: "apps" }} />
+        <IpdInconclusiveNote data={inconclusive} view="apps" />
       )}
       </>
       )}
@@ -2796,7 +2858,7 @@ function MatchedAppCard({
             >
               {storeLabel(app.store)}
             </span>
-            {!inactive && <IpdChip row={app} />}
+            {!inactive && <IpdChip row={app} subject={appSubject(app)} />}
             {inactive && <InactiveChip />}
           </div>
           {/* A trial withholds an inactive app's publisher (the crawler
@@ -2819,7 +2881,7 @@ function MatchedAppCard({
               )}
             </div>
           )}
-          {!inactive && <IpdWhere row={app} />}
+          {!inactive && <IpdWhere row={app} subject={appSubject(app)} />}
           {fileLine && (
             <div data-app-file className="truncate text-[11px] text-slate-400">
               {fileLine}

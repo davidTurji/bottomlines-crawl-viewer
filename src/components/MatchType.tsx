@@ -5,9 +5,12 @@
  * type pills only split a list: All, Own (the publisher's own file) or IPD
  * (the line sits in an inventory partner's ads.txt that the publisher's
  * app-ads.txt names). An own row carries no chip; an IPD row a small chip
- * and one quiet line, "<partner> on <platform>". An IPD match whose
- * partner's ads.txt this crawl could not read is never a row and never
- * counted: one quiet note under the list.
+ * and one quiet line that depends on the list (David, 2026-10-25): on a
+ * publisher row "Via failarmy.tv, inventory partner of this publisher", on
+ * an app row "Via failarmy.tv, inventory partner of Samsung TV Plus" (the
+ * app's publisher). An IPD match whose partner's ads.txt this crawl could
+ * not read is never a row and never counted: one quiet note under the
+ * list, in the same shape per view.
  *
  * Everything here renders NOTHING on a report frozen before match types:
  * no counts means no pills, no ``match_type`` means no chip. Old links
@@ -76,11 +79,32 @@ export function MatchTypeControl({
   );
 }
 
-/** "lanternworks.tv on Pebblecast TV": where an IPD row's lines sit. */
-export function ipdWhere(row: MatchTypeFields): string | null {
+/** Which list a row or a note is on: the words differ (see the top). */
+export type MatchTypeView = "publishers" | "apps";
+
+/**
+ * "Via failarmy.tv, inventory partner of this publisher" (a publisher row)
+ * or "Via failarmy.tv, inventory partner of Samsung TV Plus" (an app row,
+ * `subject` = the app's publisher). The partner first, then whose
+ * inventory partner it is.
+ */
+export function ipdWhere(row: MatchTypeFields, subject: string | null | undefined): string | null {
   if (row.match_type !== "ipd" || !row.ipd_partner) return null;
-  return row.ipd_platform ? `${row.ipd_partner} on ${row.ipd_platform}` : row.ipd_partner;
+  const of = (subject ?? "").trim();
+  return of ? `Via ${row.ipd_partner}, inventory partner of ${of}` : `Via ${row.ipd_partner}`;
 }
+
+/** The app row's subject: its publisher, by name, else by domain, else
+ *  the platform the crawler named. */
+export function appSubject(app: {
+  owner_name?: string | null;
+  owner_domain?: string | null;
+  ipd_platform?: string | null;
+}): string | null {
+  return app.owner_name || app.owner_domain || app.ipd_platform || null;
+}
+
+const PUBLISHER_SUBJECT = "this publisher";
 
 /** The domain whose file holds a row's lines: the partner's for an IPD
  *  row (its ads.txt), the row's own otherwise. */
@@ -88,19 +112,20 @@ export function linesDomain(row: MatchTypeFields, own: string | null | undefined
   return row.match_type === "ipd" && row.ipd_partner ? row.ipd_partner : (own ?? null);
 }
 
-function ipdTitle(row: MatchTypeFields): string | undefined {
-  const where = ipdWhere(row);
+function ipdTitle(row: MatchTypeFields, subject: string | null | undefined): string | undefined {
+  const where = ipdWhere(row, subject);
   const parts = [where, row.declared_in ? `Declared in ${row.declared_in}` : null].filter(Boolean);
   return parts.length ? parts.join(". ") : undefined;
 }
 
-/** The small "IPD" chip beside the name; nothing on an own row. */
-export function IpdChip({ row }: { row: MatchTypeFields }) {
+/** The small "IPD" chip beside the name; nothing on an own row. `subject`
+ *  as on IpdWhere; absent means a publisher row. */
+export function IpdChip({ row, subject = PUBLISHER_SUBJECT }: { row: MatchTypeFields; subject?: string | null }) {
   if (row.match_type !== "ipd") return null;
   return (
     <span
       data-ipd-chip
-      title={ipdTitle(row)}
+      title={ipdTitle(row, subject)}
       className="inline-flex flex-shrink-0 items-center rounded-full border border-info-border bg-info-bg px-1.5 py-px text-[10px] font-semibold text-info"
     >
       IPD
@@ -108,12 +133,13 @@ export function IpdChip({ row }: { row: MatchTypeFields }) {
   );
 }
 
-/** The partner and platform, one quiet line under the name. */
-export function IpdWhere({ row }: { row: MatchTypeFields }) {
-  const where = ipdWhere(row);
+/** The quiet line under the name. `subject`: the app's publisher on an
+ *  app row; absent means a publisher row ("this publisher"). */
+export function IpdWhere({ row, subject = PUBLISHER_SUBJECT }: { row: MatchTypeFields; subject?: string | null }) {
+  const where = ipdWhere(row, subject);
   if (!where) return null;
   return (
-    <div data-ipd-where title={ipdTitle(row)} className="truncate text-[11px] text-slate-500">
+    <div data-ipd-where title={ipdTitle(row, subject)} className="truncate text-[11px] text-slate-500">
       {where}
     </div>
   );
@@ -124,20 +150,39 @@ function joinAnd(items: string[]): string {
   return `${items.slice(0, -1).join(", ")} and ${items[items.length - 1]}`;
 }
 
-/** "Not counted: 2 inconclusive IPD apps (northfold-tv.com on Tidewick
- *  TV). This crawl could not read northfold-tv.com's ads.txt." */
-export function inconclusiveSentence(
-  data: IpdInconclusive,
-  noun: { one: string; many: string },
-): string {
+const NOUNS: Record<MatchTypeView, { one: string; many: string }> = {
+  publishers: { one: "publisher", many: "publishers" },
+  apps: { one: "app", many: "apps" },
+};
+
+/**
+ * The note, in the view's own shape:
+ *   apps:       "Not counted: 2 inconclusive IPD apps via northfold-tv.com,
+ *               inventory partner of Tidewick TV. This crawl could not read
+ *               northfold-tv.com's ads.txt."
+ *   publishers: "Not counted: 1 inconclusive IPD publisher (Tidewick TV, via
+ *               northfold-tv.com, its inventory partner). This crawl could
+ *               not read northfold-tv.com's ads.txt."
+ * Several partner/platform pairs are listed with semicolons. The examples
+ * are pairs, not one per row, so nothing like "and others" is inferred.
+ */
+export function inconclusiveSentence(data: IpdInconclusive, view: MatchTypeView): string {
+  const noun = NOUNS[view];
   const examples = (data.examples ?? []).filter((e) => e && e.partner);
-  const where = examples.map((e) => (e.platform ? `${e.partner} on ${e.platform}` : e.partner));
   const partners = [...new Set(examples.map((e) => e.partner))];
   const n = data.count;
   const head = `Not counted: ${n.toLocaleString()} inconclusive IPD ${n === 1 ? noun.one : noun.many}`;
-  // The examples are partner/platform pairs, not one per app: the count
-  // and the pairs are different units, so no "and others" is inferred.
-  const list = where.length ? ` (${where.join(", ")})` : "";
+  let list = "";
+  if (examples.length && view === "apps") {
+    list = ` via ${examples
+      .map((e) => (e.platform ? `${e.partner}, inventory partner of ${e.platform}` : e.partner))
+      .join("; ")}`;
+  } else if (examples.length) {
+    const its = examples.length === 1 ? "its inventory partner" : "their inventory partners";
+    list = ` (${examples
+      .map((e) => (e.platform ? `${e.platform}, via ${e.partner}` : `via ${e.partner}`))
+      .join("; ")}, ${its})`;
+  }
   const why = partners.length
     ? ` This crawl could not read ${joinAnd(partners.map((p) => `${p}'s ads.txt`))}.`
     : " This crawl could not read the partner's ads.txt.";
@@ -147,15 +192,15 @@ export function inconclusiveSentence(
 /** The quiet note under a list: IPD matches not confirmed, not counted. */
 export function IpdInconclusiveNote({
   data,
-  noun,
+  view,
 }: {
   data: IpdInconclusive | null | undefined;
-  noun: { one: string; many: string };
+  view: MatchTypeView;
 }) {
   if (!data || !(data.count > 0)) return null;
   return (
     <p data-ipd-inconclusive className="mt-3 text-xs text-slate-500">
-      {inconclusiveSentence(data, noun)}
+      {inconclusiveSentence(data, view)}
     </p>
   );
 }

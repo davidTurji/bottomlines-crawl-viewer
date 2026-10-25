@@ -145,8 +145,11 @@ export function Pager({
    *  plural stands for every count. */
   nounOne?: string;
   /** The copy above the rows says nothing on a single page: the one below
-   *  already carries the count, and saying it twice is noise. */
-  placement?: "top" | "bottom";
+   *  already carries the count, and saying it twice is noise. "inline" is
+   *  the pager on the list's controls row (2026-10-25), at the right of the
+   *  search box: it always carries the count, and the page numbers only
+   *  when there is more than one page. */
+  placement?: "top" | "bottom" | "inline";
   /** `usePaging`'s topRef, on the top pager: where a turn from the bottom
    *  scrolls back to. */
   anchorRef?: React.Ref<HTMLDivElement>;
@@ -177,7 +180,7 @@ export function Pager({
   if (pages <= 1) {
     if (placement === "top") return null;
     return (
-      <p className="px-1 text-xs text-slate-500">
+      <p className={cn("text-xs text-slate-500", placement === "inline" ? "whitespace-nowrap" : "px-1", className)}>
         {total.toLocaleString()} {total === 1 && nounOne ? nounOne : noun}
       </p>
     );
@@ -187,11 +190,13 @@ export function Pager({
     <div
       ref={anchorRef}
       className={cn(
-        "flex flex-wrap items-center justify-between gap-x-4 gap-y-2 px-1",
+        placement === "inline"
+          ? "flex flex-wrap items-center justify-end gap-x-3 gap-y-2"
+          : "flex flex-wrap items-center justify-between gap-x-4 gap-y-2 px-1",
         className,
       )}
     >
-      <p className="text-xs text-slate-500">
+      <p className="whitespace-nowrap text-xs text-slate-500">
         <span className="font-semibold tabular-nums text-slate-800">
           {first.toLocaleString()}&ndash;{last.toLocaleString()}
         </span>{" "}
@@ -199,7 +204,12 @@ export function Pager({
       </p>
       <nav
         aria-label="Pages"
-        className="inline-flex items-center gap-0.5 rounded-full border border-slate-200 bg-white p-1 shadow-sm"
+        className={cn(
+          "inline-flex items-center gap-0.5 rounded-full border border-slate-200 bg-white shadow-sm",
+          // On the controls row the bar is exactly the search box's 40px,
+          // so the row's height never changes with the bar coming and going.
+          placement === "inline" ? "p-[3px]" : "p-1",
+        )}
       >
         <button
           type="button"
