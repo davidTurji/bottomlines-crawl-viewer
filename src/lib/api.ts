@@ -325,10 +325,11 @@ export const api = {
     page = 1,
     q = "",
     lines?: string[],
+    matchType: MatchTypeFilter = "all",
   ) => {
     if (MOCK) {
       const { mockDeveloperEvents } = await import("./mockData");
-      const r = mockDeveloperEvents(event, page, lines ?? []);
+      const r = mockDeveloperEvents(event, page, lines ?? [], mockMatchType(matchType));
       return trialMock()
         ? {
             ...r,
@@ -339,7 +340,7 @@ export const api = {
     }
     return req<DeveloperEventsPage>(
       "GET",
-      `/v1/viewer/${token}/developer-events?event=${event}&page=${page}&page_size=${PAGE_SIZE}${q ? `&q=${encodeURIComponent(q)}` : ""}${linesQuery(lines)}`,
+      `/v1/viewer/${token}/developer-events?event=${event}&page=${page}&page_size=${PAGE_SIZE}${q ? `&q=${encodeURIComponent(q)}` : ""}${linesQuery(lines)}${matchTypeQuery(matchType)}`,
     );
   },
   changeGroups: async (
@@ -418,6 +419,8 @@ export const api = {
       page_size?: number;
       /** Seat-line keys (see lib/lineFilter); empty means every line. */
       lines?: string[];
+      /** All / own / IPD (crawler #348); "all" is never sent. */
+      match_type?: MatchTypeFilter;
     } = {},
   ) => {
     if (MOCK) {
@@ -427,11 +430,12 @@ export const api = {
       // mock keeps a dozen and says how many there are in full.
       return trialMock() ? { ...r, ...cutRows(r.rows, 12, r.total) } : r;
     }
-    const { lines, ...rest } = filters;
+    const { lines, match_type, ...rest } = filters;
     const q = new URLSearchParams();
     for (const [k, v] of Object.entries(rest)) {
       if (v !== undefined && v !== null && v !== "") q.set(k, String(v));
     }
+    if (match_type && match_type !== "all") q.set("match_type", match_type);
     if (lines && lines.length) q.set(LINES_PARAM, serializeLines(lines));
     return req<LineEventsPage>(
       "GET",
@@ -456,10 +460,11 @@ export const api = {
     page = 1,
     q = "",
     lines?: string[],
+    matchType: MatchTypeFilter = "all",
   ) => {
     if (MOCK) {
       const { mockMatchedDevelopers } = await import("./mockData");
-      const r = mockMatchedDevelopers(page, q, lines ?? []);
+      const r = mockMatchedDevelopers(page, q, lines ?? [], mockMatchType(matchType));
       return trialMock()
         ? {
             ...r,
@@ -470,7 +475,7 @@ export const api = {
     }
     return req<MatchedDevelopersPage>(
       "GET",
-      `/v1/viewer/${token}/matched-developers?page=${page}&page_size=${PAGE_SIZE}${q ? `&q=${encodeURIComponent(q)}` : ""}${linesQuery(lines)}`,
+      `/v1/viewer/${token}/matched-developers?page=${page}&page_size=${PAGE_SIZE}${q ? `&q=${encodeURIComponent(q)}` : ""}${linesQuery(lines)}${matchTypeQuery(matchType)}`,
     );
   },
   matchedBundles: async (token: string, page = 1, q = "") => {
@@ -498,17 +503,23 @@ export const api = {
    * instead be embedded under matched-developers; a standalone endpoint is
    * cleaner because the app is the row here, not the publisher.
    */
-  matchedApps: async (token: string, page = 1, q = "", lines?: string[]) => {
+  matchedApps: async (
+    token: string,
+    page = 1,
+    q = "",
+    lines?: string[],
+    matchType: MatchTypeFilter = "all",
+  ) => {
     if (MOCK) {
       const { mockMatchedApps } = await import("./mockData");
-      const r = mockMatchedApps(page, q, lines ?? []);
+      const r = mockMatchedApps(page, q, lines ?? [], mockMatchType(matchType));
       return trialMock()
         ? { ...r, page: 1, ...cutRows(r.rows, TRIAL_CAPS_MOCK.apps, r.total) }
         : r;
     }
     return req<MatchedAppsPage>(
       "GET",
-      `/v1/viewer/${token}/matched-apps?page=${page}&page_size=${PAGE_SIZE}${q ? `&q=${encodeURIComponent(q)}` : ""}${linesQuery(lines)}`,
+      `/v1/viewer/${token}/matched-apps?page=${page}&page_size=${PAGE_SIZE}${q ? `&q=${encodeURIComponent(q)}` : ""}${linesQuery(lines)}${matchTypeQuery(matchType)}`,
     );
   },
   /**
@@ -1333,7 +1344,75 @@ export type Summary = {
   };
 };
 
-export type DeveloperEvent = {
+/* ── MATCH TYPE (crawler PR #348, inventory sharing) ──────────────────
+   A match is "own" when the seat line sits in the publisher's own file,
+   and "ipd" when it sits in an inventory partner's ads.txt that the
+   publisher's app-ads.txt names (INVENTORYPARTNERDOMAIN: a FAST channel
+   inside a CTV platform). IPD matches stay inside the one Matched count;
+   the Match type filter only splits the list. An IPD match whose
+   partner's ads.txt this crawl could not read is inconclusive: never a
+   row, never counted, only a quiet note.
+
+   Every field below is OPTIONAL and absent on every report frozen before
+   the crawler sent it (or with its report switches off). Absent means
+   the page looks exactly as it did: no Match type control, no chips. */
+
+/** How a row matched: its own file, or an inventory partner's ads.txt. */
+export type MatchType = "own" | "ipd";
+/** The list filter (query param ``match_type``); "all" is never sent. */
+export type MatchTypeFilter = "all" | MatchType;
+
+/** The per-row fields of the contract. */
+export type MatchTypeFields = {
+  match_type?: MatchType;
+  /** IPD rows: the partner whose ads.txt carries the line. */
+  ipd_partner?: string | null;
+  /** IPD rows: the platform whose app-ads.txt names that partner. */
+  ipd_platform?: string | null;
+  /** IPD rows: the file that declares the partner, in words. */
+  declared_in?: string | null;
+  /** The seat's role per its sellers.json entry: owner, manager,
+   *  reseller, not in sellers.json, confidential. */
+  seller_role?: string | null;
+  /** "X (GB)": the manager that counts for this seller. */
+  managed_by?: string | null;
+  /** One sentence when the roles disagree with the file. */
+  alert?: string | null;
+  /** Not part of the fixed contract: the CTV platforms whose app-ads.txt
+   *  names this publisher as their inventory partner. Shown only if the
+   *  crawler ever sends it. */
+  partner_inventory_on?: string[] | null;
+};
+
+/** List meta: the split under the current search and lines. */
+export type MatchTypeCounts = { all: number; own: number; ipd: number };
+
+/** List meta: IPD matches this crawl could not confirm. */
+export type IpdInconclusive = {
+  count: number;
+  examples: { partner: string; platform: string }[];
+};
+
+/** The list meta of every list that takes ``match_type``. */
+export type MatchTypeMeta = {
+  match_type_counts?: MatchTypeCounts | null;
+  ipd_inconclusive?: IpdInconclusive | null;
+};
+
+function matchTypeQuery(matchType: MatchTypeFilter | undefined): string {
+  return matchType && matchType !== "all" ? `&match_type=${matchType}` : "";
+}
+
+/** Mock mode only: ``?matchtype=off`` previews a report frozen before
+ *  match types (no fields, no control). Never reached in production. */
+function mockMatchType(matchType: MatchTypeFilter): MatchTypeFilter | null {
+  const off =
+    typeof window !== "undefined" &&
+    new URLSearchParams(window.location.search).get("matchtype") === "off";
+  return off ? null : matchType;
+}
+
+export type DeveloperEvent = MatchTypeFields & {
   developer_id: number;
   developer_name: string | null;
   developer_domain: string | null;
@@ -1363,7 +1442,7 @@ export type DeveloperEvent = {
   matched_lines?: MatchedSeatLine[];
 };
 
-export type DeveloperEventsPage = {
+export type DeveloperEventsPage = MatchTypeMeta & {
   /** Present on a trial report: this list was cut (see ``TrialSlice``). */
   trial?: TrialSlice | null;
   event: string;
@@ -1470,9 +1549,9 @@ export type LineEvent = {
    *  partner. Can be non-empty even when matched_via is "file": a developer
    *  can be both crawled directly and vouched for. Capped at 25. */
   ipd_declared_by?: string[];
-};
+} & MatchTypeFields;
 
-export type LineEventsPage = {
+export type LineEventsPage = MatchTypeMeta & {
   /** Present on a trial report: this list was cut (see ``TrialSlice``). */
   trial?: TrialSlice | null;
   page: number;
@@ -1549,7 +1628,7 @@ export type FileSource =
   | "other_site"
   | "no_website";
 
-export type MatchedDeveloper = {
+export type MatchedDeveloper = MatchTypeFields & {
   developer_id: number;
   name: string | null;
   domain: string | null;
@@ -1580,7 +1659,7 @@ export type MatchedDeveloper = {
   file_hosts?: string[];
 };
 
-export type MatchedDevelopersPage = {
+export type MatchedDevelopersPage = MatchTypeMeta & {
   /** Present on a trial report: this list was cut (see ``TrialSlice``). */
   trial?: TrialSlice | null;
   page: number;
@@ -1644,7 +1723,7 @@ export type MatchedBundlesPage = {
  * in the expanded row; it is capped for display, and `line_count` is the
  * honest total.
  */
-export type MatchedApp = {
+export type MatchedApp = MatchTypeFields & {
   store: string;
   bundle_id: string;
   app_name: string;
@@ -1690,7 +1769,7 @@ export type MatchedApp = {
   file_source?: FileSource;
 };
 
-export type MatchedAppsPage = {
+export type MatchedAppsPage = MatchTypeMeta & {
   /** Present on a trial report: this list was cut (see ``TrialSlice``). */
   trial?: TrialSlice | null;
   page: number;
@@ -2144,18 +2223,25 @@ export type ChangeFilters = {
   lines?: string[];
   page?: number;
   page_size?: number;
+  /** All / own / IPD (crawler #348); "all" is never sent. */
+  match_type?: MatchTypeFilter;
 };
-function changeQuery({ lines, ...filters }: ChangeFilters): string {
+function changeQuery({ lines, match_type, ...filters }: ChangeFilters): string {
   const q = new URLSearchParams();
   for (const [key, value] of Object.entries(filters))
     if (value !== undefined && value !== "") q.set(key, String(value));
+  if (match_type && match_type !== "all") q.set("match_type", match_type);
   if (lines?.length) q.set(LINES_PARAM, serializeLines(lines));
   return q.toString();
 }
 export type ChangeGroup = Omit<
   import("./changeGroups").LocalChangeGroup,
   "publishers"
-> & { publisher_count: number };
+> & {
+  publisher_count: number;
+  /** Own or IPD (crawler #348); absent on reports frozen before it. */
+  match_type?: MatchType;
+};
 export type ChangeKpi = {
   lines: number;
   placements: number;
@@ -2163,7 +2249,7 @@ export type ChangeKpi = {
   publishers: number;
   apps: number;
 };
-export type ChangeGroupsPage = {
+export type ChangeGroupsPage = MatchTypeMeta & {
   page: number;
   page_size: number;
   total: number;

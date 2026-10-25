@@ -12,6 +12,14 @@ import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { BEAT_PAUSE_MS, CountUp, landsAfterMs, payoffStyle } from "@/components/CountUp";
 import { LineFilter } from "@/components/LineFilter";
 import { Dots } from "@/components/Dots";
+import {
+  IpdChip,
+  IpdInconclusiveNote,
+  IpdWhere,
+  linesDomain,
+  MatchTypeControl,
+  RowRoles,
+} from "@/components/MatchType";
 import { PAGE_SIZE } from "@/lib/paging";
 import { usePageCache } from "@/lib/pageCache";
 import { useLineFilter } from "@/lib/lineFilter";
@@ -30,6 +38,10 @@ import {
   type MatchedApp,
   type MatchedSeatLine,
   type LineEvent,
+  type IpdInconclusive,
+  type MatchTypeCounts,
+  type MatchTypeFields,
+  type MatchTypeFilter,
   type MatchedMove,
   type MatchedMoves,
   type InactiveApp,
@@ -112,6 +124,11 @@ export default function CrawlReport() {
   // Which Inactive list is open (Publishers or Apps). The page's, so it
   // survives switching views; picking a view picks its own list.
   const [inactiveKind, setInactiveKind] = useState<InactiveKind>("publishers");
+  // Match type (All / Own / IPD, crawler #348). The page's, like the tab,
+  // so it survives switching between publishers and apps. Never anything
+  // but "all" on a report without match types: the pills that change it
+  // only show when the list says how it splits.
+  const [matchType, setMatchType] = useState<MatchTypeFilter>("all");
   const pickView = (view: "publishers" | "apps") => {
     setMatchedView(view);
     setInactiveKind(view);
@@ -572,6 +589,8 @@ export default function CrawlReport() {
             tab={listTab}
             setTab={setDrillTab}
             openFirst={openFirst}
+            matchType={matchType}
+            setMatchType={setMatchType}
           />
         </div>
       ) : (
@@ -589,6 +608,8 @@ export default function CrawlReport() {
             tab={listTab}
             setTab={setDrillTab}
             openFirst={openFirst}
+            matchType={matchType}
+            setMatchType={setMatchType}
           />
         </div>
       )}
@@ -1336,7 +1357,35 @@ type Row = {
   /** The declared hosts whose app-ads.txt hold some of this publisher's
    *  lines (2026-10-21); empty on its own file alone or on an older report. */
   file_hosts: string[];
-};
+} & MatchTypeFields;
+
+/** The contract's per-row match type fields, copied as they came: absent
+ *  stays absent, so an old report's row carries none of them. */
+function matchTypeFieldsOf(d: MatchTypeFields): MatchTypeFields {
+  const out: MatchTypeFields = {};
+  if (d.match_type !== undefined) out.match_type = d.match_type;
+  if (d.ipd_partner !== undefined) out.ipd_partner = d.ipd_partner;
+  if (d.ipd_platform !== undefined) out.ipd_platform = d.ipd_platform;
+  if (d.declared_in !== undefined) out.declared_in = d.declared_in;
+  if (d.seller_role !== undefined) out.seller_role = d.seller_role;
+  if (d.managed_by !== undefined) out.managed_by = d.managed_by;
+  if (d.alert !== undefined) out.alert = d.alert;
+  if (d.partner_inventory_on !== undefined) out.partner_inventory_on = d.partner_inventory_on;
+  return out;
+}
+
+/** The status tabs on the left, Match type on the right of ONE row. On a
+ *  phone the pills wrap under the tabs. Without match types (every report
+ *  frozen before crawler #348) the right side is empty and the row is the
+ *  one it always was. */
+function ListTabsRow({ left, right }: { left: ReactNode; right: ReactNode }) {
+  return (
+    <div className="flex flex-wrap items-center justify-between gap-x-4 gap-y-2">
+      <div className="flex min-w-0 max-w-full flex-wrap items-center gap-3">{left}</div>
+      {right}
+    </div>
+  );
+}
 
 function DrilldownList({
   token,
@@ -1346,6 +1395,8 @@ function DrilldownList({
   tab,
   setTab,
   openFirst,
+  matchType,
+  setMatchType,
 }: {
   token: string;
   lines: string[];
@@ -1358,8 +1409,15 @@ function DrilldownList({
   setTab: (tab: DrillTab) => void;
   /** Each bump opens the first row of the next list to land. */
   openFirst: number;
+  /** All / Own / IPD, owned by the page (survives the view switch). */
+  matchType: MatchTypeFilter;
+  setMatchType: (next: MatchTypeFilter) => void;
 }) {
   const [rows, setRows] = useState<Row[]>([]);
+  // The list's split and its inconclusive IPD matches (crawler #348).
+  // Null on a report without match types: no pills, no note.
+  const [typeCounts, setTypeCounts] = useState<MatchTypeCounts | null>(null);
+  const [inconclusive, setInconclusive] = useState<IpdInconclusive | null>(null);
   const cache = usePageCache<unknown>();
   // The tab the rows on screen were read for. Lags `tab` until a new tab's
   // list lands, so a freshly picked tab never opens last tab's first row.
@@ -1383,7 +1441,7 @@ function DrilldownList({
   // empty list for a term that matches.
   useEffect(() => {
     setPage(1);
-  }, [tab, query, lines]);
+  }, [tab, query, lines, matchType]);
 
   // A NEW TAB OR A NEW LINE SELECTION IS A NEW LIST, and gets the
   // skeleton. Dropping `settled` to 0 is what says so: it is the same
@@ -1397,7 +1455,7 @@ function DrilldownList({
   // are the right weight for a search.
   useEffect(() => {
     setSettled(0);
-  }, [tab, lines]);
+  }, [tab, lines, matchType]);
 
   useEffect(() => {
     // The Inactive section reads its own lists.
@@ -1406,7 +1464,7 @@ function DrilldownList({
     let cancelled = false;
     const load = (pg: number) =>
       event === "all"
-        ? api.matchedDevelopers(token, pg, query, lines).then((r) => ({
+        ? api.matchedDevelopers(token, pg, query, lines, matchType).then((r) => ({
             rows: r.rows.map(
               (d: MatchedDeveloper): Row => ({
                 developer_id: d.developer_id,
@@ -1423,13 +1481,16 @@ function DrilldownList({
                 removed_lines: d.removed_lines ?? [],
                 cert_changed_lines: d.cert_changed_lines ?? [],
                 file_hosts: d.file_hosts ?? [],
+                ...matchTypeFieldsOf(d),
               }),
             ),
             total: r.total,
             truncated: r.truncated ?? false,
             trial: r.trial ?? null,
+            typeCounts: r.match_type_counts ?? null,
+            inconclusive: r.ipd_inconclusive ?? null,
           }))
-        : api.developerEvents(token, event, pg, query, lines).then((r) => ({
+        : api.developerEvents(token, event, pg, query, lines, matchType).then((r) => ({
             rows: r.rows.map(
               (d: DeveloperEvent): Row => ({
                 developer_id: d.developer_id,
@@ -1447,16 +1508,24 @@ function DrilldownList({
                 cert_changed_lines: d.cert_changed_lines ?? [],
                 // A change row names no hosts: the standing row does.
                 file_hosts: [],
+                ...matchTypeFieldsOf(d),
               }),
             ),
             total: r.total,
             truncated: false,
             trial: r.trial ?? null,
+            typeCounts: r.match_type_counts ?? null,
+            inconclusive: r.ipd_inconclusive ?? null,
           }));
     type Loaded = Awaited<ReturnType<typeof load>>;
-    const keyFor = (pg: number) => [tab, pg, query, lines.join(",")].join("|");
+    const keyFor = (pg: number) => [tab, pg, query, lines.join(","), matchType].join("|");
     const apply = (data: Loaded) => {
+      // A list that does not say how it splits has no pills, so it must
+      // not stay filtered by them either: back to every match.
+      if (!data.typeCounts && matchType !== "all") setMatchType("all");
       setRows(data.rows);
+      setTypeCounts(data.typeCounts);
+      setInconclusive(data.inconclusive);
       setRowsTab(tab);
       setTotal(data.total);
       setTruncated(data.truncated);
@@ -1493,7 +1562,7 @@ function DrilldownList({
     return () => {
       cancelled = true;
     };
-  }, [token, tab, page, query, lines, cache]);
+  }, [token, tab, page, query, lines, matchType, setMatchType, cache]);
 
   useOpenFirst(
     openFirst,
@@ -1507,7 +1576,9 @@ function DrilldownList({
       {/* Tabs, then a full-width search, in the Changes page's grammar,
           so the two pages read as one product. */}
       <div className="mb-3 space-y-2">
-        <div className="flex flex-wrap items-center gap-3">
+        <ListTabsRow
+          left={
+            <>
           <Tabs value={tab} onValueChange={(v) => setTab(v as DrillTab)} className="max-w-full">
             {/* Scrolls sideways on a narrow phone rather than pushing the page wider. */}
             <TabsList className="max-w-full justify-start overflow-x-auto">
@@ -1529,7 +1600,16 @@ function DrilldownList({
             </span>
           )}
           {loading && settled > 0 && tab !== "inactive" && <Dots />}
-        </div>
+            </>
+          }
+          right={
+            // Not on Inactive: those lists are not split by match type.
+            tab !== "inactive" &&
+            typeCounts && (
+              <MatchTypeControl value={matchType} onChange={setMatchType} counts={typeCounts} />
+            )
+          }
+        />
         {tab !== "inactive" && (
         <div className="relative w-full">
           <Search className="pointer-events-none absolute left-3.5 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
@@ -1638,6 +1718,11 @@ function DrilldownList({
             />
             {truncated && <TruncatedNotice shown={total} noun="publishers" />}
           </div>
+        )}
+        {/* IPD matches this crawl could not confirm: not rows, not
+            counted, one quiet line (All matched, never under Own). */}
+        {settled > 0 && !error && tab === "all" && matchType !== "own" && (
+          <IpdInconclusiveNote data={inconclusive} noun={{ one: "publisher", many: "publishers" }} />
         )}
       </div>
       )}
@@ -1805,6 +1890,7 @@ function PublisherCard({
                 {row.developer_platform}
               </span>
             )}
+            {!inactive && <IpdChip row={row} />}
             {inactive && <InactiveChip />}
           </div>
           {row.developer_domain && row.developer_name && (
@@ -1818,6 +1904,7 @@ function PublisherCard({
           {/* WHERE ITS FILES ARE (2026-10-21): the declared hosts whose
               app-ads.txt hold some of this publisher's lines. One quiet
               line, only when there are any; the lines below say which. */}
+          {!inactive && <IpdWhere row={row} />}
           {fileHostsLabel(row.file_hosts) && (
             <div data-file-hosts className="truncate text-[11px] text-slate-400">
               {fileHostsLabel(row.file_hosts)}
@@ -1875,20 +1962,28 @@ function PublisherCard({
             ) : (
               <p className="text-xs text-slate-500">No seat lines on record for this publisher.</p>
             )
-          ) : hasEmbeddedLines ? (
-            <ChangeExpansion
-              added={row.added_lines}
-              removed={row.removed_lines}
-              certChanged={row.cert_changed_lines}
-              matched={row.matched_lines}
-              publisherDomain={row.developer_domain}
-            />
           ) : (
-            <LazyMatchedSeatLines
-              token={token}
-              developerId={row.developer_id}
-              publisherDomain={row.developer_domain}
-            />
+            <>
+              {/* Seller role, Managed by, Alert (crawler #348): nothing on
+                  a row that carries none. */}
+              <RowRoles row={row} />
+              {hasEmbeddedLines ? (
+                <ChangeExpansion
+                  added={row.added_lines}
+                  removed={row.removed_lines}
+                  certChanged={row.cert_changed_lines}
+                  matched={row.matched_lines}
+                  // An IPD row's lines sit in its partner's ads.txt.
+                  publisherDomain={linesDomain(row, row.developer_domain)}
+                />
+              ) : (
+                <LazyMatchedSeatLines
+                  token={token}
+                  developerId={row.developer_id}
+                  publisherDomain={linesDomain(row, row.developer_domain)}
+                />
+              )}
+            </>
           )}
         </div>
       </Collapse>
@@ -2336,6 +2431,8 @@ function MatchedAppsList({
   tab,
   setTab,
   openFirst,
+  matchType,
+  setMatchType,
 }: {
   token: string;
   lines: string[];
@@ -2347,8 +2444,14 @@ function MatchedAppsList({
   setTab: (tab: DrillTab) => void;
   /** Each bump opens the first row of the next list to land. */
   openFirst: number;
+  /** All / Own / IPD, owned by the page (survives the view switch). */
+  matchType: MatchTypeFilter;
+  setMatchType: (next: MatchTypeFilter) => void;
 }) {
   const [allRows, setAllRows] = useState<MatchedApp[]>([]);
+  // The list's split and its inconclusive IPD matches (crawler #348).
+  const [typeCounts, setTypeCounts] = useState<MatchTypeCounts | null>(null);
+  const [inconclusive, setInconclusive] = useState<IpdInconclusive | null>(null);
   const [loading, setLoading] = useState(true);
   const [failed, setFailed] = useState(false);
   const [expanded, setExpanded] = useState<string | null>(null);
@@ -2368,21 +2471,25 @@ function MatchedAppsList({
   // first page.
   useEffect(() => {
     setPage(1);
-  }, [query, lines]);
+  }, [query, lines, matchType]);
 
   // Same rule as the publishers list above: a new line selection is a new
   // list and gets the skeleton, a keystroke in the search does not.
   useEffect(() => {
     setSettled(0);
-  }, [lines]);
+  }, [lines, matchType]);
 
   useEffect(() => {
     let cancelled = false;
-    const load = (pg: number) => api.matchedApps(token, pg, query, lines);
+    const load = (pg: number) => api.matchedApps(token, pg, query, lines, matchType);
     type Loaded = Awaited<ReturnType<typeof load>>;
-    const keyFor = (pg: number) => [pg, query, lines.join(",")].join("|");
+    const keyFor = (pg: number) => [pg, query, lines.join(","), matchType].join("|");
     const apply = (r: Loaded) => {
+      // No split said, no pills: and no filter left on from them.
+      if (!r.match_type_counts && matchType !== "all") setMatchType("all");
       setAllRows(r.rows ?? []);
+      setTypeCounts(r.match_type_counts ?? null);
+      setInconclusive(r.ipd_inconclusive ?? null);
       setTotal(r.total ?? 0);
       setTruncated(r.truncated ?? false);
       setTrial(r.trial ?? null);
@@ -2421,6 +2528,8 @@ function MatchedAppsList({
         // its number comes from the summary, not this list.
         if (!cancelled) {
           setAllRows([]);
+          setTypeCounts(null);
+          setInconclusive(null);
           setTotal(0);
           setFailed(true);
           setSettled((n) => n + 1);
@@ -2430,7 +2539,7 @@ function MatchedAppsList({
     return () => {
       cancelled = true;
     };
-  }, [token, page, query, lines, appCache]);
+  }, [token, page, query, lines, matchType, setMatchType, appCache]);
 
   // A card held open from one tab must not appear under another.
   useEffect(() => setExpanded(null), [tab]);
@@ -2454,7 +2563,9 @@ function MatchedAppsList({
   return (
     <div>
       <div className="mb-3 space-y-2">
-        <div className="flex flex-wrap items-center gap-3">
+        <ListTabsRow
+          left={
+            <>
           <Tabs value={tab} onValueChange={(v) => setTab(v as DrillTab)} className="max-w-full">
             {/* Scrolls sideways on a narrow phone rather than pushing the page wider. */}
             <TabsList className="max-w-full justify-start overflow-x-auto">
@@ -2473,7 +2584,22 @@ function MatchedAppsList({
             </span>
           )}
           {loading && settled > 0 && tab !== "inactive" && <Dots />}
-        </div>
+            </>
+          }
+          right={
+            tab !== "inactive" &&
+            typeCounts && (
+              <MatchTypeControl
+                value={matchType}
+                onChange={setMatchType}
+                // The change tabs filter the loaded page in the browser,
+                // so the server's split counts All matched only: no
+                // number in their tooltips rather than a wrong one.
+                counts={tab === "all" ? typeCounts : null}
+              />
+            )
+          }
+        />
         {tab !== "inactive" && (
         <div className="relative w-full">
           <Search className="pointer-events-none absolute left-3.5 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
@@ -2575,6 +2701,9 @@ function MatchedAppsList({
           {truncated && <TruncatedNotice shown={total} noun="apps" />}
         </div>
       )}
+      {settled > 0 && !failed && tab === "all" && matchType !== "own" && (
+        <IpdInconclusiveNote data={inconclusive} noun={{ one: "app", many: "apps" }} />
+      )}
       </>
       )}
     </div>
@@ -2667,6 +2796,7 @@ function MatchedAppCard({
             >
               {storeLabel(app.store)}
             </span>
+            {!inactive && <IpdChip row={app} />}
             {inactive && <InactiveChip />}
           </div>
           {/* A trial withholds an inactive app's publisher (the crawler
@@ -2689,6 +2819,7 @@ function MatchedAppCard({
               )}
             </div>
           )}
+          {!inactive && <IpdWhere row={app} />}
           {fileLine && (
             <div data-app-file className="truncate text-[11px] text-slate-400">
               {fileLine}
@@ -2746,20 +2877,26 @@ function MatchedAppCard({
                 ? "No seat lines on record for this app."
                 : "Its publisher and the lines it carries are in your full report."}
             </p>
-          ) : !hasEmbeddedLines && app.developer_id != null ? (
-            <LazyMatchedSeatLines
-              token={token}
-              developerId={app.developer_id}
-              publisherDomain={app.owner_domain}
-            />
           ) : (
-            <ChangeExpansion
-              added={app.added_lines ?? []}
-              removed={app.removed_lines ?? []}
-              certChanged={app.cert_changed_lines ?? []}
-              matched={lines}
-              publisherDomain={app.owner_domain}
-            />
+            <>
+              <RowRoles row={app} />
+              {!hasEmbeddedLines && app.developer_id != null ? (
+                <LazyMatchedSeatLines
+                  token={token}
+                  developerId={app.developer_id}
+                  publisherDomain={linesDomain(app, app.owner_domain)}
+                />
+              ) : (
+                <ChangeExpansion
+                  added={app.added_lines ?? []}
+                  removed={app.removed_lines ?? []}
+                  certChanged={app.cert_changed_lines ?? []}
+                  matched={lines}
+                  // An IPD app's lines sit in its partner's ads.txt.
+                  publisherDomain={linesDomain(app, app.owner_domain)}
+                />
+              )}
+            </>
           )}
         </div>
       </Collapse>
