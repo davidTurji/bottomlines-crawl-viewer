@@ -34,7 +34,7 @@ const CONTRACT_ROW_KEYS = [
   "declared_in",
   "seller_role",
   "managed_by",
-  "alert",
+  "verdict_alerts",
 ] as const;
 const CONTRACT_LIST_KEYS = ["match_type_counts", "ipd_inconclusive"] as const;
 const APP_NOTE = inconclusiveSentence({ count: 2, examples: MT_INCONCLUSIVE }, "apps");
@@ -281,9 +281,11 @@ test.describe("match type on a report that has it", () => {
     await expect(roles).toContainText("Seller role:Reseller");
     await expect(roles).toContainText("Managed by:copperline-media.tv (GB)");
     await expect(roles).toContainText("Partner inventory on:Tidewick TV");
-    await expect(page.locator("[data-row-alert]")).toHaveText(
+    // Each alert on its own line.
+    await expect(page.locator("[data-row-alert]")).toHaveText([
       "Listed as DIRECT, but sellers.json names copperline-media.tv, not northfold-tv.com: treated as a reseller.",
-    );
+      "Two managers for one country (GB): neither counts there.",
+    ]);
     // An own row: no chip.
     await expect(page.locator("[data-ipd-chip]")).toHaveCount(0);
     expect(errors).toEqual([]);

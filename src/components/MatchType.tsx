@@ -218,11 +218,12 @@ function roleLabel(role: string): string {
  */
 export function RowRoles({ row }: { row: MatchTypeFields }) {
   const partnerOn = (row.partner_inventory_on ?? []).filter(Boolean);
+  const alerts = (row.verdict_alerts ?? []).filter((a) => typeof a === "string" && a.trim());
   const facts: [string, string][] = [];
   if (row.seller_role) facts.push(["Seller role", roleLabel(row.seller_role)]);
   if (row.managed_by) facts.push(["Managed by", row.managed_by]);
   if (partnerOn.length) facts.push(["Partner inventory on", partnerOn.join(", ")]);
-  if (facts.length === 0 && !row.alert) return null;
+  if (facts.length === 0 && alerts.length === 0) return null;
   return (
     <div data-row-roles className="mb-3 space-y-2">
       {facts.length > 0 && (
@@ -235,15 +236,17 @@ export function RowRoles({ row }: { row: MatchTypeFields }) {
           ))}
         </dl>
       )}
-      {row.alert && (
+      {/* Each alert on its own quiet line. */}
+      {alerts.map((a) => (
         <p
+          key={a}
           data-row-alert
           role="note"
           className="rounded-lg border border-warn-border bg-warn-bg px-3 py-2 text-xs text-warn"
         >
-          {row.alert}
+          {a}
         </p>
-      )}
+      ))}
     </div>
   );
 }

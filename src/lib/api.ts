@@ -1376,8 +1376,10 @@ export type MatchTypeFields = {
   seller_role?: string | null;
   /** "X (GB)": the manager that counts for this seller. */
   managed_by?: string | null;
-  /** One sentence when the roles disagree with the file. */
-  alert?: string | null;
+  /** One sentence each when the roles disagree with the file, e.g.
+   *  "Listed as DIRECT, but sellers.json names X, not Y: treated as a
+   *  reseller." Empty or absent: nothing to say. */
+  verdict_alerts?: string[] | null;
   /** Not part of the fixed contract: the CTV platforms whose app-ads.txt
    *  names this publisher as their inventory partner. Shown only if the
    *  crawler ever sends it. */
@@ -1567,6 +1569,11 @@ export type LineEventsPage = MatchTypeMeta & {
  * publisher carry", which is a different fact from how many moved this week.
  */
 export type MatchedSeatLine = {
+  /** The seat's roles (crawler #348, REPORT_SELLER_ROLES), as on the row
+   *  that carries the line; read for the type's sake, the row says them. */
+  seller_role?: string | null;
+  managed_by?: string | null;
+  verdict_alerts?: string[] | null;
   ssp_domain: string;
   publisher_id: string;
   relationship: string;

@@ -1390,7 +1390,7 @@ function matchTypeFieldsOf(d: MatchTypeFields): MatchTypeFields {
   if (d.declared_in !== undefined) out.declared_in = d.declared_in;
   if (d.seller_role !== undefined) out.seller_role = d.seller_role;
   if (d.managed_by !== undefined) out.managed_by = d.managed_by;
-  if (d.alert !== undefined) out.alert = d.alert;
+  if (d.verdict_alerts !== undefined) out.verdict_alerts = d.verdict_alerts;
   if (d.partner_inventory_on !== undefined) out.partner_inventory_on = d.partner_inventory_on;
   return out;
 }

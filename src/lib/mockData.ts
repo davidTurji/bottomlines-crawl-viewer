@@ -1763,7 +1763,10 @@ const NORTHFOLD_LINES = (): MatchedSeatLine[] =>
 const NORTHFOLD_ROLES: MatchTypeFields = {
   seller_role: "reseller",
   managed_by: "copperline-media.tv (GB)",
-  alert: "Listed as DIRECT, but sellers.json names copperline-media.tv, not northfold-tv.com: treated as a reseller.",
+  verdict_alerts: [
+    "Listed as DIRECT, but sellers.json names copperline-media.tv, not northfold-tv.com: treated as a reseller.",
+    "Two managers for one country (GB): neither counts there.",
+  ],
   partner_inventory_on: ["Tidewick TV"],
 };
 
