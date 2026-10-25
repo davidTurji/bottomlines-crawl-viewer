@@ -31,9 +31,9 @@ const OPTIONS: { value: MatchTypeFilter; label: string; noun: string }[] = [
 ];
 
 /**
- * "Match type": All / Own / IPD as pill buttons at the right end of the
- * status tabs' row, the tabs' own height so the row reads as one designed
- * line. Counts sit in each pill's tooltip, not its label, so the pills keep
+ * "Match type": All / Own / IPD as slim, wide pill buttons at the right end
+ * of the status tabs' row, centred on the tabs' height so the row reads as
+ * one designed line. Counts sit in each pill's tooltip, not its label, so the pills keep
  * one width on every tab and every choice. `counts` null: the pills still
  * filter, the tooltips name no number (a list counted in the browser). On a
  * phone the group wraps under the tabs.
@@ -49,7 +49,7 @@ export function MatchTypeControl({
 }) {
   return (
     <div className="flex items-center gap-2" data-testid="match-type">
-      <span id="match-type-label" className="text-xs font-medium text-slate-500">
+      <span id="match-type-label" className="text-[10px] font-medium text-slate-500">
         Match type
       </span>
       <div role="group" aria-labelledby="match-type-label" className="flex items-center gap-1.5">
@@ -64,7 +64,7 @@ export function MatchTypeControl({
               onClick={() => onChange(o.value)}
               title={typeof n === "number" ? `${n.toLocaleString()} ${o.noun}` : undefined}
               className={cn(
-                "inline-flex h-10 items-center rounded-full border px-4 text-sm font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2",
+                "inline-flex h-8 items-center rounded-full border px-5 text-xs font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2",
                 on
                   ? "border-primary/40 bg-primary/10 text-primary"
                   : "border-border bg-white text-slate-600 hover:bg-muted hover:text-slate-900",
