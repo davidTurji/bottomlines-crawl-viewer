@@ -124,7 +124,9 @@ test.describe("the contract the client reads", () => {
       match_type: "ipd",
       ipd_partner: MT_PARTNER,
       ipd_platform: "Samsung TV Plus",
-      declared_in: "samsungtvplus.com's app-ads.txt",
+      declared_in: "Samsung TV Plus's app-ads.txt",
+      file_host: MT_PARTNER,
+      file_source: "inventory_partner",
     });
     expect(find(mockMatchedApps(1, "Samsung TV Plus", [], "ipd").rows)).toBeTruthy();
     expect(find(mockMatchedApps(1, "Samsung TV Plus", [], "own").rows)).toBeUndefined();
@@ -220,8 +222,10 @@ test.describe("match type on a report that has it", () => {
     await expect(card(page, "Samsung TV Plus")).toHaveCount(1);
     const chip = page.locator("[data-ipd-chip]").first();
     await expect(chip).toHaveText("IPD");
-    await expect(chip).toHaveAttribute("title", `${APP_WHERE}. Declared in samsungtvplus.com's app-ads.txt`);
+    await expect(chip).toHaveAttribute("title", `${APP_WHERE}. Declared in Samsung TV Plus's app-ads.txt`);
     await expect(page.locator("[data-ipd-where]")).toHaveText([APP_WHERE]);
+    // Credited from the partner's ads.txt, and the file line says so.
+    await expect(page.locator("[data-app-file]")).toHaveText(["File: failarmy.tv's ads.txt"]);
     await expect(page.locator("[data-ipd-inconclusive]")).toHaveText(APP_NOTE);
     // One row: the count alone, no pager.
     await expect(page.locator("[data-list-count] p")).toHaveText("1 app");
@@ -254,7 +258,7 @@ test.describe("match type on a report that has it", () => {
     await expect(page.locator("[data-ipd-where]")).toHaveText([PUBLISHER_WHERE]);
     await expect(page.locator("[data-ipd-chip]")).toHaveAttribute(
       "title",
-      `${PUBLISHER_WHERE}. Declared in samsungtvplus.com's app-ads.txt`,
+      `${PUBLISHER_WHERE}. Declared in Samsung TV Plus's app-ads.txt`,
     );
     await expect(page.locator("[data-ipd-inconclusive]")).toHaveText(PUBLISHER_NOTE);
     await expect(page.locator("[data-list-count] p")).toHaveText("1 publisher");
@@ -282,6 +286,20 @@ test.describe("match type on a report that has it", () => {
     );
     // An own row: no chip.
     await expect(page.locator("[data-ipd-chip]")).toHaveCount(0);
+    expect(errors).toEqual([]);
+  });
+
+  test("an IPD publisher under Added carries its partner line too", async ({ page }) => {
+    const errors = watchErrors(page);
+    const calls = await open(page, { matchType: true });
+    await page.getByRole("tab", { name: "Added" }).click();
+    await pill(page, "IPD").click();
+    await expect(card(page, "Samsung TV Plus")).toHaveCount(1);
+    await expect(page.locator("[data-ipd-chip]")).toHaveCount(1);
+    await expect(page.locator("[data-ipd-where]")).toHaveText([PUBLISHER_WHERE]);
+    await expect
+      .poll(() => calls.some((c) => c.path.endsWith("/developer-events") && c.query.includes("match_type=ipd")))
+      .toBe(true);
     expect(errors).toEqual([]);
   });
 

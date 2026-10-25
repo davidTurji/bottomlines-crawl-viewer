@@ -1626,7 +1626,10 @@ export type FileSource =
   | "parent_no_file"
   | "parent_host_unread"
   | "other_site"
-  | "no_website";
+  | "no_website"
+  /** An IPD app (crawler #348): credited from its inventory partner's
+   *  ads.txt, the partner under ``file_host``. */
+  | "inventory_partner";
 
 export type MatchedDeveloper = MatchTypeFields & {
   developer_id: number;

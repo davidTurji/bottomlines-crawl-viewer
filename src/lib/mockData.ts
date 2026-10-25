@@ -1747,8 +1747,16 @@ const MT_IPD: MatchTypeFields = {
   match_type: "ipd",
   ipd_partner: MT_PARTNER,
   ipd_platform: MT_PLATFORM.name,
-  declared_in: "samsungtvplus.com's app-ads.txt",
+  // The crawler sends the declaring file by its display name.
+  declared_in: `${MT_PLATFORM.name}'s app-ads.txt`,
   seller_role: "reseller",
+};
+/** The partner's ads.txt gained two of the customer's lines this week, so
+ *  the platform's IPD rows (publisher, app, and the Added event) move. */
+const MT_ADDED = {
+  ...MT_NO_CHANGE,
+  lines_added: 2,
+  added_lines: MT_SEATS.slice(0, 2).map((l) => ({ ...l, found_in: "ads.txt" })),
 };
 const NORTHFOLD_LINES = (): MatchedSeatLine[] =>
   CUSTOMER_SEATS.slice(40, 43).map((l) => ({ ...l, found_in: "app-ads.txt" }));
@@ -1767,7 +1775,7 @@ const MT_PUBLISHERS: MatchedDeveloper[] = [
     platform: "Samsung",
     line_count: MT_SEATS.length,
     matched_lines: mtLines("ads.txt"),
-    ...MT_NO_CHANGE,
+    ...MT_ADDED,
     file_hosts: [],
     ...MT_IPD,
   },
@@ -1795,7 +1803,10 @@ const MT_APPS: MatchedApp[] = [
     developer_id: MT_PLATFORM.developer_id,
     line_count: MT_SEATS.length,
     matched_lines: mtLines("ads.txt"),
-    ...MT_NO_CHANGE,
+    ...MT_ADDED,
+    // Credited from the partner's ads.txt (file_source of crawler #348).
+    file_host: MT_PARTNER,
+    file_source: "inventory_partner",
     ...MT_IPD,
   },
   {
@@ -1881,17 +1892,35 @@ function matchTypeApps(page: number, q: string, lines: string[], matchType: Matc
   };
 }
 
+/** The IPD event of the week: the partner's two new lines, on the platform. */
+const MT_ADDED_EVENT: DeveloperEvent = {
+  developer_id: MT_PLATFORM.developer_id,
+  developer_name: MT_PLATFORM.name,
+  developer_domain: MT_PLATFORM.domain,
+  developer_platform: "Samsung",
+  matched_lines_prev: MT_SEATS.length - MT_ADDED.lines_added,
+  matched_lines_current: MT_SEATS.length,
+  lines_newly_monitored: 0,
+  lines_monitoring_stopped: 0,
+  top_ssps: [{ ssp_domain: "madeupmedia.com", count: MT_ADDED.lines_added }],
+  occurred_at: "2026-08-25T09:18:40Z",
+  ...MT_ADDED,
+  matched_lines: mtLines("ads.txt"),
+  ...MT_IPD,
+};
+
 function matchTypeEvents(
   event: string,
   rows: DeveloperEvent[],
   page: number,
-  _lines: string[],
+  lines: string[],
   matchType: MatchTypeFilter,
 ): DeveloperEventsPage {
   const all: DeveloperEvent[] = [
-    // The week's changes are all own-file matches: an IPD row moves only
-    // when its partner's ads.txt does, and this mock's did not.
     ...rows.map((d): DeveloperEvent => ({ ...d, ...MT_OWN })),
+    // An IPD row under Added, with its partner, platform and file: the
+    // developer-events rows carry them too (crawler #348).
+    ...(event === "added" && carries(MT_ADDED_EVENT.matched_lines, lines) ? [MT_ADDED_EVENT] : []),
   ];
   const split = mtSplit(all, matchType);
   return {
