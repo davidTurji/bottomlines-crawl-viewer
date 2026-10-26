@@ -72,6 +72,7 @@ import {
   dateTitle,
   formatDateTime,
   removedDates,
+  removalReasonText,
   unconfirmedSentence,
   WEEKLY_READ_NOTE,
 } from "@/lib/changeDates";
@@ -2150,6 +2151,8 @@ function SeatLineRow({
         : change === "cert"
           ? certDates(line)
           : null;
+  // Why it was removed, when the report says (2026-10-26).
+  const removal = change === "removed" ? removalReasonText(line) : null;
   const text = (
     <div className="min-w-0 flex-1">
       <code
@@ -2164,6 +2167,11 @@ function SeatLineRow({
           <span className="font-normal text-slate-400">, {line.cert_id}</span>
         )}
       </code>
+      {removal && (
+        <div data-removal-reason className="text-[10px] leading-snug text-slate-600">
+          {removal}
+        </div>
+      )}
       {dates && (
         <div
           data-line-dates

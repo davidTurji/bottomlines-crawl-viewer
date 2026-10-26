@@ -11,7 +11,7 @@
  * One module, so the Overview's change windows, the Changes page's rosters
  * and the CSV export cannot drift in how they say a date.
  */
-import type { LineDateSource } from "./api";
+import type { LineDateSource, RemovalFields } from "./api";
 
 /** "18 Oct 2026, 11:29": the reader's local date, 24 hour time. Null when
  *  the value is absent or unreadable. */
@@ -92,6 +92,23 @@ export function unconfirmedDates(line: UnconfirmedLine): string {
     `read ${dateText(line.read_at)}`,
     verified ? `verified ${verified}` : "not verified",
   ].join(", ");
+}
+
+/** Why a removed line was removed, in the words the page prints: "Line no
+ *  longer in the file", or "File not served", plus the crawler's detail
+ *  when it sent one ("File not served: 404 on 3 reads"). Null when the
+ *  report does not say (frozen before the field) or says something this
+ *  page does not know: then the line says nothing about why. */
+export function removalReasonText(line: RemovalFields): string | null {
+  const label =
+    line.removal_reason === "line_not_in_file"
+      ? "Line no longer in the file"
+      : line.removal_reason === "file_not_served"
+        ? "File not served"
+        : null;
+  if (!label) return null;
+  const detail = line.removal_detail?.trim();
+  return detail ? `${label}: ${detail}` : label;
 }
 
 /** The one sentence that explains why every change carries two dates. */
