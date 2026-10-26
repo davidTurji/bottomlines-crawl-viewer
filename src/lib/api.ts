@@ -1491,7 +1491,20 @@ export type LineEventCounts = Record<Exclude<LineEventKind, "unconfirmed">, numb
  *  crawl's time when the exact read time was not stored. */
 export type LineDateSource = "fetch" | "crawl";
 
-export type LineEvent = {
+/**
+ * WHY A LINE WAS REMOVED (crawler, 2026-10-26), on a removed line: the file
+ * was read and the line is no longer in it, or the file itself was not
+ * served. Absent on every report frozen before it: the line then says
+ * nothing about why. Either way it is counted as removed.
+ */
+export type RemovalReason = "line_not_in_file" | "file_not_served";
+export type RemovalFields = {
+  removal_reason?: RemovalReason | null;
+  /** Optional evidence in a few words, e.g. "404 on 3 reads". */
+  removal_detail?: string | null;
+};
+
+export type LineEvent = RemovalFields & {
   developer_id: number;
   developer_name: string | null;
   developer_domain: string | null;
@@ -1568,7 +1581,7 @@ export type LineEventsPage = MatchTypeMeta & {
  * optional cert id. This is the answer to "which of my seats did this
  * publisher carry", which is a different fact from how many moved this week.
  */
-export type MatchedSeatLine = {
+export type MatchedSeatLine = RemovalFields & {
   /** The seat's roles (crawler #348, REPORT_SELLER_ROLES), as on the row
    *  that carries the line; read for the type's sake, the row says them. */
   seller_role?: string | null;

@@ -28,6 +28,7 @@ import {
   certDates,
   dateTitle,
   removedDates,
+  removalReasonText,
   unconfirmedDates,
   unconfirmedSentence,
   WEEKLY_READ_NOTE,
@@ -1134,6 +1135,14 @@ function ChangeCard({
                             {scopeReasonText(p.reason)}
                           </div>
                         )}
+                      {/* WHY THE LINE WAS REMOVED (2026-10-26): the line left
+                          the file, or the file was not served. Nothing on a
+                          report frozen before the crawler said. */}
+                      {group.event === "removed" && removalReasonText(p) && (
+                        <div data-removal-reason className="text-[10px] leading-snug text-slate-600">
+                          {removalReasonText(p)}
+                        </div>
+                      )}
                       {rowDates(p) && (
                         <div
                           data-line-dates

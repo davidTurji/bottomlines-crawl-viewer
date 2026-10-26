@@ -143,6 +143,13 @@ export type Scenario = {
    *  lists honour ``?match_type=own|ipd``. Default false: the answer of
    *  every report frozen before it, byte for byte today's. */
   matchType?: boolean;
+  /** true: a report whose removed lines say why (crawler, 2026-10-26):
+   *  every removed seat line and every removed line event carries
+   *  ``removal_reason``, in turn "line_not_in_file", "file_not_served"
+   *  with ``removal_detail`` "404 on 3 reads", and "file_not_served" with
+   *  no detail (see ``removalFor``). Default false: every report frozen
+   *  before it, with no such field. */
+  removalReasons?: boolean;
 };
 
 /* ── THE FILE-HOST FIELDS (snapshot version 5, 2026-10-21) ────────────
@@ -221,6 +228,17 @@ const publisherWithHost = (d: MatchedDeveloper): MatchedDeveloper => ({
     : {}),
 });
 
+/** The ``removalReasons`` scenario's reason for the i-th removed line of a
+ *  row (or the i-th publisher of a removed line's roster). */
+export function removalFor(i: number): Pick<MatchedSeatLine, "removal_reason" | "removal_detail"> {
+  if (i % 3 === 0) return { removal_reason: "line_not_in_file" };
+  if (i % 3 === 1) return { removal_reason: "file_not_served", removal_detail: "404 on 3 reads" };
+  return { removal_reason: "file_not_served" };
+}
+function withRemovalReasons<T extends LineArrays>(row: T): T {
+  return row.removed_lines ? { ...row, removed_lines: row.removed_lines.map((l, i) => ({ ...l, ...removalFor(i) })) } : row;
+}
+
 const TRIAL_CAPS = { publishers: 3, apps: 3, declarations: 3, discovered_lines: 3 };
 
 function cut<T>(rows: T[], cap: number, total: number) {
@@ -285,6 +303,7 @@ export async function installFakeApi(page: Page, scenario: Scenario = {}): Promi
     crawlDates: true,
     declaredHost: false,
     matchType: false,
+    removalReasons: false,
     ...scenario,
   };
   const hostApp = s.declaredHost ? declaredHostApp() : null;
@@ -371,7 +390,9 @@ export async function installFakeApi(page: Page, scenario: Scenario = {}): Promi
         // are newly monitored, not added (the first publisher of each).
         s.declaredHost && group?.event === "newly_monitored" && i === 0
           ? { ...lineEvent(r), host: DECLARED_HOST, reason: "host first read" }
-          : lineEvent(r),
+          : s.removalReasons && group?.event === "removed"
+            ? { ...lineEvent(r), ...removalFor(i) }
+            : lineEvent(r),
       );
       const size = filters.page_size!,
         p = filters.page!;
@@ -407,7 +428,7 @@ export async function installFakeApi(page: Page, scenario: Scenario = {}): Promi
       case "developer-events": {
         const event = (q.get("event") ?? "added") as "added" | "removed" | "changed";
         const r = mockDeveloperEvents(event, page_, lines, matchType);
-        r.rows = r.rows.map(eventRow);
+        r.rows = r.rows.map(eventRow).map((d) => (s.removalReasons ? withRemovalReasons(d) : d));
         return reply(200, s.trial ? { ...r, page: 1, ...cut(r.rows, TRIAL_CAPS.publishers, r.total) } : r);
       }
       case "line-events": {
@@ -422,9 +443,11 @@ export async function installFakeApi(page: Page, scenario: Scenario = {}): Promi
       }
       case "matched-developers": {
         const r = mockMatchedDevelopers(page_, q.get("q") ?? "", lines, matchType);
-        r.rows = r.rows.map((d) =>
-          hostApp && d.domain === hostApp.owner_domain ? publisherWithHost(publisherRow(d)) : publisherRow(d),
-        );
+        r.rows = r.rows
+          .map((d) =>
+            hostApp && d.domain === hostApp.owner_domain ? publisherWithHost(publisherRow(d)) : publisherRow(d),
+          )
+          .map((d) => (s.removalReasons ? withRemovalReasons(d) : d));
         return reply(200, s.trial ? { ...r, page: 1, ...cut(r.rows, TRIAL_CAPS.publishers, r.total) } : r);
       }
       case "matched-bundles": {
@@ -433,9 +456,9 @@ export async function installFakeApi(page: Page, scenario: Scenario = {}): Promi
       }
       case "matched-apps": {
         const r = mockMatchedApps(page_, q.get("q") ?? "", lines, matchType);
-        r.rows = r.rows.map((a) =>
-          hostApp && appKey(a) === appKey(hostApp) ? appAtHost(appRow(a)) : appRow(a),
-        );
+        r.rows = r.rows
+          .map((a) => (hostApp && appKey(a) === appKey(hostApp) ? appAtHost(appRow(a)) : appRow(a)))
+          .map((a) => (s.removalReasons ? withRemovalReasons(a) : a));
         return reply(200, s.trial ? { ...r, page: 1, ...cut(r.rows, TRIAL_CAPS.apps, r.total) } : r);
       }
       case "discovered-lines": {
