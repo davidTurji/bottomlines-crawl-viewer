@@ -38,6 +38,7 @@ import {
   type DeveloperEvent,
   type MatchedDeveloper,
   type MatchedApp,
+  type AppChange,
   type MatchedSeatLine,
   type LineEvent,
   type IpdInconclusive,
@@ -2501,12 +2502,30 @@ function lineEventToSeatLine(e: LineEvent): MatchedSeatLine {
   };
 }
 
+/** The change tabs, as the crawler's ``?change=`` names them. */
+function appChangeOf(tab: DrillTab): AppChange | undefined {
+  return tab === "added" || tab === "removed" || tab === "changed" ? tab : undefined;
+}
+/** The same filter in the browser, for an API that ignores ``?change=``. */
+function appMoved(a: MatchedApp, change: AppChange): boolean {
+  if (change === "added") return (a.lines_added ?? 0) > 0;
+  if (change === "removed") return (a.lines_removed ?? 0) > 0;
+  return (a.lines_cert_changed ?? 0) > 0;
+}
+
 /**
  * The matched APPS list, shown when the pink "Matched apps" card is selected.
  * A card-per-app list, the pink sibling of the publisher drilldown: same
  * shape, same expansion, same Added / Removed / Changed tabs, a different
- * family colour. The tabs filter the loaded apps by their weekly change; an
- * app that did not move this week appears under "All matched" only.
+ * family colour. An app that did not move this week appears under "All
+ * matched" only.
+ *
+ * The change tabs ask the server for the WHOLE list filtered by the change
+ * (``?change=``), paged and counted like All matched. An API from before
+ * that filter ignores the parameter (it echoes no ``change``): the tab then
+ * filters the page it got, and its count says it covers that page only,
+ * never the whole list (Select Media, 2026-10-26: "0 with changes" on a
+ * report with 82 apps lost).
  */
 function MatchedAppsList({
   token,
@@ -2551,6 +2570,11 @@ function MatchedAppsList({
   const keyOf = (a: MatchedApp) => `${a.store}:${a.bundle_id}`;
   const appCache = usePageCache<unknown>();
   const [settled, setSettled] = useState(0);
+  // The tab the rows on screen were read for, and whether the server
+  // filtered them for it (it echoed ``change``). Both lag `tab` until the
+  // new tab's list lands.
+  const [rowsTab, setRowsTab] = useState<DrillTab>(tab);
+  const [serverFiltered, setServerFiltered] = useState(false);
   // The match type the rows on screen were read for (the note follows it).
   const [rowsMatchType, setRowsMatchType] = useState<MatchTypeFilter>(matchType);
   // As on the publishers list: the rows settle in with the first list
@@ -2561,24 +2585,28 @@ function MatchedAppsList({
   }, [settled]);
   const slow = useLingering(loading && settled > 0, 300);
 
-  // A new search or a new line selection is a new list and starts at its
-  // first page.
+  // A new search, a new tab or a new line selection is a new list and
+  // starts at its first page.
   useEffect(() => {
     setPage(1);
-  }, [query, lines, matchType]);
+  }, [tab, query, lines, matchType]);
 
   // Same rule as the publishers list above: every change keeps the list on
-  // screen and ListSwap carries it across. This list stays loaded under
-  // Inactive (its tabs filter in the browser), so nothing resets here.
+  // screen and ListSwap carries it across. Under Inactive the rows stay as
+  // they were (that section reads its own lists).
 
   useEffect(() => {
+    if (tab === "inactive") return;
     let cancelled = false;
-    const load = (pg: number) => api.matchedApps(token, pg, query, lines, matchType);
+    const change = appChangeOf(tab);
+    const load = (pg: number) => api.matchedApps(token, pg, query, lines, matchType, change);
     type Loaded = Awaited<ReturnType<typeof load>>;
-    const keyFor = (pg: number) => [pg, query, lines.join(","), matchType].join("|");
+    const keyFor = (pg: number) => [change ?? "all", pg, query, lines.join(","), matchType].join("|");
     const apply = (r: Loaded) => {
       // No split said, no pills: and no filter left on from them.
       if (!r.match_type_counts && matchType !== "all") setMatchType("all");
+      setRowsTab(tab);
+      setServerFiltered(!!change && r.change === change);
       setAllRows(r.rows ?? []);
       setTypeCounts(r.match_type_counts ?? null);
       setInconclusive(r.ipd_inconclusive ?? null);
@@ -2620,6 +2648,8 @@ function MatchedAppsList({
         // red error or a blank card region. The "Matched apps" KPI is unaffected:
         // its number comes from the summary, not this list.
         if (!cancelled) {
+          setRowsTab(tab);
+          setServerFiltered(false);
           setAllRows([]);
           setTypeCounts(null);
           setInconclusive(null);
@@ -2632,23 +2662,25 @@ function MatchedAppsList({
     return () => {
       cancelled = true;
     };
-  }, [token, page, query, lines, matchType, setMatchType, appCache]);
+  }, [token, tab, page, query, lines, matchType, setMatchType, appCache]);
 
   // A card held open from one tab must not appear under another.
   useEffect(() => setExpanded(null), [tab]);
 
-  const rows = useMemo(() => {
-    if (tab === "added") return allRows.filter((a) => (a.lines_added ?? 0) > 0);
-    if (tab === "removed")
-      return allRows.filter((a) => (a.lines_removed ?? 0) > 0);
-    if (tab === "changed")
-      return allRows.filter((a) => (a.lines_cert_changed ?? 0) > 0);
-    return allRows;
-  }, [allRows, tab]);
+  // The server's rows are the answer when it filtered them; otherwise (an
+  // API that ignores ?change=) the change tab filters the page it got.
+  const rowsChange = appChangeOf(rowsTab);
+  const pageFiltered = !!rowsChange && !serverFiltered;
+  const rows = useMemo(
+    () => (pageFiltered && rowsChange ? allRows.filter((a) => appMoved(a, rowsChange)) : allRows),
+    [allRows, pageFiltered, rowsChange],
+  );
+  // What the count and the pager call the rows they count.
+  const noun = rowsTab === "all" ? "apps" : "with changes";
 
   useOpenFirst(
     openFirst,
-    !loading && settled > 0,
+    !loading && settled > 0 && rowsTab === tab,
     rows[0] ? keyOf(rows[0]) : null,
     setExpanded,
   );
@@ -2679,9 +2711,9 @@ function MatchedAppsList({
               <MatchTypeControl
                 value={matchType}
                 onChange={setMatchType}
-                // The change tabs filter the loaded page in the browser,
-                // so the server's split counts All matched only: no
-                // number in their tooltips rather than a wrong one.
+                // The server's split is known to count All matched only:
+                // no number in the change tabs' tooltips rather than a
+                // wrong one.
                 counts={tab === "all" ? typeCounts : null}
               />
             )
@@ -2694,15 +2726,15 @@ function MatchedAppsList({
             placeholder="Search apps"
             label="Search matched apps"
             right={
-              // The pager counts the SERVER's total, which is why it shows
-              // on All matched only. The change tabs filter the loaded page
-              // in the browser, so their count is a count of this page and
-              // paging it would be a claim the data cannot support.
+              // The pager counts the SERVER's total: All matched, or a
+              // change tab the server filtered. A change tab filtered in
+              // the browser counts the page it got, says so, and pages
+              // nothing: paging it would be a claim the data cannot support.
               settled > 0 && !failed && rows.length > 0
-                ? tab !== "all"
-                  ? <CountLine count={rows.length} noun="with changes" />
+                ? pageFiltered
+                  ? <CountLine count={rows.length} noun="on this page" />
                   : trial || caps
-                    ? <CountLine count={total} noun="apps" />
+                    ? <CountLine count={total} noun={noun} />
                     : (
                       <Pager
                         placement="inline"
@@ -2710,8 +2742,8 @@ function MatchedAppsList({
                         pageSize={PAGE_SIZE}
                         total={total}
                         onPage={paging.onPage}
-                        noun="apps"
-                        nounOne="app"
+                        noun={noun}
+                        nounOne={rowsTab === "all" ? "app" : undefined}
                       />
                     )
                 : null
@@ -2736,16 +2768,17 @@ function MatchedAppsList({
       {loading && settled === 0 && (
         <SkeletonRows rows={5} label="Loading matched apps" />
       )}
-      {/* One ListSwap for every change, as on the publishers list. The
-          change tabs filter in the browser, so the tab is part of the
-          version: switching them swaps the rows the same calm way. */}
+      {/* One ListSwap for every change, as on the publishers list: a tab
+          is a new list read, and the rows swap when it lands. */}
       {settled > 0 && (
-        <ListSwap version={`${settled}:${tab}`} pending={loading} intro={!landed.current}>
+        <ListSwap version={settled} pending={loading} intro={!landed.current}>
           {rows.length === 0 ? (
             failed ? (
               <p className="rounded-lg border border-dashed border-border bg-muted/20 p-6 text-center text-sm text-slate-500">
                 No matched apps to show yet.
               </p>
+            ) : pageFiltered ? (
+              <EmptyResult query={query} noun="apps with changes" onPage />
             ) : (
               <EmptyResult query={query} noun="apps" />
             )
@@ -2775,7 +2808,7 @@ function MatchedAppsList({
           )}
           {/* The pager under the list, only when there are pages to turn (the
               search row carries the count). */}
-          {!failed && tab === "all" && rows.length > 0 && !trial && !caps && (
+          {!failed && !pageFiltered && rows.length > 0 && !trial && !caps && (
             <div className="mt-4">
               {total > PAGE_SIZE && (
                 <Pager
@@ -2783,13 +2816,13 @@ function MatchedAppsList({
                   pageSize={PAGE_SIZE}
                   total={total}
                   onPage={paging.onPage}
-                  noun="apps"
+                  noun={noun}
                 />
               )}
-              {truncated && <TruncatedNotice shown={total} noun="apps" />}
+              {rowsTab === "all" && truncated && <TruncatedNotice shown={total} noun="apps" />}
             </div>
           )}
-          {!failed && tab === "all" && rowsMatchType !== "own" && (
+          {!failed && rowsTab === "all" && rowsMatchType !== "own" && (
             <IpdInconclusiveNote data={inconclusive} view="apps" />
           )}
         </ListSwap>

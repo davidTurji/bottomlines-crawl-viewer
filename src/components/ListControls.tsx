@@ -374,13 +374,23 @@ export function TruncatedNotice({
 }
 
 /** What an empty result should say, which depends on WHY it is empty. */
-export function EmptyResult({ query, noun }: { query: string; noun: string }) {
+export function EmptyResult({
+  query,
+  noun,
+  onPage = false,
+}: {
+  query: string;
+  noun: string;
+  /** The list was filtered on the loaded page only: say so, never "on
+   *  this report". */
+  onPage?: boolean;
+}) {
   return (
     <div className="rounded-lg border border-dashed border-border px-4 py-8 text-center">
       <p className="text-sm text-slate-600">
         {query
-          ? `No ${noun} match "${query}".`
-          : `No ${noun} on this report.`}
+          ? `No ${noun} match "${query}"${onPage ? " on this page" : ""}.`
+          : `No ${noun} on this ${onPage ? "page" : "report"}.`}
       </p>
       {query && (
         <p className="mt-1 text-xs text-slate-500">

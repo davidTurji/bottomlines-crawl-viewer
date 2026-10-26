@@ -48,6 +48,7 @@ import type {
   MatchedDeveloper,
   MatchedSeatLine,
   MatchTypeFilter,
+  AppChange,
 } from "../src/lib/api";
 import {
   MOCK_CHECKED_AT,
@@ -150,6 +151,12 @@ export type Scenario = {
    *  no detail (see ``removalFor``). Default false: every report frozen
    *  before it, with no such field. */
   removalReasons?: boolean;
+  /** true: a crawler with the matched apps change filter (2026-10-26):
+   *  ``?change=added|removed|changed`` filters the whole list before
+   *  paging, ``total`` is the filtered count, and the answer echoes
+   *  ``change``. Default false: today's API, which ignores the parameter
+   *  and answers the unfiltered list with no echo. */
+  appChange?: boolean;
 };
 
 /* ── THE FILE-HOST FIELDS (snapshot version 5, 2026-10-21) ────────────
@@ -304,6 +311,7 @@ export async function installFakeApi(page: Page, scenario: Scenario = {}): Promi
     declaredHost: false,
     matchType: false,
     removalReasons: false,
+    appChange: false,
     ...scenario,
   };
   const hostApp = s.declaredHost ? declaredHostApp() : null;
@@ -455,7 +463,8 @@ export async function installFakeApi(page: Page, scenario: Scenario = {}): Promi
         return reply(200, { ...r, rows: r.rows.map(bundleRow) });
       }
       case "matched-apps": {
-        const r = mockMatchedApps(page_, q.get("q") ?? "", lines, matchType);
+        const change = s.appChange ? ((q.get("change") || null) as AppChange | null) : null;
+        const r = mockMatchedApps(page_, q.get("q") ?? "", lines, matchType, change);
         r.rows = r.rows
           .map((a) => (hostApp && appKey(a) === appKey(hostApp) ? appAtHost(appRow(a)) : appRow(a)))
           .map((a) => (s.removalReasons ? withRemovalReasons(a) : a));
