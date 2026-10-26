@@ -180,7 +180,7 @@ export function Pager({
   if (pages <= 1) {
     if (placement === "top") return null;
     return (
-      <p className={cn("text-xs text-slate-500", placement === "inline" ? "whitespace-nowrap" : "px-1", className)}>
+      <p className={cn("text-xs tabular-nums text-slate-500", placement === "inline" ? "whitespace-nowrap" : "px-1", className)}>
         {total.toLocaleString()} {total === 1 && nounOne ? nounOne : noun}
       </p>
     );

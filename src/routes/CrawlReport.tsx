@@ -1,7 +1,7 @@
 import InactiveSection, { type InactiveCards } from "@/components/InactiveSection";
 import LockedTail from "@/components/LockedTail";
 import { MiniStat } from "@/components/MiniStat";
-import { Collapse, Settle, glideTo } from "@/components/Motion";
+import { Collapse, ListSwap, Settle, glideTo, useLingering } from "@/components/Motion";
 import TrialBanner from "@/components/TrialBanner";
 import {
   OverviewSkeleton,
@@ -1460,7 +1460,7 @@ function ListSearchRow({
  *  browser. */
 function CountLine({ count, noun }: { count: number; noun: string }) {
   return (
-    <p className="whitespace-nowrap text-xs text-slate-500">
+    <p className="whitespace-nowrap text-xs tabular-nums text-slate-500">
       {count.toLocaleString()} {noun}
     </p>
   );
@@ -1501,6 +1501,9 @@ function DrilldownList({
   // The tab the rows on screen were read for. Lags `tab` until a new tab's
   // list lands, so a freshly picked tab never opens last tab's first row.
   const [rowsTab, setRowsTab] = useState<DrillTab>(tab);
+  // The match type the rows on screen were read for: the note under the
+  // list follows the rows, not the pill, so it changes with them.
+  const [rowsMatchType, setRowsMatchType] = useState<MatchTypeFilter>(matchType);
   const [total, setTotal] = useState(0);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -1511,8 +1514,16 @@ function DrilldownList({
   const [truncated, setTruncated] = useState(false);
   /** The cut this trial report made to the list, or null on a full report. */
   const [trial, setTrial] = useState<TrialSlice | null>(null);
-  // Bumps each time a list lands, so the new rows ease in as one piece.
+  // Bumps each time a list lands: ListSwap swaps the rows on it.
   const [settled, setSettled] = useState(0);
+  // The rows settle in one by one with the first list only (Settle).
+  const landed = useRef(false);
+  useEffect(() => {
+    if (settled > 0) landed.current = true;
+  }, [settled]);
+  // The dots beside the tabs, only for an answer that keeps the reader
+  // waiting: one that lands at once never flashes them.
+  const slow = useLingering(loading && settled > 0, 300);
 
   // A new search, a new tab or a new line selection is a new list, so it
   // starts at its first page. Without this, searching from page 7 asks
@@ -1522,19 +1533,17 @@ function DrilldownList({
     setPage(1);
   }, [tab, query, lines, matchType]);
 
-  // A NEW TAB OR A NEW LINE SELECTION IS A NEW LIST, and gets the
-  // skeleton. Dropping `settled` to 0 is what says so: it is the same
-  // "nothing has landed yet" state a cold open is in, and it drives the
-  // same treatment, so applying a filter and opening the page cold look
-  // alike instead of one dimming and the other sketching.
-  //
-  // Typing in the search box is deliberately NOT in here. That fires on
-  // every keystroke, and a list that collapsed to a skeleton and back per
-  // character would be unreadable; the dots beside the tabs and the dim
-  // are the right weight for a search.
+  // ONE WEIGHT OF RELOAD (David, 2026-10-26). A new tab, line selection,
+  // match type, search or page keeps the list on screen and lets ListSwap
+  // carry it across: the rows dim, the new ones take their place, the
+  // height eases. The skeleton is for a list with nothing on screen to
+  // carry: the cold open, and coming back from Inactive, whose section
+  // took the list's place.
+  const prevTab = useRef(tab);
   useEffect(() => {
-    setSettled(0);
-  }, [tab, lines, matchType]);
+    if (prevTab.current === "inactive" && tab !== "inactive") setSettled(0);
+    prevTab.current = tab;
+  }, [tab]);
 
   useEffect(() => {
     // The Inactive section reads its own lists.
@@ -1606,6 +1615,7 @@ function DrilldownList({
       setTypeCounts(data.typeCounts);
       setInconclusive(data.inconclusive);
       setRowsTab(tab);
+      setRowsMatchType(data.typeCounts ? matchType : "all");
       setTotal(data.total);
       setTruncated(data.truncated);
       setTrial(data.trial);
@@ -1669,8 +1679,8 @@ function DrilldownList({
             </TabsList>
           </Tabs>
           {/* The dots say new rows are on the way while the old ones stay
-              in place (a search); the count itself sits on row 2. */}
-          {loading && settled > 0 && tab !== "inactive" && <Dots />}
+              in place; the count itself sits on row 2. */}
+          {slow && tab !== "inactive" && <Dots />}
             </>
           }
           right={
@@ -1688,14 +1698,14 @@ function DrilldownList({
             placeholder="Search publishers"
             label="Search matched publishers"
             right={
-              // Silent until a list has landed. While a new tab or filter
-              // is in flight `total` still holds the PREVIOUS answer, and
-              // printing "262 publishers" over a skeleton states a number
-              // for a question that is still being asked.
+              // Silent until a list has landed (the skeleton states no
+              // number). After that it is the count of the rows on screen,
+              // worded for the tab they were read for, and it changes when
+              // they do.
               settled > 0 && !error && rows.length > 0
                 ? trial || caps
                   // A trial's list is cut: the count, no pages.
-                  ? <CountLine count={total} noun={tab === "all" ? "publishers" : "with changes"} />
+                  ? <CountLine count={total} noun={rowsTab === "all" ? "publishers" : "with changes"} />
                   : (
                     <Pager
                       placement="inline"
@@ -1703,8 +1713,8 @@ function DrilldownList({
                       pageSize={PAGE_SIZE}
                       total={total}
                       onPage={paging.onPage}
-                      noun={tab === "all" ? "publishers" : "with changes"}
-                      nounOne={tab === "all" ? "publisher" : undefined}
+                      noun={rowsTab === "all" ? "publishers" : "with changes"}
+                      nounOne={rowsTab === "all" ? "publisher" : undefined}
                     />
                   )
                 : null
@@ -1712,20 +1722,11 @@ function DrilldownList({
           />
         )}
       </div>
-      {/* TWO WEIGHTS OF RELOAD, and which one a change gets is the whole
-          rule here.
-
-          A SEARCH is the light one: the rows stay on screen, dimmed, with
-          the dots above saying new ones are coming. It fires per keystroke,
-          and a list that collapsed to a skeleton and back on every
-          character would be unreadable.
-
-          A NEW TAB OR A NEW SEAT-LINE SELECTION is the heavy one. That is
-          a different question about the report, not a narrowing of this
-          one, and the rows underneath would otherwise sit dimmed while
-          still answering the question the reader just changed. Those reset
-          `settled` to 0, which is the same "nothing has landed yet" state a
-          cold open is in, and so draws the same skeleton. */}
+      {/* The skeleton until a first list lands; from then on every change
+          (tab, seat lines, match type, search, page) is one ListSwap: the
+          rows dim, the new ones take their place, the height eases. The
+          trial card, the pager under the list and the IPD note ride inside
+          it, so they move with the rows instead of jumping. */}
       {tab === "inactive" && inactive ? (
         <InactiveSection
           token={token}
@@ -1744,68 +1745,61 @@ function DrilldownList({
           <SkeletonRows rows={5} label="Loading matched publishers" />
         )}
         {error && <p className="text-sm text-critical">{error}</p>}
-        {settled > 0 && !error && rows.length === 0 && (
-          <div className={cn("transition-opacity duration-300", loading && "opacity-60")}>
-            <EmptyResult query={query} noun="publishers" />
-          </div>
-        )}
-        {/* `settled > 0` as well as rows: while a new tab or filter is
-            in flight the previous list is still in state, and without
-            this guard it would render underneath the skeleton. */}
-        {settled > 0 && !error && rows.length > 0 && (
-          <div
-            key={settled}
-            className={cn(
-              "animate-in fade-in space-y-3 transition-opacity duration-300 ease-out",
-              loading && "opacity-60",
+        {/* `settled > 0`: nothing to carry before a first list lands. */}
+        {settled > 0 && !error && (
+          <ListSwap version={settled} pending={loading} intro={!landed.current}>
+            {rows.length === 0 ? (
+              <EmptyResult query={query} noun="publishers" />
+            ) : (
+              <div className="space-y-3">
+                {rows.map((r, i) => (
+                  <Settle key={r.developer_id} index={i}>
+                    <PublisherCard
+                      row={r}
+                      token={token}
+                      open={expanded === r.developer_id}
+                      onToggle={() =>
+                        setExpanded(expanded === r.developer_id ? null : r.developer_id)
+                      }
+                    />
+                  </Settle>
+                ))}
+              </div>
             )}
-          >
-            {rows.map((r, i) => (
-              <Settle key={r.developer_id} index={i}>
-                <PublisherCard
-                  row={r}
-                  token={token}
-                  open={expanded === r.developer_id}
-                  onToggle={() =>
-                    setExpanded(expanded === r.developer_id ? null : r.developer_id)
-                  }
-                />
-              </Settle>
-            ))}
-          </div>
-        )}
-        {/* On a trial the card stands on every tab, rows or none: the way to
-            the full report never depends on the tab the reader is on. */}
-        {settled > 0 && !error && (caps || trial) && (
-          <LockedTail
-            slice={trial}
-            caps={caps}
-            noun={tab === "all" ? "matched publishers" : "publishers with changes"}
-            detail="publisher, every line it carries and every change, week after week"
-          />
-        )}
-        {/* The pager under the list, for the reader who has scrolled past
-            every row. On a single page it would only repeat the count the
-            search row already carries, so it stands only when there are
-            pages to turn. */}
-        {settled > 0 && !error && rows.length > 0 && !trial && !caps && (
-          <div className="mt-4">
-            {total > PAGE_SIZE && (
-              <Pager
-                page={page}
-                pageSize={PAGE_SIZE}
-                total={total}
-                onPage={paging.onPage}
-                noun={tab === "all" ? "publishers" : "with changes"}
+            {/* On a trial the card stands on every tab, rows or none: the way to
+                the full report never depends on the tab the reader is on. */}
+            {(caps || trial) && (
+              <LockedTail
+                slice={trial}
+                caps={caps}
+                noun={rowsTab === "all" ? "matched publishers" : "publishers with changes"}
+                detail="publisher, every line it carries and every change, week after week"
               />
             )}
-            {truncated && <TruncatedNotice shown={total} noun="publishers" />}
-          </div>
-        )}
-        {/* IPD matches this crawl could not confirm: not rows, not
-            counted, one quiet line (All matched, never under Own). */}
-        {settled > 0 && !error && tab === "all" && matchType !== "own" && (
-          <IpdInconclusiveNote data={inconclusive} view="publishers" />
+            {/* The pager under the list, for the reader who has scrolled past
+                every row. On a single page it would only repeat the count the
+                search row already carries, so it stands only when there are
+                pages to turn. */}
+            {rows.length > 0 && !trial && !caps && (
+              <div className="mt-4">
+                {total > PAGE_SIZE && (
+                  <Pager
+                    page={page}
+                    pageSize={PAGE_SIZE}
+                    total={total}
+                    onPage={paging.onPage}
+                    noun={rowsTab === "all" ? "publishers" : "with changes"}
+                  />
+                )}
+                {truncated && <TruncatedNotice shown={total} noun="publishers" />}
+              </div>
+            )}
+            {/* IPD matches this crawl could not confirm: not rows, not
+                counted, one quiet line (All matched, never under Own). */}
+            {rowsTab === "all" && rowsMatchType !== "own" && (
+              <IpdInconclusiveNote data={inconclusive} view="publishers" />
+            )}
+          </ListSwap>
         )}
       </div>
       )}
@@ -2549,6 +2543,15 @@ function MatchedAppsList({
   const keyOf = (a: MatchedApp) => `${a.store}:${a.bundle_id}`;
   const appCache = usePageCache<unknown>();
   const [settled, setSettled] = useState(0);
+  // The match type the rows on screen were read for (the note follows it).
+  const [rowsMatchType, setRowsMatchType] = useState<MatchTypeFilter>(matchType);
+  // As on the publishers list: the rows settle in with the first list
+  // only, and the dots wait for an answer that keeps the reader waiting.
+  const landed = useRef(false);
+  useEffect(() => {
+    if (settled > 0) landed.current = true;
+  }, [settled]);
+  const slow = useLingering(loading && settled > 0, 300);
 
   // A new search or a new line selection is a new list and starts at its
   // first page.
@@ -2556,11 +2559,9 @@ function MatchedAppsList({
     setPage(1);
   }, [query, lines, matchType]);
 
-  // Same rule as the publishers list above: a new line selection is a new
-  // list and gets the skeleton, a keystroke in the search does not.
-  useEffect(() => {
-    setSettled(0);
-  }, [lines, matchType]);
+  // Same rule as the publishers list above: every change keeps the list on
+  // screen and ListSwap carries it across. This list stays loaded under
+  // Inactive (its tabs filter in the browser), so nothing resets here.
 
   useEffect(() => {
     let cancelled = false;
@@ -2573,6 +2574,7 @@ function MatchedAppsList({
       setAllRows(r.rows ?? []);
       setTypeCounts(r.match_type_counts ?? null);
       setInconclusive(r.ipd_inconclusive ?? null);
+      setRowsMatchType(r.match_type_counts ? matchType : "all");
       setTotal(r.total ?? 0);
       setTruncated(r.truncated ?? false);
       setTrial(r.trial ?? null);
@@ -2660,7 +2662,7 @@ function MatchedAppsList({
               {inactive && <TabsTrigger value="inactive">Inactive</TabsTrigger>}
             </TabsList>
           </Tabs>
-          {loading && settled > 0 && tab !== "inactive" && <Dots />}
+          {slow && tab !== "inactive" && <Dots />}
             </>
           }
           right={
@@ -2726,67 +2728,63 @@ function MatchedAppsList({
       {loading && settled === 0 && (
         <SkeletonRows rows={5} label="Loading matched apps" />
       )}
-      {settled > 0 && rows.length === 0 && (
-        <div className={cn("transition-opacity duration-300", loading && "opacity-60")}>
-          {failed ? (
-            <p className="rounded-lg border border-dashed border-border bg-muted/20 p-6 text-center text-sm text-slate-500">
-              No matched apps to show yet.
-            </p>
+      {/* One ListSwap for every change, as on the publishers list. The
+          change tabs filter in the browser, so the tab is part of the
+          version: switching them swaps the rows the same calm way. */}
+      {settled > 0 && (
+        <ListSwap version={`${settled}:${tab}`} pending={loading} intro={!landed.current}>
+          {rows.length === 0 ? (
+            failed ? (
+              <p className="rounded-lg border border-dashed border-border bg-muted/20 p-6 text-center text-sm text-slate-500">
+                No matched apps to show yet.
+              </p>
+            ) : (
+              <EmptyResult query={query} noun="apps" />
+            )
           ) : (
-            <EmptyResult query={query} noun="apps" />
+            <div className="space-y-3">
+              {rows.map((a, i) => (
+                <Settle key={keyOf(a)} index={i}>
+                  <MatchedAppCard
+                    app={a}
+                    open={expanded === keyOf(a)}
+                    onToggle={() =>
+                      setExpanded(expanded === keyOf(a) ? null : keyOf(a))
+                    }
+                    token={token}
+                  />
+                </Settle>
+              ))}
+            </div>
           )}
-        </div>
-      )}
-      {/* `settled > 0` as well: the previous list is still in state while a
-          new filter is in flight, and would render under the skeleton. */}
-      {settled > 0 && rows.length > 0 && (
-        <div
-          key={settled}
-          className={cn(
-            "animate-in fade-in space-y-3 transition-opacity duration-300 ease-out",
-            loading && "opacity-60",
-          )}
-        >
-          {rows.map((a, i) => (
-            <Settle key={keyOf(a)} index={i}>
-              <MatchedAppCard
-                app={a}
-                open={expanded === keyOf(a)}
-                onToggle={() =>
-                  setExpanded(expanded === keyOf(a) ? null : keyOf(a))
-                }
-                token={token}
-              />
-            </Settle>
-          ))}
-        </div>
-      )}
-      {settled > 0 && !failed && (caps || trial) && (
-        <LockedTail
-          slice={trial}
-          caps={caps}
-          noun="matched apps"
-          detail="app, its store listing and every line it carries"
-        />
-      )}
-      {/* The pager under the list, only when there are pages to turn (the
-          search row carries the count). */}
-      {settled > 0 && !failed && tab === "all" && rows.length > 0 && !trial && !caps && (
-        <div className="mt-4">
-          {total > PAGE_SIZE && (
-            <Pager
-              page={page}
-              pageSize={PAGE_SIZE}
-              total={total}
-              onPage={paging.onPage}
-              noun="apps"
+          {!failed && (caps || trial) && (
+            <LockedTail
+              slice={trial}
+              caps={caps}
+              noun="matched apps"
+              detail="app, its store listing and every line it carries"
             />
           )}
-          {truncated && <TruncatedNotice shown={total} noun="apps" />}
-        </div>
-      )}
-      {settled > 0 && !failed && tab === "all" && matchType !== "own" && (
-        <IpdInconclusiveNote data={inconclusive} view="apps" />
+          {/* The pager under the list, only when there are pages to turn (the
+              search row carries the count). */}
+          {!failed && tab === "all" && rows.length > 0 && !trial && !caps && (
+            <div className="mt-4">
+              {total > PAGE_SIZE && (
+                <Pager
+                  page={page}
+                  pageSize={PAGE_SIZE}
+                  total={total}
+                  onPage={paging.onPage}
+                  noun="apps"
+                />
+              )}
+              {truncated && <TruncatedNotice shown={total} noun="apps" />}
+            </div>
+          )}
+          {!failed && tab === "all" && rowsMatchType !== "own" && (
+            <IpdInconclusiveNote data={inconclusive} view="apps" />
+          )}
+        </ListSwap>
       )}
       </>
       )}

@@ -16,6 +16,8 @@
  * no counts means no pills, no ``match_type`` means no chip. Old links
  * look exactly as they did (links are forever).
  */
+import { useRef, type KeyboardEvent } from "react";
+
 import type {
   IpdInconclusive,
   MatchTypeCounts,
@@ -31,12 +33,22 @@ const OPTIONS: { value: MatchTypeFilter; label: string; noun: string }[] = [
 ];
 
 /**
- * "Match type": All / Own / IPD as slim, wide pill buttons at the right end
- * of the status tabs' row, centred on the tabs' height so the row reads as
- * one designed line. Counts sit in each pill's tooltip, not its label, so the pills keep
- * one width on every tab and every choice. `counts` null: the pills still
- * filter, the tooltips name no number (a list counted in the browser). On a
- * phone the group wraps under the tabs.
+ * "Match type": All / Own / IPD as one slim segmented control at the right
+ * end of the status tabs' row, centred on the tabs' height so the row reads
+ * as one designed line. Counts sit in each option's tooltip, not its label,
+ * so the control keeps one width on every tab and every choice. `counts`
+ * null: the options still filter, the tooltips name no number (a list
+ * counted in the browser). On a phone the control wraps under the tabs.
+ *
+ * ONE TRACK, ONE THUMB (David, 2026-10-26: "more premium, system theme").
+ * The three options are equal segments of one rounded track in the theme's
+ * muted tone; a single raised thumb in the card colour slides under the
+ * chosen one (220 ms, the list swap's easing) while the labels' colours
+ * cross over, the same raised-on-muted look as the status tabs beside it.
+ * Equal segments, so the thumb moves by whole segment widths in CSS and
+ * never needs measuring. Arrow keys, Home and End move the choice like the
+ * tabs do; the control is one stop in the Tab order. Less motion asked
+ * for: the thumb jumps.
  */
 export function MatchTypeControl({
   value,
@@ -47,27 +59,59 @@ export function MatchTypeControl({
   onChange: (next: MatchTypeFilter) => void;
   counts: MatchTypeCounts | null;
 }) {
+  const index = Math.max(0, OPTIONS.findIndex((o) => o.value === value));
+  const buttons = useRef<(HTMLButtonElement | null)[]>([]);
+  const onKeyDown = (e: KeyboardEvent<HTMLDivElement>) => {
+    const last = OPTIONS.length - 1;
+    const next =
+      e.key === "ArrowRight" || e.key === "ArrowDown"
+        ? index === last ? 0 : index + 1
+        : e.key === "ArrowLeft" || e.key === "ArrowUp"
+          ? index === 0 ? last : index - 1
+          : e.key === "Home"
+            ? 0
+            : e.key === "End"
+              ? last
+              : null;
+    if (next === null) return;
+    e.preventDefault();
+    buttons.current[next]?.focus();
+    if (next !== index) onChange(OPTIONS[next].value);
+  };
   return (
-    <div className="flex items-center gap-2" data-testid="match-type">
+    <div className="flex items-center gap-2 tabular-nums" data-testid="match-type">
       <span id="match-type-label" className="text-[10px] font-medium text-slate-500">
         Match type
       </span>
-      <div role="group" aria-labelledby="match-type-label" className="flex items-center gap-1.5">
-        {OPTIONS.map((o) => {
-          const on = value === o.value;
+      <div
+        role="group"
+        aria-labelledby="match-type-label"
+        onKeyDown={onKeyDown}
+        className="relative grid h-8 grid-cols-3 items-center rounded-full border border-border bg-muted p-[3px]"
+      >
+        <span
+          aria-hidden
+          data-match-type-thumb={OPTIONS[index].value}
+          className="pointer-events-none absolute inset-y-[3px] left-[3px] w-[calc((100%-6px)/3)] rounded-full bg-card shadow-[0_1px_2px_hsl(150_30%_8%/0.08),0_1px_1px_hsl(150_30%_8%/0.04)] ring-1 ring-border/70 transition-transform [transition-duration:220ms] [transition-timing-function:cubic-bezier(0.2,0.8,0.2,1)] motion-reduce:transition-none"
+          style={{ transform: `translateX(${index * 100}%)` }}
+        />
+        {OPTIONS.map((o, i) => {
+          const on = i === index;
           const n = counts?.[o.value];
           return (
             <button
               key={o.value}
+              ref={(el) => {
+                buttons.current[i] = el;
+              }}
               type="button"
               aria-pressed={on}
+              tabIndex={on ? 0 : -1}
               onClick={() => onChange(o.value)}
               title={typeof n === "number" ? `${n.toLocaleString()} ${o.noun}` : undefined}
               className={cn(
-                "inline-flex h-8 items-center rounded-full border px-5 text-xs font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2",
-                on
-                  ? "border-primary/40 bg-primary/10 text-primary"
-                  : "border-border bg-white text-slate-600 hover:bg-muted hover:text-slate-900",
+                "relative z-10 inline-flex h-full w-16 items-center justify-center rounded-full text-xs font-medium transition-colors duration-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 motion-reduce:transition-none",
+                on ? "text-foreground" : "text-muted-foreground hover:text-foreground",
               )}
             >
               {o.label}

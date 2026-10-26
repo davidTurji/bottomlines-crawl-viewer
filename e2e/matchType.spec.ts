@@ -275,6 +275,8 @@ test.describe("match type on a report that has it", () => {
     const errors = watchErrors(page);
     await open(page, { matchType: true });
     await page.getByRole("textbox", { name: "Search matched publishers" }).fill("Northfold");
+    // The searched row first: the list swaps to it once the answer lands.
+    await expect(card(page, "Northfold TV")).toHaveCount(1);
     const closed = page.getByRole("button", { name: "Show the seat lines of Northfold TV" });
     if (await closed.count()) await closed.click();
     const roles = page.locator("[data-row-roles]");
@@ -342,6 +344,163 @@ test.describe("match type on a report that has it", () => {
     await expect(page.locator("[data-ipd-chip]")).toHaveCount(0);
     await toPublishers(page);
     await expect(pill(page, "All")).toHaveAttribute("aria-pressed", "true");
+    expect(errors).toEqual([]);
+  });
+});
+
+/*
+ * THE SWITCH IS CALM (owner, 2026-10-26: "a bit violent as the results
+ * shift; make it more premium"). A switch keeps the list mounted (the same
+ * element, the same id), dims the rows on screen rather than blanking
+ * them, swaps, and eases the list's height; the one thumb slides under the
+ * chosen option. Less motion asked for: none of that motion, an instant
+ * swap.
+ */
+type ListWatch = { el: Element | null; opacities: string[]; transitions: string[]; heights: string[] };
+
+/** Records what a switch does to the list: its fade layer's opacities and
+ *  transitions, and any height set on it while it eases. */
+async function watchList(page: Page) {
+  await page.evaluate(() => {
+    const outer = document.querySelector<HTMLElement>("[data-list-swap]");
+    const fade = outer?.querySelector<HTMLElement>("[data-list-fade]");
+    const w: ListWatch = { el: outer ?? null, opacities: [], transitions: [], heights: [] };
+    (window as unknown as { __listWatch: ListWatch }).__listWatch = w;
+    if (!outer || !fade) return;
+    new MutationObserver(() => {
+      w.opacities.push(fade.style.opacity);
+      if (fade.style.transition) w.transitions.push(fade.style.transition);
+    }).observe(fade, { attributes: true, attributeFilter: ["style"] });
+    new MutationObserver(() => {
+      if (outer.style.height) w.heights.push(outer.style.height);
+    }).observe(outer, { attributes: true, attributeFilter: ["style"] });
+  });
+}
+
+async function watched(page: Page) {
+  // The height lets go (back to auto) once it has eased.
+  await expect
+    .poll(() => page.locator("[data-list-swap]").evaluate((el) => (el as HTMLElement).style.height))
+    .toBe("");
+  return page.evaluate(() => {
+    const w = (window as unknown as { __listWatch: ListWatch }).__listWatch;
+    const now = document.querySelector<HTMLElement>("[data-list-swap]");
+    return {
+      same: w.el !== null && now === w.el,
+      opacity: now?.querySelector<HTMLElement>("[data-list-fade]")?.style.opacity ?? null,
+      opacities: w.opacities,
+      transitions: w.transitions,
+      heights: w.heights,
+    };
+  });
+}
+
+const thumb = (page: Page) => page.locator("[data-match-type-thumb]");
+const centreX = async (l: ReturnType<Page["locator"]>) => {
+  const b = await l.boundingBox();
+  return b ? Math.round(b.x + b.width / 2) : -1;
+};
+
+test.describe("the switch is calm", () => {
+  test("a switch keeps the list, dims the rows (never blank), swaps and eases the height; the thumb follows", async ({ page }) => {
+    const errors = watchErrors(page);
+    await open(page, { matchType: true });
+    await expect(thumb(page)).toHaveAttribute("data-match-type-thumb", "all");
+    for (const view of ["publishers", "apps"] as const) {
+      if (view === "apps") await toApps(page);
+      await expect(anyCard(page)).toBeVisible();
+      const id = await page.locator("[data-list-swap]").getAttribute("data-list-swap");
+      expect(id).toBeTruthy();
+
+      // All (or IPD, carried over from publishers) to Own: a long list.
+      await watchList(page);
+      await pill(page, "Own").click();
+      await expect(pill(page, "Own")).toHaveAttribute("aria-pressed", "true");
+      await expect(thumb(page)).toHaveAttribute("data-match-type-thumb", "own");
+      await expect.poll(() => centreX(thumb(page))).toBe(await centreX(pill(page, "Own")));
+      await expect(anyCard(page)).toBeVisible();
+      let w = await watched(page);
+      expect(w.same).toBe(true);
+      await expect(page.locator("[data-list-swap]")).toHaveAttribute("data-list-swap", id!);
+      // Dimmed, never blank, and back to full.
+      expect(w.opacities.some((o) => Number(o) < 1)).toBe(true);
+      expect(w.opacities.filter((o) => o !== "").every((o) => Number(o) >= 0.35)).toBe(true);
+      expect(w.opacity).toBe("1");
+
+      // Own to IPD: one row, so the list's height eases down to it.
+      await watchList(page);
+      await pill(page, "IPD").click();
+      await expect(card(page, "Samsung TV Plus")).toHaveCount(1);
+      await expect.poll(() => centreX(thumb(page))).toBe(await centreX(pill(page, "IPD")));
+      w = await watched(page);
+      expect(w.same).toBe(true);
+      expect(w.heights.length).toBeGreaterThan(0);
+      expect(w.opacity).toBe("1");
+      await expect(page.locator("[data-list-swap]")).toHaveAttribute("data-list-swap", id!);
+    }
+    expect(errors).toEqual([]);
+  });
+
+  test("the status tabs swap the rows the same way, in the same list", async ({ page }) => {
+    const errors = watchErrors(page);
+    await open(page, { matchType: true });
+    await expect(anyCard(page)).toBeVisible();
+    const id = await page.locator("[data-list-swap]").getAttribute("data-list-swap");
+    await watchList(page);
+    await page.getByRole("tab", { name: "Added" }).click();
+    await expect(page.getByRole("tab", { name: "Added" })).toHaveAttribute("aria-selected", "true");
+    await expect(anyCard(page)).toBeVisible();
+    const w = await watched(page);
+    expect(w.same).toBe(true);
+    expect(w.opacities.some((o) => Number(o) < 1)).toBe(true);
+    await expect(page.locator("[data-list-swap]")).toHaveAttribute("data-list-swap", id!);
+    expect(errors).toEqual([]);
+  });
+
+  test("arrow keys, Home and End move the choice; the control is one Tab stop", async ({ page }) => {
+    await open(page, { matchType: true });
+    await expect(pill(page, "All")).toHaveAttribute("tabindex", "0");
+    await expect(pill(page, "Own")).toHaveAttribute("tabindex", "-1");
+    await pill(page, "All").focus();
+    await page.keyboard.press("ArrowRight");
+    await expect(pill(page, "Own")).toHaveAttribute("aria-pressed", "true");
+    await expect(pill(page, "Own")).toBeFocused();
+    await expect(pill(page, "Own")).toHaveAttribute("tabindex", "0");
+    await page.keyboard.press("End");
+    await expect(pill(page, "IPD")).toHaveAttribute("aria-pressed", "true");
+    await page.keyboard.press("ArrowRight");
+    await expect(pill(page, "All")).toHaveAttribute("aria-pressed", "true");
+    await page.keyboard.press("ArrowLeft");
+    await expect(pill(page, "IPD")).toHaveAttribute("aria-pressed", "true");
+    await page.keyboard.press("Home");
+    await expect(pill(page, "All")).toHaveAttribute("aria-pressed", "true");
+    await expect(pill(page, "All")).toBeFocused();
+  });
+});
+
+test.describe("less motion asked for", () => {
+  test.use({ contextOptions: { reducedMotion: "reduce" } });
+
+  test("no thumb slide, no fade, no height ease: an instant swap in the same list", async ({ page }) => {
+    const errors = watchErrors(page);
+    await open(page, { matchType: true });
+    await expect(anyCard(page)).toBeVisible();
+    expect(await thumb(page).evaluate((el) => getComputedStyle(el).transitionProperty)).toBe("none");
+    const id = await page.locator("[data-list-swap]").getAttribute("data-list-swap");
+    await watchList(page);
+    await pill(page, "IPD").click();
+    await expect(card(page, "Samsung TV Plus")).toHaveCount(1);
+    // The thumb is already there: nothing to wait for.
+    expect(await centreX(thumb(page))).toBe(await centreX(pill(page, "IPD")));
+    const w = await watched(page);
+    expect(w.same).toBe(true);
+    expect(w.heights).toEqual([]);
+    expect(w.transitions).toEqual([]);
+    expect(w.opacities.filter((o) => o !== "" && o !== "1")).toEqual([]);
+    expect(
+      await page.locator("[data-list-fade]").evaluate((el) => getComputedStyle(el).transitionDuration),
+    ).toBe("0s");
+    await expect(page.locator("[data-list-swap]")).toHaveAttribute("data-list-swap", id!);
     expect(errors).toEqual([]);
   });
 });
