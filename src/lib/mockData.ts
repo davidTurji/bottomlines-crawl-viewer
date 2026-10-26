@@ -40,6 +40,7 @@ import type {
   MatchedBundlesPage,
   MatchedApp,
   MatchedAppsPage,
+  AppChange,
   ChatFrame,
   DeclarationRow,
   DeclarationRowsPayload,
@@ -1682,16 +1683,28 @@ function buildMatchedApps(): MatchedApp[] {
 
 const MATCHED_APPS = buildMatchedApps();
 
+/** The crawler's ``?change=`` filter on one app: it moved that way. */
+export function appMoved(a: MatchedApp, change: AppChange | null): boolean {
+  if (change === "added") return (a.lines_added ?? 0) > 0;
+  if (change === "removed") return (a.lines_removed ?? 0) > 0;
+  if (change === "changed") return (a.lines_cert_changed ?? 0) > 0;
+  return true;
+}
+
 export function mockMatchedApps(
   page: number,
   q = "",
   lines: string[] = [],
   /** null: a report frozen before match types (today's exact answer). */
   matchType: MatchTypeFilter | null = null,
+  /** The change tabs: the whole list filtered before paging, echoed as
+   *  ``change``. null: no filter, and no echo (today's exact answer). */
+  change: AppChange | null = null,
 ): MatchedAppsPage {
-  if (matchType !== null) return matchTypeApps(page, q, lines, matchType);
-  const pool = MATCHED_APPS.filter((a) => carries(a.matched_lines, lines));
-  return mockPage(pool, page, q, ["app_name", "bundle_id", "owner_domain"], PAGE_SIZE) as MatchedAppsPage;
+  if (matchType !== null) return matchTypeApps(page, q, lines, matchType, change);
+  const pool = MATCHED_APPS.filter((a) => carries(a.matched_lines, lines) && appMoved(a, change));
+  const r = mockPage(pool, page, q, ["app_name", "bundle_id", "owner_domain"], PAGE_SIZE) as MatchedAppsPage;
+  return change ? { ...r, change } : r;
 }
 
 // ─────────────────────────────────────────────────────────────────
@@ -1872,12 +1885,18 @@ function matchTypePublishers(
   };
 }
 
-function matchTypeApps(page: number, q: string, lines: string[], matchType: MatchTypeFilter): MatchedAppsPage {
+function matchTypeApps(
+  page: number,
+  q: string,
+  lines: string[],
+  matchType: MatchTypeFilter,
+  change: AppChange | null,
+): MatchedAppsPage {
   const all: MatchedApp[] = [...MATCHED_APPS.map((a): MatchedApp => ({ ...a, ...MT_OWN })), ...MT_APPS].sort(
     (a, b) => b.line_count - a.line_count,
   );
   const pool = mtSearch(
-    all.filter((a) => carries(a.matched_lines, lines)),
+    all.filter((a) => carries(a.matched_lines, lines) && appMoved(a, change)),
     q,
     (a) => [a.app_name, a.bundle_id, a.owner_domain, a.ipd_partner, a.ipd_platform],
   );
@@ -1892,6 +1911,7 @@ function matchTypeApps(page: number, q: string, lines: string[], matchType: Matc
     match_type_counts: split.counts,
     // Tidewick TV's two apps, through northfold-tv.com: not read, not counted.
     ipd_inconclusive: mtInconclusive(lines, 2),
+    ...(change ? { change } : {}),
   };
 }
 
