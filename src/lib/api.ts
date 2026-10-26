@@ -502,6 +502,13 @@ export const api = {
    * the APP and it carries the app's owner and its matched seat lines. Could
    * instead be embedded under matched-developers; a standalone endpoint is
    * cleaner because the app is the row here, not the publisher.
+   *
+   * `change` (the Added / Removed / Changed tabs) asks the server to filter
+   * the WHOLE list before paging: apps with lines_added, lines_removed or
+   * lines_cert_changed above 0, combined with `q`, `lines` and
+   * `match_type`, and `total` is the filtered count. A crawler that knows
+   * the filter echoes it as `change` on the response; an older one ignores
+   * the parameter and answers the unfiltered list (see MatchedAppsPage).
    */
   matchedApps: async (
     token: string,
@@ -509,17 +516,18 @@ export const api = {
     q = "",
     lines?: string[],
     matchType: MatchTypeFilter = "all",
+    change?: AppChange,
   ) => {
     if (MOCK) {
       const { mockMatchedApps } = await import("./mockData");
-      const r = mockMatchedApps(page, q, lines ?? [], mockMatchType(matchType));
+      const r = mockMatchedApps(page, q, lines ?? [], mockMatchType(matchType), change ?? null);
       return trialMock()
         ? { ...r, page: 1, ...cutRows(r.rows, TRIAL_CAPS_MOCK.apps, r.total) }
         : r;
     }
     return req<MatchedAppsPage>(
       "GET",
-      `/v1/viewer/${token}/matched-apps?page=${page}&page_size=${PAGE_SIZE}${q ? `&q=${encodeURIComponent(q)}` : ""}${linesQuery(lines)}${matchTypeQuery(matchType)}`,
+      `/v1/viewer/${token}/matched-apps?page=${page}&page_size=${PAGE_SIZE}${q ? `&q=${encodeURIComponent(q)}` : ""}${linesQuery(lines)}${matchTypeQuery(matchType)}${change ? `&change=${change}` : ""}`,
     );
   },
   /**
@@ -1779,9 +1787,18 @@ export type MatchedApp = MatchTypeFields & {
   file_source?: FileSource;
 };
 
+/** The change filter of the matched apps list (query param ``change``). */
+export type AppChange = "added" | "removed" | "changed";
+
 export type MatchedAppsPage = MatchTypeMeta & {
   /** Present on a trial report: this list was cut (see ``TrialSlice``). */
   trial?: TrialSlice | null;
+  /**
+   * The ``change`` filter the server applied to the whole list, echoed.
+   * Absent on an API from before the filter: it ignored the parameter, so
+   * the rows and ``total`` are the unfiltered list's.
+   */
+  change?: AppChange | null;
   page: number;
   page_size: number;
   total: number;
