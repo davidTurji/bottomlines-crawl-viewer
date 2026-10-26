@@ -31,8 +31,12 @@ import type {
   LineEventsPage,
   LineEvent,
   LineEventKind,
+  MatchedDeveloper,
   MatchedDevelopersPage,
   MatchedSeatLine,
+  MatchTypeFilter,
+  MatchTypeFields,
+  MatchTypeCounts,
   MatchedBundlesPage,
   MatchedApp,
   MatchedAppsPage,
@@ -768,6 +772,8 @@ export function mockDeveloperEvents(
   event: "added" | "removed" | "changed" | "unconfirmed",
   page: number,
   lines: string[] = [],
+  /** null: a report frozen before match types (today's exact answer). */
+  matchType: MatchTypeFilter | null = null,
 ): DeveloperEventsPage {
   // Attach the seat lines behind each row's counts, so its expanded card can
   // show WHAT moved. Seeded off the developer id (see changeArrays), so a
@@ -778,6 +784,7 @@ export function mockDeveloperEvents(
       ...changeArrays(d.developer_id, d.lines_added, d.lines_removed, d.lines_cert_changed),
     }))
     .filter((d) => carries(d.matched_lines ?? matchedLinesFor(d.developer_id, 6), lines));
+  if (matchType !== null) return matchTypeEvents(event, rows, page, lines, matchType);
   // Paged like the live endpoint, so the change tabs page in a local run.
   return {
     event,
@@ -1516,7 +1523,10 @@ export function mockMatchedDevelopers(
   page: number,
   q = "",
   lines: string[] = [],
+  /** null: a report frozen before match types (today's exact answer). */
+  matchType: MatchTypeFilter | null = null,
 ): MatchedDevelopersPage {
+  if (matchType !== null) return matchTypePublishers(page, q, lines, matchType);
   const pool = MATCHED_DEVS.filter((d) => carries(d.matched_lines, lines));
   return mockPage(pool, page, q, ["name", "domain"], PAGE_SIZE) as MatchedDevelopersPage;
 }
@@ -1672,9 +1682,258 @@ function buildMatchedApps(): MatchedApp[] {
 
 const MATCHED_APPS = buildMatchedApps();
 
-export function mockMatchedApps(page: number, q = "", lines: string[] = []): MatchedAppsPage {
+export function mockMatchedApps(
+  page: number,
+  q = "",
+  lines: string[] = [],
+  /** null: a report frozen before match types (today's exact answer). */
+  matchType: MatchTypeFilter | null = null,
+): MatchedAppsPage {
+  if (matchType !== null) return matchTypeApps(page, q, lines, matchType);
   const pool = MATCHED_APPS.filter((a) => carries(a.matched_lines, lines));
   return mockPage(pool, page, q, ["app_name", "bundle_id", "owner_domain"], PAGE_SIZE) as MatchedAppsPage;
+}
+
+// ─────────────────────────────────────────────────────────────────
+// Match type: own or IPD (crawler PR #348, inventory sharing)
+// ─────────────────────────────────────────────────────────────────
+//
+// Only on a report that carries match types (mock mode by default,
+// ``?matchtype=off`` for one frozen before them; the e2e fake API's
+// ``matchType`` scenario). Off, every function above answers exactly
+// what it always did.
+//
+// THE OWNER'S GOLDEN SCENARIO, real-world-correct (mock-data rule,
+// 2026-10-07: no real platform is ever shown naming a partner it does not
+// name). Checked live on 2026-10-25:
+//   * samsungtvplus.com/app-ads.txt (served from tvplus.adgrx.com) carries
+//     ``inventorypartnerdomain=failarmy.tv`` (line 348 that day);
+//   * failarmy.tv/ads.txt answers 200 (www.failarmy.tv, Trusted Media
+//     Brands), so this crawl "read" it;
+//   * com.samsung.android.tvplus is the Samsung TV Plus app on Google Play.
+// The customer's seat lines in that ads.txt are the invented
+// madeupmedia.com lines, as everywhere in this mock. So the Samsung TV Plus
+// app, and its publisher, match through failarmy.tv: IPD rows, counted in
+// the one Matched number, listed under All and IPD, never under Own.
+//
+// Everything else here is invented and belongs to nobody (NXDOMAIN, no NS,
+// 404 on Google Play, 2026-10-25): Northfold TV (northfold-tv.com,
+// tv.northfold.app) matches on its own app-ads.txt and carries the roles
+// sample; Tidewick TV (tidewick-tv.com) names northfold-tv.com as its
+// inventory partner, but this crawl did not read northfold-tv.com's
+// ads.txt, so those IPD matches are inconclusive: never a row, never
+// counted, one quiet note. copperline-media.tv is the invented manager.
+
+export const MT_PARTNER = "failarmy.tv";
+export const MT_PLATFORM = {
+  developer_id: 990_301,
+  name: "Samsung TV Plus",
+  domain: "samsungtvplus.com",
+  bundle: "com.samsung.android.tvplus",
+};
+const MT_SEATS = CUSTOMER_SEATS.filter((l) => l.ssp_domain === "madeupmedia.com").slice(1, 9);
+export const MT_INCONCLUSIVE = [{ partner: "northfold-tv.com", platform: "Tidewick TV" }];
+const mtLines = (found_in: string): MatchedSeatLine[] => MT_SEATS.map((l) => ({ ...l, found_in }));
+const MT_NO_CHANGE = {
+  lines_added: 0,
+  lines_removed: 0,
+  lines_cert_changed: 0,
+  added_lines: [] as MatchedSeatLine[],
+  removed_lines: [] as MatchedSeatLine[],
+  cert_changed_lines: [] as MatchedSeatLine[],
+};
+const MT_OWN: MatchTypeFields = { match_type: "own" };
+const MT_IPD: MatchTypeFields = {
+  match_type: "ipd",
+  ipd_partner: MT_PARTNER,
+  ipd_platform: MT_PLATFORM.name,
+  // The crawler sends the declaring file by its display name.
+  declared_in: `${MT_PLATFORM.name}'s app-ads.txt`,
+  seller_role: "reseller",
+};
+/** The partner's ads.txt gained two of the customer's lines this week, so
+ *  the platform's IPD rows (publisher, app, and the Added event) move. */
+const MT_ADDED = {
+  ...MT_NO_CHANGE,
+  lines_added: 2,
+  added_lines: MT_SEATS.slice(0, 2).map((l) => ({ ...l, found_in: "ads.txt" })),
+};
+const NORTHFOLD_LINES = (): MatchedSeatLine[] =>
+  CUSTOMER_SEATS.slice(40, 43).map((l) => ({ ...l, found_in: "app-ads.txt" }));
+const NORTHFOLD_ROLES: MatchTypeFields = {
+  seller_role: "reseller",
+  managed_by: "copperline-media.tv (GB)",
+  verdict_alerts: [
+    "Listed as DIRECT, but sellers.json names copperline-media.tv, not northfold-tv.com: treated as a reseller.",
+    "Two managers for one country (GB): neither counts there.",
+  ],
+  partner_inventory_on: ["Tidewick TV"],
+};
+
+const MT_PUBLISHERS: MatchedDeveloper[] = [
+  {
+    developer_id: MT_PLATFORM.developer_id,
+    name: MT_PLATFORM.name,
+    domain: MT_PLATFORM.domain,
+    platform: "Samsung",
+    line_count: MT_SEATS.length,
+    matched_lines: mtLines("ads.txt"),
+    ...MT_ADDED,
+    file_hosts: [],
+    ...MT_IPD,
+  },
+  {
+    developer_id: 990_310,
+    name: "Northfold TV",
+    domain: "northfold-tv.com",
+    platform: "CTV",
+    line_count: 3,
+    matched_lines: NORTHFOLD_LINES(),
+    ...MT_NO_CHANGE,
+    file_hosts: [],
+    ...MT_OWN,
+    ...NORTHFOLD_ROLES,
+  },
+];
+
+const MT_APPS: MatchedApp[] = [
+  {
+    store: "android",
+    bundle_id: MT_PLATFORM.bundle,
+    app_name: MT_PLATFORM.name,
+    owner_domain: MT_PLATFORM.domain,
+    owner_name: MT_PLATFORM.name,
+    developer_id: MT_PLATFORM.developer_id,
+    line_count: MT_SEATS.length,
+    matched_lines: mtLines("ads.txt"),
+    ...MT_ADDED,
+    // Credited from the partner's ads.txt (file_source of crawler #348).
+    file_host: MT_PARTNER,
+    file_source: "inventory_partner",
+    ...MT_IPD,
+  },
+  {
+    store: "android",
+    bundle_id: "tv.northfold.app",
+    app_name: "Northfold TV",
+    owner_domain: "northfold-tv.com",
+    owner_name: "Northfold TV",
+    developer_id: 990_310,
+    line_count: 3,
+    matched_lines: NORTHFOLD_LINES(),
+    ...MT_NO_CHANGE,
+    file_host: "northfold-tv.com",
+    file_source: "own_domain",
+    ...MT_OWN,
+    ...NORTHFOLD_ROLES,
+  },
+];
+
+function mtSplit<T extends MatchTypeFields>(
+  rows: T[],
+  matchType: MatchTypeFilter,
+): { rows: T[]; counts: MatchTypeCounts } {
+  const ipd = rows.filter((r) => r.match_type === "ipd").length;
+  return {
+    rows: matchType === "all" ? rows : rows.filter((r) => (r.match_type ?? "own") === matchType),
+    counts: { all: rows.length, own: rows.length - ipd, ipd },
+  };
+}
+function mtSearch<T>(rows: T[], q: string, text: (r: T) => (string | null | undefined)[]): T[] {
+  const needle = (q || "").trim().toLowerCase();
+  return needle ? rows.filter((r) => text(r).some((v) => (v ?? "").toLowerCase().includes(needle))) : rows;
+}
+/** The note's IPD matches ride on Northfold TV's lines: they leave with a
+ *  line filter that drops those. */
+function mtInconclusive(lines: string[], count: number) {
+  return carries(CUSTOMER_SEATS.slice(40, 43), lines) ? { count, examples: MT_INCONCLUSIVE } : null;
+}
+
+function matchTypePublishers(
+  page: number,
+  q: string,
+  lines: string[],
+  matchType: MatchTypeFilter,
+): MatchedDevelopersPage {
+  const all: MatchedDeveloper[] = [
+    ...MATCHED_DEVS.map((d): MatchedDeveloper => ({ ...d, ...MT_OWN })),
+    ...MT_PUBLISHERS,
+  ].sort((a, b) => b.line_count - a.line_count);
+  const pool = mtSearch(
+    all.filter((d) => carries(d.matched_lines, lines)),
+    q,
+    (d) => [d.name, d.domain, d.ipd_partner, d.ipd_platform],
+  );
+  const split = mtSplit(pool, matchType);
+  return {
+    ...(mockPage(split.rows, page, "", [], PAGE_SIZE) as MatchedDevelopersPage),
+    match_type_counts: split.counts,
+    ipd_inconclusive: mtInconclusive(lines, 1),
+  };
+}
+
+function matchTypeApps(page: number, q: string, lines: string[], matchType: MatchTypeFilter): MatchedAppsPage {
+  const all: MatchedApp[] = [...MATCHED_APPS.map((a): MatchedApp => ({ ...a, ...MT_OWN })), ...MT_APPS].sort(
+    (a, b) => b.line_count - a.line_count,
+  );
+  const pool = mtSearch(
+    all.filter((a) => carries(a.matched_lines, lines)),
+    q,
+    (a) => [a.app_name, a.bundle_id, a.owner_domain, a.ipd_partner, a.ipd_platform],
+  );
+  const split = mtSplit(pool, matchType);
+  const start = (page - 1) * PAGE_SIZE;
+  return {
+    page,
+    page_size: PAGE_SIZE,
+    total: split.rows.length,
+    truncated: false,
+    rows: split.rows.slice(start, start + PAGE_SIZE),
+    match_type_counts: split.counts,
+    // Tidewick TV's two apps, through northfold-tv.com: not read, not counted.
+    ipd_inconclusive: mtInconclusive(lines, 2),
+  };
+}
+
+/** The IPD event of the week: the partner's two new lines, on the platform. */
+const MT_ADDED_EVENT: DeveloperEvent = {
+  developer_id: MT_PLATFORM.developer_id,
+  developer_name: MT_PLATFORM.name,
+  developer_domain: MT_PLATFORM.domain,
+  developer_platform: "Samsung",
+  matched_lines_prev: MT_SEATS.length - MT_ADDED.lines_added,
+  matched_lines_current: MT_SEATS.length,
+  lines_newly_monitored: 0,
+  lines_monitoring_stopped: 0,
+  top_ssps: [{ ssp_domain: "madeupmedia.com", count: MT_ADDED.lines_added }],
+  occurred_at: "2026-08-25T09:18:40Z",
+  ...MT_ADDED,
+  matched_lines: mtLines("ads.txt"),
+  ...MT_IPD,
+};
+
+function matchTypeEvents(
+  event: string,
+  rows: DeveloperEvent[],
+  page: number,
+  lines: string[],
+  matchType: MatchTypeFilter,
+): DeveloperEventsPage {
+  const all: DeveloperEvent[] = [
+    ...rows.map((d): DeveloperEvent => ({ ...d, ...MT_OWN })),
+    // An IPD row under Added, with its partner, platform and file: the
+    // developer-events rows carry them too (crawler #348).
+    ...(event === "added" && carries(MT_ADDED_EVENT.matched_lines, lines) ? [MT_ADDED_EVENT] : []),
+  ];
+  const split = mtSplit(all, matchType);
+  return {
+    event,
+    page,
+    page_size: PAGE_SIZE,
+    total: split.rows.length,
+    rows: split.rows.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE),
+    match_type_counts: split.counts,
+  };
 }
 
 /** The summary under a seat-line filter: the matched counters re-counted

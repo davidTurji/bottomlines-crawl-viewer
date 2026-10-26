@@ -116,6 +116,8 @@ export function fileSourceLabel(source: FileSource | string | null | undefined):
       return "no file: the store listing names another site";
     case "no_website":
       return "no website in the store listing";
+    case "inventory_partner":
+      return "its inventory partner's ads.txt";
     default:
       return null;
   }
@@ -133,6 +135,12 @@ export function appFileLine(
 ): string | null {
   if (source === "no_website")
     return "No website in the store listing: no file applies";
+  // An IPD app (crawler #348): its lines sit in its inventory partner's
+  // ads.txt, and the partner is the host.
+  if (source === "inventory_partner") {
+    const partner = (host ?? "").trim();
+    return partner ? `File: ${partner}'s ads.txt` : "File: its inventory partner's ads.txt";
+  }
   const label = fileSourceLabel(source);
   if (!label) return null;
   const h = (host ?? "").trim();

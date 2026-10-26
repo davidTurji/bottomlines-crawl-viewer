@@ -1,7 +1,7 @@
 import InactiveSection, { type InactiveCards } from "@/components/InactiveSection";
 import LockedTail from "@/components/LockedTail";
 import { MiniStat } from "@/components/MiniStat";
-import { Collapse, Settle, glideTo } from "@/components/Motion";
+import { Collapse, ListSwap, Settle, glideTo, useLingering } from "@/components/Motion";
 import TrialBanner from "@/components/TrialBanner";
 import {
   OverviewSkeleton,
@@ -12,6 +12,16 @@ import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { BEAT_PAUSE_MS, CountUp, landsAfterMs, payoffStyle } from "@/components/CountUp";
 import { LineFilter } from "@/components/LineFilter";
 import { Dots } from "@/components/Dots";
+import { HoverHint } from "@/components/HoverHint";
+import {
+  appSubject,
+  IpdChip,
+  IpdInconclusiveNote,
+  IpdWhere,
+  linesDomain,
+  MatchTypeControl,
+  RowRoles,
+} from "@/components/MatchType";
 import { PAGE_SIZE } from "@/lib/paging";
 import { usePageCache } from "@/lib/pageCache";
 import { useLineFilter } from "@/lib/lineFilter";
@@ -30,6 +40,10 @@ import {
   type MatchedApp,
   type MatchedSeatLine,
   type LineEvent,
+  type IpdInconclusive,
+  type MatchTypeCounts,
+  type MatchTypeFields,
+  type MatchTypeFilter,
   type MatchedMove,
   type MatchedMoves,
   type InactiveApp,
@@ -112,6 +126,11 @@ export default function CrawlReport() {
   // Which Inactive list is open (Publishers or Apps). The page's, so it
   // survives switching views; picking a view picks its own list.
   const [inactiveKind, setInactiveKind] = useState<InactiveKind>("publishers");
+  // Match type (All / Own / IPD, crawler #348). The page's, like the tab,
+  // so it survives switching between publishers and apps. Never anything
+  // but "all" on a report without match types: the pills that change it
+  // only show when the list says how it splits.
+  const [matchType, setMatchType] = useState<MatchTypeFilter>("all");
   const pickView = (view: "publishers" | "apps") => {
     setMatchedView(view);
     setInactiveKind(view);
@@ -489,12 +508,14 @@ export default function CrawlReport() {
               {summary.counters.matched.lines.toLocaleString()} lines total
             </span>
           </div>
-          {/* Two premium tiles that double as the selector for the list
-              below: publishers in the brand's racing green, apps in pink.
-              Same number, label and delta rhythm as the left card's split
-              stats, so the two hero panels line up. Click one to switch the
-              list underneath; the selected tile carries a toned ring. */}
-          <div className="grid grid-cols-2 gap-3">
+          {/* Two tiles that double as the selector for the list below:
+              publishers in the brand's racing green, apps in pink. THE SAME
+              SPLIT AS THE LEFT CARD (David, 2026-10-25): one bordered box,
+              a hairline between, the same padding, so all four tiles are
+              the same width to the pixel and the two hero panels line up.
+              Click one to switch the list underneath; the selected tile
+              carries its tint. */}
+          <div className="grid grid-cols-2 divide-x divide-border overflow-hidden rounded-xl border border-border">
             <MatchedTile
               tone="publisher"
               icon={Globe}
@@ -572,6 +593,8 @@ export default function CrawlReport() {
             tab={listTab}
             setTab={setDrillTab}
             openFirst={openFirst}
+            matchType={matchType}
+            setMatchType={setMatchType}
           />
         </div>
       ) : (
@@ -589,6 +612,8 @@ export default function CrawlReport() {
             tab={listTab}
             setTab={setDrillTab}
             openFirst={openFirst}
+            matchType={matchType}
+            setMatchType={setMatchType}
           />
         </div>
       )}
@@ -914,13 +939,20 @@ export function SplitStat({
 }
 
 /**
- * A premium matched-inventory tile that doubles as the selector for the list
- * below. Publishers wear the brand's racing green, apps wear the pink `app`
- * tone. The number, label and delta rhythm matches the left card's SplitStat
- * so the two hero panels line up: the number leads, the label follows with a
- * small toned icon beside it (never over the number, so the figures share a
- * baseline across both panels), then the delta. The selected tile carries a
- * toned ring and a deeper tint; the idle one is plain white and hoverable.
+ * A matched-inventory tile that doubles as the selector for the list below.
+ * Publishers wear the brand's racing green, apps the pink `app` tone.
+ *
+ * ONE RHYTHM WITH THE LINES TILES ON THE LEFT (David, 2026-10-25, "1000%
+ * symmetric"): the same padding, corner radius and big-number row as
+ * SplitStat, the label on the same second line, the same 17px quiet slot
+ * under it, so all four tiles stand at one height. What this tile adds is
+ * found and lost this week (the value found, never only the net;
+ * kpis-show-value-found), in the tile's top-right corner: a tiny "This
+ * week" caption over "▲ 380 found" and "▼ 29 lost", small muted type, the
+ * figures softly tinted, shorter than the number and label beside it.
+ * Last week's count is not printed, it is the number minus the move: it
+ * lives in a hint above the move line. The selected tile carries its
+ * tint, as the Lines tiles do.
  */
 export function MatchedTile({
   tone,
@@ -936,7 +968,7 @@ export function MatchedTile({
   delayMs = 0,
 }: {
   tone: "publisher" | "app";
-  /** Found / lost behind the net, said under it when the report has them. */
+  /** Found / lost behind the net, when the report has them. */
   move?: MatchedMove | null;
   icon: typeof Globe;
   number: number;
@@ -944,122 +976,132 @@ export function MatchedTile({
   delta?: Delta | null;
   /** When this figure starts rolling (the overview's second beat). */
   delayMs?: number;
-  /** Last week's count. With it the week's change stands as its own figure
-   *  ("+351", "+4.4%") at the tile's right edge instead of a chip. */
+  /** Last week's count. With it the move line says the week's move and
+   *  keeps last week's figure in its tooltip. */
   previous?: number | null;
-  /** Said in the delta's slot when there is no delta; the slot keeps its
+  /** Said in the quiet slot when there is no delta; the slot keeps its
    *  height either way so the tile never moves. */
   note?: string;
   active: boolean;
   onClick: () => void;
 }) {
   const isApp = tone === "app";
-  const wordy = delta != null && previous != null;
-  const moveCls =
-    delta == null || delta.abs === 0 ? "text-slate-400" : delta.abs > 0 ? "text-ok" : "text-critical";
+  // The pair the move line reads, narrowed once for the type checker.
+  const w = delta != null && previous != null ? { delta, previous } : null;
   const numberCls = isApp ? "text-app" : "text-primary";
   const iconCls = isApp ? "text-app" : "text-primary";
-  const activeGround = isApp
-    ? "border-app-border bg-app-bg/70 ring-1 ring-app/40"
-    : "border-ok-border bg-ok-bg/60 ring-1 ring-primary/30";
-  const idleGround =
-    "border-border bg-white hover:border-primary/20 hover:bg-muted/30";
+  // Toned to the tile when its list is the one below, as SplitStat does.
+  const activeGround = isApp ? "bg-app-bg/70" : "bg-ok-bg/60";
+  const idleGround = "hover:bg-muted/40";
+  // The change lines are the payoff: they rise in once the figure lands.
+  const payoff = payoffStyle(delayMs + landsAfterMs());
+  const numberRow = (
+    // The Lines tiles' number row to the pixel: the same baseline row, its
+    // sign slot present but empty and zero wide, so the row stands at the
+    // same height as "+127" over there.
+    <span className="flex items-baseline">
+      <span aria-hidden className="invisible w-0 select-none font-mono text-2xl font-semibold tabular-nums sm:text-3xl">
+        +
+      </span>
+      <span
+        // Keyed on the value: a new figure counts up again.
+        key={number}
+        className={cn(
+          "font-mono text-3xl font-semibold leading-none tabular-nums tracking-tight sm:text-4xl",
+          numberCls,
+        )}
+      >
+        <CountUp value={number} delayMs={delayMs} />
+      </span>
+    </span>
+  );
+  const labelRow = (
+    <span className="mt-2 flex items-center gap-1.5 text-[12px] font-medium text-slate-700">
+      <Icon aria-hidden className={cn("h-3.5 w-3.5 flex-shrink-0", iconCls)} />
+      {label}
+    </span>
+  );
+  const moveLine = w ? (
+    // Last week's count rides in a hint anchored to this line (a native
+    // title floats wherever the pointer is, half a card away).
+    <HoverHint text={`${w.previous.toLocaleString()} last week`}>
+      <span className="text-slate-500">
+        {w.delta.abs === 0 ? (
+          "no change vs last week"
+        ) : (
+          <>
+            <span className="font-mono font-medium tabular-nums text-slate-600">{moveText(w.delta)}</span>{" "}
+            vs last week
+          </>
+        )}
+      </span>
+    </HoverHint>
+  ) : delta ? (
+    <DeltaChip delta={delta} />
+  ) : note ? (
+    <span className="text-slate-400">{note}</span>
+  ) : null;
   return (
     <button
       type="button"
       onClick={onClick}
       aria-pressed={active}
       className={cn(
-        "kpi-tile flex flex-col gap-3 rounded-xl border px-5 py-4 text-left shadow-sm transition-colors",
+        "mtile group block w-full px-5 py-4 text-left transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring",
         active ? activeGround : idleGround,
       )}
     >
-      {/* TWO ROWS, so what pairs up lines up (David, 2026-10-06). The top
-          row holds the count and its label beside the week's move; the
-          bottom row holds last week's figure beside found and lost, on one
-          baseline, so the two small lines never sit at different heights. */}
-      <span className="kpi-tile-top">
-        <span className="flex min-w-0 flex-col">
-          <span
-            key={number}
-            className={cn(
-              "kpi-tile-num font-mono font-semibold leading-none tabular-nums tracking-tight",
-              numberCls,
-            )}
-          >
-            <CountUp value={number} delayMs={delayMs} />
-          </span>
-          <span className="mt-2 flex items-center gap-1.5 text-[12px] font-medium text-slate-700">
-            <Icon aria-hidden className={cn("h-3.5 w-3.5 flex-shrink-0", iconCls)} />
-            {label}
-          </span>
-        </span>
-        {/* THE WEEK'S MOVE, AS ITS OWN FIGURE. How many more publishers or
-            apps matched this week is the point of the tile, so the count and
-            the percentage stand at the tile's right edge at reading size,
-            not as a footnote under the label. A narrow tile stacks it under
-            the count (index.css, .kpi-tile). */}
-        {wordy && (
-          <span
-            key={number}
-            className="kpi-tile-move"
-            // The week's move is the payoff: it rises in once the count lands.
-            style={payoffStyle(delayMs + landsAfterMs())}
-          >
-            <span
-              className={cn(
-                "kpi-tile-move-num font-mono font-semibold leading-none tabular-nums",
-                moveCls,
-              )}
-            >
-              {delta.abs > 0 ? "+" : delta.abs < 0 ? "-" : ""}
-              {Math.abs(delta.abs).toLocaleString()}
-            </span>
-            <span className="kpi-tile-move-sub text-[11px] leading-[15px] text-slate-500">
-              {delta.abs !== 0 && (
-                <span className={cn("font-mono font-medium tabular-nums", moveCls)}>
-                  {pctText(delta.pct)}
-                </span>
-              )}
-              <span>{delta.abs === 0 ? "no change" : "vs last week"}</span>
-            </span>
-          </span>
-        )}
+      {/* A small grid (index.css, .mtile-grid): the number and the label
+          in the first column, the corner in the second, a fixed gap
+          between, never overlapping. The corner is shorter than the two
+          rows beside it, so the tile keeps the Lines tiles' height. Too
+          narrow for the two columns (a phone), the corner moves under the
+          label. */}
+      <span className="mtile-grid">
+        <span className="mtile-num">{numberRow}</span>
+        <span className="mtile-label">{labelRow}</span>
+        {w && move && <FoundLostCorner move={move} style={payoff} />}
       </span>
-      <span className="kpi-tile-foot min-h-[15px] text-[11px] leading-[15px]">
-        <span className="min-w-0">
-          {wordy ? (
-            <span className="text-slate-500">{previous.toLocaleString()} last week</span>
-          ) : delta ? (
-            <DeltaChip delta={delta} />
-          ) : note ? (
-            <span className="text-slate-400">{note}</span>
-          ) : null}
-        </span>
-        {wordy && move && (move.found > 0 || move.lost > 0) && (
-          // Behind the net, in plain words: what we found and what went.
-          <span
-            key={number}
-            className="kpi-tile-fl text-slate-500"
-            style={payoffStyle(delayMs + landsAfterMs())}
-          >
-            <span className="font-mono font-medium tabular-nums text-ok">
-              {move.found.toLocaleString()}
-            </span>{" "}
-            found,{" "}
-            <span
-              className={cn(
-                "font-mono font-medium tabular-nums",
-                move.lost > 0 ? "text-critical" : "text-slate-500",
-              )}
-            >
-              {move.lost.toLocaleString()}
-            </span>{" "}
-            lost
-          </span>
-        )}
+      {/* ONE SLOT, ALWAYS THE SAME HEIGHT, as on the Lines tiles. */}
+      <span key={number} className="block min-h-[17px] text-[11px] leading-[17px]" style={payoff}>
+        {moveLine}
       </span>
     </button>
+  );
+}
+
+/** The signed move and its percentage, "+351 (+4.4%)". */
+function moveText(delta: Delta): string {
+  const sign = delta.abs > 0 ? "+" : delta.abs < 0 ? "-" : "";
+  return `${sign}${Math.abs(delta.abs).toLocaleString()} (${pctText(delta.pct)})`;
+}
+
+/** Soft tints for the quiet lines: easy on the eye, never saturated. */
+const SOFT_OK = "text-[hsl(152_38%_38%)]";
+const SOFT_CRITICAL = "text-[hsl(0_46%_54%)]";
+
+/**
+ * The tile's corner: a tiny muted "This week" over "▲ 380 found" and
+ * "▼ 29 lost", short right-aligned lines in small muted type, the figures
+ * softly tinted. "This week" is a caption rather than on each line so the
+ * corner stays narrow enough to sit beside the number on a 1,280px window.
+ */
+function FoundLostCorner({ move, style }: { move: MatchedMove; style?: React.CSSProperties }) {
+  const line = (glyph: string, n: number, word: string, tint: string) => (
+    <span className="whitespace-nowrap">
+      <span className={cn("text-[8px]", n > 0 ? tint : "text-slate-400")}>{glyph}</span>{" "}
+      <span className={cn("font-mono font-medium tabular-nums", n > 0 ? tint : "text-slate-400")}>
+        {n.toLocaleString()}
+      </span>{" "}
+      {word}
+    </span>
+  );
+  return (
+    <span data-found-lost className="mtile-corner flex flex-col items-end text-right text-[10px] leading-[1.6] text-slate-500" style={style}>
+      <span className="text-[9px] leading-[1.4] text-slate-400">This week</span>
+      {line("▲", move.found, "found", SOFT_OK)}
+      {line("▼", move.lost, "lost", SOFT_CRITICAL)}
+    </span>
   );
 }
 
@@ -1336,7 +1378,93 @@ type Row = {
   /** The declared hosts whose app-ads.txt hold some of this publisher's
    *  lines (2026-10-21); empty on its own file alone or on an older report. */
   file_hosts: string[];
-};
+} & MatchTypeFields;
+
+/** The contract's per-row match type fields, copied as they came: absent
+ *  stays absent, so an old report's row carries none of them. */
+function matchTypeFieldsOf(d: MatchTypeFields): MatchTypeFields {
+  const out: MatchTypeFields = {};
+  if (d.match_type !== undefined) out.match_type = d.match_type;
+  if (d.ipd_partner !== undefined) out.ipd_partner = d.ipd_partner;
+  if (d.ipd_platform !== undefined) out.ipd_platform = d.ipd_platform;
+  if (d.declared_in !== undefined) out.declared_in = d.declared_in;
+  if (d.seller_role !== undefined) out.seller_role = d.seller_role;
+  if (d.managed_by !== undefined) out.managed_by = d.managed_by;
+  if (d.verdict_alerts !== undefined) out.verdict_alerts = d.verdict_alerts;
+  if (d.partner_inventory_on !== undefined) out.partner_inventory_on = d.partner_inventory_on;
+  return out;
+}
+
+/* ── THE LIST'S CONTROLS, TWO ROWS AND NOTHING ELSE (David, 2026-10-25) ──
+   Row 1: the status tabs on the left; "Match type" and its pills on the
+   right, the tabs' height. Row 2: the search box on the left, held to a
+   sensible width; "1–25 of 262 publishers" and the pager on the right,
+   centred on the search box. The count lives on row 2 only (the pills
+   keep theirs in their tooltips), and the standalone count-and-pager line
+   that used to sit above the rows is gone; the pager under the list
+   stays. On a phone row 1 wraps the pills under the tabs and row 2 stacks
+   the search above the count and pager. Nothing in either row moves when
+   a tab or a pill changes: the tabs and pills have fixed widths, the
+   search box keeps its width whatever lands on its right, and the right
+   side is right-aligned so only its left edge grows. Without match types
+   (every report frozen before crawler #348) row 1's right side is empty. */
+function ListTabsRow({ left, right }: { left: ReactNode; right: ReactNode }) {
+  return (
+    <div className="flex flex-wrap items-center justify-between gap-x-4 gap-y-2">
+      <div className="flex min-w-0 max-w-full flex-wrap items-center gap-3">{left}</div>
+      {right}
+    </div>
+  );
+}
+
+function ListSearchRow({
+  query,
+  setQuery,
+  placeholder,
+  label,
+  right,
+}: {
+  query: string;
+  setQuery: (next: string) => void;
+  placeholder: string;
+  label: string;
+  /** The count and pager; null while nothing has landed (the row keeps its
+   *  height: the search box is as tall as the pager). */
+  right: ReactNode;
+}) {
+  return (
+    <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between sm:gap-x-6">
+      {/* PREVIEW (2026-10-25): the search stretches to the count and pager,
+          a comfortable gap between, never narrower than 12rem. */}
+      <div className="relative w-full min-w-0 sm:min-w-[12rem] sm:flex-1">
+        <Search className="pointer-events-none absolute left-3.5 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
+        <input
+          value={query}
+          onChange={(e) => setQuery(e.target.value)}
+          placeholder={placeholder}
+          aria-label={label}
+          className="h-10 w-full rounded-full border border-border bg-white pl-10 pr-4 text-sm text-slate-900 outline-none transition-colors placeholder:text-slate-400 focus:border-primary/40"
+        />
+      </div>
+      {right && (
+        <div data-list-count className="flex min-h-10 items-center justify-end sm:ml-auto sm:flex-shrink-0">
+          {right}
+        </div>
+      )}
+    </div>
+  );
+}
+
+/** The plain count for a list that cannot be paged here: a trial's cut
+ *  list, or the app change tabs, which filter the loaded page in the
+ *  browser. */
+function CountLine({ count, noun }: { count: number; noun: string }) {
+  return (
+    <p className="whitespace-nowrap text-xs tabular-nums text-slate-500">
+      {count.toLocaleString()} {noun}
+    </p>
+  );
+}
 
 function DrilldownList({
   token,
@@ -1346,6 +1474,8 @@ function DrilldownList({
   tab,
   setTab,
   openFirst,
+  matchType,
+  setMatchType,
 }: {
   token: string;
   lines: string[];
@@ -1358,12 +1488,22 @@ function DrilldownList({
   setTab: (tab: DrillTab) => void;
   /** Each bump opens the first row of the next list to land. */
   openFirst: number;
+  /** All / Own / IPD, owned by the page (survives the view switch). */
+  matchType: MatchTypeFilter;
+  setMatchType: (next: MatchTypeFilter) => void;
 }) {
   const [rows, setRows] = useState<Row[]>([]);
+  // The list's split and its inconclusive IPD matches (crawler #348).
+  // Null on a report without match types: no pills, no note.
+  const [typeCounts, setTypeCounts] = useState<MatchTypeCounts | null>(null);
+  const [inconclusive, setInconclusive] = useState<IpdInconclusive | null>(null);
   const cache = usePageCache<unknown>();
   // The tab the rows on screen were read for. Lags `tab` until a new tab's
   // list lands, so a freshly picked tab never opens last tab's first row.
   const [rowsTab, setRowsTab] = useState<DrillTab>(tab);
+  // The match type the rows on screen were read for: the note under the
+  // list follows the rows, not the pill, so it changes with them.
+  const [rowsMatchType, setRowsMatchType] = useState<MatchTypeFilter>(matchType);
   const [total, setTotal] = useState(0);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -1374,8 +1514,16 @@ function DrilldownList({
   const [truncated, setTruncated] = useState(false);
   /** The cut this trial report made to the list, or null on a full report. */
   const [trial, setTrial] = useState<TrialSlice | null>(null);
-  // Bumps each time a list lands, so the new rows ease in as one piece.
+  // Bumps each time a list lands: ListSwap swaps the rows on it.
   const [settled, setSettled] = useState(0);
+  // The rows settle in one by one with the first list only (Settle).
+  const landed = useRef(false);
+  useEffect(() => {
+    if (settled > 0) landed.current = true;
+  }, [settled]);
+  // The dots beside the tabs, only for an answer that keeps the reader
+  // waiting: one that lands at once never flashes them.
+  const slow = useLingering(loading && settled > 0, 300);
 
   // A new search, a new tab or a new line selection is a new list, so it
   // starts at its first page. Without this, searching from page 7 asks
@@ -1383,21 +1531,19 @@ function DrilldownList({
   // empty list for a term that matches.
   useEffect(() => {
     setPage(1);
-  }, [tab, query, lines]);
+  }, [tab, query, lines, matchType]);
 
-  // A NEW TAB OR A NEW LINE SELECTION IS A NEW LIST, and gets the
-  // skeleton. Dropping `settled` to 0 is what says so: it is the same
-  // "nothing has landed yet" state a cold open is in, and it drives the
-  // same treatment, so applying a filter and opening the page cold look
-  // alike instead of one dimming and the other sketching.
-  //
-  // Typing in the search box is deliberately NOT in here. That fires on
-  // every keystroke, and a list that collapsed to a skeleton and back per
-  // character would be unreadable; the dots beside the tabs and the dim
-  // are the right weight for a search.
+  // ONE WEIGHT OF RELOAD (David, 2026-10-26). A new tab, line selection,
+  // match type, search or page keeps the list on screen and lets ListSwap
+  // carry it across: the rows dim, the new ones take their place, the
+  // height eases. The skeleton is for a list with nothing on screen to
+  // carry: the cold open, and coming back from Inactive, whose section
+  // took the list's place.
+  const prevTab = useRef(tab);
   useEffect(() => {
-    setSettled(0);
-  }, [tab, lines]);
+    if (prevTab.current === "inactive" && tab !== "inactive") setSettled(0);
+    prevTab.current = tab;
+  }, [tab]);
 
   useEffect(() => {
     // The Inactive section reads its own lists.
@@ -1406,7 +1552,7 @@ function DrilldownList({
     let cancelled = false;
     const load = (pg: number) =>
       event === "all"
-        ? api.matchedDevelopers(token, pg, query, lines).then((r) => ({
+        ? api.matchedDevelopers(token, pg, query, lines, matchType).then((r) => ({
             rows: r.rows.map(
               (d: MatchedDeveloper): Row => ({
                 developer_id: d.developer_id,
@@ -1423,13 +1569,16 @@ function DrilldownList({
                 removed_lines: d.removed_lines ?? [],
                 cert_changed_lines: d.cert_changed_lines ?? [],
                 file_hosts: d.file_hosts ?? [],
+                ...matchTypeFieldsOf(d),
               }),
             ),
             total: r.total,
             truncated: r.truncated ?? false,
             trial: r.trial ?? null,
+            typeCounts: r.match_type_counts ?? null,
+            inconclusive: r.ipd_inconclusive ?? null,
           }))
-        : api.developerEvents(token, event, pg, query, lines).then((r) => ({
+        : api.developerEvents(token, event, pg, query, lines, matchType).then((r) => ({
             rows: r.rows.map(
               (d: DeveloperEvent): Row => ({
                 developer_id: d.developer_id,
@@ -1447,17 +1596,26 @@ function DrilldownList({
                 cert_changed_lines: d.cert_changed_lines ?? [],
                 // A change row names no hosts: the standing row does.
                 file_hosts: [],
+                ...matchTypeFieldsOf(d),
               }),
             ),
             total: r.total,
             truncated: false,
             trial: r.trial ?? null,
+            typeCounts: r.match_type_counts ?? null,
+            inconclusive: r.ipd_inconclusive ?? null,
           }));
     type Loaded = Awaited<ReturnType<typeof load>>;
-    const keyFor = (pg: number) => [tab, pg, query, lines.join(",")].join("|");
+    const keyFor = (pg: number) => [tab, pg, query, lines.join(","), matchType].join("|");
     const apply = (data: Loaded) => {
+      // A list that does not say how it splits has no pills, so it must
+      // not stay filtered by them either: back to every match.
+      if (!data.typeCounts && matchType !== "all") setMatchType("all");
       setRows(data.rows);
+      setTypeCounts(data.typeCounts);
+      setInconclusive(data.inconclusive);
       setRowsTab(tab);
+      setRowsMatchType(data.typeCounts ? matchType : "all");
       setTotal(data.total);
       setTruncated(data.truncated);
       setTrial(data.trial);
@@ -1493,7 +1651,7 @@ function DrilldownList({
     return () => {
       cancelled = true;
     };
-  }, [token, tab, page, query, lines, cache]);
+  }, [token, tab, page, query, lines, matchType, setMatchType, cache]);
 
   useOpenFirst(
     openFirst,
@@ -1504,10 +1662,12 @@ function DrilldownList({
 
   return (
     <div>
-      {/* Tabs, then a full-width search, in the Changes page's grammar,
-          so the two pages read as one product. */}
-      <div className="mb-3 space-y-2">
-        <div className="flex flex-wrap items-center gap-3">
+      {/* The two control rows (see ListTabsRow). A page turned from the
+          pager under the list scrolls back up to here. */}
+      <div ref={paging.topRef} className="mb-3 space-y-2">
+        <ListTabsRow
+          left={
+            <>
           <Tabs value={tab} onValueChange={(v) => setTab(v as DrillTab)} className="max-w-full">
             {/* Scrolls sideways on a narrow phone rather than pushing the page wider. */}
             <TabsList className="max-w-full justify-start overflow-x-auto">
@@ -1518,45 +1678,55 @@ function DrilldownList({
               {inactive && <TabsTrigger value="inactive">Inactive</TabsTrigger>}
             </TabsList>
           </Tabs>
-          {/* Silent until a list has landed. While a new tab or filter is
-              in flight this still holds the PREVIOUS total, and printing
-              "260 matched" over a skeleton states a number for a question
-              that is still being asked. */}
-          {settled > 0 && tab !== "inactive" && (
-            <span className="text-xs text-slate-500">
-              {total.toLocaleString()}{" "}
-              {tab === "all" ? "matched" : "with changes"}
-            </span>
-          )}
-          {loading && settled > 0 && tab !== "inactive" && <Dots />}
-        </div>
+          {/* The dots say new rows are on the way while the old ones stay
+              in place; the count itself sits on row 2. */}
+          {slow && tab !== "inactive" && <Dots />}
+            </>
+          }
+          right={
+            // Not on Inactive: those lists are not split by match type.
+            tab !== "inactive" &&
+            typeCounts && (
+              <MatchTypeControl value={matchType} onChange={setMatchType} counts={typeCounts} />
+            )
+          }
+        />
         {tab !== "inactive" && (
-        <div className="relative w-full">
-          <Search className="pointer-events-none absolute left-3.5 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
-          <input
-            value={query}
-            onChange={(e) => setQuery(e.target.value)}
+          <ListSearchRow
+            query={query}
+            setQuery={setQuery}
             placeholder="Search publishers"
-            aria-label="Search matched publishers"
-            className="h-10 w-full rounded-full border border-border bg-white pl-10 pr-4 text-sm text-slate-900 outline-none transition-colors placeholder:text-slate-400 focus:border-primary/40"
+            label="Search matched publishers"
+            right={
+              // Silent until a list has landed (the skeleton states no
+              // number). After that it is the count of the rows on screen,
+              // worded for the tab they were read for, and it changes when
+              // they do.
+              settled > 0 && !error && rows.length > 0
+                ? trial || caps
+                  // A trial's list is cut: the count, no pages.
+                  ? <CountLine count={total} noun={rowsTab === "all" ? "publishers" : "with changes"} />
+                  : (
+                    <Pager
+                      placement="inline"
+                      page={page}
+                      pageSize={PAGE_SIZE}
+                      total={total}
+                      onPage={paging.onPage}
+                      noun={rowsTab === "all" ? "publishers" : "with changes"}
+                      nounOne={rowsTab === "all" ? "publisher" : undefined}
+                    />
+                  )
+                : null
+            }
           />
-        </div>
         )}
       </div>
-      {/* TWO WEIGHTS OF RELOAD, and which one a change gets is the whole
-          rule here.
-
-          A SEARCH is the light one: the rows stay on screen, dimmed, with
-          the dots above saying new ones are coming. It fires per keystroke,
-          and a list that collapsed to a skeleton and back on every
-          character would be unreadable.
-
-          A NEW TAB OR A NEW SEAT-LINE SELECTION is the heavy one. That is
-          a different question about the report, not a narrowing of this
-          one, and the rows underneath would otherwise sit dimmed while
-          still answering the question the reader just changed. Those reset
-          `settled` to 0, which is the same "nothing has landed yet" state a
-          cold open is in, and so draws the same skeleton. */}
+      {/* The skeleton until a first list lands; from then on every change
+          (tab, seat lines, match type, search, page) is one ListSwap: the
+          rows dim, the new ones take their place, the height eases. The
+          trial card, the pager under the list and the IPD note ride inside
+          it, so they move with the rows instead of jumping. */}
       {tab === "inactive" && inactive ? (
         <InactiveSection
           token={token}
@@ -1575,69 +1745,61 @@ function DrilldownList({
           <SkeletonRows rows={5} label="Loading matched publishers" />
         )}
         {error && <p className="text-sm text-critical">{error}</p>}
-        {settled > 0 && !error && rows.length === 0 && (
-          <div className={cn("transition-opacity duration-300", loading && "opacity-60")}>
-            <EmptyResult query={query} noun="publishers" />
-          </div>
-        )}
-        {settled > 0 && !error && rows.length > 0 && !trial && !caps && (
-          <Pager
-            placement="top"
-            anchorRef={paging.topRef}
-            className="mb-3"
-            page={page}
-            pageSize={PAGE_SIZE}
-            total={total}
-            onPage={paging.onPage}
-            noun={tab === "all" ? "publishers" : "with changes"}
-          />
-        )}
-        {/* `settled > 0` as well as rows: while a new tab or filter is
-            in flight the previous list is still in state, and without
-            this guard it would render underneath the skeleton. */}
-        {settled > 0 && !error && rows.length > 0 && (
-          <div
-            key={settled}
-            className={cn(
-              "animate-in fade-in space-y-3 transition-opacity duration-300 ease-out",
-              loading && "opacity-60",
+        {/* `settled > 0`: nothing to carry before a first list lands. */}
+        {settled > 0 && !error && (
+          <ListSwap version={settled} pending={loading} intro={!landed.current}>
+            {rows.length === 0 ? (
+              <EmptyResult query={query} noun="publishers" />
+            ) : (
+              <div className="space-y-3">
+                {rows.map((r, i) => (
+                  <Settle key={r.developer_id} index={i}>
+                    <PublisherCard
+                      row={r}
+                      token={token}
+                      open={expanded === r.developer_id}
+                      onToggle={() =>
+                        setExpanded(expanded === r.developer_id ? null : r.developer_id)
+                      }
+                    />
+                  </Settle>
+                ))}
+              </div>
             )}
-          >
-            {rows.map((r, i) => (
-              <Settle key={r.developer_id} index={i}>
-                <PublisherCard
-                  row={r}
-                  token={token}
-                  open={expanded === r.developer_id}
-                  onToggle={() =>
-                    setExpanded(expanded === r.developer_id ? null : r.developer_id)
-                  }
-                />
-              </Settle>
-            ))}
-          </div>
-        )}
-        {/* On a trial the card stands on every tab, rows or none: the way to
-            the full report never depends on the tab the reader is on. */}
-        {settled > 0 && !error && (caps || trial) && (
-          <LockedTail
-            slice={trial}
-            caps={caps}
-            noun={tab === "all" ? "matched publishers" : "publishers with changes"}
-            detail="publisher, every line it carries and every change, week after week"
-          />
-        )}
-        {settled > 0 && !error && rows.length > 0 && !trial && !caps && (
-          <div className="mt-4">
-            <Pager
-              page={page}
-              pageSize={PAGE_SIZE}
-              total={total}
-              onPage={paging.onPage}
-              noun={tab === "all" ? "publishers" : "with changes"}
-            />
-            {truncated && <TruncatedNotice shown={total} noun="publishers" />}
-          </div>
+            {/* On a trial the card stands on every tab, rows or none: the way to
+                the full report never depends on the tab the reader is on. */}
+            {(caps || trial) && (
+              <LockedTail
+                slice={trial}
+                caps={caps}
+                noun={rowsTab === "all" ? "matched publishers" : "publishers with changes"}
+                detail="publisher, every line it carries and every change, week after week"
+              />
+            )}
+            {/* The pager under the list, for the reader who has scrolled past
+                every row. On a single page it would only repeat the count the
+                search row already carries, so it stands only when there are
+                pages to turn. */}
+            {rows.length > 0 && !trial && !caps && (
+              <div className="mt-4">
+                {total > PAGE_SIZE && (
+                  <Pager
+                    page={page}
+                    pageSize={PAGE_SIZE}
+                    total={total}
+                    onPage={paging.onPage}
+                    noun={rowsTab === "all" ? "publishers" : "with changes"}
+                  />
+                )}
+                {truncated && <TruncatedNotice shown={total} noun="publishers" />}
+              </div>
+            )}
+            {/* IPD matches this crawl could not confirm: not rows, not
+                counted, one quiet line (All matched, never under Own). */}
+            {rowsTab === "all" && rowsMatchType !== "own" && (
+              <IpdInconclusiveNote data={inconclusive} view="publishers" />
+            )}
+          </ListSwap>
         )}
       </div>
       )}
@@ -1805,6 +1967,7 @@ function PublisherCard({
                 {row.developer_platform}
               </span>
             )}
+            {!inactive && <IpdChip row={row} />}
             {inactive && <InactiveChip />}
           </div>
           {row.developer_domain && row.developer_name && (
@@ -1818,6 +1981,7 @@ function PublisherCard({
           {/* WHERE ITS FILES ARE (2026-10-21): the declared hosts whose
               app-ads.txt hold some of this publisher's lines. One quiet
               line, only when there are any; the lines below say which. */}
+          {!inactive && <IpdWhere row={row} />}
           {fileHostsLabel(row.file_hosts) && (
             <div data-file-hosts className="truncate text-[11px] text-slate-400">
               {fileHostsLabel(row.file_hosts)}
@@ -1875,20 +2039,28 @@ function PublisherCard({
             ) : (
               <p className="text-xs text-slate-500">No seat lines on record for this publisher.</p>
             )
-          ) : hasEmbeddedLines ? (
-            <ChangeExpansion
-              added={row.added_lines}
-              removed={row.removed_lines}
-              certChanged={row.cert_changed_lines}
-              matched={row.matched_lines}
-              publisherDomain={row.developer_domain}
-            />
           ) : (
-            <LazyMatchedSeatLines
-              token={token}
-              developerId={row.developer_id}
-              publisherDomain={row.developer_domain}
-            />
+            <>
+              {/* Seller role, Managed by, Alert (crawler #348): nothing on
+                  a row that carries none. */}
+              <RowRoles row={row} />
+              {hasEmbeddedLines ? (
+                <ChangeExpansion
+                  added={row.added_lines}
+                  removed={row.removed_lines}
+                  certChanged={row.cert_changed_lines}
+                  matched={row.matched_lines}
+                  // An IPD row's lines sit in its partner's ads.txt.
+                  publisherDomain={linesDomain(row, row.developer_domain)}
+                />
+              ) : (
+                <LazyMatchedSeatLines
+                  token={token}
+                  developerId={row.developer_id}
+                  publisherDomain={linesDomain(row, row.developer_domain)}
+                />
+              )}
+            </>
           )}
         </div>
       </Collapse>
@@ -2336,6 +2508,8 @@ function MatchedAppsList({
   tab,
   setTab,
   openFirst,
+  matchType,
+  setMatchType,
 }: {
   token: string;
   lines: string[];
@@ -2347,8 +2521,14 @@ function MatchedAppsList({
   setTab: (tab: DrillTab) => void;
   /** Each bump opens the first row of the next list to land. */
   openFirst: number;
+  /** All / Own / IPD, owned by the page (survives the view switch). */
+  matchType: MatchTypeFilter;
+  setMatchType: (next: MatchTypeFilter) => void;
 }) {
   const [allRows, setAllRows] = useState<MatchedApp[]>([]);
+  // The list's split and its inconclusive IPD matches (crawler #348).
+  const [typeCounts, setTypeCounts] = useState<MatchTypeCounts | null>(null);
+  const [inconclusive, setInconclusive] = useState<IpdInconclusive | null>(null);
   const [loading, setLoading] = useState(true);
   const [failed, setFailed] = useState(false);
   const [expanded, setExpanded] = useState<string | null>(null);
@@ -2363,26 +2543,38 @@ function MatchedAppsList({
   const keyOf = (a: MatchedApp) => `${a.store}:${a.bundle_id}`;
   const appCache = usePageCache<unknown>();
   const [settled, setSettled] = useState(0);
+  // The match type the rows on screen were read for (the note follows it).
+  const [rowsMatchType, setRowsMatchType] = useState<MatchTypeFilter>(matchType);
+  // As on the publishers list: the rows settle in with the first list
+  // only, and the dots wait for an answer that keeps the reader waiting.
+  const landed = useRef(false);
+  useEffect(() => {
+    if (settled > 0) landed.current = true;
+  }, [settled]);
+  const slow = useLingering(loading && settled > 0, 300);
 
   // A new search or a new line selection is a new list and starts at its
   // first page.
   useEffect(() => {
     setPage(1);
-  }, [query, lines]);
+  }, [query, lines, matchType]);
 
-  // Same rule as the publishers list above: a new line selection is a new
-  // list and gets the skeleton, a keystroke in the search does not.
-  useEffect(() => {
-    setSettled(0);
-  }, [lines]);
+  // Same rule as the publishers list above: every change keeps the list on
+  // screen and ListSwap carries it across. This list stays loaded under
+  // Inactive (its tabs filter in the browser), so nothing resets here.
 
   useEffect(() => {
     let cancelled = false;
-    const load = (pg: number) => api.matchedApps(token, pg, query, lines);
+    const load = (pg: number) => api.matchedApps(token, pg, query, lines, matchType);
     type Loaded = Awaited<ReturnType<typeof load>>;
-    const keyFor = (pg: number) => [pg, query, lines.join(",")].join("|");
+    const keyFor = (pg: number) => [pg, query, lines.join(","), matchType].join("|");
     const apply = (r: Loaded) => {
+      // No split said, no pills: and no filter left on from them.
+      if (!r.match_type_counts && matchType !== "all") setMatchType("all");
       setAllRows(r.rows ?? []);
+      setTypeCounts(r.match_type_counts ?? null);
+      setInconclusive(r.ipd_inconclusive ?? null);
+      setRowsMatchType(r.match_type_counts ? matchType : "all");
       setTotal(r.total ?? 0);
       setTruncated(r.truncated ?? false);
       setTrial(r.trial ?? null);
@@ -2421,6 +2613,8 @@ function MatchedAppsList({
         // its number comes from the summary, not this list.
         if (!cancelled) {
           setAllRows([]);
+          setTypeCounts(null);
+          setInconclusive(null);
           setTotal(0);
           setFailed(true);
           setSettled((n) => n + 1);
@@ -2430,7 +2624,7 @@ function MatchedAppsList({
     return () => {
       cancelled = true;
     };
-  }, [token, page, query, lines, appCache]);
+  }, [token, page, query, lines, matchType, setMatchType, appCache]);
 
   // A card held open from one tab must not appear under another.
   useEffect(() => setExpanded(null), [tab]);
@@ -2453,8 +2647,11 @@ function MatchedAppsList({
 
   return (
     <div>
-      <div className="mb-3 space-y-2">
-        <div className="flex flex-wrap items-center gap-3">
+      {/* The two control rows, as on the publishers list. */}
+      <div ref={paging.topRef} className="mb-3 space-y-2">
+        <ListTabsRow
+          left={
+            <>
           <Tabs value={tab} onValueChange={(v) => setTab(v as DrillTab)} className="max-w-full">
             {/* Scrolls sideways on a narrow phone rather than pushing the page wider. */}
             <TabsList className="max-w-full justify-start overflow-x-auto">
@@ -2465,26 +2662,53 @@ function MatchedAppsList({
               {inactive && <TabsTrigger value="inactive">Inactive</TabsTrigger>}
             </TabsList>
           </Tabs>
-          {/* Same rule as the publishers list: silent until one lands. */}
-          {settled > 0 && tab !== "inactive" && (
-            <span className="text-xs text-slate-500">
-              {(tab === "all" ? total : rows.length).toLocaleString()}{" "}
-              {tab === "all" ? "matched" : "with changes"}
-            </span>
-          )}
-          {loading && settled > 0 && tab !== "inactive" && <Dots />}
-        </div>
+          {slow && tab !== "inactive" && <Dots />}
+            </>
+          }
+          right={
+            tab !== "inactive" &&
+            typeCounts && (
+              <MatchTypeControl
+                value={matchType}
+                onChange={setMatchType}
+                // The change tabs filter the loaded page in the browser,
+                // so the server's split counts All matched only: no
+                // number in their tooltips rather than a wrong one.
+                counts={tab === "all" ? typeCounts : null}
+              />
+            )
+          }
+        />
         {tab !== "inactive" && (
-        <div className="relative w-full">
-          <Search className="pointer-events-none absolute left-3.5 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
-          <input
-            value={query}
-            onChange={(e) => setQuery(e.target.value)}
+          <ListSearchRow
+            query={query}
+            setQuery={setQuery}
             placeholder="Search apps"
-            aria-label="Search matched apps"
-            className="h-10 w-full rounded-full border border-border bg-white pl-10 pr-4 text-sm text-slate-900 outline-none transition-colors placeholder:text-slate-400 focus:border-primary/40"
+            label="Search matched apps"
+            right={
+              // The pager counts the SERVER's total, which is why it shows
+              // on All matched only. The change tabs filter the loaded page
+              // in the browser, so their count is a count of this page and
+              // paging it would be a claim the data cannot support.
+              settled > 0 && !failed && rows.length > 0
+                ? tab !== "all"
+                  ? <CountLine count={rows.length} noun="with changes" />
+                  : trial || caps
+                    ? <CountLine count={total} noun="apps" />
+                    : (
+                      <Pager
+                        placement="inline"
+                        page={page}
+                        pageSize={PAGE_SIZE}
+                        total={total}
+                        onPage={paging.onPage}
+                        noun="apps"
+                        nounOne="app"
+                      />
+                    )
+                : null
+            }
           />
-        </div>
         )}
       </div>
       {tab === "inactive" && inactive ? (
@@ -2504,76 +2728,63 @@ function MatchedAppsList({
       {loading && settled === 0 && (
         <SkeletonRows rows={5} label="Loading matched apps" />
       )}
-      {settled > 0 && rows.length === 0 && (
-        <div className={cn("transition-opacity duration-300", loading && "opacity-60")}>
-          {failed ? (
-            <p className="rounded-lg border border-dashed border-border bg-muted/20 p-6 text-center text-sm text-slate-500">
-              No matched apps to show yet.
-            </p>
+      {/* One ListSwap for every change, as on the publishers list. The
+          change tabs filter in the browser, so the tab is part of the
+          version: switching them swaps the rows the same calm way. */}
+      {settled > 0 && (
+        <ListSwap version={`${settled}:${tab}`} pending={loading} intro={!landed.current}>
+          {rows.length === 0 ? (
+            failed ? (
+              <p className="rounded-lg border border-dashed border-border bg-muted/20 p-6 text-center text-sm text-slate-500">
+                No matched apps to show yet.
+              </p>
+            ) : (
+              <EmptyResult query={query} noun="apps" />
+            )
           ) : (
-            <EmptyResult query={query} noun="apps" />
+            <div className="space-y-3">
+              {rows.map((a, i) => (
+                <Settle key={keyOf(a)} index={i}>
+                  <MatchedAppCard
+                    app={a}
+                    open={expanded === keyOf(a)}
+                    onToggle={() =>
+                      setExpanded(expanded === keyOf(a) ? null : keyOf(a))
+                    }
+                    token={token}
+                  />
+                </Settle>
+              ))}
+            </div>
           )}
-        </div>
-      )}
-      {settled > 0 && !failed && tab === "all" && rows.length > 0 && !trial && !caps && (
-        <Pager
-          placement="top"
-          anchorRef={paging.topRef}
-          className="mb-3"
-          page={page}
-          pageSize={PAGE_SIZE}
-          total={total}
-          onPage={paging.onPage}
-          noun="apps"
-        />
-      )}
-      {/* `settled > 0` as well: the previous list is still in state while a
-          new filter is in flight, and would render under the skeleton. */}
-      {settled > 0 && rows.length > 0 && (
-        <div
-          key={settled}
-          className={cn(
-            "animate-in fade-in space-y-3 transition-opacity duration-300 ease-out",
-            loading && "opacity-60",
+          {!failed && (caps || trial) && (
+            <LockedTail
+              slice={trial}
+              caps={caps}
+              noun="matched apps"
+              detail="app, its store listing and every line it carries"
+            />
           )}
-        >
-          {rows.map((a, i) => (
-            <Settle key={keyOf(a)} index={i}>
-              <MatchedAppCard
-                app={a}
-                open={expanded === keyOf(a)}
-                onToggle={() =>
-                  setExpanded(expanded === keyOf(a) ? null : keyOf(a))
-                }
-                token={token}
-              />
-            </Settle>
-          ))}
-        </div>
-      )}
-      {/* The pager counts the SERVER's total, which is why it only shows on
-          All matched. The change tabs filter the loaded page in the browser,
-          so their count is a count of this page and paging it would be a
-          claim the data cannot support. */}
-      {settled > 0 && !failed && (caps || trial) && (
-        <LockedTail
-          slice={trial}
-          caps={caps}
-          noun="matched apps"
-          detail="app, its store listing and every line it carries"
-        />
-      )}
-      {settled > 0 && !failed && tab === "all" && rows.length > 0 && !trial && !caps && (
-        <div className="mt-4">
-          <Pager
-            page={page}
-            pageSize={PAGE_SIZE}
-            total={total}
-            onPage={paging.onPage}
-            noun="apps"
-          />
-          {truncated && <TruncatedNotice shown={total} noun="apps" />}
-        </div>
+          {/* The pager under the list, only when there are pages to turn (the
+              search row carries the count). */}
+          {!failed && tab === "all" && rows.length > 0 && !trial && !caps && (
+            <div className="mt-4">
+              {total > PAGE_SIZE && (
+                <Pager
+                  page={page}
+                  pageSize={PAGE_SIZE}
+                  total={total}
+                  onPage={paging.onPage}
+                  noun="apps"
+                />
+              )}
+              {truncated && <TruncatedNotice shown={total} noun="apps" />}
+            </div>
+          )}
+          {!failed && tab === "all" && rowsMatchType !== "own" && (
+            <IpdInconclusiveNote data={inconclusive} view="apps" />
+          )}
+        </ListSwap>
       )}
       </>
       )}
@@ -2667,6 +2878,7 @@ function MatchedAppCard({
             >
               {storeLabel(app.store)}
             </span>
+            {!inactive && <IpdChip row={app} subject={appSubject(app)} />}
             {inactive && <InactiveChip />}
           </div>
           {/* A trial withholds an inactive app's publisher (the crawler
@@ -2689,6 +2901,7 @@ function MatchedAppCard({
               )}
             </div>
           )}
+          {!inactive && <IpdWhere row={app} subject={appSubject(app)} />}
           {fileLine && (
             <div data-app-file className="truncate text-[11px] text-slate-400">
               {fileLine}
@@ -2746,20 +2959,26 @@ function MatchedAppCard({
                 ? "No seat lines on record for this app."
                 : "Its publisher and the lines it carries are in your full report."}
             </p>
-          ) : !hasEmbeddedLines && app.developer_id != null ? (
-            <LazyMatchedSeatLines
-              token={token}
-              developerId={app.developer_id}
-              publisherDomain={app.owner_domain}
-            />
           ) : (
-            <ChangeExpansion
-              added={app.added_lines ?? []}
-              removed={app.removed_lines ?? []}
-              certChanged={app.cert_changed_lines ?? []}
-              matched={lines}
-              publisherDomain={app.owner_domain}
-            />
+            <>
+              <RowRoles row={app} />
+              {!hasEmbeddedLines && app.developer_id != null ? (
+                <LazyMatchedSeatLines
+                  token={token}
+                  developerId={app.developer_id}
+                  publisherDomain={linesDomain(app, app.owner_domain)}
+                />
+              ) : (
+                <ChangeExpansion
+                  added={app.added_lines ?? []}
+                  removed={app.removed_lines ?? []}
+                  certChanged={app.cert_changed_lines ?? []}
+                  matched={lines}
+                  // An IPD app's lines sit in its partner's ads.txt.
+                  publisherDomain={linesDomain(app, app.owner_domain)}
+                />
+              )}
+            </>
           )}
         </div>
       </Collapse>

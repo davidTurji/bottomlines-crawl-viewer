@@ -47,6 +47,7 @@ import type {
   MatchedBundle,
   MatchedDeveloper,
   MatchedSeatLine,
+  MatchTypeFilter,
 } from "../src/lib/api";
 import {
   MOCK_CHECKED_AT,
@@ -135,6 +136,13 @@ export type Scenario = {
    *  every newly monitored line's first publisher carries the "host first
    *  read" reason. Default false: every file is the publisher's own. */
   declaredHost?: boolean;
+  /** true: a report built by crawler #348 with its report switches on.
+   *  Every matched publisher, app and publisher change carries
+   *  ``match_type`` (own / ipd) and the IPD detail and roles, every such
+   *  list its ``match_type_counts`` and ``ipd_inconclusive``, and the
+   *  lists honour ``?match_type=own|ipd``. Default false: the answer of
+   *  every report frozen before it, byte for byte today's. */
+  matchType?: boolean;
 };
 
 /* ── THE FILE-HOST FIELDS (snapshot version 5, 2026-10-21) ────────────
@@ -276,6 +284,7 @@ export async function installFakeApi(page: Page, scenario: Scenario = {}): Promi
     inactive: "ok",
     crawlDates: true,
     declaredHost: false,
+    matchType: false,
     ...scenario,
   };
   const hostApp = s.declaredHost ? declaredHostApp() : null;
@@ -289,6 +298,9 @@ export async function installFakeApi(page: Page, scenario: Scenario = {}): Promi
     const path = url.pathname.replace(/^\/api/, "");
     const q = url.searchParams;
     const page_ = Number(q.get("page") ?? 1);
+    // The list filter of crawler #348, read only by a report that has it
+    // (an older API ignores the parameter and answers in full).
+    const matchType = s.matchType ? ((q.get("match_type") ?? "all") as MatchTypeFilter) : null;
     const lines = (q.get("lines") ?? "")
       .split(",")
       .filter(Boolean)
@@ -394,7 +406,7 @@ export async function installFakeApi(page: Page, scenario: Scenario = {}): Promi
         return reply(200, { format: "xlsx", line_export: true, excel_row_limit: 1_048_576 });
       case "developer-events": {
         const event = (q.get("event") ?? "added") as "added" | "removed" | "changed";
-        const r = mockDeveloperEvents(event, page_, lines);
+        const r = mockDeveloperEvents(event, page_, lines, matchType);
         r.rows = r.rows.map(eventRow);
         return reply(200, s.trial ? { ...r, page: 1, ...cut(r.rows, TRIAL_CAPS.publishers, r.total) } : r);
       }
@@ -409,7 +421,7 @@ export async function installFakeApi(page: Page, scenario: Scenario = {}): Promi
         return reply(200, { ...r, rows: r.rows.map(lineEvent) });
       }
       case "matched-developers": {
-        const r = mockMatchedDevelopers(page_, q.get("q") ?? "", lines);
+        const r = mockMatchedDevelopers(page_, q.get("q") ?? "", lines, matchType);
         r.rows = r.rows.map((d) =>
           hostApp && d.domain === hostApp.owner_domain ? publisherWithHost(publisherRow(d)) : publisherRow(d),
         );
@@ -420,7 +432,7 @@ export async function installFakeApi(page: Page, scenario: Scenario = {}): Promi
         return reply(200, { ...r, rows: r.rows.map(bundleRow) });
       }
       case "matched-apps": {
-        const r = mockMatchedApps(page_, q.get("q") ?? "", lines);
+        const r = mockMatchedApps(page_, q.get("q") ?? "", lines, matchType);
         r.rows = r.rows.map((a) =>
           hostApp && appKey(a) === appKey(hostApp) ? appAtHost(appRow(a)) : appRow(a),
         );
