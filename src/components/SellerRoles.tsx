@@ -3,12 +3,11 @@
  * want to see any sellers in the overview page. It should all go to the
  * Sellers.json page. Segment it."). The matched lists are about matching
  * and removing; what the seats' sellers.json files say of each matched
- * publisher lives here, as one segment of plain rows: the seller role, who
- * manages it, and each sellers.json alert ("Listed as DIRECT, but
- * sellers.json names ...") as a quiet line, never an amber box (David
- * wants to see them here before deciding on them). Searchable and paged on
- * the server, the skeleton while a page loads. "Partner inventory on" is
- * shown nowhere (David, 2026-10-27).
+ * publisher lives here, as one segment of plain rows: the seller role and
+ * who manages it. Searchable and paged on the server, the skeleton while a
+ * page loads. The sellers.json alerts ("Listed as DIRECT, but sellers.json
+ * names ...") and "Partner inventory on" are shown nowhere in the viewer
+ * (David, 2026-10-27).
  *
  * ONLY ON A REPORT THAT READ SELLERS.JSON FIRST. Before crawler #364 the
  * roles were derived without a recent read of the exchanges' files, so a
@@ -180,9 +179,6 @@ function RolesList({ token, reads }: { token: string; reads: SellersJsonReads })
 function RoleRow({ row, n, digits }: { row: MatchedDeveloper; n: number; digits: number }) {
   const role = roleText(row.seller_role);
   const managedBy = typeof row.managed_by === "string" ? row.managed_by.trim() : "";
-  // One string joined by " | " as the crawler sends it, or an array; read
-  // safely either way (the shape that crashed the Overview on 2026-10-27).
-  const alerts = Array.from(new Set(textList(row.verdict_alerts)));
   const name = row.domain || row.name || "Unnamed publisher";
   return (
     <li data-seller-role-row className={SEAT_ROW}>
@@ -212,11 +208,6 @@ function RoleRow({ row, n, digits }: { row: MatchedDeveloper; n: number; digits:
         ) : (
           <p className="text-[11px] text-slate-400">No seller role recorded.</p>
         )}
-        {alerts.map((a) => (
-          <p key={a} data-seller-role-alert className="text-[11px] leading-snug text-slate-600">
-            {a}
-          </p>
-        ))}
       </div>
     </li>
   );

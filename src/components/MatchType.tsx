@@ -132,9 +132,19 @@ export type MatchTypeView = "publishers" | "apps";
  * `subject` = the app's publisher). The partner first, then whose
  * inventory partner it is.
  */
-export function ipdWhere(row: MatchTypeFields, subject: string | null | undefined): string | null {
+export function ipdWhere(
+  row: MatchTypeFields,
+  subject: string | null | undefined,
+  /** How many OTHER partners carry the row's lines (2026-10-27: a row named
+   *  only the first of 14). */
+  others = 0,
+): string | null {
   if (row.match_type !== "ipd" || !row.ipd_partner) return null;
   const of = (subject ?? "").trim();
+  if (others > 0) {
+    const more = `${row.ipd_partner} and ${others.toLocaleString()} other inventory ${others === 1 ? "partner" : "partners"}`;
+    return of ? `Via ${more} of ${of}` : `Via ${more}`;
+  }
   return of ? `Via ${row.ipd_partner}, inventory partner of ${of}` : `Via ${row.ipd_partner}`;
 }
 
@@ -156,8 +166,8 @@ export function linesDomain(row: MatchTypeFields, own: string | null | undefined
   return row.match_type === "ipd" && row.ipd_partner ? row.ipd_partner : (own ?? null);
 }
 
-function ipdTitle(row: MatchTypeFields, subject: string | null | undefined): string | undefined {
-  const where = ipdWhere(row, subject);
+function ipdTitle(row: MatchTypeFields, subject: string | null | undefined, others = 0): string | undefined {
+  const where = ipdWhere(row, subject, others);
   const parts = [where, row.declared_in ? `Declared in ${row.declared_in}` : null].filter(Boolean);
   return parts.length ? parts.join(". ") : undefined;
 }
@@ -180,12 +190,20 @@ export function platformLabel(raw: unknown): "CTV" | "Mobile" | "Web" | null {
 
 /** The small "IPD" chip beside the name; nothing on an own row. `subject`
  *  as on IpdWhere; absent means a publisher row. */
-export function IpdChip({ row, subject = PUBLISHER_SUBJECT }: { row: MatchTypeFields; subject?: string | null }) {
+export function IpdChip({
+  row,
+  subject = PUBLISHER_SUBJECT,
+  others = 0,
+}: {
+  row: MatchTypeFields;
+  subject?: string | null;
+  others?: number;
+}) {
   if (row.match_type !== "ipd") return null;
   return (
     <span
       data-ipd-chip
-      title={ipdTitle(row, subject)}
+      title={ipdTitle(row, subject, others)}
       className="inline-flex flex-shrink-0 items-center rounded-full border border-info-border bg-info-bg px-1.5 py-px text-[10px] font-semibold text-info"
     >
       IPD
@@ -195,11 +213,19 @@ export function IpdChip({ row, subject = PUBLISHER_SUBJECT }: { row: MatchTypeFi
 
 /** The quiet line under the name. `subject`: the app's publisher on an
  *  app row; absent means a publisher row ("this publisher"). */
-export function IpdWhere({ row, subject = PUBLISHER_SUBJECT }: { row: MatchTypeFields; subject?: string | null }) {
-  const where = ipdWhere(row, subject);
+export function IpdWhere({
+  row,
+  subject = PUBLISHER_SUBJECT,
+  others = 0,
+}: {
+  row: MatchTypeFields;
+  subject?: string | null;
+  others?: number;
+}) {
+  const where = ipdWhere(row, subject, others);
   if (!where) return null;
   return (
-    <div data-ipd-where title={ipdTitle(row, subject)} className="truncate text-[11px] text-slate-500">
+    <div data-ipd-where title={ipdTitle(row, subject, others)} className="truncate text-[11px] text-slate-500">
       {where}
     </div>
   );

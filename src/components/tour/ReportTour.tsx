@@ -29,14 +29,13 @@ import { useReportTour } from "./useReportTour";
 /** The rail's name for each page, as the page-move label says it. */
 const PAGE_LABEL: Record<ReportPage, string> = {
   "": "Overview",
-  changes: "Changes",
   discovery: "Discovery",
   declarations: "Declarations",
   schain: "Schain",
 };
 
 /** The rail's order, which decides which way a page slides. */
-const PAGE_ORDER: ReportPage[] = ["", "changes", "discovery", "declarations", "schain"];
+const PAGE_ORDER: ReportPage[] = ["", "discovery", "declarations", "schain"];
 
 /**
  * THE PAGE MOVE: WATCH THE PAGE SLIDE (David, 2026-10-02, after two

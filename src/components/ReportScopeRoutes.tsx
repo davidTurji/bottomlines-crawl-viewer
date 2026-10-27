@@ -205,3 +205,16 @@ export function ReportSubpathRedirect() {
   const { basePath } = useReportScope();
   return <Navigate to={basePath || "/"} replace />;
 }
+
+/**
+ * /changes, and anything under it: the Changes page is now the Overview's
+ * Lines view (David, 2026-10-27). The link's query (the line filter) and
+ * its fragment (a sign-in) ride along; ``view=lines`` opens the view.
+ */
+export function ChangesRedirect() {
+  const { basePath } = useReportScope();
+  const { search, hash } = useLocation();
+  const params = new URLSearchParams(search);
+  params.set("view", "lines");
+  return <Navigate to={{ pathname: basePath || "/", search: `?${params.toString()}`, hash }} replace />;
+}

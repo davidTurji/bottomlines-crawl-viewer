@@ -1656,6 +1656,13 @@ export type MatchedSeatLine = RemovalFields & {
    * "ftmj.fortunemo.com"). Null or absent: the publisher's own domain file.
    */
   host?: string | null;
+  /** Per line (crawler #348): "own" when the line sits in the publisher's
+   *  own file, "ipd" when in an inventory partner's ads.txt, named by
+   *  ``ipd_partner``. One row's lines can come through several partners,
+   *  each line once per partner (2026-10-27). Absent on older reports:
+   *  the row's own match type then speaks for its lines. */
+  match_type?: MatchType;
+  ipd_partner?: string | null;
 };
 
 /**

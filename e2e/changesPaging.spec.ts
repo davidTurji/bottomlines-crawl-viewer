@@ -4,6 +4,8 @@ import { mockLineEvents } from "../src/lib/mockData";
 import { pageChangeGroups } from "../src/lib/changeGroups";
 import type { LineEvent } from "../src/lib/api";
 
+// The Changes page is the Overview's Lines view (2026-10-27); its old
+// address lands there, so every test here also proves the redirect.
 const path = `/crawl-report/${TOKEN}/changes`;
 async function setup(page: import("@playwright/test").Page) {
   await page.addInitScript(() =>
@@ -29,7 +31,9 @@ test("20682 placements show a complete first page after one grouped request; ros
   }));
   let groupedRequests = 0;
   await page.route("**/change-groups?*", (route) => {
-    groupedRequests++;
+    // The list's own read (the Popular bar counts the tabs with a one-row
+    // read of its own).
+    if (new URL(route.request().url()).searchParams.get("page_size") !== "1") groupedRequests++;
     const url = new URL(route.request().url());
     return route.fulfill({
       json: pageChangeGroups(rows, {
@@ -43,7 +47,8 @@ test("20682 placements show a complete first page after one grouped request; ros
   expect(groupedRequests).toBe(1);
   expect(calls.filter((c) => c.path.endsWith("/line-events"))).toHaveLength(0);
   expect(calls.filter((c) => c.path.endsWith("/publishers"))).toHaveLength(0);
-  await expect(page.getByText("20,682", { exact: true }).first()).toBeVisible();
+  // One card per line: 30 lines, whatever the 20,682 placements.
+  await expect(page.locator("[data-list-count]")).toContainText("of 30 lines");
   await expect(page.getByRole("button", { name: /seat-29,/ })).toHaveCount(0);
 });
 
@@ -192,7 +197,7 @@ test("actual backend response contract pages every group and wide roster, export
     page.locator("button[aria-expanded] code").allTextContents();
   const first = await labels();
   expect(first[0]).toContain("contract.example, wide, DIRECT");
-  await expect(page.getByText("31 lines", { exact: true })).toBeVisible();
+  await expect(page.locator("[data-list-count]")).toContainText("of 31 lines");
   await page
     .getByRole("button", { name: "Next page", exact: true })
     .first()
@@ -200,7 +205,7 @@ test("actual backend response contract pages every group and wide roster, export
   await expect(cards).toHaveCount(6);
   const second = await labels();
   expect(second.some((label) => first.includes(label))).toBe(false);
-  await expect(page.getByText("31 lines", { exact: true })).toBeVisible();
+  await expect(page.locator("[data-list-count]")).toContainText("of 31 lines");
   await page
     .getByRole("button", { name: "Previous page", exact: true })
     .first()

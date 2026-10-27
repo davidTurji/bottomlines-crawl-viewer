@@ -195,7 +195,8 @@ async function crawl(page: Page, vp: string): Promise<Run> {
   };
   /** Clicks a control when the page has it; never waits for one it lacks. */
   const tap = async (name: string, l: ReturnType<Page["locator"]>) => {
-    if (await l.count()) await step(name, () => click(l));
+    if ((await l.count()) && (await l.isVisible().catch(() => false)) && (await l.isEnabled().catch(() => false)))
+      await step(name, () => click(l));
   };
   const OVERVIEW_ROWS = 'button[aria-label^="Show the seat lines of"]';
   const goTo = async (label: string) => {
@@ -258,24 +259,40 @@ async function crawl(page: Page, vp: string): Promise<Run> {
   // The lines filter: one line on, the list re-read, and off again.
   await step("lines filter open", () => click(page.getByRole("button", { name: "Filter by seat line" })));
   await step("lines filter pick", () => click(page.getByRole("group", { name: "Seat lines" }).getByRole("menuitemcheckbox").first()));
-  await step("lines filter close", () => page.keyboard.press("Escape"));
+  await step("lines filter apply", () => click(page.getByRole("menuitem", { name: "Apply", exact: true })));
   await openAll("filtered", OVERVIEW_ROWS, 2);
   await step("lines filter reopen", () => click(page.getByRole("button", { name: "Filter by seat line" })));
   await step("lines filter unpick", () => click(page.getByRole("group", { name: "Seat lines" }).getByRole("menuitemcheckbox").first()));
-  await step("lines filter close again", () => page.keyboard.press("Escape"));
+  await step("lines filter apply again", () => click(page.getByRole("menuitem", { name: "Apply", exact: true })));
+  await step("lines filter close", () => page.keyboard.press("Escape"));
+
+  /* ── The Lines view (the old Changes page, folded in 2026-10-27). ── */
+  const CARDS = "button[aria-expanded='false']:not([aria-haspopup])";
+  const LINE_CARDS = `main ${CARDS}:has(code)`;
+  await step("view lines", () => click(page.getByTestId("list-view").getByRole("button", { name: "Lines", exact: true })));
+  const tabs = await page.getByRole("tab").allInnerTexts();
+  for (const label of tabs) {
+    await step(`Lines / ${label}`, () => click(page.getByRole("tab", { name: label.trim(), exact: true })));
+    await openAll("changes", LINE_CARDS, API_CARDS);
+  }
+  await step("Lines / search", () => page.getByPlaceholder("Filter by SSP domain").fill("tv", { timeout: 3_000 }));
+  await step("Lines / clear search", () => page.getByPlaceholder("Filter by SSP domain").fill("", { timeout: 3_000 }));
+  await tap("Lines / next page", page.getByRole("button", { name: "Next page", exact: true }).first());
+
+  /* ── Popular: every choice, then the last one again (it clears). ── */
+  const choices = await page.locator("[data-popular]").evaluateAll((els) => els.map((e) => e.getAttribute("data-popular") ?? ""));
+  for (const id of choices) {
+    await step(`popular ${id}`, () => click(page.locator(`[data-popular="${id}"]`)));
+    await openAll(`popular ${id}`, OVERVIEW_ROWS, 1);
+  }
+  if (choices.length)
+    await step("popular clear", () => click(page.locator(`[data-popular="${choices[choices.length - 1]}"]`)));
+  await tap("popular next", page.getByRole("button", { name: "More choices" }));
+  await tap("popular previous", page.getByRole("button", { name: "Previous choices" }));
+  await step("view publishers", () => click(page.getByTestId("list-view").getByRole("button", { name: "Publishers", exact: true })));
 
   lap("overview done");
   /* ── Every other page in the menu. ── */
-  const CARDS = "button[aria-expanded='false']:not([aria-haspopup])";
-  await step("page Changes", () => goTo("Changes"));
-  const tabs = await page.getByRole("tab").allInnerTexts();
-  for (const label of tabs) {
-    await step(`Changes / ${label}`, () => click(page.getByRole("tab", { name: label.trim(), exact: true })));
-    await openAll("changes", `main ${CARDS}`, API_CARDS);
-  }
-  await step("Changes / search", () => page.getByPlaceholder("Filter by SSP domain").fill("tv", { timeout: 3_000 }));
-  await step("Changes / clear search", () => page.getByPlaceholder("Filter by SSP domain").fill("", { timeout: 3_000 }));
-  await tap("Changes / next page", page.getByRole("button", { name: "Next page", exact: true }).first());
 
   await step("page Discovery", () => goTo("Discovery"));
   await openAll("discovery", `main ${CARDS}`, API_CARDS);

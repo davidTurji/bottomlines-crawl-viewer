@@ -191,7 +191,7 @@ test.describe("seller roles live on the Sellers.json page", () => {
     expect(errors).toEqual([]);
   });
 
-  test("a report that read sellers.json: role, managed by and each alert as plain rows, searchable; no partner inventory", async ({ page }) => {
+  test("a report that read sellers.json: role and managed by as plain rows, searchable; no alerts, no partner inventory", async ({ page }) => {
     const errors = watchErrors(page);
     await open(page, { sellers: "page", matchType: true, sellersReads: true }, "/sellers");
     const seg = page.getByTestId("seller-roles");
@@ -206,16 +206,10 @@ test.describe("seller roles live on the Sellers.json page", () => {
     await expect(row).toHaveCount(1);
     await expect(row).toContainText("Seller role:Reseller");
     await expect(row).toContainText("Managed by:copperline-media.tv (GB)");
-    // The " | "-joined string read as two quiet lines, never an amber box.
-    const alerts = row.locator("[data-seller-role-alert]");
-    await expect(alerts).toHaveText([
-      "Listed as DIRECT, but sellers.json names copperline-media.tv, not northfold-tv.com: treated as a reseller.",
-      "Two managers for one country (GB): neither counts there.",
-    ]);
-    await expect(alerts.first()).not.toHaveClass(/border|bg-warn|text-warn/);
-    await expect(page.locator("[data-row-alert]")).toHaveCount(0);
-    // Partner inventory on: nowhere (the row carries it in the fixtures).
-    await expect(page.getByText(/Partner inventory on|Tidewick TV/)).toHaveCount(0);
+    // The row carries two alerts and a partner inventory list in the
+    // fixtures: neither is shown, here or anywhere (David, 2026-10-27).
+    await expect(page.getByText(/sellers\.json names|Two managers|Partner inventory on|Tidewick TV/)).toHaveCount(0);
+    await expect(page.locator("[data-seller-role-alert], [data-row-alert]")).toHaveCount(0);
     // The numbers in the gutter, like every list of the report.
     await expect(row.locator("[data-line-no]")).toHaveText("1");
     expect(errors).toEqual([]);

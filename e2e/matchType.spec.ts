@@ -534,9 +534,8 @@ test.describe("less motion asked for", () => {
     await expect(card(page, "Samsung TV Plus")).toHaveCount(1);
     // The thumb is already there: nothing to wait for.
     expect(await centreX(thumb(page))).toBe(await centreX(pill(page, "IPD")));
-    expect(
-      await page.locator("[data-list-fade]").evaluate((el) => getComputedStyle(el).transitionDuration),
-    ).toBe("0s");
+    // Never a fade over the rows: they simply replace each other.
+    await expect(page.locator("[data-list-fade], [data-list-swap]")).toHaveCount(0);
     expect(errors).toEqual([]);
   });
 });

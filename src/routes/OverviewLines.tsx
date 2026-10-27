@@ -1,15 +1,12 @@
-import type { ChangeGroup, ChangeGroupsPage } from "@/lib/api";
+import type { ChangeGroup, ChangeGroupsPage, TrialCaps } from "@/lib/api";
 import { HoverHint } from "@/components/HoverHint";
 import { Pager, usePaging } from "@/components/ListControls";
 import { Collapse, Settle } from "@/components/Motion";
 import LockedTail from "@/components/LockedTail";
-import TrialBanner from "@/components/TrialBanner";
-import { SkeletonRows, SkeletonStatCards } from "@/components/Skeleton";
+import { SkeletonRows } from "@/components/Skeleton";
 import { gutterDigits, RowNote, RowText, SeatLinesFrame, SeatLinesHead, SeatLinesSkeleton } from "@/components/SeatLines";
 import { useEffect, useMemo, useRef, useState } from "react";
-import { LineFilter } from "@/components/LineFilter";
 import { PAGE_SIZE } from "@/lib/paging";
-import { useLineFilter } from "@/lib/lineFilter";
 import {
   ArrowRight,
   ChevronDown,
@@ -21,7 +18,6 @@ import {
   EyeOff,
   Sparkles,
   RefreshCw,
-  Search,
 } from "lucide-react";
 import {
   addedDates,
@@ -29,21 +25,30 @@ import {
   removedDates,
   removalReasonText,
   unconfirmedDates,
-  unconfirmedSentence,
   WEEKLY_READ_NOTE,
 } from "@/lib/changeDates";
 
 import { api, type LineEvent, type Summary, type TrialSlice } from "../lib/api";
-import { formatWeek, WeekLine } from "@/components/WeekLine";
-import { useReportScope } from "@/lib/reportScope";
-import { PageShell } from "@/components/PageShell";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { cn, scopeReasonText } from "@/lib/utils";
 import { PublisherDomainLink } from "@/components/PublisherLinks";
-import { computeDelta, MiniStat, SeatLineRow, SplitStat } from "./CrawlReport";
-import { BEAT_PAUSE_MS, landsAfterMs } from "@/components/CountUp";
+import { MiniStat } from "@/components/MiniStat";
+import { CountSkeleton, ListSearchRow, ListTabsRow, SeatLineRow } from "./CrawlReport";
 
 /**
+ * THE LINES VIEW OF THE OVERVIEW (David, 2026-10-27: "fold the Changes page
+ * into the Overview as a third view: Publishers, Apps, Lines"). Everything
+ * the Changes page had, as one of the Overview's lists: one card per line,
+ * the publishers it moved on behind each card, the Added / Removed / Cert
+ * changes / Started watching / Stopped watching / Unconfirmed tabs, the SSP
+ * search, paging and the per-line export. The page's own KPI cards are gone:
+ * the Overview's "This week's changes" card above says the same week. The
+ * old /changes links land here (main.tsx).
+ *
+ * What follows is the Changes page's own account of the card, kept.
+ */
+
+/*
  * LINE CHANGES.
  *
  * The question this page answers is "which ads.txt lines moved since last
@@ -78,7 +83,7 @@ import { BEAT_PAUSE_MS, landsAfterMs } from "@/components/CountUp";
  * event in words, which is what a colourblind reader reads.
  */
 
-type Bucket = "all" | EventKind;
+export type Bucket = "all" | EventKind;
 /** What happened to a line between the two crawls.
  *
  *  The first three describe the WILD. The last two describe OUR WATCHLIST
@@ -87,7 +92,7 @@ type Bucket = "all" | EventKind;
  *  kinds, not a footnote on "added", because a seat that joined the
  *  watchlist had always been out there and calling that an addition told
  *  the customer their market moved when only our attention did. */
-type EventKind =
+export type EventKind =
   | "added"
   | "removed"
   | "cert_changed"
@@ -99,42 +104,71 @@ type EventKind =
    *  own tab, with the reason and the dates, and never a big card. */
   | "unconfirmed";
 
-export default function CrawlChanges() {
-  const { token } = useReportScope();
-  const [summary, setSummary] = useState<Summary | null>(null);
-  // Whether the summary request has SETTLED, success or failure — which
-  // is not the same question as whether a summary arrived. Every page here
-  // swallows a summary failure (the week line is the only thing that reads
-  // it, and a page whose own numbers are fine should not die for a missing
-  // date), so `summary` stays null forever on an old artifact whose summary
-  // does not load. Reserving the week line's space on `!summary` would then
-  // shimmer a skeleton bar for ever on exactly those older links.
-  const [summarySettled, setSummarySettled] = useState(false);
-  const [previous, setPrevious] = useState<Summary | null>(null);
-  const [bucket, setBucket] = useState<Bucket>("all");
+
+/** The tab a Lines bucket is on the publishers and apps lists, and back
+ *  (owner rule: the tab survives a view switch). */
+export function bucketOfTab(tab: "all" | "added" | "removed" | "changed" | "inactive"): Bucket {
+  return tab === "changed" ? "cert_changed" : tab === "inactive" ? "all" : tab;
+}
+export function tabOfBucket(bucket: Bucket): "all" | "added" | "removed" | "changed" {
+  return bucket === "cert_changed" ? "changed" : bucket === "added" || bucket === "removed" ? bucket : "all";
+}
+
+/** What an empty bucket says (David, 2026-10-27: never "on this report"
+ *  for a tab that is merely quiet this week). */
+const EMPTY_BUCKET: Record<Bucket, string> = {
+  all: "No line changes this week.",
+  added: "No lines were added this week.",
+  removed: "No lines were removed this week.",
+  cert_changed: "No cert changes this week.",
+  newly_monitored: "No lines started being watched this week.",
+  monitoring_stopped: "No lines stopped being watched this week.",
+  first_appearance: "No first appearances this week.",
+  unconfirmed: "Every line was confirmed this week.",
+};
+
+export function LinesList({
+  token,
+  lines,
+  summary,
+  caps,
+  bucket,
+  setBucket,
+}: {
+  token: string;
+  /** The seat-line filter (the page's, in the URL). */
+  lines: string[];
+  /** This week's summary, under the same filter. */
+  summary: Summary;
+  caps: TrialCaps | null;
+  bucket: Bucket;
+  setBucket: (b: Bucket) => void;
+}) {
   // Which scope tabs this week earns, from the crawl-wide totals.
   const scopeTabs = useMemo<[EventKind, string][]>(() => {
-    const t = summary?.hero_diff?.line_totals;
+    const t = summary.hero_diff?.line_totals;
     if (!t) return [];
     return (["newly_monitored", "monitoring_stopped"] as const)
       .filter((k) => (t[k] ?? 0) > 0)
       .map((k) => [k, TONES[k].label]);
   }, [summary]);
-  // UNCONFIRMED (2026-10-20): lines the crawler could not verify this
-  // crawl. Counted from the summary, like the scope tabs, so the tab that
-  // reveals them does not vanish once it is open. Missing on a report
-  // frozen before the kind existed, which reads as 0: no tab, no line.
-  const unconfirmedCount = summary?.hero_diff?.line_totals?.unconfirmed ?? 0;
-  // The tab exists only while something is unconfirmed; a page left on it
-  // (a line filter that narrowed them away) falls back to All.
+  // UNCONFIRMED (2026-10-20): its tab exists only while something is
+  // unconfirmed; a page left on it falls back to All.
+  const unconfirmedCount = summary.hero_diff?.line_totals?.unconfirmed ?? 0;
+  const scopeOn = (k: Bucket) => scopeTabs.some(([s]) => s === k);
   useEffect(() => {
-    if (bucket === "unconfirmed" && summary && unconfirmedCount === 0) setBucket("all");
-  }, [bucket, summary, unconfirmedCount]);
+    if (bucket === "unconfirmed" && unconfirmedCount === 0) setBucket("all");
+    if ((bucket === "newly_monitored" || bucket === "monitoring_stopped") && !scopeOn(bucket)) setBucket("all");
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [bucket, unconfirmedCount, scopeTabs]);
   const [ssp, setSsp] = useState("");
+  const [filter, setFilter] = useState("");
+  useEffect(() => {
+    const timer = window.setTimeout(() => setFilter(ssp.trim()), 250);
+    return () => window.clearTimeout(timer);
+  }, [ssp]);
   const [result, setResult] = useState<ChangeGroupsPage | null>(null);
   const rows = result?.rows ?? [];
-  /** Present on a trial: the server cut the line events to the visible
-   *  publishers' and says how many there are in full. */
   const [trial, setTrial] = useState<TrialSlice | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -143,54 +177,7 @@ export default function CrawlChanges() {
   const [open, setOpen] = useState<Set<string>>(new Set());
   // Bumps each time a list lands, so the new cards ease in as one piece.
   const [settled, setSettled] = useState(0);
-
-  const [filter, setFilter] = useState("");
-  useEffect(() => {
-    const timer = window.setTimeout(() => setFilter(ssp.trim()), 250);
-    return () => window.clearTimeout(timer);
-  }, [ssp]);
-  // Which query produced the displayed counters. A server-paged tab or
-  // filter must never put old totals under a newly selected label.
-  const [settledFor, setSettledFor] = useState<string | null>(null);
-  /* The seat-line filter, shared with the overview through the URL. The
-     events are re-fetched under it, and every KPI on this page is counted
-     from the rows, so the numbers follow the filter by construction. */
-  const { selected: lines, setSelected: setLines } = useLineFilter();
-  const linesKey = lines.join(",");
-  const selectionKey = JSON.stringify([token, linesKey, filter, bucket]);
-  const refiltering = settledFor !== null && settledFor !== selectionKey;
-  // The cold open and the refilter share one treatment.
-  const showSkeleton = !error && (refiltering || (loading && settled === 0));
-  const showListSkeleton =
-    showSkeleton || (!error && (loading || result?.page !== page));
-
-  useEffect(() => {
-    let cancelled = false;
-    api
-      .summary(token, lines)
-      .then((s) => !cancelled && setSummary(s))
-      .catch(() => {})
-      .finally(() => !cancelled && setSummarySettled(true));
-    return () => {
-      cancelled = true;
-    };
-  }, [token, lines]);
-
-  // LAST WEEK'S SUMMARY DOES NOT TAKE THE LINE FILTER, so it is keyed on
-  // the token alone. It used to sit in the effect above and be re-read on
-  // every change of selection, and it is two round trips (it reads this
-  // crawl's summary to learn the previous crawl's id, then reads that),
-  // every one of them returning the answer already in state.
-  useEffect(() => {
-    let cancelled = false;
-    api
-      .previousSummary(token)
-      .then((p) => !cancelled && setPrevious(p))
-      .catch(() => {});
-    return () => {
-      cancelled = true;
-    };
-  }, [token]);
+  const isFirstCrawl = summary.previous_job_id === null;
 
   // The server groups BEFORE paging and counts the entire filtered set.
   // Abort an obsolete read; it must not continue walking old pages.
@@ -216,115 +203,18 @@ export default function CrawlChanges() {
         setTrial(r.trial ?? null);
         setOpen(new Set());
         setSettled((n) => n + 1);
-        setSettledFor(selectionKey);
       })
-      .catch(
-        (e: Error) =>
-          !controller.signal.aborted && setError(changeErrorMessage(e)),
-      )
+      .catch((e: Error) => !controller.signal.aborted && setError(changeErrorMessage(e)))
       .finally(() => !controller.signal.aborted && setLoading(false));
     return () => controller.abort();
-  }, [token, filter, lines, linesKey, bucket, page, selectionKey]);
+  }, [token, filter, lines, bucket, page]);
 
   useEffect(() => setPage(1), [bucket, filter, lines]);
+  // The skeleton whenever the list waits for its rows (David, 2026-10-27).
+  const waiting = !error && (loading || result?.page !== page);
   const total = result?.total ?? 0;
   const pageCount = Math.max(1, Math.ceil(total / PAGE_SIZE));
   const safePage = Math.min(page, pageCount);
-  const shown = rows;
-
-  const weekLabel = summary?.finished_at
-    ? formatWeek(new Date(summary.finished_at))
-    : null;
-  const prevWeekLabel = previous?.finished_at
-    ? formatWeek(new Date(previous.finished_at))
-    : null;
-
-  // The KPI row re-scopes to the selected tab, so the numbers on top always
-  // describe the cards underneath them rather than the whole week. Picking
-  // "Removed" and reading a total that still counts additions was the old
-  // page's worst lie.
-  const kpi = result?.kpi ?? {
-    lines: 0,
-    placements: 0,
-    publishers: 0,
-    apps: 0,
-    byEvent: {
-      added: 0,
-      removed: 0,
-      cert_changed: 0,
-      newly_monitored: 0,
-      monitoring_stopped: 0,
-      first_appearance: 0,
-    },
-  };
-
-  /** No previous crawl at all. Distinct from "no changes": one is a
-   *  starting point, the other is a result. */
-  const isFirstCrawl = summary?.previous_job_id === null;
-
-  // Last week's own totals for the same three events, so each KPI can say
-  // whether this week was busier than the last.
-  //
-  // WHICH NUMBER THIS CAN BE COMPARED AGAINST. `hero_diff.line_totals`
-  // counts one per (line x publisher file) — 127 additions last week means
-  // 127 file entries, not 127 distinct lines. This page's cards are one per
-  // DISTINCT line, so its `counts.added` (32) is a different unit entirely.
-  // Putting last week's 92 next to this week's 32 produced a confident
-  // "-65.2%" that measured nothing. The delta therefore rides on
-  // `kpi.byEvent`, which is counted the same way the summary counts, and
-  // the distinct-line figure carries no delta because no prior-week
-  // distinct-line count exists to compare it to.
-  //
-  // Suppressed under a filter for the same reason: the counts on screen
-  // then describe a slice while last week's describe the whole week.
-  //
-  // Incomplete frozen artifacts are refused by the grouped endpoint.
-  // A seat-line filter makes every current count a slice of the week while
-  // last week's figures are the whole week, so nothing is comparable.
-  // Not on a trial either: this week's figures are counted on the cut
-  // rows while last week's are whole, and a delta between the two would
-  // be confident and wrong.
-  const comparable = !filter && lines.length === 0 && !trial;
-  const prevCounts = useMemo<Record<EventKind, number | null>>(
-    () => ({
-      added: previous?.hero_diff.line_totals.added ?? null,
-      removed: previous?.hero_diff.line_totals.removed ?? null,
-      cert_changed: previous?.hero_diff.line_totals.cert_changed ?? null,
-      // A scope kind has no honest previous value BY CONSTRUCTION: last
-      // week we were not watching these lines, so there is no number from
-      // that week to be a percentage of. Their first week is a baseline.
-      newly_monitored: null,
-      monitoring_stopped: null,
-      first_appearance: null,
-      // Not a change at all, so nothing to be a percentage of.
-      unconfirmed: null,
-    }),
-    [previous],
-  );
-  const deltaFor = (event: EventKind, current: number) => {
-    // Scope kinds never carry a delta, whatever else is true. Everything
-    // else keeps the existing suppression rules.
-    if (isScopeKind(event) || event === "unconfirmed") return null;
-    const prev = prevCounts[event];
-    return comparable && prev != null ? computeDelta(current, prev) : null;
-  };
-
-  // Week-over-week growth on the "Where they landed" card's two figures.
-  // Drawn only where the comparison is like for like: the whole week (the All
-  // tab, not a scope tab where the current counts describe only a slice while
-  // last week's affected figure is the whole week), and only when the deltas
-  // are comparable at all (no filter, not truncated) with a previous crawl to
-  // measure against. Same discipline the left card's deltas already follow.
-  const prevAffected = previous?.hero_diff.affected ?? null;
-  const showAffectedDelta = bucket === "all" && comparable;
-  const publishersAffectedDelta =
-    showAffectedDelta && prevAffected
-      ? computeDelta(kpi.publishers, prevAffected.publishers)
-      : null;
-  const appsAffectedDelta =
-    showAffectedDelta && prevAffected
-      ? computeDelta(kpi.apps, prevAffected.apps)
-      : null;
 
   const toggle = (key: string) =>
     setOpen((prev) => {
@@ -335,402 +225,94 @@ export default function CrawlChanges() {
     });
 
   return (
-    <PageShell>
-      {summary?.trial && <TrialBanner caps={summary.trial} summary={summary} />}
-      {/* Page header. The seat-line filter sits top right, exactly where the
-          overview keeps it, so it is the same control in the same place on
-          both pages. */}
-      <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
-        <div className="min-w-0" data-tour="changes-header">
-          <h1 className="text-xl font-bold leading-tight tracking-tight text-slate-900 sm:text-2xl">
-            Changes
-          </h1>
-          <p className="mt-1 text-sm text-slate-500">
-            {isFirstCrawl
-              ? "Lines publishers added, dropped, or re-certified. First crawl, so the comparison begins next week."
-              : "Lines publishers added, dropped, or re-certified this week."}
-          </p>
-          <WeekLine
-            week={weekLabel}
-            previousWeek={prevWeekLabel}
-            isFirstCrawl={summary?.previous_job_id === null}
-            pending={!summarySettled}
-            className="mt-1.5"
-          />
-        </div>
-        <LineFilter
-          seats={summary?.watchlist?.seats ?? []}
-          selected={lines}
-          onChange={setLines}
-          // Only a REFILTER, not the page's own first load: on a cold open
-          // the skeleton below already says the page is loading, and a
-          // second "Filtering..." beside it would claim the reader had
-          // set a filter they never touched.
-          busy={refiltering}
-        />
-      </div>
-      <p className="-mt-2 min-h-[18px] text-[12px] leading-[18px] text-slate-500">
-        {lines.length > 0 && (
-          <>
-            Only changes on{" "}
-            <span className="font-mono text-slate-700">
-              {lines.length === 1
-                ? "the selected line"
-                : `${lines.length} selected lines`}
-            </span>
-            .
-          </>
-        )}
-      </p>
-
-      {/* The KPI row, scoped to the selected tab. Same two-card shape as the
-          overview so a reader who has seen one has seen both. */}
-      {/* The KPI row, scoped to the selected tab.
-
-          A SEAT-LINE REFILTER AND A COLD OPEN GET THE SAME SKELETON: both
-          are a new question about the report, and the numbers here would
-          otherwise sit at 60% opacity still stating the answer to the old
-          one. An SSP search is different, and deliberately keeps the light
-          treatment (the dim, plus the dots beside the tabs).
-
-          This sits in the KPI row's own slot rather than where the loader
-          used to be, because the real row is ABOVE the tabs: put it lower
-          and the cards would arrive under the controls and jump back. */}
-      {showSkeleton && <SkeletonStatCards count={2} />}
-
-      {!error && !showSkeleton && (
-        <div
-          className={cn(
-            "grid grid-cols-1 gap-4 transition-opacity duration-300 ease-out lg:grid-cols-2",
-            loading && "opacity-60",
-          )}
-        >
-          <div className="rounded-2xl border border-border bg-white p-5 shadow-sm">
-            <div className="mb-3 flex items-baseline justify-between gap-3">
-              <div>
-                <div className="font-display text-sm font-medium text-slate-700">
-                  {bucket === "all"
-                    ? "This week's changes"
-                    : TONES[bucket].label}
-                </div>
-                <div className="text-[11px] text-slate-500">
-                  {isFirstCrawl
-                    ? "Your first crawl"
-                    : bucket === "all"
-                      ? "Relative to last week"
-                      : bucket === "first_appearance"
-                        ? "New to your report, nothing to compare against"
-                        : bucket === "newly_monitored"
-                          ? "Their first week on your seat lines"
-                          : // Not "first week": these lines came OFF the list,
-                            // so the week they are having is their last. The
-                            // publishers still carry them.
-                            bucket === "monitoring_stopped"
-                            ? "Came off your seat lines, still carried"
-                            : bucket === "unconfirmed"
-                              ? "Not counted as added or removed"
-                              : "This tab only"}
-                </div>
-              </div>
-              <span className="text-xs text-slate-500">
-                {isFirstCrawl
-                  ? "baseline"
-                  : bucket === "all"
-                    ? `${kpi.byEvent.cert_changed.toLocaleString()} cert changes`
-                    : `${kpi.lines.toLocaleString()} distinct lines`}
-              </span>
-            </div>
-            {/* Same reason as the overview: on a first crawl "+0 added, -0
-                removed" is the absence of a result, not one, and it is the
-                first thing a new customer reads. */}
-            {isFirstCrawl ? (
-              <div className="rounded-xl border border-border bg-muted/30 px-5 py-6 text-center">
-                <div className="text-sm font-medium text-slate-700">
-                  This is the first crawl, with no prior week
-                </div>
-                <div className="mx-auto mt-1 max-w-md text-[12px] leading-relaxed text-slate-500">
-                  There is nothing to compare against yet. This week is your
-                  baseline, and the next crawl will list what publishers added,
-                  dropped and re-certified against it.
-                </div>
-              </div>
-            ) : bucket === "unconfirmed" ? (
-              // NEVER A BIG NUMBER (David, 2026-10-20). What could not be
-              // checked is not a result, so this tab's card says what the
-              // lines below are instead of counting them in a KPI.
-              <div className="rounded-xl border border-border bg-muted/30 px-5 py-6 text-center">
-                <div className="text-sm font-medium text-slate-700">
-                  {unconfirmedSentence(unconfirmedCount)}
-                </div>
-                <div className="mx-auto mt-1 max-w-md text-[12px] leading-relaxed text-slate-500">
-                  Each line below says why, when it was last seen, when its
-                  file was read this crawl and whether it was verified.
-                </div>
-              </div>
-            ) : (
-              <div className="grid grid-cols-2 divide-x divide-border overflow-hidden rounded-xl border border-border">
-                {bucket === "all" ? (
-                  <>
-                    <SplitStat
-                      tone="ok"
-                      prefix="+"
-                      number={kpi.byEvent.added}
-                      label="Lines added"
-                      delta={deltaFor("added", kpi.byEvent.added)}
-                      note={
-                        lines.length ? "under the selected lines" : undefined
-                      }
-                    />
-                    <SplitStat
-                      tone="critical"
-                      prefix="-"
-                      number={kpi.byEvent.removed}
-                      label="Lines removed"
-                      delta={deltaFor("removed", kpi.byEvent.removed)}
-                      note={
-                        lines.length ? "under the selected lines" : undefined
-                      }
-                    />
-                  </>
-                ) : (
-                  <>
-                    <SplitStat
-                      tone={
-                        bucket === "added"
-                          ? "ok"
-                          : bucket === "removed"
-                            ? "critical"
-                            : bucket === "newly_monitored"
-                              ? "info"
-                              : bucket === "monitoring_stopped"
-                                ? "warn"
-                                : // First appearance stays neutral, matching
-                                  // its cards: news about our crawl, not the
-                                  // market.
-                                  isScopeKind(bucket)
-                                  ? undefined
-                                  : "warn"
-                      }
-                      number={kpi.placements}
-                      label={TONES[bucket].label}
-                      delta={deltaFor(bucket, kpi.placements)}
-                      note={
-                        lines.length ? "under the selected lines" : undefined
-                      }
-                    />
-                    <SplitStat number={kpi.lines} label="Distinct lines" />
-                  </>
-                )}
-              </div>
-            )}
-          </div>
-
-          <div className="rounded-2xl border border-border bg-white p-5 shadow-sm">
-            <div className="mb-3 flex items-baseline justify-between gap-3">
-              <div>
-                <div className="font-display text-sm font-medium text-slate-700">
-                  Where they landed
-                </div>
-                <div className="text-[11px] text-slate-500">
-                  {isFirstCrawl
-                    ? "No prior week to compare against"
-                    : bucket === "unconfirmed"
-                      ? "Carrying the unconfirmed lines below"
-                      : "Across the lines shown below"}
-                </div>
-              </div>
-              <span className="text-xs text-slate-500">
-                {isFirstCrawl
-                  ? "first crawl"
-                  : `${kpi.lines.toLocaleString()} lines`}
-              </span>
-            </div>
-            {/* "0 publishers affected" is true and useless on a first crawl:
-                nothing was affected because there is no earlier week for
-                anything to have moved against. Two zeros make a new customer
-                read the product as having found nothing, so the card says
-                which of the two it is. */}
-            {isFirstCrawl ? (
-              <div className="rounded-xl border border-border bg-muted/30 px-5 py-6 text-center">
-                <div className="text-sm font-medium text-slate-700">
-                  This is the first crawl, with no prior week
-                </div>
-                <div className="mx-auto mt-1 max-w-md text-[12px] leading-relaxed text-slate-500">
-                  Nothing has moved yet because there is nothing to move
-                  against. Publishers and apps appear here once the next crawl
-                  compares to this one.
-                </div>
-              </div>
-            ) : (
-              <div className="grid grid-cols-2 divide-x divide-border overflow-hidden rounded-xl border border-border">
-                {/* Same tones as the overview's matched cards: publishers in the
-                  brand green, apps in pink, so the two pages read as one. */}
-                <SplitStat
-                  tone="publisher"
-                  number={kpi.publishers}
-                  label="Publishers affected"
-                  // Second beat: a second after the left card has landed.
-                  delayMs={landsAfterMs() + BEAT_PAUSE_MS}
-                  delta={publishersAffectedDelta}
-                  note={lines.length ? "under the selected lines" : undefined}
-                />
-                <SplitStat
-                  tone="app"
-                  number={kpi.apps}
-                  label="Apps affected"
-                  // Second beat: a second after the left card has landed.
-                  delayMs={landsAfterMs() + BEAT_PAUSE_MS}
-                  delta={appsAffectedDelta}
-                  note={lines.length ? "under the selected lines" : undefined}
-                />
-              </div>
-            )}
-          </div>
-        </div>
-      )}
-
-      {/* Controls: the bucket, then a full-width SSP filter on its own row.
-          The search used to be a fixed-width pill floating on the right of the
-          tabs; as a wide bar spanning the row it reads as the search it is. */}
-      <div className="space-y-3" data-tour="changes-controls">
-        {/* The same plain segmented control the overview's drilldown wears.
-            The per-tab counts it used to carry now live in the KPI row
-            directly above, which re-scopes with the tab, so printing them
-            on the control as well was the same number twice. */}
-        {/* THE NOTE SITS WITH THE TABS IT IS ABOUT, not inside the KPI
-            card. Inside the card it pushed the two headline numbers down
-            and left the pair of cards uneven, which is a layout cost paid
-            on the one week a customer most needs the numbers to read
-            normally. Here it explains the two extra tabs, an arm's length
-            from them, and disturbs nothing above it. */}
+    <div>
+      <div ref={paging.topRef} className="mb-3 space-y-2" data-tour="lines-controls">
+        {/* THE NOTE SITS WITH THE TABS IT IS ABOUT. */}
         {!isFirstCrawl && scopeTabs.length > 0 && (
-          <p className="mb-2 flex items-start gap-1.5 text-[12px] leading-relaxed text-slate-500">
-            <Eye
-              aria-hidden
-              className="mt-[3px] h-3.5 w-3.5 flex-shrink-0 text-slate-400"
-            />
+          <p className="flex items-start gap-1.5 text-[12px] leading-relaxed text-slate-500">
+            <Eye aria-hidden className="mt-[3px] h-3.5 w-3.5 flex-shrink-0 text-slate-400" />
             <span>
-              Your seat lines changed since last week. Lines you started or
-              stopped watching are on their own tabs, and are not counted as
+              Lines you started or stopped watching are on their own tabs, and are not counted as
               added or removed: the publishers carrying them did not change.
             </span>
           </p>
         )}
-        <div className="flex min-w-0 items-center gap-3">
-          {/* ON A PHONE, A WEEK WITH SIX TABS IS WIDER THAN THE SCREEN. The
-              row scrolls sideways on its own, so the tabs never push the
-              whole page into a sideways scroll (it did, by about 100px). */}
-          <div className="min-w-0 overflow-x-auto">
-            <Tabs value={bucket} onValueChange={(v) => setBucket(v as Bucket)}>
-              {/* max-w-none: the base layer caps every element at 100% of its
-                parent, which squeezed this strip to the screen and, being
-                centred, pushed All and Added off its left edge where no
-                scroll could reach them. */}
-              <TabsList className="w-max max-w-none">
-                <TabsTrigger value="all">All</TabsTrigger>
-                <TabsTrigger value="added">Added</TabsTrigger>
-                <TabsTrigger value="removed">Removed</TabsTrigger>
-                <TabsTrigger value="cert_changed">Cert changes</TabsTrigger>
-                {/* THE WATCHLIST MOVED, so the lines it moved get somewhere to
-                  be. Shown only on a week that has them -- the ordinary week
-                  keeps four tabs -- and counted from the summary rather than
-                  from the rows on screen, which are already scoped to the
-                  open tab and would make the tab that reveals them vanish
-                  the moment it was used.
-
-                  Without these, a customer who trimmed fifty lines could
-                  see the note above and then have no way to find which
-                  fifty: the rows sit in All, mixed into a week of real
-                  market movement. */}
-                {scopeTabs.map(([kind, label]) => (
-                  <TabsTrigger key={kind} value={kind}>
-                    {label}
-                  </TabsTrigger>
-                ))}
-                {/* WHAT COULD NOT BE CHECKED, last, and only on a week
-                    that has any: the ordinary week keeps its tabs. */}
-                {!isFirstCrawl && unconfirmedCount > 0 && (
-                  <TabsTrigger value="unconfirmed">Unconfirmed</TabsTrigger>
-                )}
-              </TabsList>
-            </Tabs>
-          </div>
-        </div>
-        {/* ONE QUIET LINE, NEVER A CARD (David, 2026-10-20): the lines the
-            crawler could not verify, under the tabs, on every tab but their
-            own, where the card above already says it. */}
-        {!isFirstCrawl && unconfirmedCount > 0 && bucket !== "unconfirmed" && (
-          <p data-testid="unconfirmed-quiet" className="text-[12px] leading-relaxed text-slate-500">
-            {unconfirmedSentence(unconfirmedCount)}
-          </p>
-        )}
+        <ListTabsRow
+          left={
+            // ON A PHONE, A WEEK WITH SIX TABS IS WIDER THAN THE SCREEN: the
+            // row scrolls sideways on its own, never the page.
+            <div className="min-w-0 max-w-full overflow-x-auto">
+              <Tabs value={bucket} onValueChange={(v) => setBucket(v as Bucket)}>
+                <TabsList className="w-max max-w-none">
+                  <TabsTrigger value="all">All</TabsTrigger>
+                  <TabsTrigger value="added">Added</TabsTrigger>
+                  <TabsTrigger value="removed">Removed</TabsTrigger>
+                  <TabsTrigger value="cert_changed">Cert changes</TabsTrigger>
+                  {scopeTabs.map(([kind, label]) => (
+                    <TabsTrigger key={kind} value={kind}>
+                      {label}
+                    </TabsTrigger>
+                  ))}
+                  {!isFirstCrawl && unconfirmedCount > 0 && <TabsTrigger value="unconfirmed">Unconfirmed</TabsTrigger>}
+                </TabsList>
+              </Tabs>
+            </div>
+          }
+          right={null}
+        />
         {/* Why every removal carries two dates, said once where they are. */}
         {!isFirstCrawl && bucket === "removed" && (
           <p className="text-[12px] leading-relaxed text-slate-500">{WEEKLY_READ_NOTE}</p>
         )}
-
-        <div className="relative w-full">
-          <Search className="pointer-events-none absolute left-3.5 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
-          <input
-            value={ssp}
-            onChange={(e) => setSsp(e.target.value)}
-            placeholder="Filter by SSP domain"
-            aria-label="Filter by SSP domain"
-            className="h-10 w-full rounded-full border border-border bg-white pl-10 pr-4 text-sm text-slate-900 outline-none transition-colors placeholder:text-slate-400 focus:border-primary/40"
-          />
-        </div>
+        <ListSearchRow
+          query={ssp}
+          setQuery={setSsp}
+          placeholder="Filter by SSP domain"
+          label="Filter by SSP domain"
+          right={
+            waiting ? (
+              <CountSkeleton />
+            ) : !error && total > 0 ? (
+              <Pager
+                placement="inline"
+                page={safePage}
+                pageSize={PAGE_SIZE}
+                total={total}
+                onPage={paging.onPage}
+                noun="lines"
+                nounOne="line"
+              />
+            ) : null
+          }
+        />
       </div>
 
-      {showListSkeleton && (
-        <SkeletonRows rows={6} label="Loading line changes" />
-      )}
+      {waiting && <SkeletonRows rows={5} label="Loading line changes" />}
       {error && <p className="py-4 text-sm text-critical">{error}</p>}
 
-      {/* An empty list has two very different causes and they must not
-          share a sentence. "No changes match this filter" blames a filter
-          the customer never set when the real reason is that this is their
-          first crawl and there is nothing to compare against yet. */}
-      {!loading && !error && shown.length === 0 && isFirstCrawl && (
+      {/* An empty list has two very different causes and they must not share
+          a sentence: a first crawl has nothing to compare against yet. */}
+      {!waiting && !error && rows.length === 0 && isFirstCrawl && (
         <div className="rounded-2xl border border-dashed border-border bg-muted/20 px-6 py-10 text-center">
-          <div className="text-sm font-medium text-slate-700">
-            This is your first crawl
-          </div>
+          <div className="text-sm font-medium text-slate-700">This is your first crawl</div>
           <p className="mx-auto mt-1 max-w-lg text-[13px] leading-relaxed text-slate-500">
-            There is no earlier week to compare against yet, so nothing is
-            listed here. Everything found this week becomes the baseline, and
-            the next crawl will show what moved against it.
+            There is no earlier week to compare against yet, so nothing is listed here. Everything found
+            this week becomes the baseline, and the next crawl will show what moved against it.
           </p>
         </div>
       )}
-      {!loading && !error && shown.length === 0 && !isFirstCrawl && (
-        <p className="rounded-2xl border border-dashed border-border bg-muted/20 px-6 py-10 text-center text-sm text-slate-500">
-          No line changes match this filter.
+      {!waiting && !error && rows.length === 0 && !isFirstCrawl && (
+        <p
+          data-empty-list
+          className="rounded-lg border border-dashed border-border px-4 py-8 text-center text-sm text-slate-600"
+        >
+          {filter ? `No line changes match "${filter}".` : EMPTY_BUCKET[bucket]}
         </p>
       )}
 
-      {!showListSkeleton && total > PAGE_SIZE && (
-        <Pager
-          placement="top"
-          anchorRef={paging.topRef}
-          page={safePage}
-          pageSize={PAGE_SIZE}
-          total={total}
-          onPage={paging.onPage}
-          noun="lines"
-        />
-      )}
-
-      {/* Not while the skeleton is up: the previous filter's rows are
-          still in state and would render underneath it. */}
-      {!showListSkeleton && !error && shown.length > 0 && (
-        <div
-          key={settled}
-          className={cn(
-            "animate-in fade-in space-y-3 transition-opacity duration-300 ease-out",
-            loading && "opacity-60",
-          )}
-        >
-          {shown.map((g, i) => (
+      {!waiting && !error && rows.length > 0 && (
+        <div key={settled} className="animate-in fade-in space-y-3">
+          {rows.map((g, i) => (
             <Settle key={g.key} index={i}>
               <ChangeCard
                 group={g}
@@ -744,29 +326,20 @@ export default function CrawlChanges() {
         </div>
       )}
 
-      {/* Counts the PREVIOUS filter's groups while a new one is in
-          flight, so it stays down with the list it describes. */}
-      {!showListSkeleton && !loading && (summary?.trial || trial) && (
+      {!waiting && (caps || trial) && (
         <LockedTail
           slice={trial}
-          caps={summary?.trial ?? null}
+          caps={caps}
           noun="line changes"
           detail="change, on every publisher, week after week"
         />
       )}
-      {/* The locked tail describes hidden trial placements. Paging below
-          stays within the server's already-cut, entitled publisher set. */}
-      {!showListSkeleton && total > PAGE_SIZE && (
-        <Pager
-          className="border-t border-border/70 pt-4"
-          page={safePage}
-          pageSize={PAGE_SIZE}
-          total={total}
-          onPage={paging.onPage}
-          noun="lines"
-        />
+      {!waiting && total > PAGE_SIZE && (
+        <div className="mt-4">
+          <Pager page={safePage} pageSize={PAGE_SIZE} total={total} onPage={paging.onPage} noun="lines" />
+        </div>
       )}
-    </PageShell>
+    </div>
   );
 }
 
@@ -839,6 +412,27 @@ function ChangeCard({
       .finally(() => !controller.signal.aborted && setRosterLoading(false));
     return () => controller.abort();
   }, [token, group.key, open, publisherPage, filters.ssp_domain, linesKey]);
+  // ONE ROW PER PUBLISHER (2026-10-27): a publisher whose file and
+  // partners carry the line comes once, its partners beside it.
+  const roster = useMemo(() => {
+    const out: { event: LineEvent; partners: string[]; own: boolean }[] = [];
+    const byKey = new Map<string, (typeof out)[number]>();
+    for (const p of publishers) {
+      const key = `${p.developer_id}|${p.file_kind}`;
+      const partner = p.match_type === "ipd" && p.ipd_partner ? p.ipd_partner : null;
+      let r = byKey.get(key);
+      if (!r) {
+        r = { event: p, partners: [], own: partner === null };
+        byKey.set(key, r);
+        out.push(r);
+      } else if (partner === null && !r.own) {
+        r.event = p;
+        r.own = true;
+      }
+      if (partner && !r.partners.includes(partner)) r.partners.push(partner);
+    }
+    return out;
+  }, [publishers]);
   const exportController = useRef<AbortController | null>(null);
   useEffect(() => () => exportController.current?.abort(), []);
   async function downloadRoster() {
@@ -1073,14 +667,17 @@ function ChangeCard({
                 }
               />
               <SeatLinesFrame>
-                {publishers.map((p, i) => (
+                {roster.map(({ event: p, partners, own }, i) => (
                   // Click the row: the line is copied and this publisher's
                   // file opens at it (David, 2026-10-06); a line that has
                   // left the file copies, and its file opens from the margin
-                  // (as on the Overview). The domain itself links to their
-                  // site.
+                  // (as on the Overview). A line an inventory partner carries
+                  // opens THAT partner's ads.txt, the partners named beside
+                  // it. The domain itself links to their site.
                   <SeatLineRow
                     key={`${p.developer_id}|${p.file_kind}|${i}`}
+                    partners={partners}
+                    own={own}
                     // Numbered across the roster's pages: page 2 starts at 51.
                     n={(publisherPage - 1) * ROSTER_PAGE + i + 1}
                     digits={gutterDigits(count)}
@@ -1368,19 +965,6 @@ function formatSeen(iso: string): string {
   return Number.isNaN(d.getTime())
     ? "an earlier crawl"
     : d.toLocaleDateString(undefined, { month: "short", year: "numeric" });
-}
-
-/** True for the kinds that mean the watchlist moved rather than the world. */
-/** Kinds that describe OUR coverage rather than the market: we started or
- *  stopped watching a line, or met a publisher for the first time. None of
- *  them carries a week-over-week delta, because in each case there is no
- *  honest previous number to be a percentage of. */
-function isScopeKind(event: EventKind): boolean {
-  return (
-    event === "newly_monitored" ||
-    event === "monitoring_stopped" ||
-    event === "first_appearance"
-  );
 }
 
 /* ── Helpers ───────────────────────────────────────────────────────── */

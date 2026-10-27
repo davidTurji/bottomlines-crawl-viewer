@@ -230,6 +230,11 @@ function realShape<T extends LineArrays & Record<string, unknown>>(row: T, i: nu
   const platform = REAL_PLATFORMS[i % REAL_PLATFORMS.length];
   const twice = i % 2 === 0;
   const lines = (row.matched_lines ?? []) as MatchedSeatLine[];
+  // A change window lists its lines once per partner too.
+  const copies = (ls: MatchedSeatLine[]) =>
+    twice
+      ? ls.flatMap((l) => REAL_PARTNERS.slice(0, 2 + (i % 3 === 0 ? 1 : 0)).map((p) => realLine(l, p)))
+      : ls.map((l) => realLine(l, null));
   const out: Record<string, unknown> = {
     ...row,
     ...roles,
@@ -242,11 +247,9 @@ function realShape<T extends LineArrays & Record<string, unknown>>(row: T, i: nu
             : lines.map((l) => realLine(l, null)),
         }
       : {}),
-    ...(row.added_lines ? { added_lines: (row.added_lines as MatchedSeatLine[]).map((l) => realLine(l, null)) } : {}),
-    ...(row.removed_lines ? { removed_lines: (row.removed_lines as MatchedSeatLine[]).map((l) => realLine(l, null)) } : {}),
-    ...(row.cert_changed_lines
-      ? { cert_changed_lines: (row.cert_changed_lines as MatchedSeatLine[]).map((l) => realLine(l, null)) }
-      : {}),
+    ...(row.added_lines ? { added_lines: copies(row.added_lines as MatchedSeatLine[]) } : {}),
+    ...(row.removed_lines ? { removed_lines: copies(row.removed_lines as MatchedSeatLine[]) } : {}),
+    ...(row.cert_changed_lines ? { cert_changed_lines: copies(row.cert_changed_lines as MatchedSeatLine[]) } : {}),
   };
   return out as T;
 }
