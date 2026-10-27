@@ -36,7 +36,8 @@ export function PopularBar({
   choices: PopularChoice[];
   active: string | null;
   onPick: (id: string) => void;
-  /** The counts are on their way: the chips' places, in the skeleton tone. */
+  /** Counts still on their way: the chips that landed show, and the places
+   *  of the rest in the skeleton tone, until all settle or the ceiling. */
   loading?: boolean;
 }) {
   const rail = useRef<HTMLDivElement>(null);
@@ -99,7 +100,11 @@ export function PopularBar({
     fits && "sm:invisible",
   );
   return (
-    <section data-testid="popular" aria-label="Popular" className="flex items-center gap-2">
+    // FULL WIDTH (David, 2026-10-27): the row spans the content like the
+    // sections below; the label at the left, the arrows at the two ends,
+    // the pills filling the rail between (they grow when they fit, and
+    // scroll at their own width when they do not; a phone swipes).
+    <section data-testid="popular" aria-label="Popular" aria-busy={loading || undefined} className="flex w-full items-center gap-2">
       <span className="flex-shrink-0 pr-1 text-[11px] font-medium text-slate-500">Popular</span>
       <button type="button" onClick={() => page(-1)} disabled={edges.start} aria-label="Previous choices" className={arrow}>
         <ChevronLeft className="h-4 w-4" />
@@ -111,9 +116,8 @@ export function PopularBar({
         onKeyDown={onKeyDown}
         className="tbl tbl-no-scrollbar flex min-w-0 flex-1 snap-x gap-2 overflow-x-auto py-0.5"
       >
-        {loading
-          ? [0, 1, 2, 3].map((i) => <Skeleton key={i} className="h-9 w-44 flex-shrink-0 rounded-full" />)
-          : choices.map((c) => {
+        {[
+          ...choices.map((c) => {
               const on = c.id === active;
               return (
                 <button
@@ -123,7 +127,7 @@ export function PopularBar({
                   aria-pressed={on}
                   onClick={() => onPick(c.id)}
                   className={cn(
-                    "flex h-9 flex-shrink-0 snap-start items-center gap-2 whitespace-nowrap rounded-full border px-4 text-[14px] font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50",
+                    "flex h-9 flex-shrink-0 flex-grow snap-start items-center justify-center gap-2 whitespace-nowrap rounded-full border px-4 text-[14px] font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50",
                     on
                       ? "border-primary/40 bg-accent text-primary"
                       : "border-border bg-white text-slate-700 hover:border-primary/25 hover:text-primary",
@@ -135,7 +139,16 @@ export function PopularBar({
                   </span>
                 </button>
               );
-            })}
+            }),
+          // The places of the counts still on their way.
+          ...(loading
+            ? Array.from({ length: Math.max(1, 4 - choices.length) }, (_, i) => (
+                <span key={`s${i}`} data-popular-skeleton className="min-w-[11rem] flex-shrink-0 flex-grow">
+                  <Skeleton className="h-9 w-full rounded-full" />
+                </span>
+              ))
+            : []),
+        ]}
       </div>
       <button type="button" onClick={() => page(1)} disabled={edges.end} aria-label="More choices" className={arrow}>
         <ChevronRight className="h-4 w-4" />

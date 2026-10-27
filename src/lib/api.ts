@@ -127,9 +127,17 @@ export function releaseDataRequests(): void {
   h?.release();
 }
 
-/** Waits while data requests are held (a no-op otherwise). */
+/** The longest a request waits for the sign-in before it goes anyway
+ *  (and is answered 401, which shows the form again): never forever. */
+const HOLD_CEILING_MS = 120_000;
+
+/** Waits while data requests are held (a no-op otherwise), at most
+ *  HOLD_CEILING_MS. */
 async function whenSignedIn(): Promise<void> {
-  while (held) await held.until;
+  const until = Date.now() + HOLD_CEILING_MS;
+  while (held && Date.now() < until) {
+    await Promise.race([held.until, new Promise<void>((r) => setTimeout(r, Math.max(0, until - Date.now())))]);
+  }
 }
 
 // ── Auth epoch ───────────────────────────────────────────────────
@@ -147,11 +155,32 @@ export function currentAuthEpoch(): number {
   return authEpoch;
 }
 
+// ── Every request settles (hotfix 2026-10-27) ────────────────────
+// The API ran out of memory under a big report (bl-crawl-api, 2 GiB, every
+// request loading the whole snapshot) and requests hung: the Popular bar
+// waited on six of them forever. Every request now has a ceiling, a caller
+// may ask for a shorter one, and two identical GETs in flight are one
+// request (the second waits on the first; the fetch is aborted only when
+// nobody waits on it any more).
+
+/** The longest any request may take before it is given up. */
+export const REQUEST_CEILING_MS = 90_000;
+
+/** A caller's own limits on one request. */
+export type ReqOpts = { timeoutMs?: number; signal?: AbortSignal };
+
+/** Said when a request ran past its ceiling. */
+export const TIMED_OUT = "The report took too long to answer. Please try again in a moment.";
+
+type Shared = { answer: Promise<unknown>; controller: AbortController; waiting: number; settled: boolean };
+const inFlight = new Map<string, Shared>();
+
 async function req<T>(
   method: string,
   path: string,
   body?: unknown,
   signal?: AbortSignal,
+  opts?: ReqOpts,
 ): Promise<T> {
   // Path without its query string, so the two exemptions below compare
   // whole endpoints. A prefix test would misfire on a share token that
@@ -162,32 +191,88 @@ async function req<T>(
   // which run before any session exists, never do.
   if (!endpoint.endsWith("/viewer/auth") && endpoint !== "/v1/viewer/resolve") await whenSignedIn();
   const epochAtStart = authEpoch;
-  const res = await fetch(`${BASE}${path}`, {
-    method,
-    credentials: "include",
-    headers: body ? { "Content-Type": "application/json" } : {},
-    body: body ? JSON.stringify(body) : undefined,
-    signal,
-  });
-  if (!res.ok) {
-    // The auth endpoint's own 401 means "wrong credentials", not
-    // "session expired": it must not re-trip the gate, only surface
-    // as the form's error state.
-    // Likewise the resolve endpoint: it runs *before* any session
-    // exists (it is what turns a readable URL into a token), so its
-    // failures are "no such report", never "session expired".
-    if (
-      res.status === 401 &&
-      !endpoint.endsWith("/viewer/auth") &&
-      endpoint !== "/v1/viewer/resolve" &&
-      epochAtStart === authEpoch
-    ) {
-      unauthorizedHandler?.();
-    }
-    const detail = await res.text().catch(() => "");
-    throw new ApiError(res.status, detail || `${method} ${path} → ${res.status}`);
+  const callerSignal = opts?.signal ?? signal;
+  // One request for identical GETs in flight (same path, same session).
+  const key = method === "GET" && body === undefined ? `${epochAtStart}|${path}` : null;
+  let shared = key ? inFlight.get(key) : undefined;
+  if (!shared) {
+    const controller = new AbortController();
+    const ceiling = setTimeout(() => controller.abort(new DOMException("Timed out", "TimeoutError")), REQUEST_CEILING_MS);
+    const s: Shared = { answer: Promise.resolve(), controller, waiting: 0, settled: false };
+    s.answer = (async () => {
+      try {
+        const res = await fetch(`${BASE}${path}`, {
+          method,
+          credentials: "include",
+          headers: body ? { "Content-Type": "application/json" } : {},
+          body: body ? JSON.stringify(body) : undefined,
+          signal: controller.signal,
+        });
+        if (!res.ok) {
+          // The auth endpoint's own 401 means "wrong credentials", not
+          // "session expired": it must not re-trip the gate, only surface
+          // as the form's error state.
+          // Likewise the resolve endpoint: it runs *before* any session
+          // exists (it is what turns a readable URL into a token), so its
+          // failures are "no such report", never "session expired".
+          if (
+            res.status === 401 &&
+            !endpoint.endsWith("/viewer/auth") &&
+            endpoint !== "/v1/viewer/resolve" &&
+            epochAtStart === authEpoch
+          ) {
+            unauthorizedHandler?.();
+          }
+          const detail = await res.text().catch(() => "");
+          throw new ApiError(res.status, detail || `${method} ${path} → ${res.status}`);
+        }
+        return await res.json();
+      } catch (e) {
+        if (controller.signal.aborted && !(e instanceof ApiError)) {
+          const why = controller.signal.reason;
+          if (why instanceof DOMException && why.name === "TimeoutError") throw new ApiError(504, TIMED_OUT);
+          throw new DOMException("Aborted", "AbortError");
+        }
+        throw e;
+      } finally {
+        clearTimeout(ceiling);
+        s.settled = true;
+        if (key && inFlight.get(key) === s) inFlight.delete(key);
+      }
+    })();
+    // Nobody may be left with an unhandled rejection of the shared answer.
+    s.answer.catch(() => {});
+    shared = s;
+    if (key) inFlight.set(key, s);
   }
-  return res.json() as Promise<T>;
+  const s = shared;
+  s.waiting++;
+  // This caller's own limits: a shorter timeout, or its own abort.
+  let stop: (() => void) | null = null;
+  const mine = new Promise<never>((_, reject) => {
+    const timer = opts?.timeoutMs ? setTimeout(() => reject(new ApiError(504, TIMED_OUT)), opts.timeoutMs) : null;
+    const onAbort = () => reject(new DOMException("Aborted", "AbortError"));
+    if (callerSignal?.aborted) onAbort();
+    callerSignal?.addEventListener("abort", onAbort, { once: true });
+    stop = () => {
+      if (timer) clearTimeout(timer);
+      callerSignal?.removeEventListener("abort", onAbort);
+    };
+  });
+  mine.catch(() => {});
+  try {
+    const value = await Promise.race([s.answer, mine]);
+    // Each caller its own copy when the answer was shared.
+    return (s.waiting > 1 && typeof structuredClone === "function" ? structuredClone(value) : value) as T;
+  } finally {
+    (stop as (() => void) | null)?.();
+    s.waiting--;
+    // Nobody waits on it any more: let the server stop working on it.
+    if (s.waiting === 0 && !s.settled) {
+      if (key && inFlight.get(key) === s) inFlight.delete(key);
+      s.controller.abort(new DOMException("Aborted", "AbortError"));
+    }
+  }
 }
 
 export const api = {
@@ -361,6 +446,8 @@ export const api = {
     pageSize: number = PAGE_SIZE,
     /** The Found in switch (an API without it ignores it). */
     foundIn: FoundInFilter = "all",
+    /** A shorter limit, or an abort, for this call (req). */
+    opts?: ReqOpts,
   ) => {
     if (MOCK) {
       const { mockDeveloperEvents } = await import("./mockData");
@@ -376,6 +463,9 @@ export const api = {
     return req<DeveloperEventsPage>(
       "GET",
       `/v1/viewer/${token}/developer-events?event=${event}&page=${page}&page_size=${pageSize}${q ? `&q=${encodeURIComponent(q)}` : ""}${linesQuery(lines)}${matchTypeQuery(matchType)}${foundIn !== "all" ? `&found_in=${foundIn}` : ""}`,
+      undefined,
+      undefined,
+      opts,
     );
   },
   changeGroups: async (
@@ -502,6 +592,8 @@ export const api = {
     change?: WatchChange,
     /** The Found in switch (an API without it ignores it). */
     foundIn: FoundInFilter = "all",
+    /** A shorter limit, or an abort, for this call (req). */
+    opts?: ReqOpts,
   ) => {
     if (MOCK) {
       const { mockMatchedDevelopers } = await import("./mockData");
@@ -517,6 +609,9 @@ export const api = {
     return req<MatchedDevelopersPage>(
       "GET",
       `/v1/viewer/${token}/matched-developers?page=${page}&page_size=${pageSize}${q ? `&q=${encodeURIComponent(q)}` : ""}${linesQuery(lines)}${matchTypeQuery(matchType)}${change ? `&change=${change}` : ""}${foundIn !== "all" ? `&found_in=${foundIn}` : ""}`,
+      undefined,
+      undefined,
+      opts,
     );
   },
   matchedBundles: async (token: string, page = 1, q = "") => {
@@ -561,6 +656,8 @@ export const api = {
     pageSize: number = PAGE_SIZE,
     /** The Platform switch (an API without it ignores it). */
     platform: PlatformFilter = "all",
+    /** A shorter limit, or an abort, for this call (req). */
+    opts?: ReqOpts,
   ) => {
     if (MOCK) {
       const { mockMatchedApps } = await import("./mockData");
@@ -572,6 +669,9 @@ export const api = {
     return req<MatchedAppsPage>(
       "GET",
       `/v1/viewer/${token}/matched-apps?page=${page}&page_size=${pageSize}${q ? `&q=${encodeURIComponent(q)}` : ""}${linesQuery(lines)}${matchTypeQuery(matchType)}${change ? `&change=${change}` : ""}${platform !== "all" ? `&platform=${platform}` : ""}`,
+      undefined,
+      undefined,
+      opts,
     );
   },
   /**

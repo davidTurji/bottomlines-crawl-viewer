@@ -1,0 +1,163 @@
+/**
+ * POPULAR NEVER BLOCKS (hotfix 2026-10-27). On Select Media's report the
+ * API ran out of memory; the Popular bar stayed a skeleton forever and its
+ * six requests at once helped knock the API over. Now, against an API where
+ * one of its counts never answers and one answers 503:
+ *
+ *   - nothing of Popular is asked before the list below has landed;
+ *   - at most two of its requests are in flight at once;
+ *   - the other chips show as their counts land, the two failed ones are
+ *     simply not offered, and the skeleton ends by the ceiling;
+ *   - the page and the lists work all along;
+ *   - the row spans the content's full width.
+ */
+import { expect, test, type Page } from "@playwright/test";
+
+import { mockMatchedDevelopers } from "../src/lib/mockData";
+import { installFakeApi, TOKEN, type Scenario } from "./fakeApi";
+
+const BASE = `/crawl-report/${TOKEN}`;
+const FULL: Scenario = { matchType: true, appChange: true, watchTabs: true };
+
+/** Popular's own count requests: page_size=1. */
+const isCount = (url: string) => /\/(developer-events|matched-apps)\?/.test(url) && /[?&]page_size=1(&|$)/.test(url);
+
+async function open(page: Page, routes: () => Promise<unknown>) {
+  await page.addInitScript(() => {
+    try {
+      localStorage.setItem("pf_report_walkthrough_v1", JSON.stringify({ status: "completed", stepId: null, open: false }));
+    } catch {
+      /* the tour may show; the page still renders */
+    }
+  });
+  await installFakeApi(page, FULL);
+  await routes();
+  await page.goto(BASE);
+}
+
+test("one count never answers, one answers 503: the rest show, the skeleton ends, the page works", async ({ page }) => {
+  test.setTimeout(90_000);
+  const errors: string[] = [];
+  page.on("pageerror", (e) => errors.push(e.message));
+  // Popular's requests, in flight and in order; and when the list landed.
+  let inFlight = 0;
+  let most = 0;
+  const asked: { url: string; at: number }[] = [];
+  page.on("request", (r) => {
+    if (!isCount(r.url())) return;
+    asked.push({ url: r.url(), at: Date.now() });
+    inFlight++;
+    most = Math.max(most, inFlight);
+  });
+  const done = (r: { url(): string }) => isCount(r.url()) && inFlight--;
+  page.on("requestfinished", done);
+  page.on("requestfailed", done);
+  let listLanded = 0;
+  let releaseList!: () => void;
+  const listGate = new Promise<void>((r) => (releaseList = r));
+  await open(page, async () => {
+    // The list below is held a moment: Popular must wait for it.
+    await page.route(/matched-developers\?page=1&page_size=25(&|$)/, async (route) => {
+      await listGate;
+      listLanded = Date.now();
+      await route.fallback();
+    });
+    // One count never answers ...
+    await page.route(/developer-events\?event=removed&page=1&page_size=1(&|$)/, () => new Promise<void>(() => {}));
+    // ... and one answers 503.
+    await page.route(/matched-apps\?.*page_size=1.*change=added|matched-apps\?.*change=added.*page_size=1/, (route) =>
+      route.fulfill({ status: 503, json: { detail: "Memory limit exceeded" } }),
+    );
+  });
+  await expect(page.getByRole("heading", { name: "Your weekly crawl" })).toBeVisible();
+  await page.waitForTimeout(800);
+  expect(asked, "nothing of Popular before the list lands").toEqual([]);
+  releaseList();
+  const rows = page.locator('button[aria-label^="Show the seat lines of"]');
+  await expect(rows.first()).toBeVisible();
+
+  // The others' chips, as they land; the two failed ones never.
+  const bar = page.getByTestId("popular");
+  await expect(bar.locator('[data-popular="pubs-new"]')).toBeVisible();
+  await expect(bar.locator('[data-popular="cert"]')).toBeVisible();
+  await expect(bar.locator('[data-popular="apps-removed"]')).toBeVisible();
+  // The page works while a count is still on its way.
+  await page.getByRole("tab", { name: "Added", exact: true }).click();
+  await expect(page.getByRole("tab", { name: "Added", exact: true })).toHaveAttribute("aria-selected", "true");
+  await expect(rows.first()).toBeVisible();
+  await page.getByRole("tab", { name: "All matched", exact: true }).click();
+  await expect(rows.first()).toBeVisible();
+  // The skeleton ends by the ceiling (the hung count is given up at 15 s).
+  await expect(bar.locator("[data-popular-skeleton]")).toHaveCount(0, { timeout: 40_000 });
+  await expect(bar).not.toHaveAttribute("aria-busy", "true");
+  await expect(bar.locator('[data-popular="pubs-lost"]')).toHaveCount(0);
+  await expect(bar.locator('[data-popular="apps-added"]')).toHaveCount(0);
+
+  expect(asked.length).toBeGreaterThan(0);
+  expect(Math.min(...asked.map((a) => a.at))).toBeGreaterThanOrEqual(listLanded);
+  expect(most, "at most two of Popular's requests at once").toBeLessThanOrEqual(2);
+  // The IPD and watch counts came from the list's own answer: Popular
+  // never asked matched-developers itself.
+  expect(asked.filter((a) => a.url.includes("matched-developers"))).toEqual([]);
+  expect(errors).toEqual([]);
+});
+
+test("nothing comes back: the bar goes quietly, the page stays", async ({ page }) => {
+  test.setTimeout(60_000);
+  const errors: string[] = [];
+  page.on("pageerror", (e) => errors.push(e.message));
+  await open(page, async () => {
+    await page.route(/(developer-events|matched-apps)\?.*page_size=1(&|$)/, (route) => route.fulfill({ status: 503, json: { detail: "down" } }));
+  });
+  await expect(page.locator('button[aria-label^="Show the seat lines of"]').first()).toBeVisible();
+  // Only the IPD chip may come from the list's own answer; every requested
+  // count failed, and the bar never hangs in its skeleton.
+  await expect(page.locator("[data-popular-skeleton]")).toHaveCount(0, { timeout: 20_000 });
+  for (const id of ["pubs-new", "pubs-lost", "cert", "apps-added", "apps-removed"])
+    await expect(page.locator(`[data-popular="${id}"]`)).toHaveCount(0);
+  expect(errors).toEqual([]);
+});
+
+test("the row spans the content's full width: label left, arrows at the two ends", async ({ page }) => {
+  await open(page, async () => {});
+  const bar = page.getByTestId("popular");
+  await expect(bar.locator("[data-popular]").first()).toBeVisible();
+  await expect(bar).not.toHaveAttribute("aria-busy", "true", { timeout: 20_000 });
+  const b = (await bar.boundingBox())!;
+  // As wide as the list below it (the content's column), to the pixel.
+  const list = (await page.locator('[data-tour="overview-list"]').boundingBox())!;
+  expect(Math.abs(b.width - list.width)).toBeLessThanOrEqual(2);
+  expect(Math.abs(b.x - list.x)).toBeLessThanOrEqual(2);
+  // The pills fill the rail: the last one ends at the rail's end.
+  const rail = (await bar.getByRole("group", { name: "Popular choices" }).boundingBox())!;
+  const last = (await bar.locator("[data-popular]").last().boundingBox())!;
+  const scrolls = await bar.getByRole("group", { name: "Popular choices" }).evaluate((el) => el.scrollWidth > el.clientWidth + 1);
+  if (!scrolls) expect(Math.abs(last.x + last.width - (rail.x + rail.width))).toBeLessThanOrEqual(3);
+});
+
+test("the list's own change counts spare the added and changed requests (crawler #361)", async ({ page }) => {
+  const asked: string[] = [];
+  page.on("request", (r) => isCount(r.url()) && asked.push(r.url()));
+  await open(page, async () => {
+    await page.route(/matched-developers\?page=1&page_size=25(&|$)/, (route) => {
+      const r = mockMatchedDevelopers(1);
+      return route.fulfill({
+        json: {
+          ...r,
+          match_type_counts: { all: r.total, own: r.total - 4, ipd: 4 },
+          change_counts: { added: 7, changed: 2, removed: 99, started_watching: 0, stopped_watching: 0, unconfirmed: 0 },
+        },
+      });
+    });
+  });
+  const bar = page.getByTestId("popular");
+  await expect(bar.locator('[data-popular="pubs-new"]')).toContainText("7");
+  await expect(bar.locator('[data-popular="cert"]')).toContainText("2");
+  await expect(bar.locator('[data-popular="ipd"]')).toContainText("4");
+  await expect(bar).not.toHaveAttribute("aria-busy", "true", { timeout: 20_000 });
+  // Lost is always asked (the list cannot count a publisher that lost
+  // every line); added and changed never.
+  expect(asked.filter((u) => /developer-events\?event=(added|changed)/.test(u))).toEqual([]);
+  expect(asked.filter((u) => /developer-events\?event=removed/.test(u)).length).toBe(1);
+  await expect(bar.locator('[data-popular="pubs-lost"]')).not.toContainText("99");
+});

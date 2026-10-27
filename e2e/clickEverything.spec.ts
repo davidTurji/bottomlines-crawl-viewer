@@ -55,6 +55,19 @@ const VIEWPORTS = [
  *  modes. */
 const API_CARDS = LIVE ? 6 : Infinity;
 
+/** The tab each Popular choice opens (CrawlReport POPULAR). */
+const POPULAR_TAB: Record<string, string> = {
+  "apps-removed": "Removed",
+  "apps-added": "Added",
+  "pubs-lost": "Removed",
+  "pubs-new": "Added",
+  cert: "Changed",
+  ipd: "All matched",
+  started: "Started watching",
+  stopped: "Stopped watching",
+  unconfirmed: "Unconfirmed",
+};
+
 /** A control or page this report does not have: skipped, never failed. */
 class Absent extends Error {}
 
@@ -350,9 +363,24 @@ async function crawl(page: Page, vp: string): Promise<Run> {
   if (!LIVE) await tap("export this list", page.getByRole("button", { name: "Export this list" }).first());
 
   /* ── Popular: every choice, then the last one again (it clears). ── */
+  // The bar may still be counting (hotfix 2026-10-27: its counts load
+  // after the list, two at a time): wait for it to settle first.
+  await page.locator('[data-testid="popular"][aria-busy="true"]').waitFor({ state: "detached", timeout: 45_000 }).catch(() => {});
   const choices = await page.locator("[data-popular]").evaluateAll((els) => els.map((e) => e.getAttribute("data-popular") ?? ""));
   for (const id of choices) {
-    await step(`popular ${id}`, () => click(page.locator(`[data-popular="${id}"]`)));
+    const chip = page.locator(`[data-popular="${id}"]`);
+    const said = Number((await chip.locator("span").last().innerText().catch(() => "")).replace(/[^\d]/g, ""));
+    await step(`popular ${id}`, () => click(chip));
+    // Every press lands on its tab, and the list counts what the chip said.
+    await step(`popular ${id} lands`, async () => {
+      const want = POPULAR_TAB[id];
+      if (!want) return;
+      const on = (await page.getByRole("tab", { selected: true }).first().innerText()).trim();
+      if (on !== want) throw new Error(`on the tab "${on}", not "${want}"`);
+      const text = await page.locator("[data-list-count]").first().innerText();
+      const n = Number(((text.match(/of ([\d,]+)/) ?? text.match(/([\d,]+)/))?.[1] ?? "").replace(/,/g, ""));
+      if (said && n !== said) throw new Error(`the list counts ${n}, the choice said ${said}`);
+    });
     await openAll(`popular ${id}`, OVERVIEW_ROWS, 1);
   }
   if (choices.length)
