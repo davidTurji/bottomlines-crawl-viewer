@@ -17,7 +17,7 @@ import { readFile } from "node:fs/promises";
 
 import { expect, test, type Page } from "@playwright/test";
 
-import { mockDeveloperEvents, mockLineEvents, mockMatchedDevelopers } from "../src/lib/mockData";
+import { mockDeveloperEvents, mockLineEvents, mockMatchedApps, mockMatchedDevelopers } from "../src/lib/mockData";
 import { lineKey } from "../src/lib/lineFilter";
 import type { MatchedSeatLine } from "../src/lib/api";
 import { groupSeatLines } from "../src/lib/seatLineGroups";
@@ -241,7 +241,15 @@ test.describe("Export this list", () => {
     expect(file.suggestedFilename()).toBe("publishers-all-matched.csv");
     const text = await readFile((await file.path())!, "utf8");
     const lines = text.split("\r\n");
-    expect(lines[0]).toContain('"publisher_domain","publisher_name"');
+    // The workbook's headers and values (run_export.py), never snake_case
+    // names or lowercase codes.
+    expect(lines[0]).toBe(
+      '\uFEFF"Publisher domain","Publisher","Matched via","IPD partner","Lines this week","Lines last week","Lines added","Lines removed","Certs changed","Seat lines","Reason"',
+    );
+    expect(text).toMatch(/,"Own",|,"IPD",/);
+    expect(text).not.toMatch(/,"(own|ipd)",/);
+    for (const l of lines.slice(1).filter((x) => x.includes(',"IPD",')))
+      expect(l).toMatch(/,"IPD","Via [^"]+, inventory partner of [^"]+",/);
     expect(lines.length - 1).toBe(total);
     // Never the metered full export (export-info is only its label).
     expect(calls.filter((c) => /\/export(\.xlsx)?$/.test(c.path))).toEqual([]);
@@ -350,6 +358,20 @@ test.describe("Popular", () => {
     await expect(tab(page, "Added")).toHaveAttribute("aria-selected", "true");
     await tab(page, "Removed").click();
     await expect(added).toHaveAttribute("aria-pressed", "false");
+    expect(errors).toEqual([]);
+  });
+
+  test("every label names what its count counts, never a tile's word", async ({ page }) => {
+    const errors = watchErrors(page);
+    await open(page, WATCH);
+    const chips = page.getByTestId("popular").locator("[data-popular]");
+    await expect(chips.first()).toBeVisible();
+    const labels = (await chips.allInnerTexts()).map((t) => t.replace(/[\d,]+\s*$/, "").replace(/\s+/g, " ").trim());
+    expect(labels.length).toBeGreaterThan(3);
+    for (const l of labels) expect(l).toMatch(/^(Publishers|Apps) (that (added|lost) lines|with |matched via IPD)/);
+    // The apps tile's "lost" counts apps no longer matched at all; the
+    // choice counts apps that lost lines, and says so.
+    await expect(page.locator('[data-popular="apps-removed"]')).toContainText("Apps that lost lines");
     expect(errors).toEqual([]);
   });
 
@@ -495,6 +517,114 @@ test.describe("only partner copies fold (review of #75)", () => {
     await expect(items.nth(1).locator("[data-line-host]")).toHaveText("at cdn.alder.example");
     await expect(items.nth(2)).toContainText("Found in app-ads.txt");
     await expect(items.nth(3).locator("[data-line-via]")).toContainText("via northfold-tv.com, failarmy.tv");
+    expect(errors).toEqual([]);
+  });
+});
+
+test.describe("one seat in two files (re-review of #75)", () => {
+  const seat = { ssp_domain: "madeupssp.com", publisher_id: "S-5520", relationship: "DIRECT" };
+  const ev0 = () => mockLineEvents({ event: "cert_changed", page_size: 1 }).rows[0];
+
+  test("the lines read on open keep ads.txt and app-ads.txt apart", async ({ page }) => {
+    const errors = watchErrors(page);
+    const row = {
+      ...mockMatchedDevelopers(1).rows[0],
+      developer_id: 990201,
+      name: "Alder Media",
+      domain: "alder.example",
+      matched_lines: [],
+      added_lines: [],
+      removed_lines: [],
+      cert_changed_lines: [],
+      line_count: 2,
+    };
+    const events = ["ads_txt", "app_ads_txt"].map((file_kind) => ({
+      ...ev0(),
+      ...seat,
+      event: "matched",
+      developer_id: 990201,
+      host: "alder.example",
+      file_kind,
+      old_cert_id: null,
+      new_cert_id: null,
+    }));
+    await open(page, {}, "", async () => {
+      await page.route("**/matched-developers?*", (route) => route.fulfill({ json: { page: 1, page_size: 25, total: 1, rows: [row] } }));
+      await page.route("**/line-events?*developer_id=990201*", (route) =>
+        route.fulfill({ json: { page: 1, page_size: 2, total: 2, rows: events } }),
+      );
+    });
+    await rows(page).first().click();
+    const items = page.locator("[data-seat-lines]").first().locator(":scope > li");
+    await expect(items).toHaveCount(2);
+    await expect(items.nth(0)).toContainText("Found in ads.txt");
+    await expect(items.nth(1)).toContainText("Found in app-ads.txt");
+    expect(errors).toEqual([]);
+  });
+
+  // The same seat changed its cert in both files, each from its own old
+  // cert: each line says its own old to new, on the page and in the file.
+  const changed = async (page: Page) => {
+    const row = {
+      ...mockDeveloperEvents("changed", 1).rows[0],
+      developer_id: 777002,
+      developer_name: "Alder Media",
+      developer_domain: "alder.example",
+      cert_changed_lines: [
+        { ...seat, cert_id: "newads", found_in: "ads.txt" },
+        { ...seat, cert_id: "newapp", found_in: "app-ads.txt" },
+      ],
+    };
+    const evs = [
+      { file_kind: "ads_txt", old_cert_id: "oldads", new_cert_id: "newads" },
+      { file_kind: "app_ads_txt", old_cert_id: "oldapp", new_cert_id: "newapp" },
+    ].map((e) => ({ ...ev0(), ...seat, ...e, event: "cert_changed", developer_id: 777002, host: "alder.example" }));
+    await page.route("**/developer-events?*event=changed*", (route) =>
+      route.fulfill({ json: { page: 1, page_size: 25, total: 1, rows: [row], match_type_counts: { all: 1, own: 1, ipd: 0 } } }),
+    );
+    await page.route("**/line-events?*event=cert_changed*", (route) =>
+      route.fulfill({ json: { page: 1, page_size: 500, total: evs.length, rows: evs } }),
+    );
+  };
+
+  test("each file's line gets its own old cert", async ({ page }) => {
+    const errors = watchErrors(page);
+    await open(page, FULL, "", () => changed(page));
+    await tab(page, "Changed").click();
+    await rows(page).first().click();
+    const certs = page.locator("[data-cert-change]");
+    await expect(certs).toHaveCount(2);
+    expect((await certs.allInnerTexts()).sort()).toEqual(["cert oldads \u2192 newads", "cert oldapp \u2192 newapp"]);
+    expect(errors).toEqual([]);
+  });
+
+  test("the Changed tab's file says old to new, as the page does", async ({ page }) => {
+    const errors = watchErrors(page);
+    await open(page, FULL, "", () => changed(page));
+    await tab(page, "Changed").click();
+    await expect(rows(page).first()).toBeVisible();
+    const d = page.waitForEvent("download");
+    await page.getByRole("button", { name: "Export this list" }).click();
+    const text = await readFile((await (await d).path())!, "utf8");
+    expect(text).toContain("madeupssp.com, S-5520, DIRECT, newads (cert oldads -> newads)");
+    expect(text).toContain("madeupssp.com, S-5520, DIRECT, newapp (cert oldapp -> newapp)");
+    expect(errors).toEqual([]);
+  });
+});
+
+test.describe("store names (parity audit of #75)", () => {
+  test("Apple TV, Google Play and LG, never their codes", async ({ page }) => {
+    const errors = watchErrors(page);
+    const base = mockMatchedApps(1).rows[0];
+    const apps = ["tvos", "googleplay", "lg"].map((store, i) => ({ ...base, store, bundle_id: `b-${store}`, app_name: `App ${i}` }));
+    await open(page, FULL, "", () =>
+      page.route("**/matched-apps?*", (route) => route.fulfill({ json: { page: 1, page_size: 25, total: apps.length, rows: apps } })),
+    );
+    await toApps(page);
+    await expect(rows(page)).toHaveCount(3);
+    const list = page.locator("[data-list-rows]");
+    for (const name of ["Apple TV", "Google Play", "LG"]) await expect(list.getByText(name, { exact: true }).first()).toBeVisible();
+    for (const code of ["tvos", "googleplay"]) await expect(list.getByText(code, { exact: true })).toHaveCount(0);
     expect(errors).toEqual([]);
   });
 });

@@ -19,7 +19,6 @@ import { Search } from "lucide-react";
 import { useEffect, useState } from "react";
 
 import { Pager, usePaging } from "@/components/ListControls";
-import { textList } from "@/components/MatchType";
 import { gutterDigits, LineNo, SEAT_ROW, SeatLinesFrame } from "@/components/SeatLines";
 import { SkeletonInlineRows } from "@/components/Skeleton";
 import { api, type MatchedDeveloper, type SellersJsonReads, type Summary } from "@/lib/api";
@@ -38,22 +37,49 @@ export function sellersReadsOf(summary: Summary | null | undefined): SellersJson
   return r && typeof r === "object" && !Array.isArray(r) ? (r as SellersJsonReads) : null;
 }
 
-/** "Read from the sellers.json files of 14 exchanges. Not read this time:
- *  a.com and b.com." Plain words, the exchanges named. */
+/** A crawl time as the workbook prints one (run_export.utc_label):
+ *  "2026-10-18 11:29 UTC"; the text itself when it is not a time. */
+export function utcLabel(value: unknown): string {
+  if (typeof value !== "string" || !value) return "";
+  const t = new Date(value);
+  if (Number.isNaN(t.getTime())) return value;
+  const p = (n: number) => String(n).padStart(2, "0");
+  return `${t.getUTCFullYear()}-${p(t.getUTCMonth() + 1)}-${p(t.getUTCDate())} ${p(t.getUTCHours())}:${p(t.getUTCMinutes())} UTC`;
+}
+
+/** The crawler's own budget for the build's re-read, when the record
+ *  does not say (sellers_json_cache.REPORT_READ_BUDGET_S). */
+const READ_BUDGET_S = 600;
+
+/**
+ * THE WORKBOOK'S OWN SENTENCE (parity audit of #75): the "Sellers.json
+ * read" line of the customer's Excel Summary, built the same way from the
+ * same frozen record (crawler #364, run_export.sellers_reads_text, the
+ * customer's words): "For 11 of 14 exchanges your seats name (as of
+ * 2026-10-18 11:29 UTC). Not read: a.example (never read); b.example
+ * (refused us, HTTP 403)." Same N of M, same reasons, same date.
+ */
 export function readsSentence(reads: SellersJsonReads): string {
-  const wanted = typeof reads.wanted === "number" ? reads.wanted : null;
-  const missed = [
-    ...textList(reads.failed_domains, /\s*[,;]\s*/),
-    ...textList(reads.over_budget_domains, /\s*[,;]\s*/),
-  ];
-  const head =
-    wanted != null
-      ? `Read from the sellers.json files of ${wanted.toLocaleString()} ${wanted === 1 ? "exchange" : "exchanges"} when this report was built.`
-      : "Read from the exchanges' sellers.json files when this report was built.";
-  if (!missed.length) return head;
-  const names =
-    missed.length === 1 ? missed[0] : `${missed.slice(0, -1).join(", ")} and ${missed[missed.length - 1]}`;
-  return `${head} Not read this time: ${names}.`;
+  if (reads.unavailable === true)
+    return "Not summarised for this report. The seller role says, row by row, whether that exchange's sellers.json was read.";
+  const n = (v: unknown) => (typeof v === "number" && Number.isFinite(v) ? Math.trunc(v) : 0);
+  const total = n(reads.exchanges);
+  const read = n(reads.read);
+  if (total === 0) return "None: your seats name no exchange";
+  let text = `For ${read} of ${total} exchanges your seats name`;
+  const asOf = utcLabel(reads.oldest_read);
+  if (read && asOf) text += ` (as of ${asOf})`;
+  text += ".";
+  const missing = (Array.isArray(reads.not_read) ? reads.not_read : []).filter(
+    (m): m is { domain: string; why?: string } => !!m && typeof m === "object" && typeof m.domain === "string",
+  );
+  if (missing.length) text += ` Not read: ${missing.map((m) => `${m.domain} (${typeof m.why === "string" ? m.why : ""})`).join("; ")}.`;
+  const again = (Array.isArray(reads.not_reread) ? reads.not_reread : []).filter((d): d is string => typeof d === "string");
+  if (again.length) {
+    const budget = Math.trunc(typeof reads.budget_s === "number" && reads.budget_s > 0 ? reads.budget_s : READ_BUDGET_S);
+    text += ` Not read again because this report's ${budget} s limit was reached, an earlier read is used: ${again.join(", ")}.`;
+  }
+  return text;
 }
 
 export const ROLES_LATER = "Seller roles will appear here from the next report.";

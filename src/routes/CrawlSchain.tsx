@@ -581,7 +581,9 @@ function SdkCopy({ read, onRefresh }: { read: SchainSdkRead | "reading"; onRefre
   );
   if (!read.ok) {
     return (
-      <p className="flex w-full items-center gap-1.5 text-[11px] text-critical">
+      // A fact of the report (the crawl could not read the file), not an
+      // error of the page: the click-everything walk lets it be.
+      <p data-report-fact className="flex w-full items-center gap-1.5 text-[11px] text-critical">
         <CircleAlert className="h-3.5 w-3.5 flex-shrink-0" />
         <span className="min-w-0 truncate">Could not read {read.url.replace(/^https?:\/\//, "")}: {read.reason}</span>
         {refresh}

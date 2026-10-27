@@ -174,7 +174,7 @@ function FilterBarBlock({ actions = 1 }: { actions?: number }) {
 function RowBlock({ i }: { i: number }) {
   const widths = ["w-[42%]", "w-[58%]", "w-[35%]", "w-[50%]", "w-[64%]"];
   return (
-    <div className="rounded-3xl border border-border bg-white px-4 py-4 shadow-sm sm:px-5">
+    <div data-skeleton-row className="rounded-3xl border border-border bg-white px-4 py-4 shadow-sm sm:px-5">
       <div className="flex items-center gap-4">
         <Skeleton
           className="h-11 w-11 flex-shrink-0 rounded-full"
@@ -255,19 +255,15 @@ export function SkeletonStatCards({
 const ROW_PX = 90;
 
 /**
- * HOW MANY SKELETON ROWS (review of #75): the rows the page will land
- * with, never more than fill the screen, so the list neither grows nor
- * shrinks when they arrive. `landedTotal` is this same list's size from a
- * page of it already read (a page change); null for a list not read yet,
- * which lands a full page.
+ * HOW MANY SKELETON ROWS (reviews of #75): the rows the list will land
+ * with when the page knows (lib/expectedRows: a page already read, a
+ * count the pills, the tabs or the Popular choices hold), never more than
+ * fill the screen, so the list neither grows nor shrinks when they arrive.
+ * Null, nothing known: a full page, which fills the screen.
  */
-export function skeletonRowCount(page: number, landedTotal: number | null): number {
+export function skeletonRowCount(expected: number | null): number {
   const fit = typeof window === "undefined" ? 6 : Math.max(3, Math.ceil(window.innerHeight / ROW_PX));
-  const onPage =
-    landedTotal === null
-      ? PAGE_SIZE
-      : Math.max(1, Math.min(PAGE_SIZE, landedTotal - (page - 1) * PAGE_SIZE));
-  return Math.min(onPage, fit);
+  return Math.min(expected === null ? PAGE_SIZE : Math.max(1, expected), fit);
 }
 
 /**

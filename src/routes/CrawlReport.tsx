@@ -10,6 +10,7 @@ import {
   SkeletonStatCards,
   skeletonRowCount,
 } from "@/components/Skeleton";
+import { expectedRows, knownKey, type Landed } from "@/lib/expectedRows";
 import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { BEAT_PAUSE_MS, CountUp, landsAfterMs, payoffStyle } from "@/components/CountUp";
 import { LineFilter } from "@/components/LineFilter";
@@ -92,7 +93,9 @@ import {
 } from "@/components/PublisherLinks";
 import { groupSeatLines, placeKey, seatKey } from "@/lib/seatLineGroups";
 import {
-  certKey,
+  allCertChanges,
+  certChangeOf,
+  type CertChanges,
   isScopeTab,
   eachPage,
   READ_PAGE,
@@ -412,6 +415,18 @@ export default function CrawlReport() {
       })
     : [];
   const popularActive = popular;
+  // The same counts, for the lists' skeletons: a choice, or the tab it
+  // opens, lands with this many rows (lib/expectedRows).
+  const knownFor = (view: ListView): Record<string, number> => {
+    const out: Record<string, number> = {};
+    if (popularCounts)
+      for (const id of POPULAR_ORDER) {
+        const n = popularCounts[id];
+        const t = POPULAR[id].target;
+        if (t.view === view && typeof n === "number") out[knownKey(t.tab, t.matchType, lines.join(","))] = n;
+      }
+    return out;
+  };
 
   return (
     <PageShell className="space-y-5">
@@ -695,6 +710,7 @@ export default function CrawlReport() {
             foundIn={foundIn}
             setFoundIn={setFoundIn}
             searchReset={searchReset}
+            known={knownFor("publishers")}
           />
         ) : (
           <MatchedAppsList
@@ -710,6 +726,7 @@ export default function CrawlReport() {
             platform={platform}
             setPlatform={setPlatform}
             searchReset={searchReset}
+            known={knownFor("apps")}
           />
         )}
       </div>
@@ -1446,19 +1463,21 @@ type PopularId =
 type PopularTarget = { view: ListView; tab: DrillTab; matchType: MatchTypeFilter };
 
 const POPULAR: Record<PopularId, { label: string; target: PopularTarget }> = {
-  "apps-removed": { label: "All removed apps", target: { view: "apps", tab: "removed", matchType: "all" } },
-  "apps-added": { label: "All added apps", target: { view: "apps", tab: "added", matchType: "all" } },
+  // EVERY LABEL NAMES WHAT ITS COUNT COUNTS, the rows of its tab (reviews
+  // of #75): never a word the tiles use for their own numbers. "All
+  // removed apps" read as the Matched apps tile's "lost" (apps no longer
+  // matched at all, 82) while it counted apps whose lines were removed
+  // (1,671); "New publishers this week" counted publishers that added
+  // lines; "Cert changes" counted publishers, not the card's lines.
+  "apps-removed": { label: "Apps that lost lines", target: { view: "apps", tab: "removed", matchType: "all" } },
+  "apps-added": { label: "Apps that added lines", target: { view: "apps", tab: "added", matchType: "all" } },
   "pubs-lost": { label: "Publishers that lost lines", target: { view: "publishers", tab: "removed", matchType: "all" } },
-  // Named for what they count, the rows of their tab (review of #75: "New
-  // publishers this week" counted publishers that added lines, not the
-  // headline's new publishers; "Cert changes" counted publishers, not the
-  // card's lines).
   "pubs-new": { label: "Publishers that added lines", target: { view: "publishers", tab: "added", matchType: "all" } },
   cert: { label: "Publishers with cert changes", target: { view: "publishers", tab: "changed", matchType: "all" } },
-  ipd: { label: "IPD matches", target: { view: "publishers", tab: "all", matchType: "ipd" } },
-  started: { label: "Started watching", target: { view: "publishers", tab: "started", matchType: "all" } },
-  stopped: { label: "Stopped watching", target: { view: "publishers", tab: "stopped", matchType: "all" } },
-  unconfirmed: { label: "Unconfirmed lines", target: { view: "publishers", tab: "unconfirmed", matchType: "all" } },
+  ipd: { label: "Publishers matched via IPD", target: { view: "publishers", tab: "all", matchType: "ipd" } },
+  started: { label: "Publishers with newly watched lines", target: { view: "publishers", tab: "started", matchType: "all" } },
+  stopped: { label: "Publishers with lines no longer watched", target: { view: "publishers", tab: "stopped", matchType: "all" } },
+  unconfirmed: { label: "Publishers with unconfirmed lines", target: { view: "publishers", tab: "unconfirmed", matchType: "all" } },
 };
 const POPULAR_ORDER: PopularId[] = [
   "apps-removed",
@@ -1679,19 +1698,23 @@ function eventRow(d: DeveloperEvent): Row {
  *  cert changes have been read (its own, on open). */
 function withOldCerts(
   lines: MatchedSeatLine[],
-  certs: Map<string, { old: string | null; next: string | null }> | null,
+  certs: CertChanges | null | undefined,
+  /** The publisher's domain: the host of a line that names none. */
+  ownHost?: string | null,
 ): MatchedSeatLine[] {
   if (!certs || !Array.isArray(lines)) return Array.isArray(lines) ? lines : [];
   return lines.map((l) => {
     if (!l || typeof l !== "object") return l;
-    const c = certs.get(certKey(l));
+    // By seat AND place (re-review of #75): the same seat in two files
+    // gets each file's own old cert.
+    const c = certChangeOf(certs, l, ownHost);
     return c ? { ...l, old_cert_id: c.old ?? "", cert_id: l.cert_id || c.next || undefined } : l;
   });
 }
 
 /** A row's cert changes, read when it opens on a Changed window. */
 function useRowCerts(read: CertRead | undefined) {
-  const [certs, setCerts] = useState<Map<string, { old: string | null; next: string | null }> | null>(null);
+  const [certs, setCerts] = useState<CertChanges | null>(null);
   const key = read ? `${read.token}|${read.developerId}|${read.filter.join(",")}` : "";
   useEffect(() => {
     if (!read) return;
@@ -1869,18 +1892,44 @@ function tabLines(
   };
 }
 
+/* THE FILE SPEAKS THE WORKBOOK'S WORDS (parity audit of #75): the
+ * columns the customer's Excel also has carry its headers and its values
+ * (run_export.py: "Publisher domain", "Publisher", "Matched via" Own / IPD,
+ * "IPD partner" "Via <partner>, inventory partner of <publisher>", "App",
+ * "Bundle / store ID"); the list's own columns are named in the same
+ * plain words. */
+
+/** "Matched via", as the workbook writes it: Own or IPD. */
+function matchedViaCell(mt: string | null | undefined): string {
+  return mt === "ipd" ? "IPD" : mt === "own" ? "Own" : "";
+}
+
+/** "IPD partner", as the workbook writes it. The workbook names the
+ *  platform from the crawler's registry, else the publisher's domain;
+ *  the list knows the publisher's name, else its domain. */
+function ipdPartnerCell(
+  mt: string | null | undefined,
+  partner: string | null | undefined,
+  name: string | null | undefined,
+  domain: string | null | undefined,
+): string {
+  if (mt !== "ipd" || !partner) return "";
+  const of = (typeof name === "string" && name.trim()) || (typeof domain === "string" ? domain : "");
+  return of ? `Via ${partner}, inventory partner of ${of}` : `Via ${partner}`;
+}
+
 const PUBLISHER_CSV = [
-  "publisher_domain",
-  "publisher_name",
-  "match_type",
-  "inventory_partner",
-  "lines_this_week",
-  "lines_last_week",
-  "lines_added",
-  "lines_removed",
-  "certs_changed",
-  "lines",
-  "reasons",
+  "Publisher domain",
+  "Publisher",
+  "Matched via",
+  "IPD partner",
+  "Lines this week",
+  "Lines last week",
+  "Lines added",
+  "Lines removed",
+  "Certs changed",
+  "Seat lines",
+  "Reason",
 ];
 
 function publisherCells(r: Row, tab: DrillTab): CsvCell[] {
@@ -1893,8 +1942,8 @@ function publisherCells(r: Row, tab: DrillTab): CsvCell[] {
   return [
     r.developer_domain,
     r.developer_name,
-    r.match_type ?? "",
-    r.match_type === "ipd" ? (r.ipd_partner ?? "") : "",
+    matchedViaCell(r.match_type),
+    ipdPartnerCell(r.match_type, r.ipd_partner, r.developer_name, r.developer_domain),
     r.current,
     r.prev ?? "",
     r.added,
@@ -1906,20 +1955,20 @@ function publisherCells(r: Row, tab: DrillTab): CsvCell[] {
 }
 
 const APP_CSV = [
-  "app_name",
-  "store",
-  "bundle_id",
-  "publisher_domain",
-  "publisher_name",
-  "match_type",
-  "inventory_partner",
-  "file",
-  "matched_lines",
-  "lines_added",
-  "lines_removed",
-  "certs_changed",
-  "lines",
-  "reasons",
+  "App",
+  "Store",
+  "Bundle / store ID",
+  "Publisher domain",
+  "Publisher",
+  "Matched via",
+  "IPD partner",
+  "File",
+  "Lines",
+  "Lines added",
+  "Lines removed",
+  "Certs changed",
+  "Seat lines",
+  "Reason",
 ];
 
 function appCells(a: AppRow, tab: DrillTab): CsvCell[] {
@@ -1940,8 +1989,8 @@ function appCells(a: AppRow, tab: DrillTab): CsvCell[] {
     a.bundle_id,
     a.owner_domain,
     a.owner_name,
-    a.match_type ?? "",
-    a.match_type === "ipd" ? (a.ipd_partner ?? "") : "",
+    matchedViaCell(a.match_type),
+    ipdPartnerCell(a.match_type, a.ipd_partner, a.owner_name, a.owner_domain),
     appFileLine(a.file_host, a.file_source) ?? "",
     a.line_count,
     a.lines_added ?? 0,
@@ -2134,6 +2183,7 @@ function DrilldownList({
   foundIn,
   setFoundIn,
   searchReset,
+  known,
 }: {
   token: string;
   lines: string[];
@@ -2154,6 +2204,8 @@ function DrilldownList({
   setFoundIn: (next: FoundInFilter) => void;
   /** Bumped by a Popular choice: the search clears. */
   searchReset: number;
+  /** Counts the page read for the Popular choices (expectedRows). */
+  known?: Record<string, number> | null;
 }) {
   const [rows, setRows] = useState<Row[]>([]);
   // The list's split by file (crawler PR): null, no Found in switch.
@@ -2190,7 +2242,7 @@ function DrilldownList({
   // Bumps each time a list lands: the rows are replaced on it.
   const [settled, setSettled] = useState(0);
   // The size of the list last read, for the skeleton's row count.
-  const [landed, setLanded] = useState<{ key: string; total: number } | null>(null);
+  const [landed, setLanded] = useState<Landed | null>(null);
 
   // A new search, a new tab or a new line selection is a new list, so it
   // starts at its first page. Without this, searching from page 7 asks
@@ -2249,7 +2301,7 @@ function DrilldownList({
     type Loaded = Awaited<ReturnType<typeof load>>;
     const keyFor = (pg: number) => [tab, pg, query, lines.join(","), matchType, foundIn].join("|");
     const apply = (data: Loaded) => {
-      setLanded({ key: [tab, query, lines.join(","), matchType, foundIn].join("|"), total: data.total });
+      setLanded({ tab, query, lines: lines.join(","), matchType, filter: foundIn, total: data.total });
       if (data.changeCounts) setChangeCounts(data.changeCounts);
       if (data.unfiltered) {
         // Never a list filtered here on its own: no watch tabs at all.
@@ -2333,14 +2385,23 @@ function DrilldownList({
         progress,
         signal,
       );
-    else if (t !== "inactive")
+    else if (t !== "inactive") {
+      // THE CHANGED TAB'S FILE SAYS OLD TO NEW, as its rows do (re-review
+      // of #75): the cert changes are read for the file, every page, only
+      // when a reader asks for it.
+      const certsBy = t === "changed" ? await allCertChanges(token, lines, undefined, signal) : null;
+      const withCerts = (r: Row): Row =>
+        certsBy
+          ? { ...r, cert_changed_lines: withOldCerts(r.cert_changed_lines, certsBy.get(r.developer_id), r.developer_domain) }
+          : r;
       await eachPage(
         (pg) => api.developerEvents(token, t, pg, query, lines, mt, 200, fi),
         200,
-        (page) => sink.rows(page.map((d) => publisherCells(eventRow(d), t))),
+        (page) => sink.rows(page.map((d) => publisherCells(withCerts(eventRow(d)), t))),
         progress,
         signal,
       );
+    }
     return csvName(
       "publishers",
       TAB_SLUG[t],
@@ -2440,7 +2501,14 @@ function DrilldownList({
       <div>
         {loading && (
           <SkeletonRows
-            rows={skeletonRowCount(page, landed?.key === [tab, query, lines.join(","), matchType, foundIn].join("|") ? landed.total : null)}
+            rows={skeletonRowCount(
+              expectedRows(
+                { tab, query, lines: lines.join(","), matchType, filter: foundIn },
+                { landed, typeCounts, filterCounts: foundInCounts, changeCounts, changeOf: (t) => appChangeOf(t as DrillTab), known },
+                page,
+                PAGE_SIZE,
+              ),
+            )}
             label="Loading matched publishers"
           />
         )}
@@ -2932,14 +3000,29 @@ export function SeatLineRow({
       {hostLabel}
     </span>
   );
+  // ON A PHONE THE PARTNERS GO UNDER THE LINE (David, 2026-10-27): at
+  // the right margin they took the width and cut the line to "st...". Below
+  // the sm breakpoint they are a line of their own under it, at the line
+  // text's left edge (a spacer the gutter's width); from sm up the wrapper
+  // is `display: contents`, so they sit at the margin exactly as before.
   const via = partners.length > 0 && (
-    <PartnerLinks partners={partners} line={line} gone={gone} className="text-[10px] leading-4 text-slate-400" />
+    <span data-line-via-row className="order-last flex min-w-0 basis-full gap-3 sm:contents">
+      <span aria-hidden className="flex-shrink-0 font-mono text-[11px] leading-4 sm:hidden" style={{ width: `${Math.max(4, digits)}ch` }} />
+      <PartnerLinks
+        partners={partners}
+        line={line}
+        gone={gone}
+        className="text-[10px] leading-4 text-slate-400 max-sm:min-w-0 max-sm:max-w-none max-sm:flex-shrink max-sm:whitespace-normal max-sm:break-words max-sm:text-left"
+      />
+    </span>
   );
+  // The row may wrap on a phone (the partners' own line); never wider up.
+  const rowClass = cn(SEAT_ROW, "flex-wrap gap-y-0.5 sm:flex-nowrap");
   // A removed line copies on click (David, 2026-10-20): it is no longer in
   // the file, so the file opens from its own link at the margin instead.
   if (gone)
     return (
-      <CopyableLine line={line} className={SEAT_ROW}>
+      <CopyableLine line={line} className={rowClass}>
         {gutter}
         {text}
         {inOwn && <FoundInLinks publisherDomain={fileDomain} foundIn={foundIn} className={ROW_MARGIN} />}
@@ -2957,7 +3040,7 @@ export function SeatLineRow({
       line={line}
       publisherDomain={fileDomain}
       foundIn={foundIn}
-      className={SEAT_ROW}
+      className={rowClass}
     >
       {gutter}
       {text}
@@ -2992,7 +3075,7 @@ function ChangeWindow({
   // THE CERT, OLD TO NEW (David, 2026-10-27), read for this row only.
   const certs = useRowCerts(kind === "cert" ? certRead : undefined);
   // One row per distinct line, its partners beside it (2026-10-27).
-  const groups = groupSeatLines(withOldCerts(lines, certs), rowPartner);
+  const groups = groupSeatLines(withOldCerts(lines, certs, publisherDomain), rowPartner);
   const shown = groups.slice(0, CHANGE_LINE_CAP);
   const extra = groups.length - shown.length;
   return (
@@ -3271,6 +3354,9 @@ function lineEventToSeatLine(e: LineEvent): MatchedSeatLine {
     // The file's host: the publisher's own domain on its own file, which
     // the row then keeps quiet about.
     ...(e.host ? { host: e.host } : {}),
+    // And the file (re-review of #75): without it the same seat in the
+    // ads.txt and the app-ads.txt folded into one row on this path.
+    ...(typeof e.file_kind === "string" && e.file_kind ? { found_in: fileLabelOf(e.file_kind) } : {}),
     // Which partner carried it, when the event says (2026-10-27).
     ...(e.match_type ? { match_type: e.match_type } : {}),
     ...(e.ipd_partner ? { ipd_partner: e.ipd_partner } : {}),
@@ -3322,6 +3408,7 @@ function MatchedAppsList({
   platform,
   setPlatform,
   searchReset,
+  known,
 }: {
   token: string;
   lines: string[];
@@ -3341,6 +3428,8 @@ function MatchedAppsList({
   setPlatform: (next: PlatformFilter) => void;
   /** Bumped by a Popular choice: the search clears. */
   searchReset: number;
+  /** Counts the page read for the Popular choices (expectedRows). */
+  known?: Record<string, number> | null;
 }) {
   const [allRows, setAllRows] = useState<AppRow[]>([]);
   // The list's split by platform (crawler PR): null, no Platform switch.
@@ -3369,7 +3458,7 @@ function MatchedAppsList({
   const appCache = usePageCache<unknown>();
   const [settled, setSettled] = useState(0);
   // The size of the list last read, for the skeleton's row count.
-  const [landed, setLanded] = useState<{ key: string; total: number } | null>(null);
+  const [landed, setLanded] = useState<Landed | null>(null);
   // The tab the rows on screen were read for, and whether the server
   // filtered them for it (it echoed ``change``). Both lag `tab` until the
   // new tab's list lands.
@@ -3402,7 +3491,7 @@ function MatchedAppsList({
     const keyFor = (pg: number) =>
       [isScopeTab(tab) ? tab : change ?? "all", pg, query, lines.join(","), matchType, platform].join("|");
     const apply = (r: Loaded) => {
-      setLanded({ key: [tab, query, lines.join(","), matchType, platform].join("|"), total: r.total ?? 0 });
+      setLanded({ tab, query, lines: lines.join(","), matchType, filter: platform, total: r.total ?? 0 });
       if (r.change_counts) setChangeCounts(r.change_counts);
       if (isScopeTab(tab) && r.change !== change) {
         // A watch filter the API did not apply: no watch tabs at all, and
@@ -3513,6 +3602,12 @@ function MatchedAppsList({
     const pf: PlatformFilter = platformCounts ? platform : "all";
     const change = appChangeOf(t);
     sink.header(APP_CSV);
+    // Old to new on the Changed tab, as on the page (see the publishers').
+    const certsBy = t === "changed" ? await allCertChanges(token, lines, undefined, signal) : null;
+    const withCerts = (a: AppRow): AppRow =>
+      certsBy && a.developer_id != null
+        ? { ...a, cert_changed_lines: withOldCerts(a.cert_changed_lines ?? [], certsBy.get(a.developer_id), a.owner_domain) }
+        : a;
     if (t !== "inactive")
       await eachPage(
         async (pg) => {
@@ -3524,7 +3619,7 @@ function MatchedAppsList({
         (page) =>
           sink.rows(
             page.map((a) =>
-              appCells(isScopeTab(t) ? { ...a, scope: { tab: t, filter: lines, lines: watchLinesOf(a, t) } } : a, t),
+              appCells(isScopeTab(t) ? { ...a, scope: { tab: t, filter: lines, lines: watchLinesOf(a, t) } } : withCerts(a), t),
             ),
           ),
         progress,
@@ -3627,7 +3722,14 @@ function MatchedAppsList({
       <>
       {loading && (
         <SkeletonRows
-          rows={skeletonRowCount(page, landed?.key === [tab, query, lines.join(","), matchType, platform].join("|") ? landed.total : null)}
+          rows={skeletonRowCount(
+            expectedRows(
+              { tab, query, lines: lines.join(","), matchType, filter: platform },
+              { landed, typeCounts, filterCounts: platformCounts, changeCounts, changeOf: (t) => appChangeOf(t as DrillTab), known },
+              page,
+              PAGE_SIZE,
+            ),
+          )}
           label="Loading matched apps"
         />
       )}

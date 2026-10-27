@@ -98,7 +98,8 @@ test.describe("the rail lists only what the report has", () => {
   test("none of them", async ({ page }) => {
     await open(page, { sellers: "none", schain: "none", discovery: false });
     await expectOverview(page);
-    // Changes is the Overview's Lines view now (2026-10-27): no menu entry.
+    // No Changes page (2026-10-27): its statuses are the Overview lists'
+    // tabs, so the menu has no entry for it.
     await expect(rail(page).getByRole("link", { name: "Changes" })).toHaveCount(0);
     await expect(rail(page).getByRole("link", { name: "Declarations" })).toBeVisible();
     await expect(rail(page).getByRole("link", { name: "Sellers.json" })).toHaveCount(0);

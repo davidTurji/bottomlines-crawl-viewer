@@ -7,6 +7,7 @@
  */
 import { expect, test, type Page } from "@playwright/test";
 
+import { mockDeveloperEvents } from "../src/lib/mockData";
 import { installFakeApi, TOKEN, type Scenario } from "./fakeApi";
 
 const BASE = `/crawl-report/${TOKEN}`;
@@ -210,3 +211,45 @@ test("the Found in switch (publishers) and the Platform switch (apps)", async ({
   expect(errors).toEqual([]);
 });
 
+
+test.describe("the skeleton draws the rows the list will land with (re-review of #75)", () => {
+  // Two publishers changed a cert this week: the Popular count says 2, and
+  // the Changed tab, opened by the tab or by the choice, lands with 2.
+  const two = async (page: Page) =>
+    page.route(/developer-events\?event=changed/, (route) => {
+      const r = mockDeveloperEvents("changed", 1);
+      const rowsOf = r.rows.slice(0, 2).map((d, i) => ({ ...d, developer_id: 880100 + i }));
+      return route.fulfill({ json: { ...r, page: 1, total: rowsOf.length, rows: rowsOf } });
+    });
+  const skeletonRows = (page: Page) => page.locator('[role="status"][aria-busy="true"] [data-skeleton-row]');
+
+  for (const how of ["the tab", "the Popular choice"] as const) {
+    test(`opened by ${how}: 2 rows, not a screenful`, async ({ page }) => {
+      const errors = watchErrors(page);
+      await open(page, "", () => two(page));
+      await lands(page, rows(page));
+      await expect(page.locator('[data-popular="cert"]')).toBeVisible();
+      const release = await hold(page, /developer-events\?event=changed/);
+      if (how === "the tab") await page.getByRole("tab", { name: "Changed", exact: true }).click();
+      else await page.locator('[data-popular="cert"]').click();
+      await waits(page, rows(page));
+      await expect(skeletonRows(page)).toHaveCount(2);
+      release();
+      await lands(page, rows(page));
+      await expect(rows(page)).toHaveCount(2);
+      expect(errors).toEqual([]);
+    });
+  }
+
+  test("a list with no count known: as many as fit the screen, never more than a page", async ({ page }) => {
+    await open(page);
+    await lands(page, rows(page));
+    const release = await hold(page, /matched-developers\?.*q=zz/);
+    await page.getByRole("textbox", { name: "Search matched publishers" }).fill("zz");
+    await expect(skeleton(page)).toBeVisible();
+    const n = await skeletonRows(page).count();
+    const fit = await page.evaluate(() => Math.max(3, Math.ceil(window.innerHeight / 90)));
+    expect(n).toBeLessThanOrEqual(Math.min(25, fit));
+    release();
+  });
+});

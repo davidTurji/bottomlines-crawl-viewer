@@ -142,14 +142,48 @@ async function crawl(page: Page, vp: string): Promise<Run> {
     page
       .evaluate((re) => [...document.querySelectorAll("h2")].some((h) => new RegExp(re, "i").test(h.textContent ?? "")), ERROR_PANEL.source)
       .catch(() => false);
-  /** Waits for every skeleton (aria-busy status) to go, quietly. */
-  const settled = async () => {
+  /** Waits for every skeleton (aria-busy status) to go; false when one
+   *  is still there after 30 s (a list that never lands is a failure). */
+  const settled = async (): Promise<boolean> => {
+    // A click's list starts loading a frame or two after it (React runs
+    // the read in an effect after paint): give it that, so a skeleton about
+    // to show is waited for rather than missed.
     await page
-      .locator('[role="status"][aria-busy="true"]')
+      .evaluate(() => new Promise<void>((r) => requestAnimationFrame(() => requestAnimationFrame(() => setTimeout(r, 50)))))
+      .catch(() => {});
+    return page
+      .locator('[role="status"][aria-busy="true"], [data-count-skeleton]')
       .first()
       .waitFor({ state: "detached", timeout: 30_000 })
-      .catch(() => {});
+      .then(() => true)
+      .catch(() => false);
   };
+  /** An error the page SHOWS without crashing (re-review of #75): an
+   *  alert, a red error paragraph (a list whose rows failed to map says
+   *  its message in one), or a "Could not load ..." in any colour. A fact
+   *  of the report in red (a sellers.json the crawl could not read) is
+   *  marked `data-report-fact` and is not one. One DOM pass, no locator
+   *  text scan (those take minutes on a big page). */
+  const errorShown = async (): Promise<string | null> =>
+    page
+      .evaluate(() => {
+        const seen = (el: Element) => el.getClientRects().length > 0 && !el.closest("[data-report-fact]");
+        for (const el of document.querySelectorAll('[role="alert"], p.text-critical'))
+          if (seen(el) && (el.textContent ?? "").trim()) return (el.textContent ?? "").trim();
+        const hits = document.evaluate(
+          "//*[starts-with(normalize-space(text()), 'Could not load')]",
+          document,
+          null,
+          XPathResult.ORDERED_NODE_SNAPSHOT_TYPE,
+          null,
+        );
+        for (let i = 0; i < hits.snapshotLength; i++) {
+          const el = hits.snapshotItem(i) as Element;
+          if (seen(el)) return (el.textContent ?? "").trim();
+        }
+        return null;
+      })
+      .catch(() => null);
   const step = async (name: string, fn: () => Promise<unknown>) => {
     // The first crash ends the walk: it is the answer, and every click
     // after it would only wait on a page that is gone.
@@ -173,8 +207,10 @@ async function crawl(page: Page, vp: string): Promise<Run> {
     } finally {
       if (process.env.SMOKE_DEBUG && Date.now() - t > 1500) console.log(`${vp}: slow ${name} ${Date.now() - t} ms`);
     }
-    await settled();
+    if (!(await settled())) run.failures.push(`${vp} / ${name}: still loading after 30 s`);
     if (await panel()) run.failures.push(`${vp} / ${name}: error panel shown`);
+    const shown = await errorShown();
+    if (shown) run.failures.push(`${vp} / ${name}: error shown: ${redact(shown).slice(0, 200)}`);
     if (process.env.SMOKE_DEBUG && Date.now() - t > 3000) console.log(`${vp}: slow with settle ${name} ${Date.now() - t} ms`);
   };
   const click = (l: ReturnType<Page["locator"]>) => l.click({ timeout: 3_000 });
@@ -209,8 +245,12 @@ async function crawl(page: Page, vp: string): Promise<Run> {
   };
   /** Clicks a control when the page has it; never waits for one it lacks. */
   const tap = async (name: string, l: ReturnType<Page["locator"]>) => {
-    if ((await l.count()) && (await l.isVisible().catch(() => false)) && (await l.isEnabled().catch(() => false)))
-      await step(name, () => click(l));
+    if (!(await l.count())) return;
+    // There, but maybe a beat from shown (a list that just landed): a short
+    // wait, so a present control is never skipped by a race.
+    await l.waitFor({ state: "visible", timeout: 3_000 }).catch(() => {});
+    if ((await l.isVisible().catch(() => false)) && (await l.isEnabled().catch(() => false))) await step(name, () => click(l));
+    else if (process.env.SMOKE_DEBUG) console.log(`${vp}: hidden or disabled ${name}`);
   };
   /** Fills a box when the page has it; never waits for one it lacks. */
   const fillIf = async (name: string, l: ReturnType<Page["locator"]>, value: string) => {

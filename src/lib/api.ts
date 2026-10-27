@@ -1300,17 +1300,23 @@ export type InactivePage<R = InactiveRow> = {
   derived_from?: string | null;
 };
 
-/** The sellers.json read summary (crawler #364): tallies, and the
- *  exchanges of each outcome. Every field optional: read safely. */
+/** The sellers.json read record (crawler #364,
+ *  run_export.sellers_reads_record), frozen on the report: of the
+ *  exchanges the seats name, how many have a read the seller role leans
+ *  on, since when, and why each other one has none. ``unavailable`` when
+ *  the build could not make it. Every field optional: read safely. */
 export type SellersJsonReads = {
-  wanted?: number;
-  fresh?: number;
+  unavailable?: boolean;
+  exchanges?: number;
   read?: number;
-  failed?: number;
-  over_budget?: number;
   read_domains?: string[];
-  failed_domains?: string[];
-  over_budget_domains?: string[];
+  /** ISO time of the oldest read leaned on. */
+  oldest_read?: string;
+  not_read?: { domain?: string; why?: string }[];
+  /** Read before, not read again: the build's budget ran out. */
+  not_reread?: string[];
+  budget_s?: number;
+  as_of?: string;
 };
 
 export type Summary = {

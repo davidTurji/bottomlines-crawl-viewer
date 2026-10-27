@@ -97,7 +97,11 @@ export function SeatLinesFrame({ children, className }: { children: ReactNode; c
 }
 
 /** A row's main text, in the report's one line grammar (mono, 11px). The
- *  element marked `data-line-text` is what reads as the row's link. */
+ *  element marked `data-line-text` is what reads as the row's link.
+ *  THE LINE READS IN FULL ON A PHONE (David, 2026-10-27: "st...",
+ *  "streamvan..." at 390 px): there it wraps, anywhere if it must (a long
+ *  cert has no spaces); from the sm breakpoint up it keeps one line, cut
+ *  with an ellipsis, as before. */
 export function RowText({
   children,
   muted,
@@ -111,7 +115,7 @@ export function RowText({
     <Tag
       data-line-text
       className={cn(
-        "block truncate font-mono text-[11px] leading-4 tabular-nums",
+        "block font-mono text-[11px] leading-4 tabular-nums [overflow-wrap:anywhere] sm:truncate",
         muted ? "text-slate-500" : "text-slate-800",
       )}
     >

@@ -11,7 +11,7 @@
  */
 import { expect, test, type Locator, type Page } from "@playwright/test";
 
-import { installFakeApi, SELLERS_READS, TOKEN, type Scenario } from "./fakeApi";
+import { installFakeApi, TOKEN, type Scenario } from "./fakeApi";
 
 const BASE = `/crawl-report/${TOKEN}`;
 /** Word for word (SellerRoles.ROLES_LATER; that module reads the API at
@@ -139,6 +139,79 @@ test.describe("line numbers", () => {
   });
 });
 
+test.describe("the seat line reads in full on a phone (David, 2026-10-27)", () => {
+  // At 390 px the partners at the right margin cut the line to "st...":
+  // on a phone they go on a line of their own under it, at the line's left
+  // edge, the number still on the first line; a long line wraps. Wider,
+  // nothing moves.
+  /** Opens rows until one lists a line with partners; its lines' geometry. */
+  const partnerRows = async (page: Page) => {
+    const all = page.locator('button[aria-label^="Show the seat lines of"], button[aria-label^="Hide the seat lines of"]');
+    await expect(all.first()).toBeVisible();
+    for (let i = 0; i < (await all.count()); i++) {
+      const row = all.nth(i);
+      if ((await row.getAttribute("aria-expanded")) !== "true") {
+        const box = await row.boundingBox();
+        await row.click({ position: { x: (box?.width ?? 100) - 24, y: 20 } });
+      }
+      await expect(openCard(page).locator("[data-line-text]").first()).toBeVisible();
+      const withVia = openCard(page).locator("li:has([data-line-via])");
+      if (await withVia.count()) return withVia;
+    }
+    throw new Error("no row with partners on the first page");
+  };
+  const geometry = (lis: Locator) =>
+    lis.evaluateAll((els) =>
+      els.map((li) => {
+        const text = li.querySelector("[data-line-text]") as HTMLElement;
+        const via = li.querySelector("[data-line-via]") as HTMLElement;
+        const no = li.querySelector("[data-line-no]") as HTMLElement;
+        const t = text.getBoundingClientRect();
+        const v = via.getBoundingClientRect();
+        const n = no.getBoundingClientRect();
+        const lineH = parseFloat(getComputedStyle(text).lineHeight);
+        return {
+          clipped: text.scrollWidth > text.clientWidth + 1 || getComputedStyle(text).textOverflow === "ellipsis" && text.scrollWidth > text.clientWidth,
+          ellipsis: getComputedStyle(text).textOverflow,
+          viaBelow: v.top >= t.bottom - 1,
+          sameLine: Math.abs(v.top - t.top) <= 2,
+          dx: Math.abs(v.left - t.left),
+          noOnFirstLine: Math.abs(n.top - t.top) <= 1 && n.height <= lineH + 1,
+          inside: v.right <= li.getBoundingClientRect().right + 1,
+        };
+      }),
+    );
+
+  test("390 px: the whole line, the partners under it at its left edge", async ({ page }) => {
+    const errors = watchErrors(page);
+    await page.setViewportSize({ width: 390, height: 844 });
+    await open(page, { matchType: true, realShapes: true });
+    const lis = await partnerRows(page);
+    const out = await geometry(lis);
+    expect(out.length).toBeGreaterThan(0);
+    for (const r of out) {
+      expect(r.clipped, "line text clipped").toBe(false);
+      expect(r.ellipsis).not.toBe("ellipsis");
+      expect(r.viaBelow, "partners under the line").toBe(true);
+      expect(r.dx, "partners at the line's left edge").toBeLessThanOrEqual(1);
+      expect(r.noOnFirstLine, "number on the first line").toBe(true);
+      expect(r.inside, "partners inside the row").toBe(true);
+    }
+    expect(errors).toEqual([]);
+  });
+
+  test("desktop: unchanged, the partners at the right margin of the line", async ({ page }) => {
+    const errors = watchErrors(page);
+    await open(page, { matchType: true, realShapes: true });
+    const out = await geometry(await partnerRows(page));
+    for (const r of out) {
+      expect(r.sameLine, "partners on the line's own row").toBe(true);
+      expect(r.ellipsis).toBe("ellipsis");
+    }
+    expect(errors).toEqual([]);
+  });
+});
+
 test.describe("seller roles live on the Sellers.json page", () => {
   test("a report built before the sellers.json read: one quiet line, nothing else", async ({ page }) => {
     const errors = watchErrors(page);
@@ -156,7 +229,9 @@ test.describe("seller roles live on the Sellers.json page", () => {
     await expect(seg.getByRole("heading", { name: "Seller roles" })).toBeVisible();
     await expect(page.getByTestId("seller-roles-later")).toHaveCount(0);
     await expect(seg.getByTestId("seller-roles-read")).toHaveText(
-      `Read from the sellers.json files of ${SELLERS_READS.wanted} exchanges when this report was built. Not read this time: example-exchange.tv.`,
+      // The workbook's own words (run_export.sellers_reads_text), from the
+      // same record: same N of M, same reasons, same date.
+      "For 2 of 3 exchanges your seats name (as of 2026-10-18 11:29 UTC). Not read: example-exchange.tv (refused us, HTTP 403). Not read again because this report's 600 s limit was reached, an earlier read is used: madeupmedia.com.",
     );
     await expect(seg.locator("[data-seller-role-row]").first()).toBeVisible();
     await seg.getByRole("textbox", { name: "Search seller roles" }).fill("Northfold");

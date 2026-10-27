@@ -5,6 +5,7 @@ import { EmptyResult, Pager, TruncatedNotice, usePaging } from "@/components/Lis
 import LockedTail from "@/components/LockedTail";
 import { Settle } from "@/components/Motion";
 import { SkeletonRows, skeletonRowCount } from "@/components/Skeleton";
+import { expectedRows, knownKey, type Landed } from "@/lib/expectedRows";
 import {
   api,
   type GoneInventory,
@@ -20,7 +21,7 @@ import { csvName, ExportListButton, type CsvSink } from "@/components/ExportList
 import { eachPage, READ_PAGE, type Progress } from "@/lib/scopeRows";
 import { usePageCache } from "@/lib/pageCache";
 import { PAGE_SIZE } from "@/lib/paging";
-import { cn } from "@/lib/utils";
+import { cn, storeLabel } from "@/lib/utils";
 
 /**
  * THE INACTIVE TAB of the matched list (David, 2026-10-08), which replaced
@@ -106,7 +107,7 @@ export default function InactiveSection({
   // Bumps each time a list lands; 0 means nothing for this list yet.
   const [settled, setSettled] = useState(0);
   // The size of the list last read, for the skeleton's row count.
-  const [landed, setLanded] = useState<{ key: string; total: number } | null>(null);
+  const [landed, setLanded] = useState<Landed | null>(null);
   const linesKey = lines.join(",");
 
   useEffect(() => setPage(1), [kind, query, linesKey]);
@@ -118,7 +119,7 @@ export default function InactiveSection({
     const load = (pg: number) => api.inactive(token, kind, { page: pg, q: query, lines }, legacy);
     const keyFor = (pg: number) => [kind, pg, query, linesKey].join("|");
     const apply = (d: Loaded) => {
-      setLanded({ key: [kind, query, linesKey].join("|"), total: d.total });
+      setLanded({ tab: kind, query, lines: linesKey, matchType: "all", filter: "all", total: d.total });
       setData(d);
       setSettled((n) => n + 1);
     };
@@ -167,10 +168,12 @@ export default function InactiveSection({
         .filter((l): l is { ssp_domain: string; publisher_id: string; relationship: string } => !!l && typeof l === "object")
         .map((l) => `${l.ssp_domain}, ${l.publisher_id}, ${l.relationship}`)
         .join("; ");
+    // The workbook's Inactive sheet headers (run_export.py), parity audit
+    // of #75; "Apps" as its publishers sheet says it.
     sink.header(
       kind === "publishers"
-        ? ["publisher_domain", "publisher_name", "inactive_since", "reason", "evidence", "apps", "lines"]
-        : ["app_name", "store", "bundle_id", "publisher_domain", "publisher_name", "inactive_since", "reason", "evidence", "lines"],
+        ? ["Publisher domain", "Publisher", "Inactive since", "Reason", "Evidence", "Apps", "Line"]
+        : ["App", "Store", "Bundle ID", "Publisher domain", "Publisher", "Inactive since", "Reason", "Evidence", "Line"],
     );
     await eachPage(
       (pg) => api.inactive(token, kind, { page: pg, q: query, lines, pageSize: READ_PAGE }, legacy),
@@ -181,7 +184,7 @@ export default function InactiveSection({
             ? (page as InactivePublisher[]).map((p) => [p.domain, p.name, p.inactive_since, reasonText(p), p.evidence_summary, p.apps, lineText(p.lines)])
             : (page as InactiveApp[]).map((a) => [
                 a.name,
-                a.store,
+                storeLabel(a.store),
                 a.bundle,
                 a.publisher,
                 a.publisher_name,
@@ -253,7 +256,15 @@ export default function InactiveSection({
           2026-10-27), never last answer's rows dimmed. */}
       {loading && (
         <SkeletonRows
-          rows={skeletonRowCount(page, landed?.key === [kind, query, linesKey].join("|") ? landed.total : null)}
+          rows={skeletonRowCount(
+            expectedRows(
+              { tab: kind, query, lines: linesKey, matchType: "all", filter: "all" },
+              // The summary's whole counts answer the list unfiltered.
+              { landed, known: { [knownKey("publishers", "all", "")]: counts.publishers, [knownKey("apps", "all", "")]: counts.apps } },
+              page,
+              PAGE_SIZE,
+            ),
+          )}
           label={`Loading ${noun}`}
         />
       )}

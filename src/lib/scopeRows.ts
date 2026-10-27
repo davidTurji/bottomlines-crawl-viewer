@@ -132,16 +132,74 @@ export function watchEvents(token: string, tab: ScopeTab, developerId: number, l
   return p;
 }
 
-const certs = new Map<string, Promise<Map<string, { old: string | null; next: string | null }>>>();
+/** A line's cert before and after the week. */
+export type CertChange = { old: string | null; next: string | null };
 
-/** One publisher's cert changes of the week, by line (ssp|id|REL): its old
- *  and new cert, read when its row opens on the Changed tab (never the
- *  whole list: review of #75). */
-export function rowCertChanges(
-  token: string,
-  developerId: number,
-  lines: string[],
-): Promise<Map<string, { old: string | null; next: string | null }>> {
+/**
+ * A publisher's cert changes, findable by line (re-review of #75): the
+ * same seat can sit in two files (its ads.txt and its app-ads.txt, or a
+ * declared host's), each with its own cert change, so a change is keyed by
+ * the seat AND its place. Three grains, finest first: seat + host + file,
+ * seat + file, seat. A grain two changes share in different places is
+ * ambiguous (null) and never guessed; a line that names no host or file
+ * is matched at the finest grain it can name.
+ */
+export type CertChanges = Map<string, { change: CertChange; place: string } | null>;
+
+const fileWord = (v: unknown): string => {
+  const k = (typeof v === "string" ? v : "").toLowerCase().replace(/[^a-z]/g, "");
+  return k === "appadstxt" ? "app-ads.txt" : k === "adstxt" ? "ads.txt" : k;
+};
+const hostWord = (v: unknown): string => (typeof v === "string" ? v.trim().toLowerCase() : "");
+
+function certGrains(seat: string, host: string, file: string): string[] {
+  const out: string[] = [];
+  if (host && file) out.push(`x|${seat}|${host}|${file}`);
+  if (file) out.push(`f|${seat}|${file}`);
+  out.push(`s|${seat}`);
+  return out;
+}
+
+/** Adds one cert_changed event (its host and `file_kind`). */
+export function addCertChange(map: CertChanges, e: LineEvent): void {
+  if (!e || typeof e !== "object") return;
+  const host = hostWord(e.host);
+  const file = fileWord(e.file_kind);
+  const place = `${host}|${file}`;
+  const change: CertChange = {
+    old: typeof e.old_cert_id === "string" ? e.old_cert_id : null,
+    next: typeof e.new_cert_id === "string" ? e.new_cert_id : null,
+  };
+  for (const k of certGrains(certKey(e), host, file)) {
+    const had = map.get(k);
+    if (had === undefined) map.set(k, { change, place });
+    else if (had !== null && had.place !== place) map.set(k, null);
+  }
+}
+
+/** The cert change of one line (its host, or the publisher's domain when
+ *  it names none, and its `found_in`), or null when none or ambiguous. */
+export function certChangeOf(
+  map: CertChanges | null | undefined,
+  l: { ssp_domain?: unknown; publisher_id?: unknown; relationship?: unknown; host?: unknown; found_in?: unknown },
+  ownHost?: string | null,
+): CertChange | null {
+  if (!map || !l || typeof l !== "object") return null;
+  const host = hostWord(l.host) || hostWord(ownHost);
+  for (const k of certGrains(certKey(l), host, fileWord(l.found_in))) {
+    const had = map.get(k);
+    if (had === null) return null; // ambiguous here, and so at every coarser grain
+    if (had) return had.change;
+  }
+  return null;
+}
+
+const certs = new Map<string, Promise<CertChanges>>();
+
+/** One publisher's cert changes of the week (see CertChanges), read when
+ *  its row opens on the Changed tab (never the whole list: review of
+ *  #75). */
+export function rowCertChanges(token: string, developerId: number, lines: string[]): Promise<CertChanges> {
   const key = `${token}|${developerId}|${lines.join(",")}`;
   let p = certs.get(key);
   if (!p) {
@@ -149,16 +207,8 @@ export function rowCertChanges(
       (page) => api.lineEvents(token, { event: "cert_changed", developer_id: developerId, page, page_size: READ_PAGE, lines }),
       READ_PAGE,
     ).then((rows) => {
-      const out = new Map<string, { old: string | null; next: string | null }>();
-      for (const e of rows) {
-        if (!e || typeof e !== "object") continue;
-        const k = certKey(e);
-        if (!out.has(k))
-          out.set(k, {
-            old: typeof e.old_cert_id === "string" ? e.old_cert_id : null,
-            next: typeof e.new_cert_id === "string" ? e.new_cert_id : null,
-          });
-      }
+      const out: CertChanges = new Map();
+      for (const e of rows) addCertChange(out, e);
       return out;
     });
     p = read;
@@ -168,4 +218,34 @@ export function rowCertChanges(
     certs.set(key, read);
   }
   return p;
+}
+
+/**
+ * Every publisher's cert changes on the list (for the Changed tab's
+ * export, which carries old to new as the page does): every page of the
+ * report's cert_changed events under the line filter, by publisher. Only
+ * when a reader asks for the file, never to show the tab.
+ */
+export async function allCertChanges(
+  token: string,
+  lines: string[],
+  onProgress?: Progress,
+  signal?: AbortSignal,
+): Promise<Map<number, CertChanges>> {
+  const out = new Map<number, CertChanges>();
+  await eachPage(
+    (page) => api.lineEvents(token, { event: "cert_changed", page, page_size: READ_PAGE, lines }),
+    READ_PAGE,
+    (rows) => {
+      for (const e of rows) {
+        if (!e || typeof e !== "object" || typeof e.developer_id !== "number") continue;
+        let m = out.get(e.developer_id);
+        if (!m) out.set(e.developer_id, (m = new Map()));
+        addCertChange(m, e);
+      }
+    },
+    onProgress,
+    signal,
+  );
+  return out;
 }

@@ -26,6 +26,14 @@ export function storeLabel(store?: string): string {
       return "Vizio";
     case "firetv":
       return "Fire TV";
+    // Parity audit of #75: these three read as raw codes. Store names as
+    // the crawler's domain/platforms.py describes the stores.
+    case "tvos":
+      return "Apple TV";
+    case "googleplay":
+      return "Google Play";
+    case "lg":
+      return "LG";
     case "ctv":
       return "CTV";
     default:

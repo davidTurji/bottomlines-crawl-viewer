@@ -264,15 +264,16 @@ function watchEventsFor(developerId: number, event: string, declared: boolean): 
 }
 
 /** The ``sellersReads`` scenario's read summary (crawler #364's shape). */
+/** The record crawler #364 freezes (run_export.sellers_reads_record). */
 export const SELLERS_READS = {
-  wanted: 3,
-  fresh: 1,
-  read: 1,
-  failed: 1,
-  over_budget: 0,
-  read_domains: ["madeupssp.com"],
-  failed_domains: ["example-exchange.tv"],
-  over_budget_domains: [],
+  exchanges: 3,
+  read: 2,
+  read_domains: ["madeupssp.com", "madeupmedia.com"],
+  oldest_read: "2026-10-18T11:29:41+00:00",
+  not_read: [{ domain: "example-exchange.tv", why: "refused us, HTTP 403" }],
+  not_reread: ["madeupmedia.com"],
+  budget_s: 600,
+  as_of: "2026-10-27T08:00:00+00:00",
 };
 
 /* ── THE CRAWLER'S REAL SHAPES (2026-10-27) ────────────────────────────
