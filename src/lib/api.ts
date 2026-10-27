@@ -1387,11 +1387,11 @@ export type MatchTypeFields = {
   /** One sentence each when the roles disagree with the file, e.g.
    *  "Listed as DIRECT, but sellers.json names X, not Y: treated as a
    *  reseller." Empty or absent: nothing to say. */
-  verdict_alerts?: string[] | null;
+  verdict_alerts?: string[] | string | null;
   /** Not part of the fixed contract: the CTV platforms whose app-ads.txt
    *  names this publisher as their inventory partner. Shown only if the
    *  crawler ever sends it. */
-  partner_inventory_on?: string[] | null;
+  partner_inventory_on?: string[] | string | null;
 };
 
 /** List meta: the split under the current search and lines. */
@@ -1594,7 +1594,7 @@ export type MatchedSeatLine = RemovalFields & {
    *  that carries the line; read for the type's sake, the row says them. */
   seller_role?: string | null;
   managed_by?: string | null;
-  verdict_alerts?: string[] | null;
+  verdict_alerts?: string[] | string | null;
   ssp_domain: string;
   publisher_id: string;
   relationship: string;

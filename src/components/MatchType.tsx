@@ -162,6 +162,22 @@ function ipdTitle(row: MatchTypeFields, subject: string | null | undefined): str
   return parts.length ? parts.join(". ") : undefined;
 }
 
+
+/**
+ * A publisher's platform as the page shows it: CTV, Mobile or Web, spelled
+ * once, the way the crawler's own exports spell it (domain/platforms.py).
+ * Anything else, including the internal "ipd_partner" of partner rows the
+ * IPD chase added, is a platform we cannot name: null, so no badge.
+ */
+export function platformLabel(raw: unknown): "CTV" | "Mobile" | "Web" | null {
+  if (typeof raw !== "string") return null;
+  const v = raw.trim().toLowerCase();
+  if (v === "ctv") return "CTV";
+  if (v === "mobile") return "Mobile";
+  if (v === "web" || v === "website") return "Web";
+  return null;
+}
+
 /** The small "IPD" chip beside the name; nothing on an own row. `subject`
  *  as on IpdWhere; absent means a publisher row. */
 export function IpdChip({ row, subject = PUBLISHER_SUBJECT }: { row: MatchTypeFields; subject?: string | null }) {
@@ -260,12 +276,39 @@ function roleLabel(role: string): string {
  * of an expanded row. Nothing when the row carries none of them (every
  * report frozen before the crawler sent them).
  */
+/**
+ * A list field as the crawler really sends it (2026-10-27): the frozen
+ * reports carry ``verdict_alerts`` as ONE string ("" when there is nothing
+ * to say, several alerts joined by " | "), not the array the contract
+ * described. A string, an array, or anything else is read safely here, so
+ * an expanded row can never throw on it (a crash took the whole section
+ * down on every report link).
+ */
+export function textList(value: unknown, split: RegExp = /\s\|\s|\n/): string[] {
+  const parts: unknown[] = Array.isArray(value)
+    ? value
+    : typeof value === "string"
+      ? value.split(split)
+      : [];
+  return parts
+    .filter((p): p is string => typeof p === "string")
+    .map((p) => p.trim())
+    .filter(Boolean);
+}
+
+/** A plain text field, or nothing: never throws on an unexpected type. */
+function text(value: unknown): string {
+  return typeof value === "string" ? value.trim() : "";
+}
+
 export function RowRoles({ row }: { row: MatchTypeFields }) {
-  const partnerOn = (row.partner_inventory_on ?? []).filter(Boolean);
-  const alerts = (row.verdict_alerts ?? []).filter((a) => typeof a === "string" && a.trim());
+  const partnerOn = textList(row.partner_inventory_on, /\s*[,;]\s*|\n/);
+  const alerts = Array.from(new Set(textList(row.verdict_alerts)));
   const facts: [string, string][] = [];
-  if (row.seller_role) facts.push(["Seller role", roleLabel(row.seller_role)]);
-  if (row.managed_by) facts.push(["Managed by", row.managed_by]);
+  const role = text(row.seller_role);
+  const managedBy = text(row.managed_by);
+  if (role) facts.push(["Seller role", roleLabel(role)]);
+  if (managedBy) facts.push(["Managed by", managedBy]);
   if (partnerOn.length) facts.push(["Partner inventory on", partnerOn.join(", ")]);
   if (facts.length === 0 && alerts.length === 0) return null;
   return (
