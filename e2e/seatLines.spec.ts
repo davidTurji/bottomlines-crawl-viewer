@@ -230,11 +230,9 @@ test.describe("seller roles live on the Sellers.json page", () => {
     const seg = page.getByTestId("seller-roles");
     await expect(seg.getByRole("heading", { name: "Seller roles" })).toBeVisible();
     await expect(page.getByTestId("seller-roles-later")).toHaveCount(0);
-    await expect(seg.getByTestId("seller-roles-read")).toHaveText(
-      // The workbook's own words (run_export.sellers_reads_text), from the
-      // same record: same N of M, same reasons, same date.
-      "For 2 of 3 exchanges your seats name (as of 2026-10-18 11:29 UTC). Not read: example-exchange.tv (refused us, HTTP 403). Not read again because this report's 600 s limit was reached, an earlier read is used: madeupmedia.com.",
-    );
+    // Crawler #364's tallies, in the workbook's words; a failed read
+    // gives no reason in this shape, so none is printed.
+    await expect(seg.getByTestId("seller-roles-read")).toHaveText("For 2 of 3 exchanges your seats name. Not read: example-exchange.tv.");
     await expect(seg.locator("[data-seller-role-row]").first()).toBeVisible();
     await seg.getByRole("textbox", { name: "Search seller roles" }).fill("Northfold");
     const row = seg.locator("[data-seller-role-row]");
@@ -247,6 +245,35 @@ test.describe("seller roles live on the Sellers.json page", () => {
     await expect(page.locator("[data-seller-role-alert], [data-row-alert]")).toHaveCount(0);
     // The numbers in the gutter, like every list of the report.
     await expect(row.locator("[data-line-no]")).toHaveText("1");
+    expect(errors).toEqual([]);
+  });
+
+  test("the read sentence: #370's own, #364's tallies, or nothing", async ({ page }) => {
+    const errors = watchErrors(page);
+    const said = () => page.getByTestId("seller-roles").getByTestId("seller-roles-read");
+    // #370: the Excel Summary's string, frozen, printed as is.
+    const sentence =
+      "For 11 of 14 exchanges your seats name (as of 2026-10-18 11:29 UTC). Not read: example-exchange.tv (refused us, HTTP 403).";
+    await open(page, { sellers: "page", matchType: true, sellersReads: { wanted: 14, fresh: 3, read: 8, sentence } }, "/sellers");
+    await expect(said()).toHaveText(sentence);
+    // #364, every exchange left by the budget: each said with the
+    // workbook's reason, and the full stop on "None".
+    await open(
+      page,
+      { sellers: "page", matchType: true, sellersReads: { wanted: 2, fresh: 1, read: 0, failed_domains: [], over_budget_domains: ["late.example"], budget_s: 600 } },
+      "/sellers",
+    );
+    await expect(said()).toHaveText(
+      "For 1 of 2 exchanges your seats name. Not read: late.example (left unread: this report's 600 s limit for reading sellers.json was reached).",
+    );
+    await open(page, { sellers: "page", matchType: true, sellersReads: { wanted: 0 } }, "/sellers");
+    await expect(said()).toHaveText("None: your seats name no exchange.");
+    // A shape it cannot read: the segment, and no sentence at all.
+    await open(page, { sellers: "page", matchType: true, sellersReads: { as_of: "2026-10-27" } }, "/sellers");
+    await expect(page.getByTestId("seller-roles").getByRole("heading", { name: "Seller roles" })).toBeVisible();
+    await expect(said()).toHaveCount(0);
+    await expect(page.getByText(/None: your seats name/)).toHaveCount(0);
+    await expect(page.getByText(/\(\)/)).toHaveCount(0);
     expect(errors).toEqual([]);
   });
 

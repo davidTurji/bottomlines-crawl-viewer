@@ -13,7 +13,7 @@ import { formatWeek, WeekLine } from "@/components/WeekLine";
 import { lineKey, lineLabel, sourceHint } from "@/lib/lineFilter";
 import { useReportScope } from "@/lib/reportScope";
 import { PAGE_SIZE } from "@/lib/paging";
-import { cn, foundInLabel, storeLabel } from "@/lib/utils";
+import { cn, foundInLabel, storeName } from "@/lib/utils";
 
 import {
   api,
@@ -1305,7 +1305,7 @@ function SchainAppCard({ row, open, onToggle }: { row: SchainRow; open: boolean;
               {row.app_name}
             </span>
             <span className="flex-shrink-0 rounded-full border border-app-border bg-app-bg px-1.5 py-px text-[10px] font-medium text-app">
-              {storeLabel(row.store)}
+              {storeName(row)}
             </span>
           </div>
           <div className="truncate text-xs text-slate-500">

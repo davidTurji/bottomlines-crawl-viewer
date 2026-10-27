@@ -65,7 +65,7 @@ async function readPage<T>(fetchPage: (page: number) => Promise<PageAnswer<T>>, 
 export async function eachPage<T>(
   fetchPage: (page: number) => Promise<PageAnswer<T>>,
   asked: number,
-  onRows: (rows: T[]) => void,
+  onRows: (rows: T[]) => void | Promise<void>,
   onProgress?: Progress,
   signal?: AbortSignal,
 ): Promise<number> {
@@ -82,7 +82,7 @@ export async function eachPage<T>(
         `This list counts ${total.toLocaleString()} rows but only ${seen.toLocaleString()} could be read. Nothing was exported.`,
       );
     seen += rows.length;
-    onRows(rows);
+    await onRows(rows);
     const size = Math.max(1, r.page_size || asked);
     onProgress?.(page, Math.max(page, Math.ceil(total / size)));
     if (seen >= total) return seen;
@@ -99,7 +99,15 @@ export async function readAllPages<T>(
   signal?: AbortSignal,
 ): Promise<T[]> {
   const out: T[] = [];
-  await eachPage(fetchPage, asked, (rows) => out.push(...rows), onProgress, signal);
+  await eachPage(
+    fetchPage,
+    asked,
+    (rows) => {
+      out.push(...rows);
+    },
+    onProgress,
+    signal,
+  );
   return out;
 }
 
@@ -166,9 +174,12 @@ export function addCertChange(map: CertChanges, e: LineEvent): void {
   const host = hostWord(e.host);
   const file = fileWord(e.file_kind);
   const place = `${host}|${file}`;
+  // `cert_id` is the event's cert from crawler #370 on; `new_cert_id`
+  // before it.
+  const now = (e as { cert_id?: unknown }).cert_id;
   const change: CertChange = {
     old: typeof e.old_cert_id === "string" ? e.old_cert_id : null,
-    next: typeof e.new_cert_id === "string" ? e.new_cert_id : null,
+    next: typeof e.new_cert_id === "string" ? e.new_cert_id : typeof now === "string" ? now : null,
   };
   for (const k of certGrains(certKey(e), host, file)) {
     const had = map.get(k);
@@ -220,32 +231,27 @@ export function rowCertChanges(token: string, developerId: number, lines: string
   return p;
 }
 
-/**
- * Every publisher's cert changes on the list (for the Changed tab's
- * export, which carries old to new as the page does): every page of the
- * report's cert_changed events under the line filter, by publisher. Only
- * when a reader asks for the file, never to show the tab.
- */
-export async function allCertChanges(
-  token: string,
-  lines: string[],
-  onProgress?: Progress,
-  signal?: AbortSignal,
-): Promise<Map<number, CertChanges>> {
-  const out = new Map<number, CertChanges>();
-  await eachPage(
-    (page) => api.lineEvents(token, { event: "cert_changed", page, page_size: READ_PAGE, lines }),
-    READ_PAGE,
-    (rows) => {
-      for (const e of rows) {
-        if (!e || typeof e !== "object" || typeof e.developer_id !== "number") continue;
-        let m = out.get(e.developer_id);
-        if (!m) out.set(e.developer_id, (m = new Map()));
-        addCertChange(m, e);
-      }
-    },
-    onProgress,
-    signal,
+/** True when every line already says its old cert (crawler #370's lines
+ *  and events carry `old_cert_id`): no read needed for them. */
+export function hasOldCerts(lines: unknown): boolean {
+  return (
+    Array.isArray(lines) &&
+    lines.length > 0 &&
+    lines.every((l) => !!l && typeof l === "object" && typeof (l as { old_cert_id?: unknown }).old_cert_id === "string")
   );
+}
+
+/** `fn` over `xs`, at most `limit` at a time, in order; stops on abort. */
+export async function mapLimit<T, U>(xs: T[], limit: number, fn: (x: T) => Promise<U>, signal?: AbortSignal): Promise<U[]> {
+  const out = new Array<U>(xs.length);
+  let next = 0;
+  const worker = async () => {
+    while (next < xs.length) {
+      if (signal?.aborted) throw new DOMException("Aborted", "AbortError");
+      const i = next++;
+      out[i] = await fn(xs[i]);
+    }
+  };
+  await Promise.all(Array.from({ length: Math.min(limit, xs.length) }, worker));
   return out;
 }

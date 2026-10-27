@@ -161,7 +161,10 @@ export type Scenario = {
    *  sellers.json files first: the summary carries ``sellers_json_reads``
    *  (SELLERS_READS) and the Sellers.json page shows its Seller roles
    *  segment. Default false: every report frozen before it. */
-  sellersReads?: boolean;
+  sellersReads?: boolean | Record<string, unknown>;
+  /** Fields merged into the summary as served (crawler #370's
+   *  `partial_line`, for one). */
+  summaryExtra?: Record<string, unknown>;
   /** true: every matched row, app, publisher change and line event in the
    *  crawler's REAL field shapes, as a frozen report serves them on
    *  2026-10-27 (see ``realShape``): roles as "; "-joined strings, alerts
@@ -264,16 +267,17 @@ function watchEventsFor(developerId: number, event: string, declared: boolean): 
 }
 
 /** The ``sellersReads`` scenario's read summary (crawler #364's shape). */
-/** The record crawler #364 freezes (run_export.sellers_reads_record). */
+/** What crawler #364 freezes on the summary (ensure_recent_reads). */
 export const SELLERS_READS = {
-  exchanges: 3,
-  read: 2,
-  read_domains: ["madeupssp.com", "madeupmedia.com"],
-  oldest_read: "2026-10-18T11:29:41+00:00",
-  not_read: [{ domain: "example-exchange.tv", why: "refused us, HTTP 403" }],
-  not_reread: ["madeupmedia.com"],
+  wanted: 3,
+  fresh: 1,
+  read: 1,
+  failed: 1,
+  over_budget: 0,
+  read_domains: ["madeupssp.com"],
+  failed_domains: ["example-exchange.tv"],
+  over_budget_domains: [],
   budget_s: 600,
-  as_of: "2026-10-27T08:00:00+00:00",
 };
 
 /* ── THE CRAWLER'S REAL SHAPES (2026-10-27) ────────────────────────────
@@ -536,6 +540,7 @@ export async function installFakeApi(page: Page, scenario: Scenario = {}): Promi
     removalReasons: false,
     appChange: false,
     sellersReads: false,
+    summaryExtra: {},
     realShapes: false,
     watchTabs: false,
     appPlatform: false,
@@ -654,8 +659,11 @@ export async function installFakeApi(page: Page, scenario: Scenario = {}): Promi
         const withGone = s.gone ? full : { ...full, gone: undefined };
         const withInactive = s.inactive === "ok" ? withGone : { ...withGone, inactive_counts: undefined };
         const first = s.firstReport ? { ...withInactive, previous_job_id: null } : withInactive;
-        const sum = s.sellersReads ? { ...first, sellers_json_reads: SELLERS_READS } : first;
-        return reply(200, s.trial ? { ...sum, trial: TRIAL_CAPS } : sum);
+        const sum = s.sellersReads
+          ? { ...first, sellers_json_reads: typeof s.sellersReads === "object" ? s.sellersReads : SELLERS_READS }
+          : first;
+        const extra = { ...sum, ...s.summaryExtra };
+        return reply(200, s.trial ? { ...extra, trial: TRIAL_CAPS } : extra);
       }
       case "export-info":
         if (s.exportInfo === "none") return notFound();

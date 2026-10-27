@@ -57,18 +57,24 @@ export function csvName(...parts: (string | null | undefined)[]): string {
   return `${slug || "list"}.csv`;
 }
 
+/** What a run answers: the file's name, and a note to say beside the
+ *  button when the file is whole but says less than the page (the
+ *  Changed tab's old certs that could not be read). */
+export type ExportDone = string | { name: string; note?: string };
+
 export function ExportListButton({
   run,
   className,
 }: {
   /** Reads the whole list into the sink, page by page, reporting its pages
    *  as it goes; answers the file's name. */
-  run: (sink: CsvSink, onProgress: (done: number, of: number) => void, signal: AbortSignal) => Promise<string>;
+  run: (sink: CsvSink, onProgress: (done: number, of: number) => void, signal: AbortSignal) => Promise<ExportDone>;
   className?: string;
 }) {
   const [busy, setBusy] = useState(false);
   const [progress, setProgress] = useState<{ done: number; of: number } | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [note, setNote] = useState<string | null>(null);
   const controller = useRef<AbortController | null>(null);
   useEffect(() => () => controller.current?.abort(), []);
 
@@ -78,6 +84,7 @@ export function ExportListButton({
     controller.current = c;
     setBusy(true);
     setError(null);
+    setNote(null);
     setProgress(null);
     // The file, a part per page: a byte order mark, the header, the rows.
     const parts: string[] = ["\uFEFF"];
@@ -94,8 +101,12 @@ export function ExportListButton({
       },
     };
     try {
-      const filename = await run(sink, (done, of) => !c.signal.aborted && setProgress({ done, of }), c.signal);
-      if (!c.signal.aborted && lines > 0) download(parts, filename);
+      const done = await run(sink, (n, of) => !c.signal.aborted && setProgress({ done: n, of }), c.signal);
+      const filename = typeof done === "string" ? done : done.name;
+      if (!c.signal.aborted && lines > 0) {
+        download(parts, filename);
+        if (typeof done === "object" && done.note) setNote(done.note);
+      }
     } catch (e) {
       if (!c.signal.aborted) setError(e instanceof Error && e.message ? e.message : "Could not export this list.");
     } finally {
@@ -123,6 +134,11 @@ export function ExportListButton({
       {error && (
         <span role="alert" className="text-[11px] text-critical">
           {error}
+        </span>
+      )}
+      {note && !error && (
+        <span data-export-note className="max-w-[18rem] text-[11px] leading-snug text-slate-500">
+          {note}
         </span>
       )}
     </span>

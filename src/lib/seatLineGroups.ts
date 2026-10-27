@@ -26,7 +26,7 @@ export type SeatLineGroup = {
 };
 
 /** The seat line itself: SSP, seller ID, relationship and cert. */
-export function seatKey(l: Pick<MatchedSeatLine, "ssp_domain" | "publisher_id" | "relationship" | "cert_id">): string {
+export function seatKey(l: { ssp_domain?: unknown; publisher_id?: unknown; relationship?: unknown; cert_id?: unknown }): string {
   return [
     String(l.ssp_domain ?? "").trim().toLowerCase(),
     String(l.publisher_id ?? "").trim(),

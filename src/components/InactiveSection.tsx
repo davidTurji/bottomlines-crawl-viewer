@@ -21,7 +21,7 @@ import { csvName, ExportListButton, type CsvSink } from "@/components/ExportList
 import { eachPage, READ_PAGE, type Progress } from "@/lib/scopeRows";
 import { usePageCache } from "@/lib/pageCache";
 import { PAGE_SIZE } from "@/lib/paging";
-import { cn, storeLabel } from "@/lib/utils";
+import { cn, storeName } from "@/lib/utils";
 
 /**
  * THE INACTIVE TAB of the matched list (David, 2026-10-08), which replaced
@@ -184,7 +184,7 @@ export default function InactiveSection({
             ? (page as InactivePublisher[]).map((p) => [p.domain, p.name, p.inactive_since, reasonText(p), p.evidence_summary, p.apps, lineText(p.lines)])
             : (page as InactiveApp[]).map((a) => [
                 a.name,
-                storeLabel(a.store),
+                storeName(a),
                 a.bundle,
                 a.publisher,
                 a.publisher_name,

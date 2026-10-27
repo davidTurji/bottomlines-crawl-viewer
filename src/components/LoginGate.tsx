@@ -87,8 +87,15 @@ export default function LoginGate({ children }: { children: React.ReactNode }) {
     return () => {
       onUnauthorized(null);
       onLinkRefused(null);
+      // Never a request left waiting for a sign-in that cannot come.
+      releaseDataRequests();
     };
   }, []);
+  // A dead link is the end of it: nothing is held for it (re-review of
+  // #75: requests must never wait forever).
+  useEffect(() => {
+    if (dead) releaseDataRequests();
+  }, [dead]);
 
   if (dead && !MOCK) {
     return <ReportNoticeCard message={EXPIRED_LINK_MESSAGE} />;

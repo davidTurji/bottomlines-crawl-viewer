@@ -28,7 +28,7 @@ import { formatWeek, WeekLine } from "@/components/WeekLine";
 import { PAGE_SIZE } from "@/lib/paging";
 import { useReportScope } from "@/lib/reportScope";
 import { useSellersPage } from "@/lib/useSellersPage";
-import { cn, foundInLabel, storeLabel } from "@/lib/utils";
+import { cn, foundInLabel, storeName } from "@/lib/utils";
 import { computeDelta, SplitStat } from "./CrawlReport";
 
 /**
@@ -945,7 +945,7 @@ function PlacementCard({ line, p }: { line: DiscoveredLine; p: DiscoveredPlaceme
             <>
               <span className="truncate text-slate-700">{p.app_name}</span>
               <span className="flex-shrink-0 rounded-full border border-app-border bg-app-bg px-1.5 py-px text-[10px] font-medium text-app">
-                {storeLabel(p.store)}
+                {storeName(p)}
               </span>
               {p.bundle_id && (
                 <span className="truncate font-mono text-[10px] tabular-nums text-slate-400">{p.bundle_id}</span>
@@ -1101,7 +1101,7 @@ async function downloadLineCsv(token: string, line: DiscoveredLine) {
         p.developer_domain,
         p.found_in,
         p.app_name ?? "",
-        p.app_name ? storeLabel(p.store) : "",
+        p.app_name ? storeName(p) : "",
         p.bundle_id ?? "",
       ]);
     }

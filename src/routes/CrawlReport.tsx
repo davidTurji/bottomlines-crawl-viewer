@@ -71,7 +71,7 @@ import { Card } from "@/components/ui/card";
 import InlineAskAI from "@/components/InlineAskAI";
 import { PageShell } from "@/components/PageShell";
 import { formatWeek } from "@/components/WeekLine";
-import { appFileLine, cn, fileHostsLabel, foundInLabel, lineHostLabel, scopeReasonText, storeLabel } from "@/lib/utils";
+import { appFileLine, cn, fileHostsLabel, foundInLabel, lineHostLabel, scopeReasonText, storeName } from "@/lib/utils";
 import {
   addedDates,
   certDates,
@@ -93,7 +93,8 @@ import {
 } from "@/components/PublisherLinks";
 import { groupSeatLines, placeKey, seatKey } from "@/lib/seatLineGroups";
 import {
-  allCertChanges,
+  hasOldCerts,
+  mapLimit,
   certChangeOf,
   type CertChanges,
   isScopeTab,
@@ -105,7 +106,7 @@ import {
   type Progress,
   type ScopeTab,
 } from "@/lib/scopeRows";
-import { csvName, ExportListButton, type CsvCell, type CsvSink } from "@/components/ExportList";
+import { csvName, ExportListButton, type CsvCell, type CsvSink, type ExportDone } from "@/components/ExportList";
 import { FoundInControl, PlatformControl } from "@/components/PlatformControl";
 import { useReportScope } from "@/lib/reportScope";
 import { PopularBar, type PopularChoice } from "@/components/PopularBar";
@@ -439,6 +440,13 @@ export default function CrawlReport() {
             Your weekly crawl
           </h1>
           <p className="mt-1 text-sm text-slate-500">{currentLine}</p>
+          {/* A crawl that did not finish says so, quietly, in the Excel's
+              own words (crawler #370, `partial_line`). */}
+          {typeof summary.partial_line === "string" && summary.partial_line.trim() && (
+            <p data-partial-line className="mt-0.5 text-[12px] leading-relaxed text-slate-400">
+              {summary.partial_line.trim()}
+            </p>
+          )}
           {refreshing ? (
             // The figures below are reloading for a new line selection;
             // a sentence about the old one would be wrong for a moment.
@@ -1708,11 +1716,57 @@ function withOldCerts(
   if (!certs || !Array.isArray(lines)) return Array.isArray(lines) ? lines : [];
   return lines.map((l) => {
     if (!l || typeof l !== "object") return l;
+    // A line that says its old cert itself (crawler #370) keeps it.
+    if (typeof l.old_cert_id === "string") return l;
     // By seat AND place (re-review of #75): the same seat in two files
     // gets each file's own old cert.
     const c = certChangeOf(certs, l, ownHost);
     return c ? { ...l, old_cert_id: c.old ?? "", cert_id: l.cert_id || c.next || undefined } : l;
   });
+}
+
+/**
+ * THE CHANGED TAB'S FILE SAYS OLD TO NEW, as its rows do (reviews of #75):
+ * each exported row's own cert changes (rowCertChanges, the read a row
+ * makes when it opens), so the file reads only for the rows the tab, its
+ * search and its match type list, never the report's whole list. Four at
+ * a time, each counted as it lands. Lines that already say their old cert
+ * (crawler #370) are not read for. A read that fails leaves that row's
+ * lines with their new cert only, and the file's note says so; it never
+ * fails the file.
+ */
+function changedCerts(token: string, lines: string[], signal: AbortSignal) {
+  let missed = 0;
+  return {
+    rows: <R,>(
+      rows: R[],
+      of: (r: R) => { dev: number | null; lines: MatchedSeatLine[]; host: string | null | undefined },
+      put: (r: R, lines: MatchedSeatLine[]) => R,
+      counted: () => void,
+    ): Promise<R[]> =>
+      mapLimit(
+        rows,
+        4,
+        async (r) => {
+          const { dev, lines: certLines, host } = of(r);
+          try {
+            if (dev == null || !certLines.length || hasOldCerts(certLines)) return r;
+            return put(r, withOldCerts(certLines, await rowCertChanges(token, dev, lines), host));
+          } catch {
+            if (signal.aborted) throw new DOMException("Aborted", "AbortError");
+            missed++;
+            return r;
+          } finally {
+            counted();
+          }
+        },
+        signal,
+      ),
+    note: (): string | undefined =>
+      missed
+        ? `The old cert of ${missed.toLocaleString()} ${missed === 1 ? "row" : "rows"} could not be read: ${missed === 1 ? "its lines show" : "their lines show"} the new cert only.`
+        : undefined,
+  };
 }
 
 /** A row's cert changes, read when it opens on a Changed window. */
@@ -1907,16 +1961,21 @@ function matchedViaCell(mt: string | null | undefined): string {
   return mt === "ipd" ? "IPD" : mt === "own" ? "Own" : "";
 }
 
-/** "IPD partner", as the workbook writes it. The workbook names the
- *  platform from the crawler's registry, else the publisher's domain;
- *  the list knows the publisher's name, else its domain. */
+/** "IPD partner", as the workbook writes it: the API's own
+ *  `ipd_partner_label` (crawler #370, the Excel's exact string) when it
+ *  sends one. Before: the workbook names the platform from the crawler's
+ *  registry, else the publisher's domain; the list knows the publisher's
+ *  name, else its domain. */
 function ipdPartnerCell(
   mt: string | null | undefined,
   partner: string | null | undefined,
   name: string | null | undefined,
   domain: string | null | undefined,
+  label?: string | null,
 ): string {
-  if (mt !== "ipd" || !partner) return "";
+  if (mt !== "ipd") return "";
+  if (typeof label === "string" && label.trim()) return label.trim();
+  if (!partner) return "";
   const of = (typeof name === "string" && name.trim()) || (typeof domain === "string" ? domain : "");
   return of ? `Via ${partner}, inventory partner of ${of}` : `Via ${partner}`;
 }
@@ -1946,7 +2005,7 @@ function publisherCells(r: Row, tab: DrillTab): CsvCell[] {
     r.developer_domain,
     r.developer_name,
     matchedViaCell(r.match_type),
-    ipdPartnerCell(r.match_type, r.ipd_partner, r.developer_name, r.developer_domain),
+    ipdPartnerCell(r.match_type, r.ipd_partner, r.developer_name, r.developer_domain, r.ipd_partner_label),
     r.current,
     r.prev ?? "",
     r.added,
@@ -1988,13 +2047,14 @@ function appCells(a: AppRow, tab: DrillTab): CsvCell[] {
   );
   return [
     a.app_name,
-    storeLabel(a.store),
+    storeName(a),
     a.bundle_id,
     a.owner_domain,
     a.owner_name,
     matchedViaCell(a.match_type),
-    ipdPartnerCell(a.match_type, a.ipd_partner, a.owner_name, a.owner_domain),
-    appFileLine(a.file_host, a.file_source) ?? "",
+    ipdPartnerCell(a.match_type, a.ipd_partner, a.owner_name, a.owner_domain, a.ipd_partner_label),
+    // The Excel's own words for the file when the API sends them (#370).
+    (typeof a.file_used === "string" && a.file_used.trim() ? a.file_used.trim() : appFileLine(a.file_host, a.file_source)) ?? "",
     a.line_count,
     a.lines_added ?? 0,
     a.lines_removed ?? 0,
@@ -2088,6 +2148,7 @@ function matchTypeFieldsOf(d: MatchTypeFields): MatchTypeFields {
   if (d.ipd_partner !== undefined) out.ipd_partner = d.ipd_partner;
   if (d.ipd_platform !== undefined) out.ipd_platform = d.ipd_platform;
   if (d.declared_in !== undefined) out.declared_in = d.declared_in;
+  if (d.ipd_partner_label !== undefined) out.ipd_partner_label = d.ipd_partner_label;
   return out;
 }
 
@@ -2374,10 +2435,11 @@ function DrilldownList({
 
   // EXPORT THIS LIST: every page of what the tab, filters and search show,
   // each page into the file as it arrives.
-  const exportList = async (sink: CsvSink, progress: Progress, signal: AbortSignal): Promise<string> => {
+  const exportList = async (sink: CsvSink, progress: Progress, signal: AbortSignal): Promise<ExportDone> => {
     const t = rowsTab;
     const mt = rowsMatchType;
     const fi: FoundInFilter = foundInCounts ? foundIn : "all";
+    const certs = changedCerts(token, lines, signal);
     sink.header(PUBLISHER_CSV);
     if (t === "all" || isScopeTab(t))
       await eachPage(
@@ -2389,29 +2451,43 @@ function DrilldownList({
         signal,
       );
     else if (t !== "inactive") {
-      // THE CHANGED TAB'S FILE SAYS OLD TO NEW, as its rows do (re-review
-      // of #75): the cert changes are read for the file, every page, only
-      // when a reader asks for it.
-      const certsBy = t === "changed" ? await allCertChanges(token, lines, undefined, signal) : null;
-      const withCerts = (r: Row): Row =>
-        certsBy
-          ? { ...r, cert_changed_lines: withOldCerts(r.cert_changed_lines, certsBy.get(r.developer_id), r.developer_domain) }
-          : r;
+      let total = 0;
+      let done = 0;
       await eachPage(
-        (pg) => api.developerEvents(token, t, pg, query, lines, mt, 200, fi),
+        async (pg) => {
+          const r = await api.developerEvents(token, t, pg, query, lines, mt, 200, fi);
+          total = typeof r.total === "number" ? r.total : total;
+          return r;
+        },
         200,
-        (page) => sink.rows(page.map((d) => publisherCells(withCerts(eventRow(d)), t))),
-        progress,
+        async (page) => {
+          const rows = page.map((d) => eventRow(d));
+          const out =
+            t === "changed"
+              ? await certs.rows(
+                  rows,
+                  (r) => ({ dev: r.developer_id, lines: r.cert_changed_lines, host: r.developer_domain }),
+                  (r, cert_changed_lines) => ({ ...r, cert_changed_lines }),
+                  () => progress(++done, total),
+                )
+              : rows;
+          sink.rows(out.map((r) => publisherCells(r, t)));
+        },
+        // The Changed tab counts its rows as their certs are read.
+        t === "changed" ? undefined : progress,
         signal,
       );
     }
-    return csvName(
-      "publishers",
-      TAB_SLUG[t],
-      fi !== "all" ? `found in ${fi.replace(/_/g, " ")}` : null,
-      mt !== "all" ? mt : null,
-      query ? `search ${query}` : null,
-    );
+    return {
+      name: csvName(
+        "publishers",
+        TAB_SLUG[t],
+        fi !== "all" ? `found in ${fi.replace(/_/g, " ")}` : null,
+        mt !== "all" ? mt : null,
+        query ? `search ${query}` : null,
+      ),
+      note: certs.note(),
+    };
   };
 
   return (
@@ -2898,6 +2974,18 @@ const CHANGE_WINDOW: Record<
   },
 };
 
+/** "Not re-checked this crawl, last confirmed 20 Oct" for a line this
+ *  crawl did not read again (crawler #370 `last_confirmed`, "YYYY-MM-DD");
+ *  null for any other line, or a date it cannot read. */
+export function lastConfirmedNote(day: unknown): string | null {
+  if (typeof day !== "string") return null;
+  const m = day.trim().match(/^(\d{4})-(\d{2})-(\d{2})/);
+  if (!m) return null;
+  const month = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"][Number(m[2]) - 1];
+  if (!month) return null;
+  return `Not re-checked this crawl, last confirmed ${Number(m[3])} ${month}`;
+}
+
 /**
  * One seat line in the mono grammar the whole report prints a line in:
  * `ssp_domain, publisher_id, RELATIONSHIP` with an optional dimmed cert hash.
@@ -2965,6 +3053,7 @@ export function SeatLineRow({
             : null;
   // Why it was removed, when the report says (2026-10-26).
   const removal = change === "removed" ? removalReasonText(line) : null;
+  const unchecked = lastConfirmedNote(line.last_confirmed);
   // ON A PHONE THE PARTNERS GO UNDER THE LINE (David, 2026-10-27): at
   // the right margin they took the width and cut the line to "st...".
   // Below the sm breakpoint they are a line of their own right under the
@@ -3005,6 +3094,9 @@ export function SeatLineRow({
           {removal}
         </RowNote>
       )}
+      {/* NOT RE-CHECKED (crawler #370): a line this crawl did not read
+          again says when it was last confirmed. */}
+      {unchecked && <RowNote data-line-unchecked>{unchecked}</RowNote>}
       {dates && (
         <RowNote data-line-dates title={dateTitle(line.date_source)}>
           {dates}
@@ -3084,7 +3176,8 @@ function ChangeWindow({
 }) {
   const s = CHANGE_WINDOW[kind];
   // THE CERT, OLD TO NEW (David, 2026-10-27), read for this row only.
-  const certs = useRowCerts(kind === "cert" ? certRead : undefined);
+  // Lines that say their old cert themselves (crawler #370) need no read.
+  const certs = useRowCerts(kind === "cert" && !hasOldCerts(lines) ? certRead : undefined);
   // One row per distinct line, its partners beside it (2026-10-27).
   const groups = groupSeatLines(withOldCerts(lines, certs, publisherDomain), rowPartner);
   const shown = groups.slice(0, CHANGE_LINE_CAP);
@@ -3361,7 +3454,9 @@ function lineEventToSeatLine(e: LineEvent): MatchedSeatLine {
     ssp_domain: e.ssp_domain,
     publisher_id: e.publisher_id,
     relationship: e.relationship,
-    cert_id: e.new_cert_id || e.old_cert_id || undefined,
+    // The line's cert: `cert_id` from crawler #370 on, else the event's
+    // new (or old) cert.
+    cert_id: (typeof e.cert_id === "string" ? e.cert_id : null) || e.new_cert_id || e.old_cert_id || undefined,
     // The file's host: the publisher's own domain on its own file, which
     // the row then keeps quiet about.
     ...(e.host ? { host: e.host } : {}),
@@ -3607,36 +3702,45 @@ function MatchedAppsList({
   // EXPORT THIS LIST: every page of what the tab, filters and search show,
   // each page into the file as it arrives. Offered only where the server
   // filtered the list (never on a page-filtered change tab).
-  const exportList = async (sink: CsvSink, progress: Progress, signal: AbortSignal): Promise<string> => {
+  const exportList = async (sink: CsvSink, progress: Progress, signal: AbortSignal): Promise<ExportDone> => {
     const t = rowsTab;
     const mt = rowsMatchType;
     const pf: PlatformFilter = platformCounts ? platform : "all";
     const change = appChangeOf(t);
     sink.header(APP_CSV);
     // Old to new on the Changed tab, as on the page (see the publishers').
-    const certsBy = t === "changed" ? await allCertChanges(token, lines, undefined, signal) : null;
-    const withCerts = (a: AppRow): AppRow =>
-      certsBy && a.developer_id != null
-        ? { ...a, cert_changed_lines: withOldCerts(a.cert_changed_lines ?? [], certsBy.get(a.developer_id), a.owner_domain) }
-        : a;
+    const certs = changedCerts(token, lines, signal);
+    let total = 0;
+    let done = 0;
     if (t !== "inactive")
       await eachPage(
         async (pg) => {
           const r = await api.matchedApps(token, pg, query, lines, mt, change, READ_PAGE, pf);
           if (change && r.change !== change) throw new Error("This list cannot be exported here.");
+          total = typeof r.total === "number" ? r.total : total;
           return r;
         },
         READ_PAGE,
-        (page) =>
-          sink.rows(
-            page.map((a) =>
-              appCells(isScopeTab(t) ? { ...a, scope: { tab: t, filter: lines, lines: watchLinesOf(a, t) } } : withCerts(a), t),
-            ),
-          ),
-        progress,
+        async (page) => {
+          const rows: AppRow[] = page.map((a) => (isScopeTab(t) ? { ...a, scope: { tab: t, filter: lines, lines: watchLinesOf(a, t) } } : a));
+          const out =
+            t === "changed"
+              ? await certs.rows(
+                  rows,
+                  (a) => ({ dev: a.developer_id ?? null, lines: a.cert_changed_lines ?? [], host: a.owner_domain }),
+                  (a, cert_changed_lines) => ({ ...a, cert_changed_lines }),
+                  () => progress(++done, total),
+                )
+              : rows;
+          sink.rows(out.map((a) => appCells(a, t)));
+        },
+        t === "changed" ? undefined : progress,
         signal,
       );
-    return csvName("apps", TAB_SLUG[t], pf !== "all" ? pf : null, mt !== "all" ? mt : null, query ? `search ${query}` : null);
+    return {
+      name: csvName("apps", TAB_SLUG[t], pf !== "all" ? pf : null, mt !== "all" ? mt : null, query ? `search ${query}` : null),
+      note: certs.note(),
+    };
   };
 
   return (
@@ -3856,7 +3960,10 @@ function MatchedAppCard({
   // WHICH FILE CREDITED THIS APP (2026-10-21): the app-ads.txt at the host
   // its store listing declares, or the publisher's own, in plain words.
   // Null on a report frozen before the crawler said.
-  const fileLine = appFileLine(app.file_host, app.file_source);
+  // The API's own words for it when it sends them (crawler #370,
+  // `file_used`, the Excel's File used), else ours.
+  const fileLine =
+    typeof app.file_used === "string" && app.file_used.trim() ? app.file_used.trim() : appFileLine(app.file_host, app.file_source);
   return (
     <div
       className={cn(
@@ -3886,7 +3993,14 @@ function MatchedAppCard({
             inactive ? "bg-slate-200 text-slate-500" : "bg-app-bg text-app",
           )}
         >
-          <Smartphone aria-hidden className="h-5 w-5" />
+          {/* A website row (crawler #370: on new reports the apps list
+              carries the matched websites, under Platform Web): a globe,
+              never an app's phone. */}
+          {String(app.store ?? "").toLowerCase() === "website" ? (
+            <Globe aria-hidden data-website-icon className="h-5 w-5" />
+          ) : (
+            <Smartphone aria-hidden className="h-5 w-5" />
+          )}
         </div>
         <div className="min-w-0 flex-1">
           <div className="flex min-w-0 items-center gap-2">
@@ -3899,7 +4013,7 @@ function MatchedAppCard({
                 inactive ? "border-slate-300 bg-white text-slate-500" : "border-app-border bg-app-bg text-app",
               )}
             >
-              {storeLabel(app.store)}
+              {storeName(app)}
             </span>
             {!inactive && <IpdChip row={app} subject={appSubject(app)} others={otherPartners(app, app.matched_lines)} />}
             {inactive && <InactiveChip />}

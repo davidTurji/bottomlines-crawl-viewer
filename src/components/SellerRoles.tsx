@@ -37,48 +37,43 @@ export function sellersReadsOf(summary: Summary | null | undefined): SellersJson
   return r && typeof r === "object" && !Array.isArray(r) ? (r as SellersJsonReads) : null;
 }
 
-/** A crawl time as the workbook prints one (run_export.utc_label):
- *  "2026-10-18 11:29 UTC"; the text itself when it is not a time. */
-export function utcLabel(value: unknown): string {
-  if (typeof value !== "string" || !value) return "";
-  const t = new Date(value);
-  if (Number.isNaN(t.getTime())) return value;
-  const p = (n: number) => String(n).padStart(2, "0");
-  return `${t.getUTCFullYear()}-${p(t.getUTCMonth() + 1)}-${p(t.getUTCDate())} ${p(t.getUTCHours())}:${p(t.getUTCMinutes())} UTC`;
-}
-
 /** The crawler's own budget for the build's re-read, when the record
  *  does not say (sellers_json_cache.REPORT_READ_BUDGET_S). */
 const READ_BUDGET_S = 600;
 
 /**
- * THE WORKBOOK'S OWN SENTENCE (parity audit of #75): the "Sellers.json
- * read" line of the customer's Excel Summary, built the same way from the
- * same frozen record (crawler #364, run_export.sellers_reads_text, the
- * customer's words): "For 11 of 14 exchanges your seats name (as of
- * 2026-10-18 11:29 UTC). Not read: a.example (never read); b.example
- * (refused us, HTTP 403)." Same N of M, same reasons, same date.
+ * THE "SELLERS.JSON READ" SENTENCE, the Excel Summary's line (reviews of
+ * #75). In order:
+ *
+ *   1. `sentence` (crawler #370): the Excel's own string, frozen with the
+ *      report, printed as is.
+ *   2. The read's tallies (crawler #364's shape: wanted, fresh, read,
+ *      failed_domains, over_budget_domains, budget_s), in the Excel's
+ *      words (run_export.sellers_reads_text): "For 2 of 3 exchanges your
+ *      seats name. Not read: a.example; b.example (left unread: this
+ *      report's 600 s limit for reading sellers.json was reached)." A read
+ *      that failed gives no reason in this shape, so none is printed (never
+ *      "a.example ()"); the date of the oldest read is not in it either.
+ *   3. Neither: null, nothing said (never a wrong "None").
  */
-export function readsSentence(reads: SellersJsonReads): string {
-  if (reads.unavailable === true)
-    return "Not summarised for this report. The seller role says, row by row, whether that exchange's sellers.json was read.";
-  const n = (v: unknown) => (typeof v === "number" && Number.isFinite(v) ? Math.trunc(v) : 0);
-  const total = n(reads.exchanges);
-  const read = n(reads.read);
-  if (total === 0) return "None: your seats name no exchange";
-  let text = `For ${read} of ${total} exchanges your seats name`;
-  const asOf = utcLabel(reads.oldest_read);
-  if (read && asOf) text += ` (as of ${asOf})`;
-  text += ".";
-  const missing = (Array.isArray(reads.not_read) ? reads.not_read : []).filter(
-    (m): m is { domain: string; why?: string } => !!m && typeof m === "object" && typeof m.domain === "string",
-  );
-  if (missing.length) text += ` Not read: ${missing.map((m) => `${m.domain} (${typeof m.why === "string" ? m.why : ""})`).join("; ")}.`;
-  const again = (Array.isArray(reads.not_reread) ? reads.not_reread : []).filter((d): d is string => typeof d === "string");
-  if (again.length) {
-    const budget = Math.trunc(typeof reads.budget_s === "number" && reads.budget_s > 0 ? reads.budget_s : READ_BUDGET_S);
-    text += ` Not read again because this report's ${budget} s limit was reached, an earlier read is used: ${again.join(", ")}.`;
-  }
+export function readsSentence(reads: SellersJsonReads): string | null {
+  if (typeof reads.sentence === "string" && reads.sentence.trim()) return reads.sentence.trim();
+  const num = (v: unknown) => (typeof v === "number" && Number.isFinite(v) && v >= 0 ? Math.trunc(v) : null);
+  const wanted = num(reads.wanted);
+  if (wanted === null) return null;
+  if (wanted === 0) return "None: your seats name no exchange.";
+  const usable = (num(reads.fresh) ?? 0) + (num(reads.read) ?? 0);
+  let text = `For ${usable} of ${wanted} exchanges your seats name.`;
+  const names = (v: unknown) =>
+    (Array.isArray(v) ? v : []).filter((d): d is string => typeof d === "string" && !!d.trim()).map((d) => d.trim());
+  const budget = Math.trunc(num(reads.budget_s) || READ_BUDGET_S);
+  const missing = [
+    ...names(reads.failed_domains),
+    ...names(reads.over_budget_domains).map(
+      (d) => `${d} (left unread: this report's ${budget} s limit for reading sellers.json was reached)`,
+    ),
+  ];
+  if (missing.length) text += ` Not read: ${missing.join("; ")}.`;
   return text;
 }
 
@@ -149,9 +144,11 @@ function RolesList({ token, reads }: { token: string; reads: SellersJsonReads })
         <p className="mt-0.5 text-[12px] leading-relaxed text-slate-500">
           What your seats&apos; sellers.json files say of each matched publisher: its role and who manages it.
         </p>
-        <p data-testid="seller-roles-read" className="text-[11px] leading-relaxed text-slate-400">
-          {readsSentence(reads)}
-        </p>
+        {readsSentence(reads) && (
+          <p data-testid="seller-roles-read" className="text-[11px] leading-relaxed text-slate-400">
+            {readsSentence(reads)}
+          </p>
+        )}
       </div>
       <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between sm:gap-x-6">
         <div className="relative w-full min-w-0 sm:min-w-[12rem] sm:flex-1">

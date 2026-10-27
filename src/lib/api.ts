@@ -1334,26 +1334,27 @@ export type InactivePage<R = InactiveRow> = {
   derived_from?: string | null;
 };
 
-/** The sellers.json read record (crawler #364,
- *  run_export.sellers_reads_record), frozen on the report: of the
- *  exchanges the seats name, how many have a read the seller role leans
- *  on, since when, and why each other one has none. ``unavailable`` when
- *  the build could not make it. Every field optional: read safely. */
+/** The sellers.json read summary on a report's summary (crawler #364):
+ *  the build's re-read tallies and the exchanges of each outcome; from
+ *  crawler #370 also `sentence`, the Excel Summary's "Sellers.json read"
+ *  line, frozen. Every field optional: read safely. */
 export type SellersJsonReads = {
-  unavailable?: boolean;
-  exchanges?: number;
+  sentence?: string;
+  wanted?: number;
+  fresh?: number;
   read?: number;
+  failed?: number;
+  over_budget?: number;
   read_domains?: string[];
-  /** ISO time of the oldest read leaned on. */
-  oldest_read?: string;
-  not_read?: { domain?: string; why?: string }[];
-  /** Read before, not read again: the build's budget ran out. */
-  not_reread?: string[];
+  failed_domains?: string[];
+  over_budget_domains?: string[];
   budget_s?: number;
-  as_of?: string;
 };
 
 export type Summary = {
+  /** A crawl that did not finish says so in one line (crawler #370, the
+   *  Excel's "Crawl status"). Absent on a finished crawl and before. */
+  partial_line?: string | null;
   crawl_id: number;
   /** What carried the reader's lines and is gone; never in the counts. */
   gone?: GoneInventory | null;
@@ -1444,6 +1445,9 @@ export type MatchTypeFilter = "all" | MatchType;
 
 /** The per-row fields of the contract. */
 export type MatchTypeFields = {
+  /** The Excel's "IPD partner" cell, word for word (crawler #370): "Via
+   *  failarmy.tv, inventory partner of Samsung TV Plus". Absent before. */
+  ipd_partner_label?: string | null;
   match_type?: MatchType;
   /** IPD rows: the partner whose ads.txt carries the line. */
   ipd_partner?: string | null;
@@ -1614,6 +1618,11 @@ export type LineEvent = RemovalFields & {
   event: string;
   old_cert_id: string | null;
   new_cert_id: string | null;
+  /** The line's cert (crawler #370, page parity): this crawl's, or the
+   *  compared crawl's for a line no longer here. Absent before. */
+  cert_id?: string | null;
+  /** The Excel's "IPD partner" cell, word for word (crawler #370). */
+  ipd_partner_label?: string | null;
   matched_seat: boolean;
   occurred_at: string | null;
   /** When this line was FIRST seen in the wild, from the watchlist-
@@ -1738,6 +1747,13 @@ export type MatchedSeatLine = RemovalFields & {
   /** A cert change's previous cert, from the line events ("" when the line
    *  had none); set by the Changed tab so a row says old to new. */
   old_cert_id?: string;
+  /** A line this crawl did not re-check (crawler #370, page parity): the
+   *  Excel's Line status, word for word, and the day it was last confirmed
+   *  ("YYYY-MM-DD"). Absent on a line re-checked, and before #370. */
+  line_status?: string | null;
+  last_confirmed?: string | null;
+  /** The Excel's "IPD partner" cell, word for word (crawler #370). */
+  ipd_partner_label?: string | null;
 };
 
 /**
@@ -1859,6 +1875,10 @@ export type MatchedBundlesPage = {
  * honest total.
  */
 export type MatchedApp = MatchTypeFields & {
+  /** The store's name as the Excel prints it (crawler #370). */
+  store_label?: string | null;
+  /** Which file credited the app, in the Excel's words (crawler #370). */
+  file_used?: string | null;
   store: string;
   bundle_id: string;
   app_name: string;
