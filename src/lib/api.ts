@@ -464,6 +464,9 @@ export const api = {
     lines?: string[],
     matchType: MatchTypeFilter = "all",
     pageSize: number = PAGE_SIZE,
+    /** A watch tab's filter (crawler #361); an API without it ignores it
+     *  and echoes nothing, and the tab is then not offered. */
+    change?: WatchChange,
   ) => {
     if (MOCK) {
       const { mockMatchedDevelopers } = await import("./mockData");
@@ -478,7 +481,7 @@ export const api = {
     }
     return req<MatchedDevelopersPage>(
       "GET",
-      `/v1/viewer/${token}/matched-developers?page=${page}&page_size=${pageSize}${q ? `&q=${encodeURIComponent(q)}` : ""}${linesQuery(lines)}${matchTypeQuery(matchType)}`,
+      `/v1/viewer/${token}/matched-developers?page=${page}&page_size=${pageSize}${q ? `&q=${encodeURIComponent(q)}` : ""}${linesQuery(lines)}${matchTypeQuery(matchType)}${change ? `&change=${change}` : ""}`,
     );
   },
   matchedBundles: async (token: string, page = 1, q = "") => {
@@ -1430,7 +1433,20 @@ export type IpdInconclusive = {
 export type MatchTypeMeta = {
   match_type_counts?: MatchTypeCounts | null;
   ipd_inconclusive?: IpdInconclusive | null;
+  /** THE WATCH TABS (crawler #361, 2026-10-27): how many rows each change
+   *  filter of this list holds (``started_watching``, ``stopped_watching``,
+   *  ``unconfirmed`` ...). Absent on an API from before it: then those tabs
+   *  are not offered at all. */
+  change_counts?: Partial<Record<ListChange, number>> | null;
 };
+
+/** The watch filters of crawler #361, on matched-developers and
+ *  matched-apps: rows with a line that started being watched, stopped
+ *  being watched, or could not be verified this crawl. */
+export type WatchChange = "started_watching" | "stopped_watching" | "unconfirmed";
+
+/** Every ``change`` filter a matched list may take. */
+export type ListChange = "added" | "removed" | "changed" | WatchChange;
 
 function matchTypeQuery(matchType: MatchTypeFilter | undefined): string {
   return matchType && matchType !== "all" ? `&match_type=${matchType}` : "";
@@ -1726,6 +1742,9 @@ export type MatchedDeveloper = MatchTypeFields & {
 export type MatchedDevelopersPage = MatchTypeMeta & {
   /** Present on a trial report: this list was cut (see ``TrialSlice``). */
   trial?: TrialSlice | null;
+  /** The watch filter the server applied (crawler #361), echoed; absent
+   *  on an API from before it. */
+  change?: WatchChange | null;
   page: number;
   page_size: number;
   total: number;
@@ -1834,7 +1853,7 @@ export type MatchedApp = MatchTypeFields & {
 };
 
 /** The change filter of the matched apps list (query param ``change``). */
-export type AppChange = "added" | "removed" | "changed";
+export type AppChange = "added" | "removed" | "changed" | WatchChange;
 
 export type MatchedAppsPage = MatchTypeMeta & {
   /** Present on a trial report: this list was cut (see ``TrialSlice``). */

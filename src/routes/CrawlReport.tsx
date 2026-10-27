@@ -45,6 +45,7 @@ import {
   type MatchTypeCounts,
   type MatchTypeFields,
   type MatchTypeFilter,
+  type ListChange,
   type MatchedMove,
   type MatchedMoves,
   type InactiveApp,
@@ -88,14 +89,12 @@ import {
 import { groupSeatLines, seatKey } from "@/lib/seatLineGroups";
 import { lineKey } from "@/lib/lineFilter";
 import {
-  allApps,
   certChanges,
-  groupScope,
   isScopeTab,
   READ_PAGE,
   readAllPages,
-  scopeEvents,
-  scopeSearch,
+  WATCH_CHANGE,
+  watchEvents,
   type Progress,
   type ScopeTab,
 } from "@/lib/scopeRows";
@@ -369,21 +368,7 @@ export default function CrawlReport() {
   const hasInactive = inactiveTotal(inactiveCounts) > 0;
   // The tab exists only while something is inactive; a page left on it
   // (a filter, an older link) reads as All matched rather than a tab-less list.
-  // THE WATCH TABS (David, 2026-10-27): Started watching, Stopped watching
-  // and Unconfirmed, each only on a week that has such lines (counted by
-  // the summary, under the line filter); never on a first crawl.
-  const lineTotals = summary.hero_diff.line_totals;
-  const scopeCounts: ScopeCounts = isFirstCrawl
-    ? { started: 0, stopped: 0, unconfirmed: 0 }
-    : {
-        started: lineTotals.newly_monitored ?? 0,
-        stopped: lineTotals.monitoring_stopped ?? 0,
-        unconfirmed: lineTotals.unconfirmed ?? 0,
-      };
-  const listTab: DrillTab =
-    (drillTab === "inactive" && !hasInactive) || (isScopeTab(drillTab) && scopeCounts[drillTab] === 0)
-      ? "all"
-      : drillTab;
+  const listTab: DrillTab = drillTab === "inactive" && !hasInactive ? "all" : drillTab;
   // A report covers the window between its two crawls, and the Inactive
   // section lists what went inactive in it: since the compared crawl (the
   // same date the header says it is compared with).
@@ -685,7 +670,6 @@ export default function CrawlReport() {
             lines={lines}
             caps={summary.trial ?? null}
             inactive={inactive}
-            scope={scopeCounts}
             tab={listTab}
             setTab={setDrillTab}
             openFirst={openFirst}
@@ -698,7 +682,6 @@ export default function CrawlReport() {
             lines={lines}
             caps={summary.trial ?? null}
             inactive={inactive}
-            scope={scopeCounts}
             tab={listTab}
             setTab={setDrillTab}
             openFirst={openFirst}
@@ -1342,9 +1325,9 @@ function ExportResultsButton({
 /** "inactive" is the Inactive section (it replaced No longer live). */
 type DrillTab = "all" | "added" | "removed" | "changed" | ScopeTab | "inactive";
 
-/** How many lines each watch tab carries this week (the summary's, under
- *  the line filter): a tab shows only when it has rows (David, 2026-10-27). */
-export type ScopeCounts = Record<ScopeTab, number>;
+/** A list's change counts (crawler #361): a watch tab shows only when its
+ *  count is above zero and the API filters by it (David, 2026-10-27). */
+type ChangeCounts = Partial<Record<ListChange, number>>;
 
 /** What a list's count calls its rows, per tab. */
 function tabNoun(tab: DrillTab, view: "publishers" | "apps"): { many: string; one?: string } {
@@ -1473,10 +1456,9 @@ function targetMatches(
  * Each choice's count: the rows its tab lists. Publishers that gained,
  * lost or re-certified a line and IPD matches from their lists' answers;
  * apps only from an API that filters apps by change (an older one names no
- * number, so no choice); the watch tabs' publishers from their line events
- * (the same read the tab itself makes, kept for it), only on a week the
- * summary says has such lines. Undefined while they are on the way; null:
- * no choice.
+ * number, so no choice); the watch tabs' publishers from the list's change
+ * counts (crawler #361). Undefined while they are on the way; null: no
+ * choice.
  */
 function usePopularCounts(
   token: string,
@@ -1485,9 +1467,7 @@ function usePopularCounts(
 ): Partial<Record<PopularId, number | null>> | undefined {
   const [counts, setCounts] = useState<Partial<Record<PopularId, number | null>> | undefined>(undefined);
   const key = lines.join(",");
-  const lt = summary?.hero_diff?.line_totals;
   const first = summary?.previous_job_id === null;
-  const has = (k: "newly_monitored" | "monitoring_stopped" | "unconfirmed") => !first && (lt?.[k] ?? 0) > 0;
   useEffect(() => {
     let cancelled = false;
     setCounts(undefined);
@@ -1499,12 +1479,11 @@ function usePopularCounts(
       safe(api.matchedApps(token, 1, "", lines, "all", "added")),
       safe(api.matchedApps(token, 1, "", lines, "all", "removed")),
       safe(api.matchedDevelopers(token, 1, "", lines, "all")),
-      has("newly_monitored") ? safe(scopeEvents(token, "started", lines)) : Promise.resolve(null),
-      has("monitoring_stopped") ? safe(scopeEvents(token, "stopped", lines)) : Promise.resolve(null),
-      has("unconfirmed") ? safe(scopeEvents(token, "unconfirmed", lines)) : Promise.resolve(null),
-    ]).then(([pubsAdded, pubsRemoved, pubsChanged, appsAdded, appsRemoved, matched, started, stopped, unconfirmed]) => {
+    ]).then(([pubsAdded, pubsRemoved, pubsChanged, appsAdded, appsRemoved, matched]) => {
       if (cancelled) return;
-      const publishers = (evs: LineEvent[] | null) => (evs ? new Set(evs.map((e) => e.developer_id)).size : null);
+      // The watch tabs' publishers, from the list's own change counts
+      // (crawler #361); an API without them offers no such tab or choice.
+      const watch = (k: ListChange) => (first ? null : (matched?.change_counts?.[k] ?? null));
       setCounts({
         "pubs-new": pubsAdded?.total ?? null,
         "pubs-lost": pubsRemoved?.total ?? null,
@@ -1512,16 +1491,16 @@ function usePopularCounts(
         "apps-added": appsAdded && appsAdded.change === "added" ? appsAdded.total : null,
         "apps-removed": appsRemoved && appsRemoved.change === "removed" ? appsRemoved.total : null,
         ipd: matched?.match_type_counts?.ipd ?? null,
-        started: publishers(started),
-        stopped: publishers(stopped),
-        unconfirmed: publishers(unconfirmed),
+        started: watch("started_watching"),
+        stopped: watch("stopped_watching"),
+        unconfirmed: watch("unconfirmed"),
       });
     });
     return () => {
       cancelled = true;
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [token, key, lt?.newly_monitored, lt?.monitoring_stopped, lt?.unconfirmed, first]);
+  }, [token, key, first]);
   return counts;
 }
 
@@ -1598,29 +1577,28 @@ function useOpenFirst<K>(
   }, [nonce, ready, firstKey, open]);
 }
 
+/** Whether a list offers a watch tab: its API counts the filter and the
+ *  count is above zero, and it never answered the filter unfiltered. */
+function watchTabOn(counts: ChangeCounts | null, off: boolean, tab: ScopeTab): boolean {
+  return !off && (counts?.[WATCH_CHANGE[tab]] ?? 0) > 0;
+}
+
 /** The watch tabs a list offers: only those with rows this week. */
-function ScopeTriggers({ scope }: { scope: ScopeCounts }) {
+function ScopeTriggers({ counts, off }: { counts: ChangeCounts | null; off: boolean }) {
   return (
     <>
-      {scope.started > 0 && <TabsTrigger value="started">Started watching</TabsTrigger>}
-      {scope.stopped > 0 && <TabsTrigger value="stopped">Stopped watching</TabsTrigger>}
-      {scope.unconfirmed > 0 && <TabsTrigger value="unconfirmed">Unconfirmed</TabsTrigger>}
+      {watchTabOn(counts, off, "started") && <TabsTrigger value="started">Started watching</TabsTrigger>}
+      {watchTabOn(counts, off, "stopped") && <TabsTrigger value="stopped">Stopped watching</TabsTrigger>}
+      {watchTabOn(counts, off, "unconfirmed") && <TabsTrigger value="unconfirmed">Unconfirmed</TabsTrigger>}
     </>
   );
 }
 
-/** "Reading line changes, page 2 of 4": a long read says how far it is. */
-function ReadProgress({ progress, what }: { progress: { done: number; of: number }; what: string }) {
-  return (
-    <p data-read-progress role="status" className="mt-2 text-[12px] text-slate-500">
-      Reading {what}, page {progress.done.toLocaleString()} of {progress.of.toLocaleString()}
-    </p>
-  );
-}
-
-/** A matched publisher as the list renders it. */
-function developerRow(d: MatchedDeveloper): Row {
+/** A matched publisher as the list renders it; on a watch tab it carries
+ *  the tab (its lines of the kind are read when the row opens). */
+function developerRow(d: MatchedDeveloper, watch?: { tab: ScopeTab; filter: string[] }): Row {
   return {
+    ...(watch ? { scope: { tab: watch.tab, filter: watch.filter, lines: watchLinesOf(d, watch.tab) } } : {}),
     developer_id: d.developer_id,
     developer_name: d.name,
     developer_domain: d.domain,
@@ -1661,51 +1639,6 @@ function eventRow(d: DeveloperEvent, certs: Map<string, { old: string | null; ne
   };
 }
 
-/** Every publisher of a watch tab, under the search and the match type. */
-function scopeRowsOf(evs: LineEvent[], tab: ScopeTab, query: string, matchType: MatchTypeFilter) {
-  const all = scopeSearch(groupScope(evs), query);
-  const typed = matchType === "own" ? all.filter((r) => r.own) : matchType === "ipd" ? all.filter((r) => r.ipd) : all;
-  const typedReport = evs.some((e) => e.match_type === "own" || e.match_type === "ipd");
-  return {
-    all,
-    typedReport,
-    rows: typed.map((r): Row => ({
-      developer_id: r.developer_id,
-      developer_name: r.developer_name,
-      developer_domain: r.developer_domain,
-      developer_platform: r.developer_platform,
-      prev: null,
-      current: new Set(r.events.map((e) => seatKey(e))).size,
-      added: 0,
-      removed: 0,
-      cert_changed: 0,
-      matched_lines: [],
-      added_lines: [],
-      removed_lines: [],
-      cert_changed_lines: [],
-      file_hosts: [],
-      ...(typedReport ? { match_type: r.own ? ("own" as const) : ("ipd" as const) } : {}),
-      ...(!r.own && r.partner ? { ipd_partner: r.partner } : {}),
-      scope: { tab, events: r.events },
-    })),
-  };
-}
-
-/** One page of a watch tab, built from every line event of its kind. */
-function scopePage(evs: LineEvent[], tab: ScopeTab, pg: number, query: string, matchType: MatchTypeFilter) {
-  const { all, typedReport, rows } = scopeRowsOf(evs, tab, query, matchType);
-  return {
-    rows: rows.slice((pg - 1) * PAGE_SIZE, pg * PAGE_SIZE),
-    total: rows.length,
-    truncated: false,
-    trial: null as TrialSlice | null,
-    typeCounts: typedReport
-      ? { all: all.length, own: all.filter((r) => r.own).length, ipd: all.filter((r) => r.ipd).length }
-      : null,
-    inconclusive: null as IpdInconclusive | null,
-  };
-}
-
 /** A Changed row's lines with the cert each had before, when the report
  *  says (the line events carry both; the row only the new one). */
 function withOldCerts(
@@ -1728,13 +1661,6 @@ function fileLabelOf(kind: string | null | undefined): string {
   return String(kind ?? "");
 }
 
-/** A watch tab row's one figure. */
-const SCOPE_STAT: Record<ScopeTab, string> = {
-  started: "Started watching",
-  stopped: "Stopped watching",
-  unconfirmed: "Unconfirmed",
-};
-
 const SCOPE_WINDOW: Record<ScopeTab, { title: string; text: string; head: string; border: string }> = {
   started: { title: "Started watching", text: "text-info", head: "bg-info-bg/60", border: "border-info-border" },
   stopped: { title: "Stopped watching", text: "text-warn", head: "bg-warn-bg/60", border: "border-warn-border" },
@@ -1748,14 +1674,40 @@ const SCOPE_WINDOW: Record<ScopeTab, { title: string; text: string; head: string
  * and verified. The Changes page's roster, said per publisher.
  */
 function ScopeWindow({
-  tab,
-  events,
+  token,
+  mark,
+  developerId,
   publisherDomain,
 }: {
-  tab: ScopeTab;
-  events: LineEvent[];
+  token: string;
+  mark: WatchMark;
+  /** Whose lines: the publisher (an app's, on the apps list). */
+  developerId: number | null | undefined;
   publisherDomain?: string | null;
 }) {
+  const tab = mark.tab;
+  const filterKey = mark.filter.join(",");
+  const [events, setEvents] = useState<LineEvent[] | null>(null);
+  const [failed, setFailed] = useState(false);
+  useEffect(() => {
+    if (developerId == null) {
+      setEvents([]);
+      return;
+    }
+    let cancelled = false;
+    setEvents(null);
+    setFailed(false);
+    watchEvents(token, tab, developerId, filterKey ? filterKey.split(",") : [])
+      .then((e) => !cancelled && setEvents(e))
+      .catch(() => !cancelled && setFailed(true));
+    return () => {
+      cancelled = true;
+    };
+  }, [token, tab, developerId, filterKey]);
+  if (failed) return <p className="text-xs text-slate-500">Could not load these lines.</p>;
+  if (events === null) return <SeatLinesSkeleton label={`Loading ${SCOPE_WINDOW[tab].title.toLowerCase()}`} />;
+  if (events.length === 0)
+    return <p className="text-xs text-slate-500">No {SCOPE_WINDOW[tab].title.toLowerCase()} on record for this row.</p>;
   const s = SCOPE_WINDOW[tab];
   const groups: { e: LineEvent; partners: string[]; own: boolean }[] = [];
   const byKey = new Map<string, (typeof groups)[number]>();
@@ -1834,17 +1786,14 @@ function tabLines(
   tab: DrillTab,
   lists: { matched: MatchedSeatLine[]; added: MatchedSeatLine[]; removed: MatchedSeatLine[]; cert: MatchedSeatLine[] },
   rowPartner: string | null,
-  scope?: { tab: ScopeTab; events: LineEvent[] },
+  scope?: WatchMark,
 ): { lines: string; reasons: string } {
   if (scope) {
-    const seen = new Map<string, LineEvent>();
-    for (const e of scope.events) if (!seen.has(seatKey(e))) seen.set(seatKey(e), e);
-    const evs = [...seen.values()];
+    // A watch row's lines of its kind, when the crawler sends them with it.
+    const groups = groupSeatLines(scope.lines ?? [], rowPartner);
     return {
-      lines: evs.map((e) => lineCell({ ...e, cert_id: e.new_cert_id || e.old_cert_id || undefined })).join("; "),
-      reasons: uniq(
-        scope.events.map((e) => (scope.tab === "unconfirmed" ? e.reason || "No reason recorded." : scopeReasonText(e.reason))),
-      ).join("; "),
+      lines: groups.map((g) => (g.partners.length ? `${lineCell(g.line)} via ${g.partners.join(" ")}` : lineCell(g.line))).join("; "),
+      reasons: uniq(groups.map((g) => scopeReasonText((g.line as { reason?: string | null }).reason))).join("; "),
     };
   }
   const src = tab === "added" ? lists.added : tab === "removed" ? lists.removed : tab === "changed" ? lists.cert : lists.matched;
@@ -1947,25 +1896,6 @@ function appCells(a: AppRow, tab: DrillTab): CsvCell[] {
   ];
 }
 
-/** Every app of a watch tab: the matched apps whose publisher carries a
- *  line of the kind, with those lines. */
-async function scopeApps(
-  token: string,
-  kind: ScopeTab,
-  lines: string[],
-  query: string,
-  onEvents?: Progress,
-  onApps?: Progress,
-): Promise<AppRow[]> {
-  const evs = await scopeEvents(token, kind, lines, onEvents);
-  const byDev = new Map<number, LineEvent[]>();
-  for (const e of evs) byDev.set(e.developer_id, [...(byDev.get(e.developer_id) ?? []), e]);
-  const every = await allApps(token, query, lines, "all", onApps);
-  return every
-    .filter((a) => a.developer_id != null && byDev.has(a.developer_id))
-    .map((a) => ({ ...a, scope: { tab: kind, events: byDev.get(a.developer_id!)! } }));
-}
-
 /** What a quiet tab says (David, 2026-10-27: "No publishers on this
  *  report." under Removed was wrong; "on this report" is for an empty All
  *  matched only). */
@@ -2011,9 +1941,21 @@ type Row = {
   /** The declared hosts whose app-ads.txt hold some of this publisher's
    *  lines (2026-10-21); empty on its own file alone or on an older report. */
   file_hosts: string[];
-  /** Set on a watch tab: the publisher's line events of that kind. */
-  scope?: { tab: ScopeTab; events: LineEvent[] };
+  /** Set on a watch tab: which tab, under which line filter, and the
+   *  row's lines of the kind when the crawler sends them with the row. */
+  scope?: WatchMark;
 } & MatchTypeFields;
+
+/** What marks a row of a watch tab. */
+type WatchMark = { tab: ScopeTab; filter: string[]; lines: MatchedSeatLine[] | null };
+
+/** A watch row's lines of its kind, when the crawler embeds them (as
+ *  developer-events does, ``<filter>_lines``); null otherwise. */
+function watchLinesOf(row: object, tab: ScopeTab): MatchedSeatLine[] | null {
+  const r = row as Record<string, unknown>;
+  const v = r[`${WATCH_CHANGE[tab]}_lines`];
+  return Array.isArray(v) ? (v as MatchedSeatLine[]) : null;
+}
 
 /** An IPD row's partner: the file its lines sit in when a report does not
  *  name the partner per line. Null on an own row. */
@@ -2128,7 +2070,6 @@ function DrilldownList({
   lines,
   caps,
   inactive,
-  scope,
   tab,
   setTab,
   openFirst,
@@ -2141,8 +2082,6 @@ function DrilldownList({
   caps: TrialCaps | null;
   /** The Inactive tab's wiring; null when nothing is inactive (no tab). */
   inactive: InactiveTab;
-  /** The watch tabs' line counts: a tab shows only when it has rows. */
-  scope: ScopeCounts;
   /** Owned by the page, so the line cards above can pick the tab. */
   tab: DrillTab;
   setTab: (tab: DrillTab) => void;
@@ -2153,8 +2092,11 @@ function DrilldownList({
   setMatchType: (next: MatchTypeFilter) => void;
 }) {
   const [rows, setRows] = useState<Row[]>([]);
-  // A watch tab reads every line event of its kind first: how far it is.
-  const [progress, setProgress] = useState<{ done: number; of: number } | null>(null);
+  // THE WATCH TABS (crawler #361): the list's change counts, from the last
+  // answer that carried them; and whether the API ever answered a watch
+  // filter unfiltered (an API without it: those tabs are not offered).
+  const [changeCounts, setChangeCounts] = useState<ChangeCounts | null>(null);
+  const [watchOff, setWatchOff] = useState(false);
   // The list's split and its inconclusive IPD matches (crawler #348).
   // Null on a report without match types: no pills, no note.
   const [typeCounts, setTypeCounts] = useState<MatchTypeCounts | null>(null);
@@ -2205,18 +2147,16 @@ function DrilldownList({
     if (tab === "inactive") return;
     const event = tab;
     let cancelled = false;
-    setProgress(null);
-    const onProgress = (done: number, of: number) => {
-      if (!cancelled && of > 1) setProgress({ done, of });
-    };
     const load = (pg: number) =>
-      isScopeTab(event)
-        ? scopeEvents(token, event, lines, pg === page ? onProgress : undefined).then((evs) =>
-            scopePage(evs, event, pg, query, matchType),
-          )
-        : event === "all"
-        ? api.matchedDevelopers(token, pg, query, lines, matchType).then((r) => ({
-            rows: r.rows.map(developerRow),
+      event === "all" || isScopeTab(event)
+        ? api
+            .matchedDevelopers(token, pg, query, lines, matchType, PAGE_SIZE, isScopeTab(event) ? WATCH_CHANGE[event] : undefined)
+            .then((r) => ({
+            // A watch filter the API did not echo was not applied: the
+            // tab is not offered, and these rows are never shown under it.
+            unfiltered: isScopeTab(event) && r.change !== WATCH_CHANGE[event],
+            changeCounts: r.change_counts ?? null,
+            rows: r.rows.map((d) => developerRow(d, isScopeTab(event) ? { tab: event, filter: lines } : undefined)),
             total: r.total,
             truncated: r.truncated ?? false,
             trial: r.trial ?? null,
@@ -2229,6 +2169,8 @@ function DrilldownList({
             certs: event === "changed" ? await certChanges(token, lines).catch(() => null) : null,
             r,
           })).then(({ certs, r }) => ({
+            unfiltered: false,
+            changeCounts: r.change_counts ?? null,
             rows: r.rows.map((d) => eventRow(d, certs)),
             total: r.total,
             truncated: false,
@@ -2239,6 +2181,13 @@ function DrilldownList({
     type Loaded = Awaited<ReturnType<typeof load>>;
     const keyFor = (pg: number) => [tab, pg, query, lines.join(","), matchType].join("|");
     const apply = (data: Loaded) => {
+      if (data.changeCounts) setChangeCounts(data.changeCounts);
+      if (data.unfiltered) {
+        // Never a list filtered here on its own: no watch tabs at all.
+        setWatchOff(true);
+        setTab("all");
+        return;
+      }
       // A list that does not say how it splits has no pills, so it must
       // not stay filtered by them either: back to every match.
       if (!data.typeCounts && matchType !== "all") setMatchType("all");
@@ -2282,7 +2231,13 @@ function DrilldownList({
     return () => {
       cancelled = true;
     };
-  }, [token, tab, page, query, lines, matchType, setMatchType, cache]);
+  }, [token, tab, page, query, lines, matchType, setMatchType, setTab, cache]);
+
+  // A watch tab whose count says it is empty (or an API without the
+  // filter) is not offered: a page left on it reads as All matched.
+  useEffect(() => {
+    if (isScopeTab(tab) && (watchOff || (changeCounts && !watchTabOn(changeCounts, watchOff, tab)))) setTab("all");
+  }, [tab, changeCounts, watchOff, setTab]);
 
   useOpenFirst(
     openFirst,
@@ -2296,11 +2251,15 @@ function DrilldownList({
     const t = rowsTab;
     const mt = rowsMatchType;
     let all: Row[] = [];
-    if (isScopeTab(t)) all = scopeRowsOf(await scopeEvents(token, t, lines, progress), t, query, mt).rows;
-    else if (t === "all")
-      all = (await readAllPages((pg) => api.matchedDevelopers(token, pg, query, lines, mt, 100), 100, progress, signal)).map(
-        developerRow,
-      );
+    if (t === "all" || isScopeTab(t))
+      all = (
+        await readAllPages(
+          (pg) => api.matchedDevelopers(token, pg, query, lines, mt, 100, isScopeTab(t) ? WATCH_CHANGE[t] : undefined),
+          100,
+          progress,
+          signal,
+        )
+      ).map((d) => developerRow(d, isScopeTab(t) ? { tab: t, filter: lines } : undefined));
     else if (t !== "inactive") {
       const certs = t === "changed" ? await certChanges(token, lines).catch(() => null) : null;
       all = (await readAllPages((pg) => api.developerEvents(token, t, pg, query, lines, mt, 200), 200, progress, signal)).map(
@@ -2329,7 +2288,7 @@ function DrilldownList({
               <TabsTrigger value="added">Added</TabsTrigger>
               <TabsTrigger value="removed">Removed</TabsTrigger>
               <TabsTrigger value="changed">Changed</TabsTrigger>
-              <ScopeTriggers scope={scope} />
+              <ScopeTriggers counts={changeCounts} off={watchOff} />
               {inactive && <TabsTrigger value="inactive">Inactive</TabsTrigger>}
             </TabsList>
           </Tabs>
@@ -2401,7 +2360,6 @@ function DrilldownList({
       ) : (
       <div>
         {loading && <SkeletonRows rows={5} label="Loading matched publishers" />}
-        {loading && progress && <ReadProgress progress={progress} what="line changes" />}
         {error && <p className="text-sm text-critical">{error}</p>}
         {/* `settled > 0`: nothing to show before a first list lands. */}
         {settled > 0 && !error && !loading && (
@@ -2659,13 +2617,6 @@ function PublisherCard({
               <MiniStat label="Apps" value={inactive.apps ?? 0} />
             </div>
           </div>
-        ) : row.scope ? (
-          // A watch tab's row counts its lines of that kind.
-          <div className="hidden items-center gap-6 text-right sm:flex">
-            <div className="w-[112px] whitespace-nowrap">
-              <MiniStat label={SCOPE_STAT[row.scope.tab]} value={row.current} emphasis />
-            </div>
-          </div>
         ) : (
         <div className="hidden items-center gap-6 text-right sm:flex">
           {row.prev != null && (
@@ -2711,7 +2662,7 @@ function PublisherCard({
           ) : (
             <>
               {row.scope ? (
-                <ScopeWindow tab={row.scope.tab} events={row.scope.events} publisherDomain={row.developer_domain} />
+                <ScopeWindow token={token} mark={row.scope} developerId={row.developer_id} publisherDomain={row.developer_domain} />
               ) : hasEmbeddedLines ? (
                 <ChangeExpansion
                   added={row.added_lines}
@@ -3226,13 +3177,16 @@ function lineEventToSeatLine(e: LineEvent): MatchedSeatLine {
 
 /** The change tabs, as the crawler's ``?change=`` names them. */
 function appChangeOf(tab: DrillTab): AppChange | undefined {
+  if (isScopeTab(tab)) return WATCH_CHANGE[tab];
   return tab === "added" || tab === "removed" || tab === "changed" ? tab : undefined;
 }
 /** The same filter in the browser, for an API that ignores ``?change=``. */
 function appMoved(a: MatchedApp, change: AppChange): boolean {
   if (change === "added") return (a.lines_added ?? 0) > 0;
   if (change === "removed") return (a.lines_removed ?? 0) > 0;
-  return (a.lines_cert_changed ?? 0) > 0;
+  if (change === "changed") return (a.lines_cert_changed ?? 0) > 0;
+  // A watch filter is the server's only: never applied to a page here.
+  return true;
 }
 
 /**
@@ -3251,14 +3205,13 @@ function appMoved(a: MatchedApp, change: AppChange): boolean {
  */
 /** An app row; on a watch tab it carries its publisher's lines of that
  *  kind. */
-type AppRow = MatchedApp & { scope?: { tab: ScopeTab; events: LineEvent[] } };
+type AppRow = MatchedApp & { scope?: WatchMark };
 
 function MatchedAppsList({
   token,
   lines,
   caps,
   inactive,
-  scope,
   tab,
   setTab,
   openFirst,
@@ -3270,8 +3223,6 @@ function MatchedAppsList({
   caps: TrialCaps | null;
   /** The Inactive tab's wiring; null when nothing is inactive (no tab). */
   inactive: InactiveTab;
-  /** The watch tabs' line counts: a tab shows only when it has rows. */
-  scope: ScopeCounts;
   /** Owned by the page, so the line cards above can pick the tab. */
   tab: DrillTab;
   setTab: (tab: DrillTab) => void;
@@ -3282,7 +3233,9 @@ function MatchedAppsList({
   setMatchType: (next: MatchTypeFilter) => void;
 }) {
   const [allRows, setAllRows] = useState<AppRow[]>([]);
-  const [progress, setProgress] = useState<{ done: number; of: number; what: string } | null>(null);
+  // The watch tabs (crawler #361), as on the publishers list.
+  const [changeCounts, setChangeCounts] = useState<ChangeCounts | null>(null);
+  const [watchOff, setWatchOff] = useState(false);
   // The list's split and its inconclusive IPD matches (crawler #348).
   const [typeCounts, setTypeCounts] = useState<MatchTypeCounts | null>(null);
   const [inconclusive, setInconclusive] = useState<IpdInconclusive | null>(null);
@@ -3322,47 +3275,24 @@ function MatchedAppsList({
     if (tab === "inactive") return;
     let cancelled = false;
     const change = appChangeOf(tab);
-    setProgress(null);
-    const progressOf = (what: string) => (done: number, of: number) => {
-      if (!cancelled && of > 1) setProgress({ done, of, what });
-    };
-    // A WATCH TAB (2026-10-27): the matched apps whose publisher carries a
-    // line of the kind. The crawler cannot filter apps by it yet, so the
-    // kind's line events and the whole matched apps list are read (page by
-    // page, kept per report and filter) and matched here.
-    const loadScope = (pg: number, kind: ScopeTab) =>
-      scopeApps(
-        token,
-        kind,
-        lines,
-        query,
-        pg === page ? progressOf("line changes") : undefined,
-        pg === page ? progressOf("apps") : undefined,
-      ).then((hit) => {
-        const typed = hit.some((a) => a.match_type)
-          ? { all: hit.length, own: hit.filter((a) => a.match_type === "own").length, ipd: hit.filter((a) => a.match_type === "ipd").length }
-          : null;
-        const shown = matchType === "all" || !typed ? hit : hit.filter((a) => a.match_type === matchType);
-        return {
-          page: pg,
-          page_size: PAGE_SIZE,
-          total: shown.length,
-          rows: shown.slice((pg - 1) * PAGE_SIZE, pg * PAGE_SIZE),
-          match_type_counts: typed,
-          ipd_inconclusive: null,
-          truncated: false,
-          trial: null,
-          change: undefined,
-        } as MatchedAppsPage & { rows: AppRow[] };
-      });
+    // A WATCH TAB (crawler #361): the server's filter, one list like any
+    // other; each app carries the tab, its publisher's lines read on open.
     const load = (pg: number): Promise<MatchedAppsPage & { rows: AppRow[] }> =>
-      isScopeTab(tab)
-        ? loadScope(pg, tab)
-        : api.matchedApps(token, pg, query, lines, matchType, change);
+      api.matchedApps(token, pg, query, lines, matchType, change).then((r) =>
+        isScopeTab(tab) ? { ...r, rows: (r.rows ?? []).map((a) => ({ ...a, scope: { tab, filter: lines, lines: watchLinesOf(a, tab) } })) } : r,
+      );
     type Loaded = Awaited<ReturnType<typeof load>>;
     const keyFor = (pg: number) =>
       [isScopeTab(tab) ? tab : change ?? "all", pg, query, lines.join(","), matchType].join("|");
     const apply = (r: Loaded) => {
+      if (r.change_counts) setChangeCounts(r.change_counts);
+      if (isScopeTab(tab) && r.change !== change) {
+        // A watch filter the API did not apply: no watch tabs at all, and
+        // never a list filtered here on its own.
+        setWatchOff(true);
+        setTab("all");
+        return;
+      }
       // No split said, no pills: and no filter left on from them.
       if (!r.match_type_counts && matchType !== "all") setMatchType("all");
       setRowsTab(tab);
@@ -3422,7 +3352,13 @@ function MatchedAppsList({
     return () => {
       cancelled = true;
     };
-  }, [token, tab, page, query, lines, matchType, setMatchType, appCache]);
+  }, [token, tab, page, query, lines, matchType, setMatchType, setTab, appCache]);
+
+  // A watch tab its count says is empty (or an API without the filter) is
+  // not offered: a page left on it reads as All matched.
+  useEffect(() => {
+    if (isScopeTab(tab) && (watchOff || (changeCounts && !watchTabOn(changeCounts, watchOff, tab)))) setTab("all");
+  }, [tab, changeCounts, watchOff, setTab]);
 
   // A card held open from one tab must not appear under another.
   useEffect(() => setExpanded(null), [tab]);
@@ -3430,7 +3366,9 @@ function MatchedAppsList({
   // The server's rows are the answer when it filtered them; otherwise (an
   // API that ignores ?change=) the change tab filters the page it got.
   const rowsChange = appChangeOf(rowsTab);
-  const pageFiltered = !!rowsChange && !serverFiltered;
+  // Only Added, Removed and Changed ever fall back to the page; a watch
+  // tab without the server's filter is not offered at all.
+  const pageFiltered = !!rowsChange && !serverFiltered && !isScopeTab(rowsTab);
   const rows = useMemo(
     () => (pageFiltered && rowsChange ? allRows.filter((a) => appMoved(a, rowsChange)) : allRows),
     [allRows, pageFiltered, rowsChange],
@@ -3452,10 +3390,7 @@ function MatchedAppsList({
     const t = rowsTab;
     const mt = rowsMatchType;
     let all: AppRow[] = [];
-    if (isScopeTab(t)) {
-      const hit = await scopeApps(token, t, lines, query, progress, progress);
-      all = mt === "all" ? hit : hit.filter((a) => a.match_type === mt);
-    } else if (t !== "inactive") {
+    if (t !== "inactive") {
       const change = appChangeOf(t);
       let echo: string | null | undefined;
       const read = await readAllPages(
@@ -3468,7 +3403,10 @@ function MatchedAppsList({
         progress,
         signal,
       );
-      all = change && echo !== change ? read.filter((a) => appMoved(a, change)) : read;
+      if (isScopeTab(t) && echo !== change) throw new Error("This list cannot be exported here.");
+      all = (change && echo !== change ? read.filter((a) => appMoved(a, change)) : read).map((a) =>
+        isScopeTab(t) ? { ...a, scope: { tab: t, filter: lines, lines: watchLinesOf(a, t) } } : a,
+      );
     }
     return {
       filename: csvName("apps", TAB_SLUG[t], mt !== "all" ? mt : null, query ? `search ${query}` : null),
@@ -3491,7 +3429,7 @@ function MatchedAppsList({
               <TabsTrigger value="added">Added</TabsTrigger>
               <TabsTrigger value="removed">Removed</TabsTrigger>
               <TabsTrigger value="changed">Changed</TabsTrigger>
-              <ScopeTriggers scope={scope} />
+              <ScopeTriggers counts={changeCounts} off={watchOff} />
               {inactive && <TabsTrigger value="inactive">Inactive</TabsTrigger>}
             </TabsList>
           </Tabs>
@@ -3566,7 +3504,6 @@ function MatchedAppsList({
       ) : (
       <>
       {loading && <SkeletonRows rows={5} label="Loading matched apps" />}
-      {loading && progress && <ReadProgress progress={progress} what={progress.what} />}
       {/* The skeleton while the rows are on the way, as on the publishers
           list; a page already read lands at once. */}
       {settled > 0 && !loading && (
@@ -3757,25 +3694,12 @@ function MatchedAppCard({
             </div>
           )
         ) : (
-        app.scope ? (
-          // A watch tab's app counts its publisher's lines of that kind.
-          <div className="hidden items-center gap-6 text-right sm:flex">
-            <div className="w-[112px] whitespace-nowrap">
-              <MiniStat
-                label={SCOPE_STAT[app.scope.tab]}
-                value={new Set(app.scope.events.map((e) => seatKey(e))).size}
-                emphasis
-              />
-            </div>
-          </div>
-        ) : (
         <div className="hidden items-center gap-6 text-right sm:flex">
           <div className="w-[84px] whitespace-nowrap">
             <MiniStat label="Matched lines" value={app.line_count} emphasis />
           </div>
           <ChangeCell added={added} removed={removed} certChanged={certChanged} />
         </div>
-        )
         )}
         <ChevronDown
           aria-hidden
@@ -3815,7 +3739,7 @@ function MatchedAppCard({
           ) : (
             <>
               {app.scope ? (
-                <ScopeWindow tab={app.scope.tab} events={app.scope.events} publisherDomain={app.owner_domain} />
+                <ScopeWindow token={token} mark={app.scope} developerId={app.developer_id} publisherDomain={app.owner_domain} />
               ) : !hasEmbeddedLines && app.developer_id != null ? (
                 <LazyMatchedSeatLines
                   token={token}

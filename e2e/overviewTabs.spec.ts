@@ -17,12 +17,24 @@ import { readFile } from "node:fs/promises";
 
 import { expect, test, type Page } from "@playwright/test";
 
-import { mockDeveloperEvents, mockLineEvents, mockSummaryFor } from "../src/lib/mockData";
+import { mockDeveloperEvents, mockLineEvents, mockMatchedDevelopers } from "../src/lib/mockData";
 import { lineKey } from "../src/lib/lineFilter";
 import { installFakeApi, TOKEN, type Calls, type Scenario } from "./fakeApi";
 
 const BASE = `/crawl-report/${TOKEN}`;
 const FULL: Scenario = { matchType: true, appChange: true };
+const WATCH: Scenario = { ...FULL, watchTabs: true };
+
+/** Every row of a paged mock list. */
+function allRows<T>(readPage: (page: number) => { rows: T[]; total: number }): T[] {
+  const out: T[] = [];
+  for (let p = 1; p < 10_000; p++) {
+    const r = readPage(p);
+    out.push(...r.rows);
+    if (!r.rows.length || out.length >= r.total) break;
+  }
+  return out;
+}
 
 function watchErrors(page: Page): string[] {
   const errors: string[] = [];
@@ -63,55 +75,81 @@ test.describe("the Changes page's statuses, as tabs", () => {
     expect(errors).toEqual([]);
   });
 
-  test("every status is a tab on both lists, a watch tab only with rows, and the tab survives the switch", async ({ page }) => {
+  test("today's API (no watch filter): no Started watching, Stopped watching or Unconfirmed tab, and no page-by-page read", async ({ page }) => {
     const errors = watchErrors(page);
-    await open(page, FULL);
-    const t = mockSummaryFor([]).hero_diff.line_totals;
-    const want = ["All matched", "Added", "Removed", "Changed"];
-    if ((t.newly_monitored ?? 0) > 0) want.push("Started watching");
-    if ((t.monitoring_stopped ?? 0) > 0) want.push("Stopped watching");
-    if ((t.unconfirmed ?? 0) > 0) want.push("Unconfirmed");
-    want.push("Inactive");
-    await expect(page.getByRole("tab")).toHaveText(want);
-    expect(want).toContain("Started watching");
-    await tab(page, "Started watching").click();
-    await expect(page.locator("[data-scope-note]")).toContainText("Not counted as added");
+    const calls = await open(page, FULL);
+    await expect(rows(page).first()).toBeVisible();
+    await expect(page.getByRole("tab")).toHaveText(["All matched", "Added", "Removed", "Changed", "Inactive"]);
     await toApps(page);
-    await expect(tab(page, "Started watching")).toHaveAttribute("aria-selected", "true");
-    await expect(page.getByRole("tab")).toHaveText(want);
-    await toPublishers(page);
-    await expect(tab(page, "Started watching")).toHaveAttribute("aria-selected", "true");
+    await expect(rows(page).first()).toBeVisible();
+    await expect(page.getByRole("tab")).toHaveText(["All matched", "Added", "Removed", "Changed", "Inactive"]);
+    // Never the old way: no list built from every line event.
+    expect(calls.filter((c) => c.path.endsWith("/line-events"))).toEqual([]);
+    await expect(page.locator('[data-popular="started"], [data-popular="stopped"], [data-popular="unconfirmed"]')).toHaveCount(0);
     expect(errors).toEqual([]);
   });
 
-  test("a watch tab lists the publishers with such lines, each line with its reason", async ({ page }) => {
+  test("an API with the watch filter (crawler #361): the tabs on both lists, each one server list; the tab survives the switch", async ({ page }) => {
     const errors = watchErrors(page);
-    await open(page, { ...FULL, declaredHost: true });
+    const calls = await open(page, WATCH);
+    const want = ["All matched", "Added", "Removed", "Changed", "Started watching", "Stopped watching", "Unconfirmed", "Inactive"];
+    await expect(page.getByRole("tab")).toHaveText(want);
+    await tab(page, "Started watching").click();
+    await expect(page.locator("[data-scope-note]")).toContainText("Not counted as added");
+    await settled(page);
+    const pubs = allRows((p) => mockMatchedDevelopers(p, "", [], "all"));
+    const n = pubs.filter((_, i) => i % 3 === 0).length;
+    await expect(page.locator("[data-list-count]")).toContainText(`${n.toLocaleString()} publishers`);
+    expect(calls.some((c) => c.path.endsWith("/matched-developers") && c.query.includes("change=started_watching"))).toBe(true);
+    await toApps(page);
+    await expect(tab(page, "Started watching")).toHaveAttribute("aria-selected", "true");
+    await expect.poll(() => calls.some((c) => c.path.endsWith("/matched-apps") && c.query.includes("change=started_watching"))).toBe(true);
+    await expect(page.getByRole("tab")).toHaveText(want);
+    await toPublishers(page);
+    await expect(tab(page, "Started watching")).toHaveAttribute("aria-selected", "true");
+    // Never a list built from every line event: an opened row reads only
+    // its own lines.
+    expect(calls.filter((c) => c.path.endsWith("/line-events") && !c.query.includes("developer_id="))).toEqual([]);
+    expect(errors).toEqual([]);
+  });
+
+  test("an API that ignores the filter (no echo): the tab goes, never a page filtered here", async ({ page }) => {
+    const errors = watchErrors(page);
+    await open(page, WATCH, "", () =>
+      // The filter dropped on the way: the list answers unfiltered, with
+      // no echo, as an API that does not know it would.
+      page.route("**/matched-developers?*change=*", async (route) => {
+        const url = new URL(route.request().url());
+        url.searchParams.delete("change");
+        return route.fallback({ url: url.toString() });
+      }),
+    );
+    await tab(page, "Started watching").click();
+    await expect(tab(page, "All matched")).toHaveAttribute("aria-selected", "true");
+    await expect(tab(page, "Started watching")).toHaveCount(0);
+    expect(errors).toEqual([]);
+  });
+
+  test("a watch row opens on its lines of the kind, each with its reason", async ({ page }) => {
+    const errors = watchErrors(page);
+    await open(page, { ...WATCH, declaredHost: true });
     await tab(page, "Started watching").click();
     await settled(page);
-    const expected = new Set(
-      mockLineEvents({ event: "newly_monitored", page_size: 1_000_000 }).rows.map((e) => e.developer_id),
-    ).size;
-    await expect(page.locator("[data-list-count]")).toContainText(
-      expected === 1 ? "1 publisher" : `${expected.toLocaleString()} publishers`,
-    );
     await rows(page).first().click();
     const win = page.locator("[data-scope-window]");
     await expect(win).toContainText("Started watching");
-    await expect(win.locator("[data-line-reason]").first()).toBeVisible();
+    await expect(win.locator("[data-line-reason]").first()).toContainText("first read of this file this crawl");
     expect(errors).toEqual([]);
   });
 
   test("Unconfirmed: each line says why, when it was last seen, read and verified", async ({ page }) => {
     const errors = watchErrors(page);
-    await open(page, FULL);
-    const u = tab(page, "Unconfirmed");
-    test.skip((await u.count()) === 0, "this fixture week has no unconfirmed lines");
-    await u.click();
+    await open(page, WATCH);
+    await tab(page, "Unconfirmed").click();
     await expect(page.locator("[data-scope-note]")).toContainText("could not verify");
     await rows(page).first().click();
     const win = page.locator("[data-scope-window]");
-    await expect(win.locator("[data-line-reason]").first()).toBeVisible();
+    await expect(win.locator("[data-line-reason]").first()).toContainText("503");
     await expect(win.locator("[data-line-dates]").first()).toContainText("last seen");
     expect(errors).toEqual([]);
   });
@@ -211,12 +249,27 @@ test.describe("Export this list", () => {
     expect(t2.length - 1).toBe(shown);
     expect(errors).toEqual([]);
   });
+
+  test("a watch tab exports the server's filtered list, every page", async ({ page }) => {
+    const errors = watchErrors(page);
+    const calls = await open(page, WATCH);
+    await tab(page, "Started watching").click();
+    await settled(page);
+    const total = Number(((await page.locator("[data-list-count] p").innerText()).match(/([\d,]+) publishers/)?.[1] ?? "0").replace(/,/g, ""));
+    const d = page.waitForEvent("download");
+    await page.getByRole("button", { name: "Export this list" }).click();
+    const f = await d;
+    expect(f.suggestedFilename()).toBe("publishers-started-watching.csv");
+    expect((await readFile((await f.path())!, "utf8")).split("\r\n").length - 1).toBe(total);
+    expect(calls.filter((c) => c.path.endsWith("/matched-developers") && c.query.includes("change=started_watching") && c.query.includes("page_size=100")).length).toBeGreaterThan(0);
+    expect(errors).toEqual([]);
+  });
 });
 
 test.describe("Popular", () => {
   test("only choices with rows; a choice opens its list on its tab; a second press clears it", async ({ page }) => {
     const errors = watchErrors(page);
-    await open(page, FULL, "", () =>
+    await open(page, WATCH, "", () =>
       page.route("**/matched-apps?*change=removed*", (route) =>
         route.fulfill({ json: { page: 1, page_size: 25, total: 0, rows: [], change: "removed", match_type_counts: { all: 0, own: 0, ipd: 0 } } }),
       ),

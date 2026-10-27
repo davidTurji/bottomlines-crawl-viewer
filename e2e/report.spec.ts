@@ -893,7 +893,7 @@ test.describe("where the files are", () => {
 
   test("an app credited from its declared host, its publisher's hosts, and a host's first read", async ({ page }) => {
     const errors = watchErrors(page);
-    await open(page, { declaredHost: true });
+    await open(page, { declaredHost: true, watchTabs: true });
     await expectOverview(page);
     const app = declaredHostApp();
 
@@ -926,7 +926,7 @@ test.describe("where the files are", () => {
 
   test("a report of own-domain files says nothing extra", async ({ page }) => {
     const errors = watchErrors(page);
-    await open(page, {});
+    await open(page, { watchTabs: true });
     await expectOverview(page);
     const app = declaredHostApp();
     await page.getByRole("button", { name: /Matched apps/ }).click();

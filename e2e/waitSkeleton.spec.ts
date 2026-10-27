@@ -10,7 +10,7 @@ import { expect, test, type Page } from "@playwright/test";
 import { installFakeApi, TOKEN, type Scenario } from "./fakeApi";
 
 const BASE = `/crawl-report/${TOKEN}`;
-const FULL: Scenario = { matchType: true, appChange: true, inactive: "ok" };
+const FULL: Scenario = { matchType: true, appChange: true, inactive: "ok", watchTabs: true };
 
 function watchErrors(page: Page): string[] {
   const errors: string[] = [];
@@ -166,11 +166,10 @@ test("Inactive: its lists switch the same way", async ({ page }) => {
 
 test("the publishers / apps tiles, and a watch tab", async ({ page }) => {
   const errors = watchErrors(page);
-  // The watch tab's read is held from the start (the Popular bar asks for
-  // it at load, and the tab then waits on that same read).
+  // The watch tab's own read (the server's filter, crawler #361) is held.
   let stopped!: () => void;
   await open(page, "", async () => {
-    stopped = await hold(page, (u) => u.pathname.endsWith("/line-events") && u.searchParams.get("event") === "monitoring_stopped");
+    stopped = await hold(page, (u) => u.pathname.endsWith("/matched-developers") && u.searchParams.get("change") === "stopped_watching");
   });
   await lands(page, rows(page));
   let release = await hold(

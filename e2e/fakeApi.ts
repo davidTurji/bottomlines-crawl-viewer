@@ -171,7 +171,68 @@ export type Scenario = {
    *  and an inconclusive note of 55 with 25 examples. For the
    *  click-everything test: a type assumption must never pass. */
   realShapes?: boolean;
+  /** true: a crawler with the watch filters (crawler #361): matched-
+   *  developers and matched-apps take ``?change=started_watching|
+   *  stopped_watching|unconfirmed``, filter the whole list, echo
+   *  ``change`` and answer ``change_counts``; a watch line event of a
+   *  publisher says why. Default false: today's API, none of it (the watch
+   *  tabs are not offered). */
+  watchTabs?: boolean;
 };
+
+/** Which rows of a full list each watch filter keeps (by position, so a
+ *  test can count them): the crawler's own rule is its line events. */
+const WATCH_RULE: Record<string, (i: number) => boolean> = {
+  started_watching: (i) => i % 3 === 0,
+  stopped_watching: (i) => i % 7 === 1,
+  unconfirmed: (i) => i % 11 === 2,
+};
+
+/** The watch counts of a full list, and the asked filter's page of it. */
+function watchList<T>(
+  readPage: (page: number) => { rows: T[]; total: number },
+  change: string | null,
+  page: number,
+  pageSize: number,
+) {
+  const all: T[] = [];
+  for (let p = 1; p < 10_000; p++) {
+    const r = readPage(p);
+    all.push(...r.rows);
+    if (!r.rows.length || all.length >= r.total) break;
+  }
+  const counts = Object.fromEntries(Object.entries(WATCH_RULE).map(([k, f]) => [k, all.filter((_, i) => f(i)).length]));
+  const rule = change ? WATCH_RULE[change] : undefined;
+  if (!rule) return { counts, kept: null };
+  const kept = all.filter((_, i) => rule(i));
+  return { counts, kept: { rows: kept.slice((page - 1) * pageSize, page * pageSize), total: kept.length, change } };
+}
+
+/** A publisher's watch line events of one kind, from its own lines. */
+function watchEventsFor(developerId: number, event: string, declared: boolean): LineEvent[] {
+  // A host's file read for the first time (or not read) says so on a
+  // declared-host report; an unconfirmed line always says why.
+  const reason =
+    event === "unconfirmed"
+      ? "The file answered 503 on every read this crawl."
+      : !declared
+        ? null
+        : event === "newly_monitored"
+          ? "host first read"
+          : "host not read";
+  return linesForDeveloper(developerId)
+    .slice(0, 2)
+    .map((r, i) => ({
+      ...r,
+      event,
+      host: declared && i === 0 && event === "newly_monitored" ? DECLARED_HOST : (r.host ?? r.developer_domain),
+      reason,
+      last_seen_at: "2026-08-18T12:19:00+00:00",
+      read_at: "2026-08-25T12:18:00+00:00",
+      verified_at: null,
+      tries: 3,
+    })) as LineEvent[];
+}
 
 /** The ``sellersReads`` scenario's read summary (crawler #364's shape). */
 export const SELLERS_READS = {
@@ -440,6 +501,7 @@ export async function installFakeApi(page: Page, scenario: Scenario = {}): Promi
     appChange: false,
     sellersReads: false,
     realShapes: false,
+    watchTabs: false,
     ...scenario,
   };
   const hostApp = s.declaredHost ? declaredHostApp() : null;
@@ -572,6 +634,10 @@ export async function installFakeApi(page: Page, scenario: Scenario = {}): Promi
       case "line-events": {
         const filters: Record<string, unknown> = {};
         for (const [k, v] of q.entries()) if (k !== "lines") filters[k] = /^\d+$/.test(v) ? Number(v) : v;
+        if (filters.developer_id !== undefined && s.watchTabs && typeof filters.event === "string" && ["newly_monitored", "monitoring_stopped", "unconfirmed"].includes(filters.event)) {
+          const rows = watchEventsFor(Number(filters.developer_id), filters.event, s.declaredHost);
+          return reply(200, { page: 1, page_size: rows.length || 1, total: rows.length, rows });
+        }
         if (filters.developer_id !== undefined) {
           const rows = linesForDeveloper(Number(filters.developer_id))
             .map(lineEvent)
@@ -592,7 +658,11 @@ export async function installFakeApi(page: Page, scenario: Scenario = {}): Promi
         return reply(200, { ...r, rows: s.realShapes ? rows.map((e, i) => realEvent(e, i)) : rows });
       }
       case "matched-developers": {
-        const r = mockMatchedDevelopers(page_, q.get("q") ?? "", lines, matchType);
+        let r = mockMatchedDevelopers(page_, q.get("q") ?? "", lines, matchType);
+        if (s.watchTabs) {
+          const w = watchList((p) => mockMatchedDevelopers(p, q.get("q") ?? "", lines, matchType), q.get("change"), page_, 25);
+          r = { ...r, ...(w.kept ?? {}), change_counts: w.counts } as typeof r;
+        }
         r.rows = r.rows
           .map((d) =>
             hostApp && d.domain === hostApp.owner_domain ? publisherWithHost(publisherRow(d)) : publisherRow(d),
@@ -606,8 +676,14 @@ export async function installFakeApi(page: Page, scenario: Scenario = {}): Promi
         return reply(200, { ...r, rows: r.rows.map(bundleRow) });
       }
       case "matched-apps": {
-        const change = s.appChange ? ((q.get("change") || null) as AppChange | null) : null;
-        const r = mockMatchedApps(page_, q.get("q") ?? "", lines, matchType, change);
+        const asked = q.get("change") || null;
+        const watch = s.watchTabs && asked !== null && asked in WATCH_RULE;
+        const change = s.appChange && !watch ? (asked as AppChange | null) : null;
+        let r = mockMatchedApps(page_, q.get("q") ?? "", lines, matchType, change);
+        if (s.watchTabs) {
+          const w = watchList((p) => mockMatchedApps(p, q.get("q") ?? "", lines, matchType, null), watch ? asked : null, page_, 25);
+          r = { ...r, ...(w.kept ?? {}), change_counts: w.counts } as typeof r;
+        }
         r.rows = r.rows
           .map((a) => (hostApp && appKey(a) === appKey(hostApp) ? appAtHost(appRow(a)) : appRow(a)))
           .map((a) => (s.removalReasons ? withRemovalReasons(a) : a));

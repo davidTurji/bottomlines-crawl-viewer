@@ -106,6 +106,7 @@ async function signIn(browser: Browser, vp: (typeof VIEWPORTS)[number]): Promise
       removalReasons: true,
       appChange: true,
       declaredHost: true,
+      watchTabs: true,
     });
     await page.goto(`/crawl-report/${TOKEN}`);
     await page.locator("input[autocomplete=username]").fill("reader", { timeout: 3_000 });
