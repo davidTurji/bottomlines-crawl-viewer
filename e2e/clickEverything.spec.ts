@@ -360,7 +360,7 @@ async function crawl(page: Page, vp: string): Promise<Run> {
   const CARDS = "button[aria-expanded='false']:not([aria-haspopup])";
   // "Export this list" on the fake API only: on a live link it would read
   // every page of the list (it is never the metered export, but it is load).
-  if (!LIVE) await tap("export this list", page.getByRole("button", { name: "Export this list" }).first());
+  if (!LIVE) await tap("download list", page.getByRole("button", { name: "Download list" }).first());
 
   /* ── Popular: every choice, then the last one again (it clears). ── */
   // The bar may still be counting (hotfix 2026-10-27: its counts load

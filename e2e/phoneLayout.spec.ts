@@ -119,6 +119,10 @@ test("Found in and Match type on the publishers list: label above, no overlap, n
   await expect(foundIn.getByRole("button", { name: /^Both/ })).toHaveAttribute("aria-pressed", "true");
   expectClean("Found in, Both", await settledLayout(foundIn));
   expect((await layout(page.getByTestId("match-type"))).labelAbove).toBe(true);
+  // The filters row stacks on a phone: Match type under Found in, never on it.
+  const a = (await foundIn.boundingBox())!;
+  const b = (await page.getByTestId("match-type").boundingBox())!;
+  expect(b.y).toBeGreaterThanOrEqual(a.y + a.height - 0.5);
   expect(errors).toEqual([]);
 });
 

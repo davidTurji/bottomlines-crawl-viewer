@@ -236,7 +236,7 @@ test.describe("Export this list", () => {
     const total = Number(((await page.locator("[data-list-count] p").innerText()).match(/of ([\d,]+)/)?.[1] ?? "0").replace(/,/g, ""));
     expect(total).toBeGreaterThan(25);
     const download = page.waitForEvent("download");
-    await page.getByRole("button", { name: "Export this list" }).click();
+    await page.getByRole("button", { name: "Download list" }).click();
     const file = await download;
     expect(file.suggestedFilename()).toBe("publishers-all-matched.csv");
     const text = await readFile((await file.path())!, "utf8");
@@ -260,7 +260,7 @@ test.describe("Export this list", () => {
     await settled(page);
     const shown = Number(((await page.locator("[data-list-count] p").innerText()).match(/([\d,]+)\s/g)?.pop() ?? "0").replace(/[^\d]/g, ""));
     const d2 = page.waitForEvent("download");
-    await page.getByRole("button", { name: "Export this list" }).click();
+    await page.getByRole("button", { name: "Download list" }).click();
     const f2 = await d2;
     expect(f2.suggestedFilename()).toBe("publishers-added-search-a.csv");
     const t2 = (await readFile((await f2.path())!, "utf8")).split("\r\n");
@@ -275,7 +275,7 @@ test.describe("Export this list", () => {
     await settled(page);
     const total = Number(((await page.locator("[data-list-count] p").innerText()).match(/([\d,]+) publishers/)?.[1] ?? "0").replace(/,/g, ""));
     const d = page.waitForEvent("download");
-    await page.getByRole("button", { name: "Export this list" }).click();
+    await page.getByRole("button", { name: "Download list" }).click();
     const f = await d;
     expect(f.suggestedFilename()).toBe("publishers-started-watching.csv");
     expect((await readFile((await f.path())!, "utf8")).split("\r\n").length - 1).toBe(total);
@@ -298,7 +298,7 @@ test.describe("Export this list, safe and whole (review of #75)", () => {
     );
     await expect(rows(page).first()).toBeVisible();
     const d = page.waitForEvent("download");
-    await page.getByRole("button", { name: "Export this list" }).click();
+    await page.getByRole("button", { name: "Download list" }).click();
     const text = await readFile((await (await d).path())!, "utf8");
     expect(text.startsWith("\uFEFF")).toBe(true);
     expect(text).toContain(`"'=HYPERLINK(""https://madeupmedia.com"",""x"")"`);
@@ -324,7 +324,7 @@ test.describe("Export this list, safe and whole (review of #75)", () => {
     await expect(rows(page).first()).toBeVisible();
     let downloaded = false;
     page.on("download", () => (downloaded = true));
-    await page.getByRole("button", { name: "Export this list" }).click();
+    await page.getByRole("button", { name: "Download list" }).click();
     await expect(page.getByRole("alert")).toHaveText("This list counts 150 rows but only 100 could be read. Nothing was exported.");
     expect(downloaded).toBe(false);
     expect(errors).toEqual([]);
@@ -604,7 +604,7 @@ test.describe("one seat in two files (re-review of #75)", () => {
     await tab(page, "Changed").click();
     await expect(rows(page).first()).toBeVisible();
     const d = page.waitForEvent("download");
-    await page.getByRole("button", { name: "Export this list" }).click();
+    await page.getByRole("button", { name: "Download list" }).click();
     const text = await readFile((await (await d).path())!, "utf8");
     expect(text).toContain("madeupssp.com, S-5520, DIRECT, newads (cert oldads -> newads)");
     expect(text).toContain("madeupssp.com, S-5520, DIRECT, newapp (cert oldapp -> newapp)");
@@ -639,7 +639,7 @@ test.describe("store names (parity audit of #75, crawler #370's map)", () => {
     await expect(list.locator("[data-website-icon]")).toHaveCount(1);
     // The CSV says the same names.
     const d = page.waitForEvent("download");
-    await page.getByRole("button", { name: "Export this list" }).click();
+    await page.getByRole("button", { name: "Download list" }).click();
     const text = await readFile((await (await d).path())!, "utf8");
     for (const name of ["Apple TV", "Google TV", "Roku Channel Store", "Website"]) expect(text).toContain(`"${name}"`);
     expect(errors).toEqual([]);
@@ -701,7 +701,7 @@ test.describe("crawler #370's page parity fields: read when there, never require
     });
     await expect(rows(page).first()).toBeVisible();
     const d = page.waitForEvent("download");
-    await page.getByRole("button", { name: "Export this list" }).click();
+    await page.getByRole("button", { name: "Download list" }).click();
     const text = await readFile((await (await d).path())!, "utf8");
     expect(text).toContain(`"IPD","${label}"`);
     // Without the label: the list's own words, as before.
@@ -709,7 +709,7 @@ test.describe("crawler #370's page parity fields: read when there, never require
     await toApps(page);
     await expect(page.locator("[data-app-file]").first()).toHaveText("app-ads.txt at the host its store listing names");
     const d2 = page.waitForEvent("download");
-    await page.getByRole("button", { name: "Export this list" }).click();
+    await page.getByRole("button", { name: "Download list" }).click();
     expect(await readFile((await (await d2).path())!, "utf8")).toContain('"app-ads.txt at the host its store listing names"');
     expect(errors).toEqual([]);
   });
@@ -797,7 +797,7 @@ test.describe("crawler #370's page parity fields: read when there, never require
     await settled(page);
     await expect(rows(page)).toHaveCount(2);
     const d = page.waitForEvent("download");
-    await page.getByRole("button", { name: "Export this list" }).click();
+    await page.getByRole("button", { name: "Download list" }).click();
     const text = await readFile((await (await d).path())!, "utf8");
     // Only the searched rows were read for, each by its publisher.
     expect([...new Set(certReads)].sort()).toEqual(["880301", "880302"]);

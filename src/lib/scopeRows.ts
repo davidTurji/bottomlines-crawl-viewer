@@ -64,7 +64,8 @@ async function readPage<T>(fetchPage: (page: number) => Promise<PageAnswer<T>>, 
  */
 export async function eachPage<T>(
   fetchPage: (page: number) => Promise<PageAnswer<T>>,
-  asked: number,
+  /** The page size asked for (the answer's rows say how many came). */
+  _asked: number,
   onRows: (rows: T[]) => void | Promise<void>,
   onProgress?: Progress,
   signal?: AbortSignal,
@@ -83,8 +84,8 @@ export async function eachPage<T>(
       );
     seen += rows.length;
     await onRows(rows);
-    const size = Math.max(1, r.page_size || asked);
-    onProgress?.(page, Math.max(page, Math.ceil(total / size)));
+    // Progress in rows, as the list counts them ("1,200 of 3,400").
+    onProgress?.(Math.min(seen, total), total);
     if (seen >= total) return seen;
   }
   // The API's own ceiling (100,000 pages): said, never a silent cut.

@@ -2259,6 +2259,18 @@ export function ListTabsRow({ left, right }: { left: ReactNode; right: ReactNode
   );
 }
 
+/** The list's filters, one row under its tabs, the content's full width:
+ *  the list's own split (Found in, Platform) at the far left, Match type at
+ *  the far right. A phone stacks them, each label over its pills. */
+export function ListFiltersRow({ left, right }: { left: ReactNode; right: ReactNode }) {
+  return (
+    <div data-list-filters className="flex w-full min-w-0 flex-col items-start gap-2 sm:flex-row sm:items-center sm:justify-between sm:gap-x-4">
+      <div className="min-w-0 max-w-full">{left}</div>
+      <div className="min-w-0 max-w-full sm:ml-auto">{right}</div>
+    </div>
+  );
+}
+
 export function ListSearchRow({
   query,
   setQuery,
@@ -2620,18 +2632,17 @@ function DrilldownList({
           </Tabs>
             </>
           }
-          right={
-            // Not on Inactive: those lists are not split by these.
-            tab !== "inactive" && (typeCounts || foundInCounts) && (
-              // A phone stacks the switches, each label over its pills;
-              // wider, they sit right of the tabs, as before.
-              <span className="flex w-full min-w-0 flex-col items-start gap-2 sm:w-auto sm:flex-row sm:flex-wrap sm:items-center sm:justify-end sm:gap-x-4">
-                {foundInCounts && <FoundInControl value={foundIn} onChange={setFoundIn} counts={foundInCounts} />}
-                {typeCounts && <MatchTypeControl value={matchType} onChange={setMatchType} counts={typeCounts} />}
-              </span>
-            )
-          }
+          right={null}
         />
+        {/* ONE FILTERS ROW UNDER THE TABS (David, 2026-10-27): Found in at
+            the far left, Match type at the far right. Not on Inactive:
+            those lists are not split by these. */}
+        {tab !== "inactive" && (typeCounts || foundInCounts) && (
+          <ListFiltersRow
+            left={foundInCounts && <FoundInControl value={foundIn} onChange={setFoundIn} counts={foundInCounts} />}
+            right={typeCounts && <MatchTypeControl value={matchType} onChange={setMatchType} counts={typeCounts} />}
+          />
+        )}
         {isScopeTab(tab) && <p data-scope-note className="text-[12px] leading-relaxed text-slate-500">{SCOPE_NOTE[tab]}</p>}
         {tab !== "inactive" && (
           <ListSearchRow
@@ -2651,18 +2662,18 @@ function DrilldownList({
                   // A trial's list is cut: the count, no pages, no export.
                   ? <CountLine count={total} noun={tabNoun(rowsTab, "publishers").many} />
                   : (
-                    <span className="flex flex-wrap items-center justify-end gap-x-3 gap-y-2">
-                      <ExportListButton run={exportList} />
-                      <Pager
-                        placement="inline"
-                        page={page}
-                        pageSize={PAGE_SIZE}
-                        total={total}
-                        onPage={paging.onPage}
-                        noun={tabNoun(rowsTab, "publishers").many}
-                        nounOne={tabNoun(rowsTab, "publishers").one}
-                      />
-                    </span>
+                    // The count, then "Download list" right after it, then the
+                    // pages (David, 2026-10-27).
+                    <Pager
+                      placement="inline"
+                      page={page}
+                      pageSize={PAGE_SIZE}
+                      total={total}
+                      onPage={paging.onPage}
+                      noun={tabNoun(rowsTab, "publishers").many}
+                      nounOne={tabNoun(rowsTab, "publishers").one}
+                      afterCount={<ExportListButton variant="link" run={exportList} />}
+                    />
                   )
                 : null
             }
@@ -3884,24 +3895,27 @@ function MatchedAppsList({
           </Tabs>
             </>
           }
-          right={
-            tab !== "inactive" && (typeCounts || platformCounts) && (
-              <span className="flex w-full min-w-0 flex-col items-start gap-2 sm:w-auto sm:flex-row sm:flex-wrap sm:items-center sm:justify-end sm:gap-x-4">
-                {platformCounts && <PlatformControl value={platform} onChange={setPlatform} counts={platformCounts} />}
-                {typeCounts && (
-                  <MatchTypeControl
-                    value={matchType}
-                    onChange={setMatchType}
-                    // The server's split is known to count All matched only:
-                    // no number in the change tabs' tooltips rather than a
-                    // wrong one.
-                    counts={tab === "all" || isScopeTab(tab) ? typeCounts : null}
-                  />
-                )}
-              </span>
-            )
-          }
+          right={null}
         />
+        {/* The filters row, as on the publishers list: Platform at the far
+            left, Match type at the far right. */}
+        {tab !== "inactive" && (typeCounts || platformCounts) && (
+          <ListFiltersRow
+            left={platformCounts && <PlatformControl value={platform} onChange={setPlatform} counts={platformCounts} />}
+            right={
+              typeCounts && (
+                <MatchTypeControl
+                  value={matchType}
+                  onChange={setMatchType}
+                  // The server's split is known to count All matched only:
+                  // no number in the change tabs' tooltips rather than a
+                  // wrong one.
+                  counts={tab === "all" || isScopeTab(tab) ? typeCounts : null}
+                />
+              )
+            }
+          />
+        )}
         {isScopeTab(tab) && <p data-scope-note className="text-[12px] leading-relaxed text-slate-500">{SCOPE_NOTE[tab]}</p>}
         {tab !== "inactive" && (
           <ListSearchRow
@@ -3920,22 +3934,20 @@ function MatchedAppsList({
                 ? trial || caps
                   ? <CountLine count={pageFiltered ? rows.length : total} noun={pageFiltered ? "on this page" : noun} />
                   : (
-                    <span className="flex flex-wrap items-center justify-end gap-x-3 gap-y-2">
-                      {!pageFiltered && <ExportListButton run={exportList} />}
-                      {pageFiltered ? (
-                        <CountLine count={rows.length} noun="on this page" />
-                      ) : (
-                        <Pager
-                          placement="inline"
-                          page={page}
-                          pageSize={PAGE_SIZE}
-                          total={total}
-                          onPage={paging.onPage}
-                          noun={noun}
-                          nounOne={tabNoun(rowsTab, "apps").one}
-                        />
-                      )}
-                    </span>
+                    pageFiltered ? (
+                      <CountLine count={rows.length} noun="on this page" />
+                    ) : (
+                      <Pager
+                        placement="inline"
+                        page={page}
+                        pageSize={PAGE_SIZE}
+                        total={total}
+                        onPage={paging.onPage}
+                        noun={noun}
+                        nounOne={tabNoun(rowsTab, "apps").one}
+                        afterCount={<ExportListButton variant="link" run={exportList} />}
+                      />
+                    )
                   )
                 : null
             }

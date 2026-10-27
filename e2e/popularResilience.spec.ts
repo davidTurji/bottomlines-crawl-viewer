@@ -237,3 +237,66 @@ test("a truncated list's counts are never the chips': added and changed are aske
     await expect(bar.locator(`[data-popular="${id}"]`)).toHaveText(new RegExp(`\\D${total}$`));
   }
 });
+
+test.describe("the list's controls (David, 2026-10-27)", () => {
+  const WIDE: Scenario = { ...FULL, foundIn: true, appPlatform: true };
+  const box = async (page: Page, sel: string) => (await page.locator(sel).first().boundingBox())!;
+
+  test("one filters row: the list's own split far left, Match type far right, the content's width", async ({ page }) => {
+    await installFakeApi(page, WIDE);
+    await page.addInitScript(() => localStorage.setItem("pf_report_walkthrough_v1", JSON.stringify({ status: "completed", stepId: null, open: false })));
+    await page.goto(BASE);
+    await expect(page.locator('button[aria-label^="Show the seat lines of"]').first()).toBeVisible();
+    for (const [view, split] of [["publishers", "found-in"], ["apps", "platform"]] as const) {
+      if (view === "apps") {
+        await page.getByRole("button", { name: /Matched apps/ }).first().click();
+        await expect(page.getByTestId(split)).toBeVisible();
+      }
+      const row = await box(page, "[data-list-filters]");
+      const list = await box(page, '[data-tour="overview-list"]');
+      const left = await box(page, `[data-testid="${split}"]`);
+      const right = await box(page, '[data-testid="match-type"]');
+      expect(Math.abs(row.width - list.width), `${view}: the row is the content's width`).toBeLessThanOrEqual(2);
+      expect(Math.abs(left.x - row.x), `${view}: ${split} at the far left`).toBeLessThanOrEqual(2);
+      expect(Math.abs(right.x + right.width - (row.x + row.width)), `${view}: Match type at the far right`).toBeLessThanOrEqual(2);
+      expect(Math.abs(left.y + left.height / 2 - (right.y + right.height / 2)), `${view}: one row`).toBeLessThanOrEqual(4);
+      // And under the tabs.
+      const tabs = await box(page, '[role="tablist"]');
+      expect(row.y).toBeGreaterThanOrEqual(tabs.y + tabs.height - 1);
+    }
+  });
+
+  test("Download list: a quiet link right after the count, before the pages, with its progress in place", async ({ page }) => {
+    await installFakeApi(page, FULL);
+    await page.addInitScript(() => localStorage.setItem("pf_report_walkthrough_v1", JSON.stringify({ status: "completed", stepId: null, open: false })));
+    await page.goto(BASE);
+    await expect(page.locator('button[aria-label^="Show the seat lines of"]').first()).toBeVisible();
+    const slot = page.locator("[data-list-count]").first();
+    const link = slot.getByRole("button", { name: "Download list" });
+    await expect(link).toBeVisible();
+    // No export button in the search row any more.
+    await expect(page.getByRole("button", { name: "Export this list" })).toHaveCount(0);
+    const count = await slot.locator("p").first().boundingBox();
+    const at = (await link.boundingBox())!;
+    const pages = await slot.getByRole("navigation", { name: "Pages" }).boundingBox();
+    expect(at.x).toBeGreaterThan(count!.x + count!.width - 1);
+    if (pages) expect(pages.x).toBeGreaterThan(at.x + at.width - 1);
+    // The count's tone: small, muted, not a button's border.
+    const countSize = await slot.locator("p").first().evaluate((el) => getComputedStyle(el).fontSize);
+    await expect(link).toHaveCSS("font-size", countSize);
+    await expect(link).toHaveCSS("border-top-width", "0px");
+    // While it runs: its progress, in place.
+    let release!: () => void;
+    const gate = new Promise<void>((r) => (release = r));
+    await page.route(/matched-developers\?page=2&page_size=100/, async (route) => {
+      await gate;
+      await route.fallback();
+    });
+    const download = page.waitForEvent("download");
+    await link.click();
+    await expect(slot.locator("[data-export-list]")).toHaveText(/^Downloading [\d,]+ of [\d,]+…$/);
+    release();
+    await download;
+    await expect(slot.getByRole("button", { name: "Download list" })).toBeVisible();
+  });
+});
