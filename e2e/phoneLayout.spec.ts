@@ -156,9 +156,11 @@ test("every status tab is in sight and clickable, on both lists", async ({ page 
   for (const view of ["publishers", "apps"] as const) {
     if (view === "apps") await page.getByRole("button", { name: /Matched apps/ }).first().click();
     const tabs = page.getByRole("tablist").first().getByRole("tab");
-    await expect(tabs.first()).toBeVisible();
+    // The watch tabs come with the list's counts: wait for them, never
+    // read the row before the list lands.
+    const all = ["All matched", "Added", "Removed", "Changed", "Started watching", "Stopped watching", "Unconfirmed"];
+    await expect.poll(() => tabs.allInnerTexts(), { message: view }).toEqual(expect.arrayContaining(all));
     const names = await tabs.allInnerTexts();
-    expect(names, view).toEqual(expect.arrayContaining(["All matched", "Added", "Removed", "Changed", "Started watching", "Stopped watching", "Unconfirmed"]));
     for (const name of names) {
       const t = page.getByRole("tab", { name, exact: true }).first();
       const box = (await t.boundingBox())!;

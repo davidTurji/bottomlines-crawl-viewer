@@ -590,12 +590,18 @@ test.describe("discovery checks each line against your sellers.json", () => {
   /** New lines sort first, so a line may sit on a later page. */
   async function find(page: Page, key: string) {
     const pager = page.getByRole("navigation", { name: "Pages" }).first();
+    const shown = () => cards(page).evaluateAll((els) => els.map((e) => e.getAttribute("data-discovered-line") ?? "").join("|"));
+    // The first page landed before looking at it.
+    await expect(cards(page).first()).toBeVisible();
     for (let n = 2; n <= 8 && (await card(page, key).count()) === 0; n += 1) {
       const btn = pager.getByRole("button", { name: `Page ${n}`, exact: true });
       if ((await btn.count()) === 0) break;
+      const before = await shown();
       await btn.click();
       // Wait for the page to be the current one, never a fixed sleep.
       await expect(pager.getByRole("button", { name: `Page ${n}`, exact: true })).toHaveAttribute("aria-current", "page");
+      // And for ITS cards: never the last page's, still on screen.
+      await expect.poll(shown).not.toBe(before);
       await expect(cards(page).first()).toBeVisible();
     }
     return card(page, key);

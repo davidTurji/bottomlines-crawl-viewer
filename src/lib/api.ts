@@ -1352,6 +1352,9 @@ export type SellersJsonReads = {
 };
 
 export type Summary = {
+  /** True on a report whose apps list and count include the matched
+   *  websites (crawler #370, page parity). Absent before. */
+  apps_include_websites?: boolean;
   /** A crawl that did not finish says so in one line (crawler #370, the
    *  Excel's "Crawl status"). Absent on a finished crawl and before. */
   partial_line?: string | null;
@@ -1393,7 +1396,9 @@ export type Summary = {
     not_found_count: number;
     unreadable_count: number;
     developers_with_lines: number;
-    matched: { lines: number; developers: number; apps: number };
+    /** `websites` (crawler #370): the matched websites, counted in `apps`
+     *  on a report whose summary says `apps_include_websites`. */
+    matched: { lines: number; developers: number; apps: number; websites?: number };
     /** How many matched publishers and apps STARTED and STOPPED matching
      *  since the baseline. Optional: links baked before it lack the key.
      *  Null = not computed (no baseline, or under a line filter); `apps`
