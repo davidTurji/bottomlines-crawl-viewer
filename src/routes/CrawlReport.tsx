@@ -324,6 +324,14 @@ export default function CrawlReport() {
 
   const matchedDevs = summary.counters.matched.developers;
   const matchedApps = summary.counters.matched.apps;
+  // APPS AND WEBSITES (David, 2026-10-27; crawler #370): a new report's apps
+  // list and count include the matched websites; it says so wherever they
+  // are counted in. Older reports and any without the flag: unchanged.
+  const sites = summary.apps_include_websites === true;
+  const websites =
+    sites && typeof summary.counters.matched.websites === "number" && summary.counters.matched.websites >= 0
+      ? summary.counters.matched.websites
+      : null;
   // Under a seat-line filter every current figure is a slice while last
   // week's summary is the whole week, so a delta would compare unlike
   // things ("-97%"). No delta is the honest answer there.
@@ -412,7 +420,7 @@ export default function CrawlReport() {
   const popularChoices: PopularChoice[] = popularCounts
     ? POPULAR_ORDER.flatMap((id) => {
         const n = popularCounts[id];
-        return typeof n === "number" && n > 0 ? [{ id, label: POPULAR[id].label, count: n }] : [];
+        return typeof n === "number" && n > 0 ? [{ id, label: popularLabel(id, sites), count: n }] : [];
       })
     : [];
   const popularActive = popular;
@@ -455,6 +463,7 @@ export default function CrawlReport() {
             <WeeklyWin
               publishers={matchedDevs}
               apps={matchedApps}
+              sites={sites}
               publishersDelta={matchedDevsDelta}
               appsDelta={matchedAppsDelta}
               moves={moves}
@@ -641,7 +650,8 @@ export default function CrawlReport() {
               tone="app"
               icon={Smartphone}
               number={matchedApps}
-              label="Matched apps"
+              label={sites ? "Matched apps and websites" : "Matched apps"}
+              sub={websites != null ? `${websites.toLocaleString()} ${websites === 1 ? "website" : "websites"}` : undefined}
               delayMs={secondBeat}
               delta={matchedAppsDelta}
               previous={prevMatchedApps}
@@ -701,8 +711,8 @@ export default function CrawlReport() {
       <div data-tour="overview-list" ref={listRef} className="scroll-mt-6">
         <ListHead
           inactive={listTab === "inactive"}
-          title={VIEW_TITLE[matchedView].title}
-          blurb={VIEW_TITLE[matchedView].blurb}
+          title={viewTitle(matchedView, sites).title}
+          blurb={viewTitle(matchedView, sites).blurb}
         />
         {matchedView === "publishers" ? (
           <DrilldownList
@@ -735,6 +745,7 @@ export default function CrawlReport() {
             setPlatform={setPlatform}
             searchReset={searchReset}
             known={knownFor("apps")}
+            sites={sites}
           />
         )}
       </div>
@@ -758,7 +769,10 @@ function WeeklyWin({
   moves,
   firstCrawl,
   filtered,
+  sites = false,
 }: {
+  /** The apps count includes the websites (crawler #370). */
+  sites?: boolean;
   publishers: number;
   apps: number;
   publishersDelta: Delta | null;
@@ -774,7 +788,8 @@ function WeeklyWin({
   );
   const pub = (n: number) => fig(n, "text-primary");
   const app = (n: number) => fig(n, "text-app");
-  const plural = (n: number, one: string, many: string) => (n === 1 ? one : many);
+  const plural = (n: number, one: string, many: string) =>
+    one === "app" && sites ? (n === 1 ? "app or website" : "apps and websites") : n === 1 ? one : many;
   const morePubs = publishersDelta && publishersDelta.abs > 0 ? publishersDelta.abs : 0;
   const moreApps = appsDelta && appsDelta.abs > 0 ? appsDelta.abs : 0;
   const foundPubs = moves?.developers?.found ?? 0;
@@ -1087,7 +1102,10 @@ export function MatchedTile({
   active,
   onClick,
   delayMs = 0,
+  sub,
 }: {
+  /** A quiet line under the label ("13,907 websites", counted in). */
+  sub?: string;
   tone: "publisher" | "app";
   /** Found / lost behind the net, when the report has them. */
   move?: MatchedMove | null;
@@ -1180,7 +1198,14 @@ export function MatchedTile({
           label. */}
       <span className="mtile-grid">
         <span className="mtile-num">{numberRow}</span>
-        <span className="mtile-label">{labelRow}</span>
+        <span className="mtile-label">
+          {labelRow}
+          {sub && (
+            <span data-tile-sub className="mt-0.5 block text-[11px] font-normal text-slate-400">
+              {sub}
+            </span>
+          )}
+        </span>
         {w && move && <FoundLostCorner move={move} style={payoff} />}
       </span>
       {/* ONE SLOT, ALWAYS THE SAME HEIGHT, as on the Lines tiles. */}
@@ -1383,6 +1408,13 @@ function tabNoun(tab: DrillTab, view: "publishers" | "apps"): { many: string; on
   return view === "apps" ? { many: "apps", one: "app" } : { many: "publishers", one: "publisher" };
 }
 
+/** The apps list's nouns, "apps and websites" where the websites are
+ *  counted in (crawler #370). */
+function appsNoun(n: { many: string; one?: string }, sites: boolean): { many: string; one?: string } {
+  if (!sites || n.many !== "apps") return n;
+  return { many: "apps and websites", one: "app or website" };
+}
+
 /** The quiet line a watch tab carries under its controls. */
 const SCOPE_NOTE: Record<ScopeTab, string> = {
   started:
@@ -1458,6 +1490,17 @@ const VIEW_TITLE: Record<ListView, { title: string; blurb: string }> = {
   },
 };
 
+/** The list's heading and blurb; the apps list says "apps and websites"
+ *  on a report that counts the websites in (crawler #370). */
+function viewTitle(view: ListView, sites: boolean): { title: string; blurb: string } {
+  if (view !== "apps" || !sites) return VIEW_TITLE[view];
+  return {
+    title: "Matched apps and websites",
+    blurb:
+      "Every app whose app-ads.txt matched your seats, or whose inventory partner's ads.txt did, and every website whose ads.txt did, with the publisher that owns it. Click a row to see the exact seat lines it carried, and what moved this week.",
+  };
+}
+
 /* ── POPULAR (David, 2026-10-27) ─────────────────────────────────────
    Each choice opens a list on one of its tabs. */
 type PopularId =
@@ -1490,6 +1533,14 @@ const POPULAR: Record<PopularId, { label: string; target: PopularTarget }> = {
   stopped: { label: "Publishers with lines no longer watched", target: { view: "publishers", tab: "stopped", matchType: "all" } },
   unconfirmed: { label: "Publishers with unconfirmed lines", target: { view: "publishers", tab: "unconfirmed", matchType: "all" } },
 };
+/** A choice's label; the apps choices say "apps and websites" on a report
+ *  whose apps list counts the websites in (crawler #370). */
+function popularLabel(id: PopularId, sites: boolean): string {
+  if (sites && id === "apps-removed") return "Apps and websites that lost lines";
+  if (sites && id === "apps-added") return "Apps and websites that added lines";
+  return POPULAR[id].label;
+}
+
 const POPULAR_ORDER: PopularId[] = [
   "apps-removed",
   "apps-added",
@@ -2974,16 +3025,14 @@ const CHANGE_WINDOW: Record<
   },
 };
 
-/** "Not re-checked this crawl, last confirmed 20 Oct" for a line this
- *  crawl did not read again (crawler #370 `last_confirmed`, "YYYY-MM-DD");
- *  null for any other line, or a date it cannot read. */
-export function lastConfirmedNote(day: unknown): string | null {
-  if (typeof day !== "string") return null;
-  const m = day.trim().match(/^(\d{4})-(\d{2})-(\d{2})/);
-  if (!m) return null;
-  const month = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"][Number(m[2]) - 1];
-  if (!month) return null;
-  return `Not re-checked this crawl, last confirmed ${Number(m[3])} ${month}`;
+/** A line this crawl did not re-check, in the Excel's own words: its
+ *  `line_status` (crawler #370, the Line status cell, e.g. "not re-checked
+ *  this crawl, last confirmed 2026-10-20" or "unconfirmed this crawl:
+ *  <why>, last confirmed <date>"), first letter up, nothing else changed;
+ *  null for a line without one (re-checked, or a report before #370). */
+export function lineStatusNote(status: unknown): string | null {
+  const t = typeof status === "string" ? status.trim() : "";
+  return t ? t.charAt(0).toUpperCase() + t.slice(1) : null;
 }
 
 /**
@@ -3053,7 +3102,7 @@ export function SeatLineRow({
             : null;
   // Why it was removed, when the report says (2026-10-26).
   const removal = change === "removed" ? removalReasonText(line) : null;
-  const unchecked = lastConfirmedNote(line.last_confirmed);
+  const unchecked = lineStatusNote(line.line_status);
   // ON A PHONE THE PARTNERS GO UNDER THE LINE (David, 2026-10-27): at
   // the right margin they took the width and cut the line to "st...".
   // Below the sm breakpoint they are a line of their own right under the
@@ -3094,8 +3143,8 @@ export function SeatLineRow({
           {removal}
         </RowNote>
       )}
-      {/* NOT RE-CHECKED (crawler #370): a line this crawl did not read
-          again says when it was last confirmed. */}
+      {/* NOT RE-CHECKED OR UNCONFIRMED (crawler #370): a line this crawl
+          did not read again says so in the Excel's words. */}
       {unchecked && <RowNote data-line-unchecked>{unchecked}</RowNote>}
       {dates && (
         <RowNote data-line-dates title={dateTitle(line.date_source)}>
@@ -3515,7 +3564,10 @@ function MatchedAppsList({
   setPlatform,
   searchReset,
   known,
+  sites = false,
 }: {
+  /** The list counts the websites in (crawler #370): its words say so. */
+  sites?: boolean;
   token: string;
   lines: string[];
   caps: TrialCaps | null;
@@ -3690,7 +3742,9 @@ function MatchedAppsList({
     [allRows, pageFiltered, rowsChange],
   );
   // What the count and the pager call the rows they count.
-  const noun = tabNoun(rowsTab, "apps").many;
+  // "apps and websites" where the websites are counted in (crawler #370).
+  const nouns = appsNoun(tabNoun(rowsTab, "apps"), sites);
+  const noun = nouns.many;
 
   useOpenFirst(
     openFirst,
@@ -3813,7 +3867,7 @@ function MatchedAppsList({
                           total={total}
                           onPage={paging.onPage}
                           noun={noun}
-                          nounOne={tabNoun(rowsTab, "apps").one}
+                          nounOne={nouns.one}
                         />
                       )}
                     </span>
@@ -3862,7 +3916,11 @@ function MatchedAppsList({
             ) : pageFiltered ? (
               <EmptyResult query={query} noun="apps with changes" onPage />
             ) : (
-              <EmptyResult query={query} noun="apps" quiet={EMPTY_TAB.apps[rowsTab]} />
+              <EmptyResult
+                query={query}
+                noun={sites ? "apps or websites" : "apps"}
+                quiet={sites ? EMPTY_TAB.apps[rowsTab]?.replace(/^No apps /, "No apps or websites ") : EMPTY_TAB.apps[rowsTab]}
+              />
             )
           ) : (
             <div className="space-y-3">

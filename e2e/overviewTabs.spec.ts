@@ -650,7 +650,7 @@ test.describe("crawler #370's page parity fields: read when there, never require
   const base = () => mockMatchedDevelopers(1).rows[0];
   const seat = { ssp_domain: "madeupssp.com", publisher_id: "S-7001", relationship: "DIRECT", cert_id: "", found_in: "ads.txt" };
 
-  test("a line this crawl did not re-check says when it was last confirmed; others say nothing", async ({ page }) => {
+  test("a line this crawl did not re-check says so in the Excel's own words; others say nothing", async ({ page }) => {
     const errors = watchErrors(page);
     const row = {
       ...base(),
@@ -660,6 +660,10 @@ test.describe("crawler #370's page parity fields: read when there, never require
       matched_lines: [
         { ...seat, line_status: "not re-checked this crawl, last confirmed 2026-10-20", last_confirmed: "2026-10-20" },
         { ...seat, publisher_id: "S-7002" },
+        // Unconfirmed is never called "not re-checked".
+        { ...seat, publisher_id: "S-7003", line_status: "unconfirmed this crawl: the file answered 503, last confirmed 2026-10-19", last_confirmed: "2026-10-19" },
+        // Not re-checked with no date: its words, no date.
+        { ...seat, publisher_id: "S-7004", line_status: "not re-checked this crawl" },
       ],
       added_lines: [],
       removed_lines: [],
@@ -670,9 +674,40 @@ test.describe("crawler #370's page parity fields: read when there, never require
     );
     await rows(page).first().click();
     const items = page.locator("[data-seat-lines]").first().locator(":scope > li");
-    await expect(items).toHaveCount(2);
-    await expect(items.nth(0).locator("[data-line-unchecked]")).toHaveText("Not re-checked this crawl, last confirmed 20 Oct");
+    await expect(items).toHaveCount(4);
+    await expect(items.nth(0).locator("[data-line-unchecked]")).toHaveText("Not re-checked this crawl, last confirmed 2026-10-20");
     await expect(items.nth(1).locator("[data-line-unchecked]")).toHaveCount(0);
+    await expect(items.nth(2).locator("[data-line-unchecked]")).toHaveText(
+      "Unconfirmed this crawl: the file answered 503, last confirmed 2026-10-19",
+    );
+    await expect(items.nth(3).locator("[data-line-unchecked]")).toHaveText("Not re-checked this crawl");
+    expect(errors).toEqual([]);
+  });
+
+  test("a report that counts its websites in: apps and websites, its websites under the number", async ({ page }) => {
+    const errors = watchErrors(page);
+    await open(page, { ...FULL, websites: 13_907 });
+    const tile = page.getByRole("button", { name: /Matched apps and websites/ }).first();
+    await expect(tile).toBeVisible();
+    await expect(tile.locator("[data-tile-sub]")).toHaveText("13,907 websites");
+    await expect(page.locator('[data-popular="apps-added"]')).toContainText("Apps and websites that added lines");
+    await tile.click();
+    await expect(page.getByRole("heading", { name: "Matched apps and websites" })).toBeVisible();
+    await expect(page.locator("[data-list-count]").first()).toContainText("apps and websites");
+    expect(errors).toEqual([]);
+  });
+
+  test("a report without the flag: apps, as before", async ({ page }) => {
+    const errors = watchErrors(page);
+    await open(page, FULL);
+    const tile = page.getByRole("button", { name: /Matched apps/ }).first();
+    await expect(tile).toBeVisible();
+    await expect(tile).not.toContainText("websites");
+    await expect(tile.locator("[data-tile-sub]")).toHaveCount(0);
+    await expect(page.locator('[data-popular="apps-added"]')).toContainText("Apps that added lines");
+    await tile.click();
+    await expect(page.getByRole("heading", { name: "Matched apps", exact: true })).toBeVisible();
+    await expect(page.getByText(/websites/)).toHaveCount(0);
     expect(errors).toEqual([]);
   });
 

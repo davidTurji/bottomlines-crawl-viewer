@@ -165,6 +165,9 @@ export type Scenario = {
   /** Fields merged into the summary as served (crawler #370's
    *  `partial_line`, for one). */
   summaryExtra?: Record<string, unknown>;
+  /** A report whose apps list counts this many websites in (crawler
+   *  #370: `apps_include_websites`, `counters.matched.websites`). */
+  websites?: number | null;
   /** true: every matched row, app, publisher change and line event in the
    *  crawler's REAL field shapes, as a frozen report serves them on
    *  2026-10-27 (see ``realShape``): roles as "; "-joined strings, alerts
@@ -541,6 +544,7 @@ export async function installFakeApi(page: Page, scenario: Scenario = {}): Promi
     appChange: false,
     sellersReads: false,
     summaryExtra: {},
+    websites: null,
     realShapes: false,
     watchTabs: false,
     appPlatform: false,
@@ -662,7 +666,15 @@ export async function installFakeApi(page: Page, scenario: Scenario = {}): Promi
         const sum = s.sellersReads
           ? { ...first, sellers_json_reads: typeof s.sellersReads === "object" ? s.sellersReads : SELLERS_READS }
           : first;
-        const extra = { ...sum, ...s.summaryExtra };
+        const withSites =
+          s.websites == null
+            ? sum
+            : {
+                ...sum,
+                apps_include_websites: true,
+                counters: { ...sum.counters, matched: { ...sum.counters.matched, websites: s.websites } },
+              };
+        const extra = { ...withSites, ...s.summaryExtra };
         return reply(200, s.trial ? { ...extra, trial: TRIAL_CAPS } : extra);
       }
       case "export-info":
