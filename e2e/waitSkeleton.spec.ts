@@ -10,7 +10,7 @@ import { expect, test, type Page } from "@playwright/test";
 import { installFakeApi, TOKEN, type Scenario } from "./fakeApi";
 
 const BASE = `/crawl-report/${TOKEN}`;
-const FULL: Scenario = { matchType: true, appChange: true, inactive: "ok", watchTabs: true };
+const FULL: Scenario = { matchType: true, appChange: true, inactive: "ok", watchTabs: true, foundIn: true, appPlatform: true };
 
 function watchErrors(page: Page): string[] {
   const errors: string[] = [];
@@ -189,3 +189,24 @@ test("the publishers / apps tiles, and a watch tab", async ({ page }) => {
   await lands(page, rows(page));
   expect(errors).toEqual([]);
 });
+
+test("the Found in switch (publishers) and the Platform switch (apps)", async ({ page }) => {
+  const errors = watchErrors(page);
+  await open(page);
+  await lands(page, rows(page));
+  let release = await hold(page, (u) => u.pathname.endsWith("/matched-developers") && u.searchParams.has("found_in"));
+  await page.getByTestId("found-in").getByRole("button").nth(1).click();
+  await waits(page, rows(page));
+  release();
+  await lands(page, rows(page));
+
+  await page.getByRole("button", { name: /Matched apps/ }).first().click();
+  await lands(page, rows(page));
+  release = await hold(page, (u) => u.pathname.endsWith("/matched-apps") && u.searchParams.has("platform"));
+  await page.getByTestId("platform").getByRole("button").nth(1).click();
+  await waits(page, rows(page));
+  release();
+  await lands(page, rows(page));
+  expect(errors).toEqual([]);
+});
+

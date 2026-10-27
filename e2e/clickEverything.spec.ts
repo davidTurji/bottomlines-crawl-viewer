@@ -107,6 +107,8 @@ async function signIn(browser: Browser, vp: (typeof VIEWPORTS)[number]): Promise
       appChange: true,
       declaredHost: true,
       watchTabs: true,
+      appPlatform: true,
+      foundIn: true,
     });
     await page.goto(`/crawl-report/${TOKEN}`);
     await page.locator("input[autocomplete=username]").fill("reader", { timeout: 3_000 });
@@ -241,6 +243,16 @@ async function crawl(page: Page, vp: string): Promise<Run> {
           await openAll(view, OVERVIEW_ROWS, 3);
         }
         await step(`${view} / ${tab} / All`, () => click(pills.getByText("All", { exact: true })));
+      }
+      // Found in (publishers) and Platform (apps), when the list splits.
+      for (const id of ["found-in", "platform"]) {
+        const sw = page.getByTestId(id).getByRole("button");
+        const words = (await sw.allInnerTexts().catch(() => [] as string[])).map((l) => l.trim().split(/\s+/)[0]);
+        for (const word of words.slice(1)) {
+          await step(`${view} / ${tab} / ${id} ${word}`, () => click(sw.filter({ hasText: new RegExp(`^${word.replace(/[.]/g, "\\.")}`) })));
+          await openAll(view, OVERVIEW_ROWS, 2);
+        }
+        if (words.length) await tap(`${view} / ${tab} / ${id} All`, sw.filter({ hasText: /^All/ }));
       }
     }
     await step(`${view} / All matched again`, () => click(page.getByRole("tab", { name: "All matched", exact: true }).first()));

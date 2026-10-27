@@ -420,3 +420,73 @@ test.describe("the rows roll in", () => {
   });
 });
 
+test.describe("Found in (publishers) and Platform (apps)", () => {
+  test("today's API: neither switch, no such request, and no platform label on any publisher", async ({ page }) => {
+    const errors = watchErrors(page);
+    const calls = await open(page, { ...FULL, realShapes: true });
+    await expect(rows(page).first()).toBeVisible();
+    await expect(page.getByTestId("found-in")).toHaveCount(0);
+    await expect(page.getByTestId("platform")).toHaveCount(0);
+    // A publisher carries no platform label anywhere (the fixtures give
+    // them CTV, Mobile and Web).
+    await expect(page.locator("[data-platform]")).toHaveCount(0);
+    await expect(page.locator("main").getByText(/^(CTV|Mobile|Web)$/)).toHaveCount(0);
+    await toApps(page);
+    await expect(rows(page).first()).toBeVisible();
+    await expect(page.getByTestId("platform")).toHaveCount(0);
+    expect(calls.filter((c) => /[?&](found_in|platform)=/.test(c.query))).toEqual([]);
+    expect(errors).toEqual([]);
+  });
+
+  test("Found in on the publishers list: counts in the pills, the whole list filtered by the server, with every tab", async ({ page }) => {
+    const errors = watchErrors(page);
+    const calls = await open(page, { ...WATCH, foundIn: true });
+    const sw = page.getByTestId("found-in");
+    await expect(sw).toBeVisible();
+    const labels = await sw.getByRole("button").allInnerTexts();
+    expect(labels[0]).toMatch(/^All\s*[\d,]+$/);
+    for (const l of labels.slice(1)) expect(l).toMatch(/^(ads\.txt|app-ads\.txt|Both)\s*[1-9][\d,]*$/);
+    const pill = sw.getByRole("button").nth(1);
+    const word = (await pill.innerText()).trim().split(/\s+/)[0];
+    const asked = word === "ads.txt" ? "ads_txt" : word === "app-ads.txt" ? "app_ads_txt" : "both";
+    const n = Number((await pill.innerText()).replace(/[^\d]/g, "").replace(/^\D+/, "")) ;
+    await pill.click();
+    await expect(pill).toHaveAttribute("aria-pressed", "true");
+    await settled(page);
+    expect(calls.some((c) => c.path.endsWith("/matched-developers") && c.query.includes(`found_in=${asked}`))).toBe(true);
+    expect(n).toBeGreaterThan(0);
+    // With a change tab and a watch tab: the same filter rides along.
+    await tab(page, "Added").click();
+    await expect.poll(() => calls.some((c) => c.path.endsWith("/developer-events") && c.query.includes(`found_in=${asked}`))).toBe(true);
+    await tab(page, "Started watching").click();
+    await expect
+      .poll(() => calls.some((c) => c.path.endsWith("/matched-developers") && c.query.includes("change=started_watching") && c.query.includes(`found_in=${asked}`)))
+      .toBe(true);
+    // Apps have no Found in switch.
+    await toApps(page);
+    await expect(rows(page).first()).toBeVisible();
+    await expect(page.getByTestId("found-in")).toHaveCount(0);
+    expect(errors).toEqual([]);
+  });
+
+  test("Platform on the apps list only: counts in the pills, the whole list filtered by the server", async ({ page }) => {
+    const errors = watchErrors(page);
+    const calls = await open(page, { ...FULL, appPlatform: true });
+    await expect(rows(page).first()).toBeVisible();
+    await expect(page.getByTestId("platform")).toHaveCount(0);
+    await toApps(page);
+    const sw = page.getByTestId("platform");
+    await expect(sw).toBeVisible();
+    const labels = await sw.getByRole("button").allInnerTexts();
+    for (const l of labels.slice(1)) expect(l).toMatch(/^(CTV|Mobile|Web)\s*[1-9][\d,]*$/);
+    const mobile = sw.getByRole("button").filter({ hasText: /^Mobile/ });
+    await mobile.click();
+    await expect(mobile).toHaveAttribute("aria-pressed", "true");
+    await settled(page);
+    expect(calls.some((c) => c.path.endsWith("/matched-apps") && c.query.includes("platform=mobile"))).toBe(true);
+    await tab(page, "Added").click();
+    await expect.poll(() => calls.some((c) => c.path.endsWith("/matched-apps") && c.query.includes("change=added") && c.query.includes("platform=mobile"))).toBe(true);
+    expect(errors).toEqual([]);
+  });
+});
+

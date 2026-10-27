@@ -16,7 +16,6 @@ import { HoverHint } from "@/components/HoverHint";
 import {
   appSubject,
   IpdChip,
-  platformLabel,
   IpdInconclusiveNote,
   IpdWhere,
   MatchTypeControl,
@@ -46,6 +45,10 @@ import {
   type MatchTypeFields,
   type MatchTypeFilter,
   type ListChange,
+  type FoundInCounts,
+  type FoundInFilter,
+  type PlatformCounts,
+  type PlatformFilter,
   type MatchedMove,
   type MatchedMoves,
   type InactiveApp,
@@ -99,6 +102,7 @@ import {
   type ScopeTab,
 } from "@/lib/scopeRows";
 import { csvName, ExportListButton, type CsvCell, type CsvTable } from "@/components/ExportList";
+import { FoundInControl, PlatformControl } from "@/components/PlatformControl";
 import { useReportScope } from "@/lib/reportScope";
 import { PopularBar, type PopularChoice } from "@/components/PopularBar";
 import {
@@ -159,6 +163,11 @@ export default function CrawlReport() {
   // but "all" on a report without match types: the pills that change it
   // only show when the list says how it splits.
   const [matchType, setMatchType] = useState<MatchTypeFilter>("all");
+  // Found in (publishers) and Platform (apps), the page's like match type,
+  // so they survive the switches; only ever set while the list says how it
+  // splits by them.
+  const [foundIn, setFoundIn] = useState<FoundInFilter>("all");
+  const [platform, setPlatform] = useState<PlatformFilter>("all");
   /** Shows a list; the tab stays (owner rule: tabs survive the publishers
    *  / apps switch), unless a tab is asked for. */
   const showView = (view: ListView, tab?: DrillTab) => {
@@ -675,6 +684,8 @@ export default function CrawlReport() {
             openFirst={openFirst}
             matchType={matchType}
             setMatchType={setMatchType}
+            foundIn={foundIn}
+            setFoundIn={setFoundIn}
           />
         ) : (
           <MatchedAppsList
@@ -687,6 +698,8 @@ export default function CrawlReport() {
             openFirst={openFirst}
             matchType={matchType}
             setMatchType={setMatchType}
+            platform={platform}
+            setPlatform={setPlatform}
           />
         )}
       </div>
@@ -1594,6 +1607,15 @@ function ScopeTriggers({ counts, off }: { counts: ChangeCounts | null; off: bool
   );
 }
 
+/** A list's split by a switch, only from an API that filtered the whole
+ *  list by it (it echoes the choice) and counted it; else null: no switch,
+ *  and never a page filtered on its own. */
+function splitOf<C>(counts: C | null | undefined, echoed: string | null | undefined, asked: string): C | null {
+  if (!counts) return null;
+  if (asked !== "all" && echoed !== asked) return null;
+  return counts;
+}
+
 /** A matched publisher as the list renders it; on a watch tab it carries
  *  the tab (its lines of the kind are read when the row opens). */
 function developerRow(d: MatchedDeveloper, watch?: { tab: ScopeTab; filter: string[] }): Row {
@@ -1814,7 +1836,6 @@ function tabLines(
 const PUBLISHER_CSV = [
   "publisher_domain",
   "publisher_name",
-  "platform",
   "match_type",
   "inventory_partner",
   "lines_this_week",
@@ -1836,7 +1857,6 @@ function publisherCells(r: Row, tab: DrillTab): CsvCell[] {
   return [
     r.developer_domain,
     r.developer_name,
-    platformLabel(r.developer_platform) ?? "",
     r.match_type ?? "",
     r.match_type === "ipd" ? (r.ipd_partner ?? "") : "",
     r.current,
@@ -2075,6 +2095,8 @@ function DrilldownList({
   openFirst,
   matchType,
   setMatchType,
+  foundIn,
+  setFoundIn,
 }: {
   token: string;
   lines: string[];
@@ -2090,8 +2112,13 @@ function DrilldownList({
   /** All / Own / IPD, owned by the page (survives the view switch). */
   matchType: MatchTypeFilter;
   setMatchType: (next: MatchTypeFilter) => void;
+  /** All / ads.txt / app-ads.txt / Both, the page's too. */
+  foundIn: FoundInFilter;
+  setFoundIn: (next: FoundInFilter) => void;
 }) {
   const [rows, setRows] = useState<Row[]>([]);
+  // The list's split by file (crawler PR): null, no Found in switch.
+  const [foundInCounts, setFoundInCounts] = useState<FoundInCounts | null>(null);
   // THE WATCH TABS (crawler #361): the list's change counts, from the last
   // answer that carried them; and whether the API ever answered a watch
   // filter unfiltered (an API without it: those tabs are not offered).
@@ -2127,7 +2154,7 @@ function DrilldownList({
   // empty list for a term that matches.
   useEffect(() => {
     setPage(1);
-  }, [tab, query, lines, matchType]);
+  }, [tab, query, lines, matchType, foundIn]);
 
   // ONE WAY TO WAIT (David, 2026-10-27, replacing the dimmed swap of
   // 2026-10-26). Whenever the list waits for new rows (a new tab, line
@@ -2150,8 +2177,9 @@ function DrilldownList({
     const load = (pg: number) =>
       event === "all" || isScopeTab(event)
         ? api
-            .matchedDevelopers(token, pg, query, lines, matchType, PAGE_SIZE, isScopeTab(event) ? WATCH_CHANGE[event] : undefined)
+            .matchedDevelopers(token, pg, query, lines, matchType, PAGE_SIZE, isScopeTab(event) ? WATCH_CHANGE[event] : undefined, foundIn)
             .then((r) => ({
+            foundInCounts: splitOf(r.found_in_counts, r.found_in, foundIn),
             // A watch filter the API did not echo was not applied: the
             // tab is not offered, and these rows are never shown under it.
             unfiltered: isScopeTab(event) && r.change !== WATCH_CHANGE[event],
@@ -2163,12 +2191,13 @@ function DrilldownList({
             typeCounts: r.match_type_counts ?? null,
             inconclusive: r.ipd_inconclusive ?? null,
           }))
-        : api.developerEvents(token, event, pg, query, lines, matchType).then(async (r) => ({
+        : api.developerEvents(token, event, pg, query, lines, matchType, PAGE_SIZE, foundIn).then(async (r) => ({
             // THE CERT, OLD TO NEW (David, 2026-10-27): the Changed tab's
             // lines say which cert they had and which they have now.
             certs: event === "changed" ? await certChanges(token, lines).catch(() => null) : null,
             r,
           })).then(({ certs, r }) => ({
+            foundInCounts: splitOf(r.found_in_counts, r.found_in, foundIn),
             unfiltered: false,
             changeCounts: r.change_counts ?? null,
             rows: r.rows.map((d) => eventRow(d, certs)),
@@ -2179,7 +2208,7 @@ function DrilldownList({
             inconclusive: r.ipd_inconclusive ?? null,
           }));
     type Loaded = Awaited<ReturnType<typeof load>>;
-    const keyFor = (pg: number) => [tab, pg, query, lines.join(","), matchType].join("|");
+    const keyFor = (pg: number) => [tab, pg, query, lines.join(","), matchType, foundIn].join("|");
     const apply = (data: Loaded) => {
       if (data.changeCounts) setChangeCounts(data.changeCounts);
       if (data.unfiltered) {
@@ -2191,6 +2220,8 @@ function DrilldownList({
       // A list that does not say how it splits has no pills, so it must
       // not stay filtered by them either: back to every match.
       if (!data.typeCounts && matchType !== "all") setMatchType("all");
+      if (!data.foundInCounts && foundIn !== "all") setFoundIn("all");
+      setFoundInCounts(data.foundInCounts);
       setRows(data.rows);
       setTypeCounts(data.typeCounts);
       setInconclusive(data.inconclusive);
@@ -2231,7 +2262,7 @@ function DrilldownList({
     return () => {
       cancelled = true;
     };
-  }, [token, tab, page, query, lines, matchType, setMatchType, setTab, cache]);
+  }, [token, tab, page, query, lines, matchType, setMatchType, foundIn, setFoundIn, setTab, cache]);
 
   // A watch tab whose count says it is empty (or an API without the
   // filter) is not offered: a page left on it reads as All matched.
@@ -2250,11 +2281,12 @@ function DrilldownList({
   const exportList = async (progress: Progress, signal: AbortSignal): Promise<CsvTable> => {
     const t = rowsTab;
     const mt = rowsMatchType;
+    const fi: FoundInFilter = foundInCounts ? foundIn : "all";
     let all: Row[] = [];
     if (t === "all" || isScopeTab(t))
       all = (
         await readAllPages(
-          (pg) => api.matchedDevelopers(token, pg, query, lines, mt, 100, isScopeTab(t) ? WATCH_CHANGE[t] : undefined),
+          (pg) => api.matchedDevelopers(token, pg, query, lines, mt, 100, isScopeTab(t) ? WATCH_CHANGE[t] : undefined, fi),
           100,
           progress,
           signal,
@@ -2262,12 +2294,18 @@ function DrilldownList({
       ).map((d) => developerRow(d, isScopeTab(t) ? { tab: t, filter: lines } : undefined));
     else if (t !== "inactive") {
       const certs = t === "changed" ? await certChanges(token, lines).catch(() => null) : null;
-      all = (await readAllPages((pg) => api.developerEvents(token, t, pg, query, lines, mt, 200), 200, progress, signal)).map(
+      all = (await readAllPages((pg) => api.developerEvents(token, t, pg, query, lines, mt, 200, fi), 200, progress, signal)).map(
         (d) => eventRow(d, certs),
       );
     }
     return {
-      filename: csvName("publishers", TAB_SLUG[t], mt !== "all" ? mt : null, query ? `search ${query}` : null),
+      filename: csvName(
+        "publishers",
+        TAB_SLUG[t],
+        fi !== "all" ? `found in ${fi.replace(/_/g, " ")}` : null,
+        mt !== "all" ? mt : null,
+        query ? `search ${query}` : null,
+      ),
       header: PUBLISHER_CSV,
       rows: all.map((r) => publisherCells(r, t)),
     };
@@ -2295,10 +2333,12 @@ function DrilldownList({
             </>
           }
           right={
-            // Not on Inactive: those lists are not split by match type.
-            tab !== "inactive" &&
-            typeCounts && (
-              <MatchTypeControl value={matchType} onChange={setMatchType} counts={typeCounts} />
+            // Not on Inactive: those lists are not split by these.
+            tab !== "inactive" && (typeCounts || foundInCounts) && (
+              <span className="flex flex-wrap items-center justify-end gap-x-4 gap-y-2">
+                {foundInCounts && <FoundInControl value={foundIn} onChange={setFoundIn} counts={foundInCounts} />}
+                {typeCounts && <MatchTypeControl value={matchType} onChange={setMatchType} counts={typeCounts} />}
+              </span>
             )
           }
         />
@@ -2578,16 +2618,10 @@ function PublisherCard({
                 row.developer_name || "Unnamed publisher"
               )}
             </span>
-            {/* IPD first, then the platform (David, 2026-10-27). The platform
-                shows only as CTV, Mobile or Web: a stored value the page cannot
-                name (the crawler's internal "ipd_partner" on partner rows the
-                IPD chase added) shows no badge at all, never the raw word. */}
+            {/* The IPD badge only: a publisher carries no platform label
+                anywhere in the viewer (David, 2026-10-27); an app says its
+                store, and its list splits by platform. */}
             {!inactive && <IpdChip row={row} others={otherPartners(row, row.matched_lines)} />}
-            {platformLabel(row.developer_platform) && (
-              <span data-platform className="flex-shrink-0 text-[11px] text-slate-400">
-                {platformLabel(row.developer_platform)}
-              </span>
-            )}
             {inactive && <InactiveChip />}
           </div>
           {row.developer_domain && row.developer_name && (
@@ -3217,6 +3251,8 @@ function MatchedAppsList({
   openFirst,
   matchType,
   setMatchType,
+  platform,
+  setPlatform,
 }: {
   token: string;
   lines: string[];
@@ -3231,8 +3267,13 @@ function MatchedAppsList({
   /** All / Own / IPD, owned by the page (survives the view switch). */
   matchType: MatchTypeFilter;
   setMatchType: (next: MatchTypeFilter) => void;
+  /** All / CTV / Mobile / Web, the page's too (apps only). */
+  platform: PlatformFilter;
+  setPlatform: (next: PlatformFilter) => void;
 }) {
   const [allRows, setAllRows] = useState<AppRow[]>([]);
+  // The list's split by platform (crawler PR): null, no Platform switch.
+  const [platformCounts, setPlatformCounts] = useState<PlatformCounts | null>(null);
   // The watch tabs (crawler #361), as on the publishers list.
   const [changeCounts, setChangeCounts] = useState<ChangeCounts | null>(null);
   const [watchOff, setWatchOff] = useState(false);
@@ -3265,7 +3306,7 @@ function MatchedAppsList({
   // starts at its first page.
   useEffect(() => {
     setPage(1);
-  }, [tab, query, lines, matchType]);
+  }, [tab, query, lines, matchType, platform]);
 
   // Same rule as the publishers list above: whenever the list waits for
   // rows it shows the skeleton. Under Inactive the rows stay as they were
@@ -3278,12 +3319,12 @@ function MatchedAppsList({
     // A WATCH TAB (crawler #361): the server's filter, one list like any
     // other; each app carries the tab, its publisher's lines read on open.
     const load = (pg: number): Promise<MatchedAppsPage & { rows: AppRow[] }> =>
-      api.matchedApps(token, pg, query, lines, matchType, change).then((r) =>
+      api.matchedApps(token, pg, query, lines, matchType, change, PAGE_SIZE, platform).then((r) =>
         isScopeTab(tab) ? { ...r, rows: (r.rows ?? []).map((a) => ({ ...a, scope: { tab, filter: lines, lines: watchLinesOf(a, tab) } })) } : r,
       );
     type Loaded = Awaited<ReturnType<typeof load>>;
     const keyFor = (pg: number) =>
-      [isScopeTab(tab) ? tab : change ?? "all", pg, query, lines.join(","), matchType].join("|");
+      [isScopeTab(tab) ? tab : change ?? "all", pg, query, lines.join(","), matchType, platform].join("|");
     const apply = (r: Loaded) => {
       if (r.change_counts) setChangeCounts(r.change_counts);
       if (isScopeTab(tab) && r.change !== change) {
@@ -3295,6 +3336,9 @@ function MatchedAppsList({
       }
       // No split said, no pills: and no filter left on from them.
       if (!r.match_type_counts && matchType !== "all") setMatchType("all");
+      const split = splitOf(r.platform_counts, r.platform, platform);
+      if (!split && platform !== "all") setPlatform("all");
+      setPlatformCounts(split);
       setRowsTab(tab);
       setServerFiltered(!!change && r.change === change);
       setAllRows(r.rows ?? []);
@@ -3352,7 +3396,7 @@ function MatchedAppsList({
     return () => {
       cancelled = true;
     };
-  }, [token, tab, page, query, lines, matchType, setMatchType, setTab, appCache]);
+  }, [token, tab, page, query, lines, matchType, setMatchType, platform, setPlatform, setTab, appCache]);
 
   // A watch tab its count says is empty (or an API without the filter) is
   // not offered: a page left on it reads as All matched.
@@ -3389,13 +3433,14 @@ function MatchedAppsList({
   const exportList = async (progress: Progress, signal: AbortSignal): Promise<CsvTable> => {
     const t = rowsTab;
     const mt = rowsMatchType;
+    const pf: PlatformFilter = platformCounts ? platform : "all";
     let all: AppRow[] = [];
     if (t !== "inactive") {
       const change = appChangeOf(t);
       let echo: string | null | undefined;
       const read = await readAllPages(
         async (pg) => {
-          const r = await api.matchedApps(token, pg, query, lines, mt, change, READ_PAGE);
+          const r = await api.matchedApps(token, pg, query, lines, mt, change, READ_PAGE, pf);
           if (pg === 1) echo = r.change;
           return r;
         },
@@ -3409,7 +3454,7 @@ function MatchedAppsList({
       );
     }
     return {
-      filename: csvName("apps", TAB_SLUG[t], mt !== "all" ? mt : null, query ? `search ${query}` : null),
+      filename: csvName("apps", TAB_SLUG[t], pf !== "all" ? pf : null, mt !== "all" ? mt : null, query ? `search ${query}` : null),
       header: APP_CSV,
       rows: all.map((a) => appCells(a, t)),
     };
@@ -3436,16 +3481,20 @@ function MatchedAppsList({
             </>
           }
           right={
-            tab !== "inactive" &&
-            typeCounts && (
-              <MatchTypeControl
-                value={matchType}
-                onChange={setMatchType}
-                // The server's split is known to count All matched only:
-                // no number in the change tabs' tooltips rather than a
-                // wrong one.
-                counts={tab === "all" || isScopeTab(tab) ? typeCounts : null}
-              />
+            tab !== "inactive" && (typeCounts || platformCounts) && (
+              <span className="flex flex-wrap items-center justify-end gap-x-4 gap-y-2">
+                {platformCounts && <PlatformControl value={platform} onChange={setPlatform} counts={platformCounts} />}
+                {typeCounts && (
+                  <MatchTypeControl
+                    value={matchType}
+                    onChange={setMatchType}
+                    // The server's split is known to count All matched only:
+                    // no number in the change tabs' tooltips rather than a
+                    // wrong one.
+                    counts={tab === "all" || isScopeTab(tab) ? typeCounts : null}
+                  />
+                )}
+              </span>
             )
           }
         />

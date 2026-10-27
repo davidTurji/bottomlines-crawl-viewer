@@ -178,7 +178,56 @@ export type Scenario = {
    *  publisher says why. Default false: today's API, none of it (the watch
    *  tabs are not offered). */
   watchTabs?: boolean;
+  /** true: a crawler with the Platform filter on the matched APPS list
+   *  (2026-10-27): ``?platform=ctv|mobile|web`` filters the whole list
+   *  (an app's platform from its store), echoed, with ``platform_counts``.
+   *  Default false: today's API (no Platform switch). */
+  appPlatform?: boolean;
+  /** true: a crawler with the Found in filter on the matched PUBLISHERS
+   *  lists (2026-10-27): ``?found_in=ads_txt|app_ads_txt|both`` on
+   *  matched-developers and developer-events, echoed, with
+   *  ``found_in_counts``. Default false: today's API (no switch). */
+  foundIn?: boolean;
 };
+
+/** Every row of a paged mock list. */
+function readAll<T>(readPage: (page: number) => { rows: T[]; total: number }): T[] {
+  const all: T[] = [];
+  for (let p = 1; p < 10_000; p++) {
+    const r = readPage(p);
+    all.push(...r.rows);
+    if (!r.rows.length || all.length >= r.total) break;
+  }
+  return all;
+}
+
+/** An app's platform, as the platform crawler names it: from its store. */
+export function fakeAppPlatform(a: { store?: string | null }): "ctv" | "mobile" | "web" | null {
+  const store = String(a.store ?? "").toLowerCase();
+  if (["ios", "android", "apple", "google"].includes(store)) return "mobile";
+  if (["roku", "samsung", "vizio", "firetv", "amazon", "lg", "tvos", "ctv"].includes(store)) return "ctv";
+  if (store === "web") return "web";
+  return null;
+}
+
+/** A publisher's files, as the Found in crawler names them: which of its
+ *  files carry the row's seat lines. */
+export function fakeFoundIn(row: Record<string, unknown>): "ads_txt" | "app_ads_txt" | "both" | null {
+  const lists = ["matched_lines", "added_lines", "removed_lines", "cert_changed_lines"].flatMap((k) =>
+    Array.isArray(row[k]) ? (row[k] as { found_in?: string }[]) : [],
+  );
+  const files = new Set(lists.map((l) => String(l.found_in ?? "").toLowerCase()));
+  const ads = files.has("ads.txt") || files.has("both");
+  const app = files.has("app-ads.txt") || files.has("both");
+  return ads && app ? "both" : ads ? "ads_txt" : app ? "app_ads_txt" : null;
+}
+
+/** Counts of a full list per choice, and the list kept by the asked one. */
+function split<T>(all: T[], of: (r: T) => string | null, keys: string[], asked: string | null) {
+  const counts: Record<string, number> = { all: all.length };
+  for (const k of keys) counts[k] = all.filter((r) => of(r) === k).length;
+  return { counts, kept: asked ? all.filter((r) => of(r) === asked) : all };
+}
 
 /** Which rows of a full list each watch filter keeps (by position, so a
  *  test can count them): the crawler's own rule is its line events. */
@@ -187,26 +236,6 @@ const WATCH_RULE: Record<string, (i: number) => boolean> = {
   stopped_watching: (i) => i % 7 === 1,
   unconfirmed: (i) => i % 11 === 2,
 };
-
-/** The watch counts of a full list, and the asked filter's page of it. */
-function watchList<T>(
-  readPage: (page: number) => { rows: T[]; total: number },
-  change: string | null,
-  page: number,
-  pageSize: number,
-) {
-  const all: T[] = [];
-  for (let p = 1; p < 10_000; p++) {
-    const r = readPage(p);
-    all.push(...r.rows);
-    if (!r.rows.length || all.length >= r.total) break;
-  }
-  const counts = Object.fromEntries(Object.entries(WATCH_RULE).map(([k, f]) => [k, all.filter((_, i) => f(i)).length]));
-  const rule = change ? WATCH_RULE[change] : undefined;
-  if (!rule) return { counts, kept: null };
-  const kept = all.filter((_, i) => rule(i));
-  return { counts, kept: { rows: kept.slice((page - 1) * pageSize, page * pageSize), total: kept.length, change } };
-}
 
 /** A publisher's watch line events of one kind, from its own lines. */
 function watchEventsFor(developerId: number, event: string, declared: boolean): LineEvent[] {
@@ -502,6 +531,8 @@ export async function installFakeApi(page: Page, scenario: Scenario = {}): Promi
     sellersReads: false,
     realShapes: false,
     watchTabs: false,
+    appPlatform: false,
+    foundIn: false,
     ...scenario,
   };
   const hostApp = s.declaredHost ? declaredHostApp() : null;
@@ -626,7 +657,12 @@ export async function installFakeApi(page: Page, scenario: Scenario = {}): Promi
         return reply(200, { format: "xlsx", line_export: true, excel_row_limit: 1_048_576 });
       case "developer-events": {
         const event = (q.get("event") ?? "added") as "added" | "removed" | "changed";
-        const r = mockDeveloperEvents(event, page_, lines, matchType);
+        let r = mockDeveloperEvents(event, page_, lines, matchType);
+        if (s.foundIn) {
+          const asked = q.get("found_in");
+          const f = split(readAll((p) => mockDeveloperEvents(event, p, lines, matchType)), (d) => fakeFoundIn(d as unknown as Record<string, unknown>), ["ads_txt", "app_ads_txt", "both"], asked);
+          r = { ...r, rows: f.kept.slice((page_ - 1) * 25, page_ * 25), total: f.kept.length, found_in_counts: f.counts, found_in: asked ?? "all" } as typeof r;
+        }
         r.rows = r.rows.map(eventRow).map((d) => (s.removalReasons ? withRemovalReasons(d) : d));
         const ev = s.realShapes ? realList(r) : r;
         return reply(200, s.trial ? { ...ev, page: 1, ...cut(ev.rows, TRIAL_CAPS.publishers, ev.total) } : ev);
@@ -659,9 +695,25 @@ export async function installFakeApi(page: Page, scenario: Scenario = {}): Promi
       }
       case "matched-developers": {
         let r = mockMatchedDevelopers(page_, q.get("q") ?? "", lines, matchType);
-        if (s.watchTabs) {
-          const w = watchList((p) => mockMatchedDevelopers(p, q.get("q") ?? "", lines, matchType), q.get("change"), page_, 25);
-          r = { ...r, ...(w.kept ?? {}), change_counts: w.counts } as typeof r;
+        if (s.watchTabs || s.foundIn) {
+          let all = readAll((p) => mockMatchedDevelopers(p, q.get("q") ?? "", lines, matchType));
+          const extra: Record<string, unknown> = {};
+          if (s.watchTabs) {
+            extra.change_counts = Object.fromEntries(Object.entries(WATCH_RULE).map(([k, f]) => [k, all.filter((_, i) => f(i)).length]));
+            const ch = q.get("change");
+            if (ch && WATCH_RULE[ch]) {
+              all = all.filter((_, i) => WATCH_RULE[ch](i));
+              extra.change = ch;
+            }
+          }
+          if (s.foundIn) {
+            const asked = q.get("found_in");
+            const f = split(all, (d) => fakeFoundIn(d as unknown as Record<string, unknown>), ["ads_txt", "app_ads_txt", "both"], asked);
+            all = f.kept;
+            extra.found_in_counts = f.counts;
+            extra.found_in = asked ?? "all";
+          }
+          r = { ...r, ...extra, rows: all.slice((page_ - 1) * 25, page_ * 25), total: all.length } as typeof r;
         }
         r.rows = r.rows
           .map((d) =>
@@ -680,9 +732,24 @@ export async function installFakeApi(page: Page, scenario: Scenario = {}): Promi
         const watch = s.watchTabs && asked !== null && asked in WATCH_RULE;
         const change = s.appChange && !watch ? (asked as AppChange | null) : null;
         let r = mockMatchedApps(page_, q.get("q") ?? "", lines, matchType, change);
-        if (s.watchTabs) {
-          const w = watchList((p) => mockMatchedApps(p, q.get("q") ?? "", lines, matchType, null), watch ? asked : null, page_, 25);
-          r = { ...r, ...(w.kept ?? {}), change_counts: w.counts } as typeof r;
+        if (s.watchTabs || s.appPlatform) {
+          let all = readAll((p) => mockMatchedApps(p, q.get("q") ?? "", lines, matchType, change));
+          const extra: Record<string, unknown> = {};
+          if (s.watchTabs) {
+            extra.change_counts = Object.fromEntries(Object.entries(WATCH_RULE).map(([k, f]) => [k, all.filter((_, i) => f(i)).length]));
+            if (watch && asked) {
+              all = all.filter((_, i) => WATCH_RULE[asked](i));
+              extra.change = asked;
+            }
+          }
+          if (s.appPlatform) {
+            const pf = q.get("platform");
+            const f = split(all, (a) => fakeAppPlatform(a), ["ctv", "mobile", "web"], pf);
+            all = f.kept;
+            extra.platform_counts = f.counts;
+            extra.platform = pf ?? "all";
+          }
+          r = { ...r, ...extra, rows: all.slice((page_ - 1) * 25, page_ * 25), total: all.length } as typeof r;
         }
         r.rows = r.rows
           .map((a) => (hostApp && appKey(a) === appKey(hostApp) ? appAtHost(appRow(a)) : appRow(a)))

@@ -328,6 +328,8 @@ export const api = {
     matchType: MatchTypeFilter = "all",
     /** Rows per page; the lists ask for PAGE_SIZE, an export for more. */
     pageSize: number = PAGE_SIZE,
+    /** The Found in switch (an API without it ignores it). */
+    foundIn: FoundInFilter = "all",
   ) => {
     if (MOCK) {
       const { mockDeveloperEvents } = await import("./mockData");
@@ -342,7 +344,7 @@ export const api = {
     }
     return req<DeveloperEventsPage>(
       "GET",
-      `/v1/viewer/${token}/developer-events?event=${event}&page=${page}&page_size=${pageSize}${q ? `&q=${encodeURIComponent(q)}` : ""}${linesQuery(lines)}${matchTypeQuery(matchType)}`,
+      `/v1/viewer/${token}/developer-events?event=${event}&page=${page}&page_size=${pageSize}${q ? `&q=${encodeURIComponent(q)}` : ""}${linesQuery(lines)}${matchTypeQuery(matchType)}${foundIn !== "all" ? `&found_in=${foundIn}` : ""}`,
     );
   },
   changeGroups: async (
@@ -467,6 +469,8 @@ export const api = {
     /** A watch tab's filter (crawler #361); an API without it ignores it
      *  and echoes nothing, and the tab is then not offered. */
     change?: WatchChange,
+    /** The Found in switch (an API without it ignores it). */
+    foundIn: FoundInFilter = "all",
   ) => {
     if (MOCK) {
       const { mockMatchedDevelopers } = await import("./mockData");
@@ -481,7 +485,7 @@ export const api = {
     }
     return req<MatchedDevelopersPage>(
       "GET",
-      `/v1/viewer/${token}/matched-developers?page=${page}&page_size=${pageSize}${q ? `&q=${encodeURIComponent(q)}` : ""}${linesQuery(lines)}${matchTypeQuery(matchType)}${change ? `&change=${change}` : ""}`,
+      `/v1/viewer/${token}/matched-developers?page=${page}&page_size=${pageSize}${q ? `&q=${encodeURIComponent(q)}` : ""}${linesQuery(lines)}${matchTypeQuery(matchType)}${change ? `&change=${change}` : ""}${foundIn !== "all" ? `&found_in=${foundIn}` : ""}`,
     );
   },
   matchedBundles: async (token: string, page = 1, q = "") => {
@@ -524,6 +528,8 @@ export const api = {
     matchType: MatchTypeFilter = "all",
     change?: AppChange,
     pageSize: number = PAGE_SIZE,
+    /** The Platform switch (an API without it ignores it). */
+    platform: PlatformFilter = "all",
   ) => {
     if (MOCK) {
       const { mockMatchedApps } = await import("./mockData");
@@ -534,7 +540,7 @@ export const api = {
     }
     return req<MatchedAppsPage>(
       "GET",
-      `/v1/viewer/${token}/matched-apps?page=${page}&page_size=${pageSize}${q ? `&q=${encodeURIComponent(q)}` : ""}${linesQuery(lines)}${matchTypeQuery(matchType)}${change ? `&change=${change}` : ""}`,
+      `/v1/viewer/${token}/matched-apps?page=${page}&page_size=${pageSize}${q ? `&q=${encodeURIComponent(q)}` : ""}${linesQuery(lines)}${matchTypeQuery(matchType)}${change ? `&change=${change}` : ""}${platform !== "all" ? `&platform=${platform}` : ""}`,
     );
   },
   /**
@@ -1438,6 +1444,12 @@ export type MatchTypeMeta = {
    *  ``unconfirmed`` ...). Absent on an API from before it: then those tabs
    *  are not offered at all. */
   change_counts?: Partial<Record<ListChange, number>> | null;
+  /** FOUND IN (crawler PR, 2026-10-27): on the publishers' lists, the
+   *  ``found_in`` filter the server applied to the whole list, echoed, and
+   *  the split counted before it. Absent on an API from before it: then no
+   *  Found in switch, and nothing filtered here. */
+  found_in?: FoundInFilter | null;
+  found_in_counts?: FoundInCounts | null;
 };
 
 /** The watch filters of crawler #361, on matched-developers and
@@ -1855,6 +1867,16 @@ export type MatchedApp = MatchTypeFields & {
 /** The change filter of the matched apps list (query param ``change``). */
 export type AppChange = "added" | "removed" | "changed" | WatchChange;
 
+/** All / CTV / Mobile / Web: the matched APPS list's Platform switch (an
+ *  app's platform comes from its store). */
+export type PlatformFilter = "all" | "ctv" | "mobile" | "web";
+export type PlatformCounts = { all: number; ctv: number; mobile: number; web: number; unknown?: number };
+
+/** All / ads.txt / app-ads.txt / Both: the matched PUBLISHERS list's
+ *  "Found in" switch (which file of theirs carries the seat lines). */
+export type FoundInFilter = "all" | "ads_txt" | "app_ads_txt" | "both";
+export type FoundInCounts = { all: number; ads_txt: number; app_ads_txt: number; both: number };
+
 export type MatchedAppsPage = MatchTypeMeta & {
   /** Present on a trial report: this list was cut (see ``TrialSlice``). */
   trial?: TrialSlice | null;
@@ -1864,6 +1886,12 @@ export type MatchedAppsPage = MatchTypeMeta & {
    * the rows and ``total`` are the unfiltered list's.
    */
   change?: AppChange | null;
+  /** PLATFORM (crawler PR, 2026-10-27): the ``platform`` filter the server
+   *  applied to the whole list, echoed, and the list's split by platform
+   *  counted before it. Both absent on an API from before it: then no
+   *  Platform switch, and nothing filtered here. */
+  platform?: PlatformFilter | null;
+  platform_counts?: PlatformCounts | null;
   page: number;
   page_size: number;
   total: number;
