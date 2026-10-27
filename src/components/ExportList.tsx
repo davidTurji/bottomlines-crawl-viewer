@@ -65,7 +65,12 @@ export type ExportDone = string | { name: string; note?: string };
 export function ExportListButton({
   run,
   className,
+  variant = "button",
 }: {
+  /** "link" (David, 2026-10-27): a quiet "Download list" text link right
+   *  after the list's count, in its tone, with a small download icon; it
+   *  shows its progress in place. "button": the rounded button. */
+  variant?: "button" | "link";
   /** Reads the whole list into the sink, page by page, reporting its pages
    *  as it goes; answers the file's name. */
   run: (sink: CsvSink, onProgress: (done: number, of: number) => void, signal: AbortSignal) => Promise<ExportDone>;
@@ -114,23 +119,42 @@ export function ExportListButton({
     }
   };
 
+  const progressText =
+    progress && progress.of > 0
+      ? `${progress.done.toLocaleString()} of ${progress.of.toLocaleString()}`
+      : null;
   return (
     <span className={cn("inline-flex flex-shrink-0 items-center gap-2", className)}>
-      <button
-        type="button"
-        data-export-list
-        onClick={go}
-        disabled={busy}
-        title="A CSV of this list as it stands: its tab, filters and search, every page"
-        className="inline-flex h-8 flex-shrink-0 items-center gap-1.5 whitespace-nowrap rounded-full border border-border bg-white px-3 text-[12px] font-medium text-slate-600 shadow-sm transition-colors hover:bg-muted disabled:cursor-progress"
-      >
-        <Download aria-hidden className="h-3.5 w-3.5" />
-        {busy
-          ? progress && progress.of > 1
-            ? `Preparing ${progress.done.toLocaleString()} of ${progress.of.toLocaleString()}`
-            : "Preparing…"
-          : "Export this list"}
-      </button>
+      {variant === "link" ? (
+        <button
+          type="button"
+          data-export-list
+          onClick={go}
+          disabled={busy}
+          aria-busy={busy || undefined}
+          title="A CSV of this list as it stands: its tab, filters and search, every page"
+          className="inline-flex items-center gap-1 whitespace-nowrap rounded-sm text-xs text-slate-500 underline-offset-2 transition-colors hover:text-primary hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50 disabled:cursor-progress disabled:hover:no-underline"
+        >
+          <Download aria-hidden className="h-3 w-3" />
+          {busy ? (progressText ? `Downloading ${progressText}\u2026` : "Downloading\u2026") : "Download list"}
+        </button>
+      ) : (
+        <button
+          type="button"
+          data-export-list
+          onClick={go}
+          disabled={busy}
+          title="A CSV of this list as it stands: its tab, filters and search, every page"
+          className="inline-flex h-8 flex-shrink-0 items-center gap-1.5 whitespace-nowrap rounded-full border border-border bg-white px-3 text-[12px] font-medium text-slate-600 shadow-sm transition-colors hover:bg-muted disabled:cursor-progress"
+        >
+          <Download aria-hidden className="h-3.5 w-3.5" />
+          {busy ? (progressText ? `Preparing ${progressText}` : "Preparing\u2026") : "Export this list"}
+        </button>
+      )}
+      {/* The progress, said to a screen reader as it moves. */}
+      <span className="sr-only" aria-live="polite">
+        {busy ? (progressText ? `Downloading ${progressText}` : "Downloading") : ""}
+      </span>
       {error && (
         <span role="alert" className="text-[11px] text-critical">
           {error}

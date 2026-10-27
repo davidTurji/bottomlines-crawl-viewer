@@ -11,7 +11,7 @@ import {
   skeletonRowCount,
 } from "@/components/Skeleton";
 import { expectedRows, knownKey, type Landed } from "@/lib/expectedRows";
-import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { BEAT_PAUSE_MS, CountUp, landsAfterMs, payoffStyle } from "@/components/CountUp";
 import { LineFilter } from "@/components/LineFilter";
 import { HoverHint } from "@/components/HoverHint";
@@ -259,7 +259,16 @@ export default function CrawlReport() {
 
   // POPULAR (David, 2026-10-27): the counts come first, so a choice whose
   // list is empty is never offered.
-  const popularCounts = usePopularCounts(token, lines, summary);
+  // The list below tells Popular when it has landed (and what it already
+  // knows): Popular never races the page for the API.
+  const [listLanded, setListLanded] = useState<{ lines: string; meta: ListMeta | null } | null>(null);
+  const onListLanded = useCallback(
+    (forLines: string, meta: ListMeta | null) =>
+      setListLanded((prev) => (prev && prev.lines === forLines && (prev.meta || !meta) ? prev : { lines: forLines, meta })),
+    [],
+  );
+  const popularState_ = usePopularCounts(token, lines, summary, listLanded);
+  const popularCounts = popularState_.counts;
   const [popular, setPopular] = useState<PopularId | null>(null);
   // Bumped by a Popular choice: the lists clear their search.
   const [searchReset, setSearchReset] = useState(0);
@@ -690,7 +699,7 @@ export default function CrawlReport() {
         choices={popularChoices}
         active={popularActive}
         onPick={pickPopular}
-        loading={popularCounts === undefined}
+        loading={!popularState_.done}
       />
 
       {/* The matched list. Which one shows is driven by the two cards above:
@@ -719,6 +728,7 @@ export default function CrawlReport() {
             setFoundIn={setFoundIn}
             searchReset={searchReset}
             known={knownFor("publishers")}
+            onLanded={onListLanded}
           />
         ) : (
           <MatchedAppsList
@@ -735,6 +745,7 @@ export default function CrawlReport() {
             setPlatform={setPlatform}
             searchReset={searchReset}
             known={knownFor("apps")}
+            onLanded={onListLanded}
           />
         )}
       </div>
@@ -1517,48 +1528,122 @@ function targetMatches(
  * counts (crawler #361). Undefined while they are on the way; null: no
  * choice.
  */
+/** What the publishers list's own first answer says, so Popular asks
+ *  nothing it already has: its match type split and its change counts. */
+type ListMeta = {
+  typeCounts: MatchTypeCounts | null;
+  changeCounts: ChangeCounts | null;
+  /** The list kept fewer rows than it has: its counts are not the tabs'. */
+  truncated: boolean;
+};
+
+/** One count may take this long; then its chip is simply not offered. */
+const POPULAR_TIMEOUT_MS = 15_000;
+/** The bar's skeleton ends by this, whatever is still on its way. */
+const POPULAR_CEILING_MS = 35_000;
+
+type PopularState = { counts: Partial<Record<PopularId, number | null>>; done: boolean };
+
+/**
+ * POPULAR NEVER BLOCKS (hotfix 2026-10-27: on Select Media's report the bar
+ * stayed a skeleton forever while the API ran out of memory, and its six
+ * requests at once helped knock it over).
+ *
+ *   - Starts only once the list below has landed (or failed): the page
+ *     and the lists come first.
+ *   - The IPD and watch counts come from that list's own answer when it
+ *     is the plain publishers list (no request); the rest are asked two at
+ *     a time, page_size 1, each given up after POPULAR_TIMEOUT_MS.
+ *   - Each chip shows as its own count lands; a count that fails or times
+ *     out just has no chip; `done` when all have settled or by
+ *     POPULAR_CEILING_MS, whichever is first. Nothing back: no bar.
+ */
 function usePopularCounts(
   token: string,
   lines: string[],
   summary: Summary | null,
-): Partial<Record<PopularId, number | null>> | undefined {
-  const [counts, setCounts] = useState<Partial<Record<PopularId, number | null>> | undefined>(undefined);
+  /** The list below has landed for these lines, with its meta when it
+   *  was the plain publishers list; null until then. */
+  landed: { lines: string; meta: ListMeta | null } | null,
+): PopularState {
+  const [state, setState] = useState<PopularState>({ counts: {}, done: false });
   const key = lines.join(",");
   const first = summary?.previous_job_id === null;
+  const ready = landed !== null && landed.lines === key;
+  // Read when the counts start, never a reason to start them again.
+  const metaRef = useRef<ListMeta | null>(null);
+  metaRef.current = ready ? landed.meta : null;
+  // THE CEILING RUNS FROM THE START (review of #77): from the report's
+  // open (or a new line selection), whether or not the list ever lands
+  // (the Inactive tab's list never "lands"), the skeleton ends by it.
   useEffect(() => {
+    setState({ counts: {}, done: false });
+    const ceiling = window.setTimeout(() => setState((s) => ({ ...s, done: true })), POPULAR_CEILING_MS);
+    return () => window.clearTimeout(ceiling);
+  }, [token, key, first]);
+  useEffect(() => {
+    if (!ready) return;
     let cancelled = false;
-    setCounts(undefined);
-    const safe = <T,>(p: Promise<T>): Promise<T | null> => p.catch(() => null);
-    Promise.all([
-      safe(api.developerEvents(token, "added", 1, "", lines)),
-      safe(api.developerEvents(token, "removed", 1, "", lines)),
-      safe(api.developerEvents(token, "changed", 1, "", lines)),
-      safe(api.matchedApps(token, 1, "", lines, "all", "added")),
-      safe(api.matchedApps(token, 1, "", lines, "all", "removed")),
-      safe(api.matchedDevelopers(token, 1, "", lines, "all")),
-    ]).then(([pubsAdded, pubsRemoved, pubsChanged, appsAdded, appsRemoved, matched]) => {
-      if (cancelled) return;
-      // The watch tabs' publishers, from the list's own change counts
-      // (crawler #361); an API without them offers no such tab or choice.
-      const watch = (k: ListChange) => (first ? null : (matched?.change_counts?.[k] ?? null));
-      setCounts({
-        "pubs-new": pubsAdded?.total ?? null,
-        "pubs-lost": pubsRemoved?.total ?? null,
-        cert: pubsChanged?.total ?? null,
-        "apps-added": appsAdded && appsAdded.change === "added" ? appsAdded.total : null,
-        "apps-removed": appsRemoved && appsRemoved.change === "removed" ? appsRemoved.total : null,
-        ipd: matched?.match_type_counts?.ipd ?? null,
+    const put = (part: Partial<Record<PopularId, number | null>>) => {
+      if (!cancelled) setState((s) => ({ counts: { ...s.counts, ...part }, done: s.done }));
+    };
+    const meta = metaRef.current;
+    const opts = { timeoutMs: POPULAR_TIMEOUT_MS };
+    // The watch tabs' publishers, from the list's own change counts
+    // (crawler #361); an API without them offers no such tab or choice.
+    const fromList = (m: { typeCounts: MatchTypeCounts | null | undefined; changeCounts: ChangeCounts | null | undefined }) => {
+      const watch = (k: ListChange) => (first ? null : (m.changeCounts?.[k] ?? null));
+      put({
+        ipd: m.typeCounts?.ipd ?? null,
         started: watch("started_watching"),
         stopped: watch("stopped_watching"),
         unconfirmed: watch("unconfirmed"),
       });
+    };
+    const tasks: (() => Promise<void>)[] = [];
+    if (meta) fromList(meta);
+    else
+      tasks.push(async () => {
+        const m = await api.matchedDevelopers(token, 1, "", lines, "all", PAGE_SIZE, undefined, "all", opts);
+        fromList({ typeCounts: m.match_type_counts, changeCounts: m.change_counts });
+      });
+    // The publishers that added, lost or re-certified a line, one small
+    // request each; added and cert changed from the list's own change
+    // counts when the API sends them (crawler #361: those publishers are
+    // all on the matched list) and the list is whole (review of #77: a
+    // truncated list, Boldwin's 2,000 of 18,665, counts only what it
+    // kept). Lost never: a publisher that lost every line is no longer on
+    // the list, so the list cannot count it.
+    const pubs: [PopularId, "added" | "removed" | "changed"][] = [
+      ["pubs-new", "added"],
+      ["pubs-lost", "removed"],
+      ["cert", "changed"],
+    ];
+    for (const [id, change] of pubs) {
+      const known = change === "removed" || !meta || meta.truncated ? undefined : meta.changeCounts?.[change];
+      if (typeof known === "number") put({ [id]: known });
+      else tasks.push(async () => put({ [id]: (await api.developerEvents(token, change, 1, "", lines, "all", 1, "all", opts)).total ?? null }));
+    }
+    tasks.push(
+      async () => {
+        const r = await api.matchedApps(token, 1, "", lines, "all", "added", 1, "all", opts);
+        put({ "apps-added": r.change === "added" ? (r.total ?? null) : null });
+      },
+      async () => {
+        const r = await api.matchedApps(token, 1, "", lines, "all", "removed", 1, "all", opts);
+        put({ "apps-removed": r.change === "removed" ? (r.total ?? null) : null });
+      },
+    );
+    // Two at a time; a failure is only that chip's.
+    void mapLimit(tasks, 2, (t) => (cancelled ? Promise.resolve() : t().catch(() => {}))).then(() => {
+      if (!cancelled) setState((s) => ({ ...s, done: true }));
     });
     return () => {
       cancelled = true;
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [token, key, first]);
-  return counts;
+  }, [token, key, first, ready]);
+  return state;
 }
 
 /**
@@ -2174,6 +2259,18 @@ export function ListTabsRow({ left, right }: { left: ReactNode; right: ReactNode
   );
 }
 
+/** The list's filters, one row under its tabs, the content's full width:
+ *  the list's own split (Found in, Platform) at the far left, Match type at
+ *  the far right. A phone stacks them, each label over its pills. */
+export function ListFiltersRow({ left, right }: { left: ReactNode; right: ReactNode }) {
+  return (
+    <div data-list-filters className="flex w-full min-w-0 flex-col items-start gap-2 sm:flex-row sm:items-center sm:justify-between sm:gap-x-4">
+      <div className="min-w-0 max-w-full">{left}</div>
+      <div className="min-w-0 max-w-full sm:ml-auto">{right}</div>
+    </div>
+  );
+}
+
 export function ListSearchRow({
   query,
   setQuery,
@@ -2248,7 +2345,10 @@ function DrilldownList({
   setFoundIn,
   searchReset,
   known,
+  onLanded,
 }: {
+  /** Told when a list lands (or fails), with the plain list's meta. */
+  onLanded?: (lines: string, meta: ListMeta | null) => void;
   token: string;
   lines: string[];
   /** The trial's caps, on a trial: the unlock card stands on every tab. */
@@ -2307,6 +2407,8 @@ function DrilldownList({
   const [settled, setSettled] = useState(0);
   // The size of the list last read, for the skeleton's row count.
   const [landed, setLanded] = useState<Landed | null>(null);
+  const landedRef = useRef(onLanded);
+  landedRef.current = onLanded;
 
   // A new search, a new tab or a new line selection is a new list, so it
   // starts at its first page. Without this, searching from page 7 asks
@@ -2331,7 +2433,12 @@ function DrilldownList({
 
   useEffect(() => {
     // The Inactive section reads its own lists.
-    if (tab === "inactive") return;
+    // The Inactive section reads its own lists; Popular need not wait for
+    // a list that never lands here (review of #77).
+    if (tab === "inactive") {
+      landedRef.current?.(lines.join(","), null);
+      return;
+    }
     const event = tab;
     let cancelled = false;
     const load = (pg: number) =>
@@ -2365,6 +2472,14 @@ function DrilldownList({
     type Loaded = Awaited<ReturnType<typeof load>>;
     const keyFor = (pg: number) => [tab, pg, query, lines.join(","), matchType, foundIn].join("|");
     const apply = (data: Loaded) => {
+      // Popular starts once a list has landed; the plain list's split and
+      // change counts spare it a request (hotfix 2026-10-27).
+      landedRef.current?.(
+        lines.join(","),
+        event === "all" && page === 1 && !query && matchType === "all" && foundIn === "all"
+          ? { typeCounts: data.typeCounts, changeCounts: data.changeCounts, truncated: data.truncated }
+          : null,
+      );
       setLanded({ tab, query, lines: lines.join(","), matchType, filter: foundIn, total: data.total });
       if (data.changeCounts) setChangeCounts(data.changeCounts);
       if (data.unfiltered) {
@@ -2413,7 +2528,11 @@ function DrilldownList({
         apply(data);
         readAhead(data);
       })
-      .catch((e: Error) => !cancelled && setError(e.message))
+      .catch((e: Error) => {
+        if (cancelled) return;
+        setError(e.message);
+        landedRef.current?.(lines.join(","), null);
+      })
       .finally(() => !cancelled && setLoading(false));
     return () => {
       cancelled = true;
@@ -2513,18 +2632,17 @@ function DrilldownList({
           </Tabs>
             </>
           }
-          right={
-            // Not on Inactive: those lists are not split by these.
-            tab !== "inactive" && (typeCounts || foundInCounts) && (
-              // A phone stacks the switches, each label over its pills;
-              // wider, they sit right of the tabs, as before.
-              <span className="flex w-full min-w-0 flex-col items-start gap-2 sm:w-auto sm:flex-row sm:flex-wrap sm:items-center sm:justify-end sm:gap-x-4">
-                {foundInCounts && <FoundInControl value={foundIn} onChange={setFoundIn} counts={foundInCounts} />}
-                {typeCounts && <MatchTypeControl value={matchType} onChange={setMatchType} counts={typeCounts} />}
-              </span>
-            )
-          }
+          right={null}
         />
+        {/* ONE FILTERS ROW UNDER THE TABS (David, 2026-10-27): Found in at
+            the far left, Match type at the far right. Not on Inactive:
+            those lists are not split by these. */}
+        {tab !== "inactive" && (typeCounts || foundInCounts) && (
+          <ListFiltersRow
+            left={foundInCounts && <FoundInControl value={foundIn} onChange={setFoundIn} counts={foundInCounts} />}
+            right={typeCounts && <MatchTypeControl value={matchType} onChange={setMatchType} counts={typeCounts} />}
+          />
+        )}
         {isScopeTab(tab) && <p data-scope-note className="text-[12px] leading-relaxed text-slate-500">{SCOPE_NOTE[tab]}</p>}
         {tab !== "inactive" && (
           <ListSearchRow
@@ -2544,18 +2662,18 @@ function DrilldownList({
                   // A trial's list is cut: the count, no pages, no export.
                   ? <CountLine count={total} noun={tabNoun(rowsTab, "publishers").many} />
                   : (
-                    <span className="flex flex-wrap items-center justify-end gap-x-3 gap-y-2">
-                      <ExportListButton run={exportList} />
-                      <Pager
-                        placement="inline"
-                        page={page}
-                        pageSize={PAGE_SIZE}
-                        total={total}
-                        onPage={paging.onPage}
-                        noun={tabNoun(rowsTab, "publishers").many}
-                        nounOne={tabNoun(rowsTab, "publishers").one}
-                      />
-                    </span>
+                    // The count, then "Download list" right after it, then the
+                    // pages (David, 2026-10-27).
+                    <Pager
+                      placement="inline"
+                      page={page}
+                      pageSize={PAGE_SIZE}
+                      total={total}
+                      onPage={paging.onPage}
+                      noun={tabNoun(rowsTab, "publishers").many}
+                      nounOne={tabNoun(rowsTab, "publishers").one}
+                      afterCount={<ExportListButton variant="link" run={exportList} />}
+                    />
                   )
                 : null
             }
@@ -3515,7 +3633,10 @@ function MatchedAppsList({
   setPlatform,
   searchReset,
   known,
+  onLanded,
 }: {
+  /** Told when a list lands (or fails). */
+  onLanded?: (lines: string, meta: ListMeta | null) => void;
   token: string;
   lines: string[];
   caps: TrialCaps | null;
@@ -3565,6 +3686,8 @@ function MatchedAppsList({
   const [settled, setSettled] = useState(0);
   // The size of the list last read, for the skeleton's row count.
   const [landed, setLanded] = useState<Landed | null>(null);
+  const landedRef = useRef(onLanded);
+  landedRef.current = onLanded;
   // The tab the rows on screen were read for, and whether the server
   // filtered them for it (it echoed ``change``). Both lag `tab` until the
   // new tab's list lands.
@@ -3584,7 +3707,12 @@ function MatchedAppsList({
   // (that section reads its own lists).
 
   useEffect(() => {
-    if (tab === "inactive") return;
+    // The Inactive section reads its own lists; Popular need not wait for
+    // a list that never lands here (review of #77).
+    if (tab === "inactive") {
+      landedRef.current?.(lines.join(","), null);
+      return;
+    }
     let cancelled = false;
     const change = appChangeOf(tab);
     // A WATCH TAB (crawler #361): the server's filter, one list like any
@@ -3597,6 +3725,7 @@ function MatchedAppsList({
     const keyFor = (pg: number) =>
       [isScopeTab(tab) ? tab : change ?? "all", pg, query, lines.join(","), matchType, platform].join("|");
     const apply = (r: Loaded) => {
+      landedRef.current?.(lines.join(","), null);
       setLanded({ tab, query, lines: lines.join(","), matchType, filter: platform, total: r.total ?? 0 });
       if (r.change_counts) setChangeCounts(r.change_counts);
       if (isScopeTab(tab) && r.change !== change) {
@@ -3654,6 +3783,7 @@ function MatchedAppsList({
         // red error or a blank card region. The "Matched apps" KPI is unaffected:
         // its number comes from the summary, not this list.
         if (!cancelled) {
+          landedRef.current?.(lines.join(","), null);
           setRowsTab(tab);
           setServerFiltered(false);
           setAllRows([]);
@@ -3765,24 +3895,27 @@ function MatchedAppsList({
           </Tabs>
             </>
           }
-          right={
-            tab !== "inactive" && (typeCounts || platformCounts) && (
-              <span className="flex w-full min-w-0 flex-col items-start gap-2 sm:w-auto sm:flex-row sm:flex-wrap sm:items-center sm:justify-end sm:gap-x-4">
-                {platformCounts && <PlatformControl value={platform} onChange={setPlatform} counts={platformCounts} />}
-                {typeCounts && (
-                  <MatchTypeControl
-                    value={matchType}
-                    onChange={setMatchType}
-                    // The server's split is known to count All matched only:
-                    // no number in the change tabs' tooltips rather than a
-                    // wrong one.
-                    counts={tab === "all" || isScopeTab(tab) ? typeCounts : null}
-                  />
-                )}
-              </span>
-            )
-          }
+          right={null}
         />
+        {/* The filters row, as on the publishers list: Platform at the far
+            left, Match type at the far right. */}
+        {tab !== "inactive" && (typeCounts || platformCounts) && (
+          <ListFiltersRow
+            left={platformCounts && <PlatformControl value={platform} onChange={setPlatform} counts={platformCounts} />}
+            right={
+              typeCounts && (
+                <MatchTypeControl
+                  value={matchType}
+                  onChange={setMatchType}
+                  // The server's split is known to count All matched only:
+                  // no number in the change tabs' tooltips rather than a
+                  // wrong one.
+                  counts={tab === "all" || isScopeTab(tab) ? typeCounts : null}
+                />
+              )
+            }
+          />
+        )}
         {isScopeTab(tab) && <p data-scope-note className="text-[12px] leading-relaxed text-slate-500">{SCOPE_NOTE[tab]}</p>}
         {tab !== "inactive" && (
           <ListSearchRow
@@ -3801,22 +3934,20 @@ function MatchedAppsList({
                 ? trial || caps
                   ? <CountLine count={pageFiltered ? rows.length : total} noun={pageFiltered ? "on this page" : noun} />
                   : (
-                    <span className="flex flex-wrap items-center justify-end gap-x-3 gap-y-2">
-                      {!pageFiltered && <ExportListButton run={exportList} />}
-                      {pageFiltered ? (
-                        <CountLine count={rows.length} noun="on this page" />
-                      ) : (
-                        <Pager
-                          placement="inline"
-                          page={page}
-                          pageSize={PAGE_SIZE}
-                          total={total}
-                          onPage={paging.onPage}
-                          noun={noun}
-                          nounOne={tabNoun(rowsTab, "apps").one}
-                        />
-                      )}
-                    </span>
+                    pageFiltered ? (
+                      <CountLine count={rows.length} noun="on this page" />
+                    ) : (
+                      <Pager
+                        placement="inline"
+                        page={page}
+                        pageSize={PAGE_SIZE}
+                        total={total}
+                        onPage={paging.onPage}
+                        noun={noun}
+                        nounOne={tabNoun(rowsTab, "apps").one}
+                        afterCount={<ExportListButton variant="link" run={exportList} />}
+                      />
+                    )
                   )
                 : null
             }

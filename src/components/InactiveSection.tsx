@@ -235,8 +235,10 @@ export default function InactiveSection({
               ? " Showing only apps whose publisher carries the selected lines."
               : " Showing only those with the selected lines.")}
         </p>
-        <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:gap-3">
-        <div className="relative w-full">
+        {/* The search on the left; the count, "Download list" and the pages
+            on the right (David, 2026-10-27), as on the matched lists. */}
+        <div ref={paging.topRef} className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between sm:gap-x-6">
+        <div className="relative w-full min-w-0 sm:min-w-[12rem] sm:flex-1">
           <Search className="pointer-events-none absolute left-3.5 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
           <input
             value={query}
@@ -246,8 +248,20 @@ export default function InactiveSection({
             className="h-10 w-full rounded-full border border-border bg-white pl-10 pr-4 text-sm text-slate-900 outline-none transition-colors placeholder:text-slate-400 focus:border-slate-400/50"
           />
         </div>
-        {/* EXPORT THIS LIST (David, 2026-10-27): every page of it. */}
-        {ready && !loading && rows.length > 0 && !locked && <ExportListButton run={exportList} />}
+        {ready && !loading && rows.length > 0 && !locked && (
+          <div data-list-count className="flex min-h-10 items-center justify-end sm:ml-auto sm:flex-shrink-0">
+            <Pager
+              placement="inline"
+              page={page}
+              pageSize={PAGE_SIZE}
+              total={data.total}
+              onPage={paging.onPage}
+              noun={noun}
+              nounOne={nounOne}
+              afterCount={<ExportListButton variant="link" run={exportList} />}
+            />
+          </div>
+        )}
         </div>
       </div>
 
@@ -286,20 +300,6 @@ export default function InactiveSection({
         </div>
       )}
 
-      {ready && !loading && rows.length > 0 && !locked && (
-        <Pager
-          placement="top"
-          anchorRef={paging.topRef}
-          className="mb-3"
-          page={page}
-          pageSize={PAGE_SIZE}
-          total={data.total}
-          onPage={paging.onPage}
-          noun={noun}
-          nounOne={nounOne}
-        />
-      )}
-
       {ready && !loading && rows.length > 0 && (
         <div key={settled} className="animate-in fade-in space-y-3">
           {kind === "publishers" &&
@@ -334,14 +334,18 @@ export default function InactiveSection({
       )}
       {ready && !loading && rows.length > 0 && !locked && (
         <div className="mt-4">
-          <Pager
-            page={page}
-            pageSize={PAGE_SIZE}
-            total={data.total}
-            onPage={paging.onPage}
-            noun={noun}
-            nounOne={nounOne}
-          />
+          {/* The pages under the list too, when there are pages: the count
+              already stands beside the search, never said twice. */}
+          {data.total > PAGE_SIZE && (
+            <Pager
+              page={page}
+              pageSize={PAGE_SIZE}
+              total={data.total}
+              onPage={paging.onPage}
+              noun={noun}
+              nounOne={nounOne}
+            />
+          )}
           {data.truncated && <TruncatedNotice shown={data.total} noun={noun} nounOne={nounOne} />}
         </div>
       )}

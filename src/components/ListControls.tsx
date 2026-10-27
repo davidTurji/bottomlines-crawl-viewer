@@ -134,7 +134,10 @@ export function Pager({
   placement = "bottom",
   anchorRef,
   className,
+  afterCount,
 }: {
+  /** Right after the count (the list's "Download list" link). */
+  afterCount?: React.ReactNode;
   page: number;
   pageSize: number;
   total: number;
@@ -179,10 +182,18 @@ export function Pager({
   // the difference between "3 matches" and "the list is broken".
   if (pages <= 1) {
     if (placement === "top") return null;
-    return (
-      <p className={cn("text-xs tabular-nums text-slate-500", placement === "inline" ? "whitespace-nowrap" : "px-1", className)}>
+    const count = (
+      <p className={cn("text-xs tabular-nums text-slate-500", placement === "inline" ? "whitespace-nowrap" : "px-1", !afterCount && className)}>
         {total.toLocaleString()} {total === 1 && nounOne ? nounOne : noun}
       </p>
+    );
+    return afterCount ? (
+      <div className={cn("flex flex-wrap items-center justify-end gap-x-3 gap-y-1", className)}>
+        {count}
+        {afterCount}
+      </div>
+    ) : (
+      count
     );
   }
 
@@ -202,6 +213,7 @@ export function Pager({
         </span>{" "}
         of <span className="tabular-nums">{total.toLocaleString()}</span> {noun}
       </p>
+      {afterCount}
       <nav
         aria-label="Pages"
         className={cn(
