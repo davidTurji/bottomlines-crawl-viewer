@@ -13,7 +13,7 @@
  */
 import { expect, test, type Page } from "@playwright/test";
 
-import { mockMatchedDevelopers } from "../src/lib/mockData";
+import { mockDeveloperEvents, mockMatchedDevelopers } from "../src/lib/mockData";
 import { installFakeApi, TOKEN, type Scenario } from "./fakeApi";
 
 const BASE = `/crawl-report/${TOKEN}`;
@@ -145,14 +145,14 @@ test("the list's own change counts spare the added and changed requests (crawler
         json: {
           ...r,
           match_type_counts: { all: r.total, own: r.total - 4, ipd: 4 },
-          change_counts: { added: 7, changed: 2, removed: 99, started_watching: 0, stopped_watching: 0, unconfirmed: 0 },
+          change_counts: { added: 70, changed: 20, removed: 99, started_watching: 0, stopped_watching: 0, unconfirmed: 0 },
         },
       });
     });
   });
   const bar = page.getByTestId("popular");
-  await expect(bar.locator('[data-popular="pubs-new"]')).toContainText("7");
-  await expect(bar.locator('[data-popular="cert"]')).toContainText("2");
+  await expect(bar.locator('[data-popular="pubs-new"]')).toHaveText(/\D70$/);
+  await expect(bar.locator('[data-popular="cert"]')).toHaveText(/\D20$/);
   await expect(bar.locator('[data-popular="ipd"]')).toContainText("4");
   await expect(bar).not.toHaveAttribute("aria-busy", "true", { timeout: 20_000 });
   // Lost is always asked (the list cannot count a publisher that lost
@@ -160,4 +160,80 @@ test("the list's own change counts spare the added and changed requests (crawler
   expect(asked.filter((u) => /developer-events\?event=(added|changed)/.test(u))).toEqual([]);
   expect(asked.filter((u) => /developer-events\?event=removed/.test(u)).length).toBe(1);
   await expect(bar.locator('[data-popular="pubs-lost"]')).not.toContainText("99");
+});
+
+test.describe("the skeleton ends whatever the list does (review of #77)", () => {
+  const busy = (page: Page) => page.locator('[data-testid="popular"][aria-busy="true"]');
+  const INACTIVE: Scenario = { ...FULL, inactive: "ok" };
+
+  test("Inactive opened before the list lands: Popular still counts, and ends", async ({ page }) => {
+    test.setTimeout(60_000);
+    // The publishers list never answers.
+    await installFakeApi(page, INACTIVE);
+    await page.route(/matched-developers\?page=1&page_size=25(&|$)/, () => new Promise<void>(() => {}));
+    await page.addInitScript(() => localStorage.setItem("pf_report_walkthrough_v1", JSON.stringify({ status: "completed", stepId: null, open: false })));
+    await page.goto(BASE);
+    await page.getByRole("button", { name: "See them", exact: true }).click();
+    await expect(page.getByTestId("inactive-section")).toBeVisible();
+    // Popular starts from Inactive at once, and its bar settles well
+    // before the ceiling.
+    await expect(page.getByTestId("popular").locator('[data-popular="pubs-new"]')).toBeVisible({ timeout: 15_000 });
+    await expect(busy(page)).toHaveCount(0, { timeout: 20_000 });
+    await expect(page.locator("[data-popular-skeleton]")).toHaveCount(0);
+  });
+
+  test("a new line selection while on Inactive: the same", async ({ page }) => {
+    test.setTimeout(60_000);
+    await open(page, async () => {});
+    await expect(page.locator('button[aria-label^="Show the seat lines of"]').first()).toBeVisible();
+    await page.getByRole("tab", { name: "Inactive", exact: true }).click().catch(async () => {
+      await page.getByRole("button", { name: "See them", exact: true }).click();
+    });
+    await expect(page.getByTestId("inactive-section")).toBeVisible();
+    await page.getByRole("button", { name: "Filter by seat line" }).click();
+    await page.getByRole("group", { name: "Seat lines" }).getByRole("menuitemcheckbox").first().click();
+    await page.getByRole("menuitem", { name: "Apply", exact: true }).click();
+    await expect(busy(page)).toHaveCount(0, { timeout: 20_000 });
+    await expect(page.locator("[data-popular-skeleton]")).toHaveCount(0);
+  });
+
+  test("a list that never lands: the skeleton still ends by the ceiling", async ({ page }) => {
+    test.setTimeout(80_000);
+    await installFakeApi(page, FULL);
+    await page.route(/matched-developers\?page=1&page_size=25(&|$)/, () => new Promise<void>(() => {}));
+    await page.addInitScript(() => localStorage.setItem("pf_report_walkthrough_v1", JSON.stringify({ status: "completed", stepId: null, open: false })));
+    await page.goto(BASE);
+    await expect(page.getByRole("heading", { name: "Your weekly crawl" })).toBeVisible();
+    await expect(busy(page)).toHaveCount(0, { timeout: 45_000 });
+    await expect(page.locator("[data-popular-skeleton]")).toHaveCount(0);
+  });
+});
+
+test("a truncated list's counts are never the chips': added and changed are asked", async ({ page }) => {
+  const asked: string[] = [];
+  page.on("request", (r) => isCount(r.url()) && asked.push(r.url()));
+  await open(page, async () => {
+    await page.route(/matched-developers\?page=1&page_size=25(&|$)/, (route) => {
+      const r = mockMatchedDevelopers(1);
+      return route.fulfill({
+        json: {
+          ...r,
+          truncated: true,
+          match_type_counts: { all: r.total, own: r.total - 4, ipd: 4 },
+          change_counts: { added: 70, changed: 20, started_watching: 0, stopped_watching: 0, unconfirmed: 0 },
+        },
+      });
+    });
+  });
+  const bar = page.getByTestId("popular");
+  await expect(bar).not.toHaveAttribute("aria-busy", "true", { timeout: 20_000 });
+  expect(asked.filter((u) => /developer-events\?event=added/.test(u)).length).toBe(1);
+  expect(asked.filter((u) => /developer-events\?event=changed/.test(u)).length).toBe(1);
+  // The chips say what their tabs list (developer-events, as the fake
+  // answers it), never the truncated list's 70 and 20.
+  for (const [id, event] of [["pubs-new", "added"], ["cert", "changed"]] as const) {
+    const total = mockDeveloperEvents(event, 1, [], "all").total;
+    expect(total === 70 || total === 20, "the fixture must not collide").toBe(false);
+    await expect(bar.locator(`[data-popular="${id}"]`)).toHaveText(new RegExp(`\\D${total}$`));
+  }
 });

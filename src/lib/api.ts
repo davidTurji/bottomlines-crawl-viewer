@@ -172,6 +172,27 @@ export type ReqOpts = { timeoutMs?: number; signal?: AbortSignal };
 /** Said when a request ran past its ceiling. */
 export const TIMED_OUT = "The report took too long to answer. Please try again in a moment.";
 
+/**
+ * A plain fetch's work (its request, and its body when `run` reads it)
+ * under the same ceiling (review of #77: export-info, sellers-fix, the
+ * schain export and chat had none, and a hung sellers-fix stayed cached
+ * until the next sign-in). Past it: ApiError 504, so a caller that keeps
+ * only answers keeps nothing.
+ */
+async function withCeiling<T>(run: (signal: AbortSignal) => Promise<T>, ms: number = REQUEST_CEILING_MS): Promise<T> {
+  const c = new AbortController();
+  const timer = setTimeout(() => c.abort(new DOMException("Timed out", "TimeoutError")), ms);
+  try {
+    return await run(c.signal);
+  } catch (e) {
+    const why = c.signal.reason;
+    if (c.signal.aborted && why instanceof DOMException && why.name === "TimeoutError") throw new ApiError(504, TIMED_OUT);
+    throw e;
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
 type Shared = { answer: Promise<unknown>; controller: AbortController; waiting: number; settled: boolean };
 const inFlight = new Map<string, Shared>();
 
@@ -348,11 +369,12 @@ export const api = {
     // here may touch the sign-in gate; the summary's own calls do that.
     try {
       await whenSignedIn();
-      const res = await fetch(`${BASE}/v1/viewer/${token}/export-info`, {
-        credentials: "include",
+      const answer = await withCeiling(async (signal) => {
+        const res = await fetch(`${BASE}/v1/viewer/${token}/export-info`, { credentials: "include", signal });
+        return res.ok ? ((await res.json()) as Partial<ExportInfo> | null) : undefined;
       });
-      if (!res.ok) return fallback;
-      const info = (await res.json()) as Partial<ExportInfo> | null;
+      if (answer === undefined) return fallback;
+      const info = answer;
       if (
         !info ||
         !["xlsx", "zip", "none"].includes(info.format as string) ||
@@ -1069,18 +1091,23 @@ export const api = {
     // req() read a 404 as a dead link, which took every report without the
     // page down.
     await whenSignedIn();
-    const res = await fetch(`${BASE}/v1/viewer/${token}/sellers-fix`, {
-      credentials: "include",
+    // The request and its body (megabytes on a busy domain) under the
+    // ceiling: a hang is a 504, which the probe never keeps.
+    return withCeiling(async (signal) => {
+      const res = await fetch(`${BASE}/v1/viewer/${token}/sellers-fix`, {
+        credentials: "include",
+        signal,
+      });
+      if (res.status === 404) return null;
+      if (!res.ok) {
+        const detail = await res.text().catch(() => "");
+        throw new ApiError(
+          res.status,
+          detail || `GET sellers-fix → ${res.status}`,
+        );
+      }
+      return (await res.json()) as SellersFixPayload;
     });
-    if (res.status === 404) return null;
-    if (!res.ok) {
-      const detail = await res.text().catch(() => "");
-      throw new ApiError(
-        res.status,
-        detail || `GET sellers-fix → ${res.status}`,
-      );
-    }
-    return (await res.json()) as SellersFixPayload;
   },
   /**
    * SCHAIN EXPORT: what the page opens on.
@@ -1195,12 +1222,13 @@ export const api = {
     });
     if (sel.live) q.set("live", "true");
     await whenSignedIn();
-    const res = await fetch(
-      `${BASE}/v1/viewer/${token}/schain/export.${format}?${q.toString()}`,
-      {
+    // Its answer under the ceiling; the file then downloads at its pace.
+    const res = await withCeiling((signal) =>
+      fetch(`${BASE}/v1/viewer/${token}/schain/export.${format}?${q.toString()}`, {
         credentials: "include",
         redirect: "follow",
-      },
+        signal,
+      }),
     );
     if (!res.ok) {
       let detail = "";
@@ -1238,12 +1266,16 @@ export const api = {
       return;
     }
     await whenSignedIn();
-    const res = await fetch(`${BASE}/v1/viewer/${token}/chat`, {
-      method: "POST",
-      credentials: "include",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ prompt }),
-    });
+    // The stream's first answer under the ceiling; it then runs its course.
+    const res = await withCeiling((signal) =>
+      fetch(`${BASE}/v1/viewer/${token}/chat`, {
+        method: "POST",
+        credentials: "include",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ prompt }),
+        signal,
+      }),
+    );
     if (!res.ok || !res.body) {
       throw new ApiError(res.status, `chat stream failed: ${res.status}`);
     }

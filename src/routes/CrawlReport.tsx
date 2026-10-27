@@ -1530,7 +1530,12 @@ function targetMatches(
  */
 /** What the publishers list's own first answer says, so Popular asks
  *  nothing it already has: its match type split and its change counts. */
-type ListMeta = { typeCounts: MatchTypeCounts | null; changeCounts: ChangeCounts | null };
+type ListMeta = {
+  typeCounts: MatchTypeCounts | null;
+  changeCounts: ChangeCounts | null;
+  /** The list kept fewer rows than it has: its counts are not the tabs'. */
+  truncated: boolean;
+};
 
 /** One count may take this long; then its chip is simply not offered. */
 const POPULAR_TIMEOUT_MS = 15_000;
@@ -1565,19 +1570,24 @@ function usePopularCounts(
   const key = lines.join(",");
   const first = summary?.previous_job_id === null;
   const ready = landed !== null && landed.lines === key;
-  const meta = ready ? landed.meta : null;
+  // Read when the counts start, never a reason to start them again.
+  const metaRef = useRef<ListMeta | null>(null);
+  metaRef.current = ready ? landed.meta : null;
+  // THE CEILING RUNS FROM THE START (review of #77): from the report's
+  // open (or a new line selection), whether or not the list ever lands
+  // (the Inactive tab's list never "lands"), the skeleton ends by it.
   useEffect(() => {
     setState({ counts: {}, done: false });
+    const ceiling = window.setTimeout(() => setState((s) => ({ ...s, done: true })), POPULAR_CEILING_MS);
+    return () => window.clearTimeout(ceiling);
+  }, [token, key, first]);
+  useEffect(() => {
     if (!ready) return;
     let cancelled = false;
-    const counts: Partial<Record<PopularId, number | null>> = {};
     const put = (part: Partial<Record<PopularId, number | null>>) => {
-      if (cancelled) return;
-      Object.assign(counts, part);
-      setState((s) => ({ counts: { ...counts }, done: s.done }));
+      if (!cancelled) setState((s) => ({ counts: { ...s.counts, ...part }, done: s.done }));
     };
-    const finish = () => !cancelled && setState({ counts: { ...counts }, done: true });
-    const ceiling = window.setTimeout(finish, POPULAR_CEILING_MS);
+    const meta = metaRef.current;
     const opts = { timeoutMs: POPULAR_TIMEOUT_MS };
     // The watch tabs' publishers, from the list's own change counts
     // (crawler #361); an API without them offers no such tab or choice.
@@ -1600,15 +1610,17 @@ function usePopularCounts(
     // The publishers that added, lost or re-certified a line, one small
     // request each; added and cert changed from the list's own change
     // counts when the API sends them (crawler #361: those publishers are
-    // all on the matched list). Lost never: a publisher that lost every
-    // line is no longer on it, so the list cannot count it.
+    // all on the matched list) and the list is whole (review of #77: a
+    // truncated list, Boldwin's 2,000 of 18,665, counts only what it
+    // kept). Lost never: a publisher that lost every line is no longer on
+    // the list, so the list cannot count it.
     const pubs: [PopularId, "added" | "removed" | "changed"][] = [
       ["pubs-new", "added"],
       ["pubs-lost", "removed"],
       ["cert", "changed"],
     ];
     for (const [id, change] of pubs) {
-      const known = change === "removed" ? undefined : meta?.changeCounts?.[change];
+      const known = change === "removed" || !meta || meta.truncated ? undefined : meta.changeCounts?.[change];
       if (typeof known === "number") put({ [id]: known });
       else tasks.push(async () => put({ [id]: (await api.developerEvents(token, change, 1, "", lines, "all", 1, "all", opts)).total ?? null }));
     }
@@ -1624,15 +1636,13 @@ function usePopularCounts(
     );
     // Two at a time; a failure is only that chip's.
     void mapLimit(tasks, 2, (t) => (cancelled ? Promise.resolve() : t().catch(() => {}))).then(() => {
-      window.clearTimeout(ceiling);
-      finish();
+      if (!cancelled) setState((s) => ({ ...s, done: true }));
     });
     return () => {
       cancelled = true;
-      window.clearTimeout(ceiling);
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [token, key, first, ready, meta]);
+  }, [token, key, first, ready]);
   return state;
 }
 
@@ -2411,7 +2421,12 @@ function DrilldownList({
 
   useEffect(() => {
     // The Inactive section reads its own lists.
-    if (tab === "inactive") return;
+    // The Inactive section reads its own lists; Popular need not wait for
+    // a list that never lands here (review of #77).
+    if (tab === "inactive") {
+      landedRef.current?.(lines.join(","), null);
+      return;
+    }
     const event = tab;
     let cancelled = false;
     const load = (pg: number) =>
@@ -2450,7 +2465,7 @@ function DrilldownList({
       landedRef.current?.(
         lines.join(","),
         event === "all" && page === 1 && !query && matchType === "all" && foundIn === "all"
-          ? { typeCounts: data.typeCounts, changeCounts: data.changeCounts }
+          ? { typeCounts: data.typeCounts, changeCounts: data.changeCounts, truncated: data.truncated }
           : null,
       );
       setLanded({ tab, query, lines: lines.join(","), matchType, filter: foundIn, total: data.total });
@@ -3681,7 +3696,12 @@ function MatchedAppsList({
   // (that section reads its own lists).
 
   useEffect(() => {
-    if (tab === "inactive") return;
+    // The Inactive section reads its own lists; Popular need not wait for
+    // a list that never lands here (review of #77).
+    if (tab === "inactive") {
+      landedRef.current?.(lines.join(","), null);
+      return;
+    }
     let cancelled = false;
     const change = appChangeOf(tab);
     // A WATCH TAB (crawler #361): the server's filter, one list like any
