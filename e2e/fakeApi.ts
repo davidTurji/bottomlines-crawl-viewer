@@ -506,6 +506,12 @@ function schainOverview(status: "ok") {
 export type Calls = { method: string; path: string; status: number; query: string }[];
 
 export async function installFakeApi(page: Page, scenario: Scenario = {}): Promise<Calls> {
+  // THE TOUR IS OFFERED ON EVERY LOAD (David, 2026-10-02; not a setting a
+  // browser keeps), a few seconds in, over whatever the test was clicking.
+  // Every test declines it whenever it shows, as a reader would.
+  await page.addLocatorHandler(page.getByRole("button", { name: "No thanks", exact: true }), async (b) => {
+    await b.click();
+  });
   const s: Required<Scenario> = {
     firstReport: false,
     sellers: "none",

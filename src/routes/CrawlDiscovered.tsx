@@ -1036,7 +1036,7 @@ function NoDiscoveryCard() {
         This report did not look for lines starting with your domain
       </h2>
       <p className="mx-auto mt-2 max-w-xl text-sm leading-relaxed text-slate-500">
-        It looked for your exact seat lines, so every line it kept is already on the Overview and Changes pages.
+        It looked for your exact seat lines, so every line it kept is already on the Overview.
       </p>
     </div>
   );

@@ -4,7 +4,7 @@ import { useEffect, useState, type ComponentType } from "react";
 import { EmptyResult, Pager, TruncatedNotice, usePaging } from "@/components/ListControls";
 import LockedTail from "@/components/LockedTail";
 import { Settle } from "@/components/Motion";
-import { SkeletonRows } from "@/components/Skeleton";
+import { SkeletonRows, skeletonRowCount } from "@/components/Skeleton";
 import {
   api,
   type GoneInventory,
@@ -16,8 +16,8 @@ import {
   type TrialCaps,
 } from "@/lib/api";
 import { INACTIVE_KINDS, inactiveNoun, reasonText } from "@/lib/inactive";
-import { csvName, ExportListButton, type CsvTable } from "@/components/ExportList";
-import { READ_PAGE, readAllPages, type Progress } from "@/lib/scopeRows";
+import { csvName, ExportListButton, type CsvSink } from "@/components/ExportList";
+import { eachPage, READ_PAGE, type Progress } from "@/lib/scopeRows";
 import { usePageCache } from "@/lib/pageCache";
 import { PAGE_SIZE } from "@/lib/paging";
 import { cn } from "@/lib/utils";
@@ -105,6 +105,8 @@ export default function InactiveSection({
   const [expanded, setExpanded] = useState<string | null>(null);
   // Bumps each time a list lands; 0 means nothing for this list yet.
   const [settled, setSettled] = useState(0);
+  // The size of the list last read, for the skeleton's row count.
+  const [landed, setLanded] = useState<{ key: string; total: number } | null>(null);
   const linesKey = lines.join(",");
 
   useEffect(() => setPage(1), [kind, query, linesKey]);
@@ -116,6 +118,7 @@ export default function InactiveSection({
     const load = (pg: number) => api.inactive(token, kind, { page: pg, q: query, lines }, legacy);
     const keyFor = (pg: number) => [kind, pg, query, linesKey].join("|");
     const apply = (d: Loaded) => {
+      setLanded({ key: [kind, query, linesKey].join("|"), total: d.total });
       setData(d);
       setSettled((n) => n + 1);
     };
@@ -158,44 +161,40 @@ export default function InactiveSection({
   const nounOne = inactiveNoun(kind, 1);
   const toggle = (key: string) => setExpanded((k) => (k === key ? null : key));
 
-  const exportList = async (progress: Progress, signal: AbortSignal): Promise<CsvTable> => {
-    const all = await readAllPages(
+  const exportList = async (sink: CsvSink, progress: Progress, signal: AbortSignal): Promise<string> => {
+    const lineText = (ls: unknown) =>
+      (Array.isArray(ls) ? ls : [])
+        .filter((l): l is { ssp_domain: string; publisher_id: string; relationship: string } => !!l && typeof l === "object")
+        .map((l) => `${l.ssp_domain}, ${l.publisher_id}, ${l.relationship}`)
+        .join("; ");
+    sink.header(
+      kind === "publishers"
+        ? ["publisher_domain", "publisher_name", "inactive_since", "reason", "evidence", "apps", "lines"]
+        : ["app_name", "store", "bundle_id", "publisher_domain", "publisher_name", "inactive_since", "reason", "evidence", "lines"],
+    );
+    await eachPage(
       (pg) => api.inactive(token, kind, { page: pg, q: query, lines, pageSize: READ_PAGE }, legacy),
       READ_PAGE,
+      (page) =>
+        sink.rows(
+          kind === "publishers"
+            ? (page as InactivePublisher[]).map((p) => [p.domain, p.name, p.inactive_since, reasonText(p), p.evidence_summary, p.apps, lineText(p.lines)])
+            : (page as InactiveApp[]).map((a) => [
+                a.name,
+                a.store,
+                a.bundle,
+                a.publisher,
+                a.publisher_name,
+                a.inactive_since,
+                reasonText(a),
+                a.evidence_summary,
+                lineText(a.lines),
+              ]),
+        ),
       progress,
       signal,
     );
-    const lineText = (ls: { ssp_domain: string; publisher_id: string; relationship: string }[] | null | undefined) =>
-      (ls ?? []).map((l) => `${l.ssp_domain}, ${l.publisher_id}, ${l.relationship}`).join("; ");
-    if (kind === "publishers")
-      return {
-        filename: csvName("inactive publishers", query ? `search ${query}` : null),
-        header: ["publisher_domain", "publisher_name", "inactive_since", "reason", "evidence", "apps", "lines"],
-        rows: (all as InactivePublisher[]).map((p) => [
-          p.domain,
-          p.name,
-          p.inactive_since,
-          reasonText(p),
-          p.evidence_summary,
-          p.apps,
-          lineText(p.lines),
-        ]),
-      };
-    return {
-      filename: csvName("inactive apps", query ? `search ${query}` : null),
-      header: ["app_name", "store", "bundle_id", "publisher_domain", "publisher_name", "inactive_since", "reason", "evidence", "lines"],
-      rows: (all as InactiveApp[]).map((a) => [
-        a.name,
-        a.store,
-        a.bundle,
-        a.publisher,
-        a.publisher_name,
-        a.inactive_since,
-        reasonText(a),
-        a.evidence_summary,
-        lineText(a.lines),
-      ]),
-    };
+    return csvName(kind === "publishers" ? "inactive publishers" : "inactive apps", query ? `search ${query}` : null);
   };
 
   return (
@@ -252,7 +251,12 @@ export default function InactiveSection({
       {/* The skeleton whenever the list waits for its rows, the first read
           and every search, page or list switch after it (David,
           2026-10-27), never last answer's rows dimmed. */}
-      {loading && <SkeletonRows rows={4} label={`Loading ${noun}`} />}
+      {loading && (
+        <SkeletonRows
+          rows={skeletonRowCount(page, landed?.key === [kind, query, linesKey].join("|") ? landed.total : null)}
+          label={`Loading ${noun}`}
+        />
+      )}
       {error && <p className="text-sm text-critical">{error}</p>}
 
       {ready && !loading && rows.length === 0 && (

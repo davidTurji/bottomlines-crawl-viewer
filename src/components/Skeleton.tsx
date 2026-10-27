@@ -28,6 +28,7 @@
 import type { CSSProperties } from "react";
 
 import { cn } from "@/lib/utils";
+import { PAGE_SIZE } from "@/lib/paging";
 
 /** Each row enters the sweep a beat after the one above it. */
 const stagger = (i: number): CSSProperties =>
@@ -248,6 +249,25 @@ export function SkeletonStatCards({
       <StatCard columns={columns} delay={1} />
     </div>
   );
+}
+
+/** A skeleton row and the gap under it, in pixels. */
+const ROW_PX = 90;
+
+/**
+ * HOW MANY SKELETON ROWS (review of #75): the rows the page will land
+ * with, never more than fill the screen, so the list neither grows nor
+ * shrinks when they arrive. `landedTotal` is this same list's size from a
+ * page of it already read (a page change); null for a list not read yet,
+ * which lands a full page.
+ */
+export function skeletonRowCount(page: number, landedTotal: number | null): number {
+  const fit = typeof window === "undefined" ? 6 : Math.max(3, Math.ceil(window.innerHeight / ROW_PX));
+  const onPage =
+    landedTotal === null
+      ? PAGE_SIZE
+      : Math.max(1, Math.min(PAGE_SIZE, landedTotal - (page - 1) * PAGE_SIZE));
+  return Math.min(onPage, fit);
 }
 
 /**

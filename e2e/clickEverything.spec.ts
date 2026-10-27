@@ -55,6 +55,9 @@ const VIEWPORTS = [
  *  modes. */
 const API_CARDS = LIVE ? 6 : Infinity;
 
+/** A control or page this report does not have: skipped, never failed. */
+class Absent extends Error {}
+
 const CRASH_CONSOLE = /TypeError|ReferenceError|is not a function|Cannot read/;
 const ERROR_PANEL = /could not be shown|did not render/i;
 
@@ -77,10 +80,12 @@ async function signIn(browser: Browser, vp: (typeof VIEWPORTS)[number]): Promise
   const page = await ctx.newPage();
   // Read-only: the report's export is never fetched, whatever is clicked.
   await page.route(/\/export\.xlsx|\/export(\?|$)|\/schain\/export\./, (r) => r.abort());
-  // The first-visit offer, declined whenever it shows.
-  await page.addLocatorHandler(page.getByRole("button", { name: "No thanks", exact: true }), async (b) => {
-    await b.click();
-  });
+  // The tour's offer, declined whenever it shows (the fake API's install
+  // does the same for every test).
+  if (LIVE)
+    await page.addLocatorHandler(page.getByRole("button", { name: "No thanks", exact: true }), async (b) => {
+      await b.click();
+    });
   if (LIVE) {
     await page
       .goto(`${LIVE.base}/crawl-report/${LIVE.token}#signin=${LIVE.signin}`, { waitUntil: "domcontentloaded" })
@@ -155,9 +160,15 @@ async function crawl(page: Page, vp: string): Promise<Run> {
     try {
       await fn();
     } catch (e) {
-      // A control this report does not have is not a crash; what the
-      // crash checks catch is.
-      if (process.env.SMOKE_DEBUG) console.log(`${vp}: skipped ${name}: ${redact(String((e as Error).message)).split("\n").slice(0, 12).join(" | ")}`);
+      // A control this report does not have is skipped (the callers ask
+      // first and throw Absent); a control that IS there and cannot be
+      // used is a failure (review of #75).
+      const msg = redact(String((e as Error)?.message ?? e)).split("\n")[0].slice(0, 200);
+      if (e instanceof Absent) {
+        if (process.env.SMOKE_DEBUG) console.log(`${vp}: absent ${name}`);
+        return;
+      }
+      run.failures.push(`${vp} / ${name}: ${msg}`);
       return;
     } finally {
       if (process.env.SMOKE_DEBUG && Date.now() - t > 1500) console.log(`${vp}: slow ${name} ${Date.now() - t} ms`);
@@ -201,12 +212,24 @@ async function crawl(page: Page, vp: string): Promise<Run> {
     if ((await l.count()) && (await l.isVisible().catch(() => false)) && (await l.isEnabled().catch(() => false)))
       await step(name, () => click(l));
   };
+  /** Fills a box when the page has it; never waits for one it lacks. */
+  const fillIf = async (name: string, l: ReturnType<Page["locator"]>, value: string) => {
+    if (await l.count()) await step(name, () => l.first().fill(value, { timeout: 3_000 }));
+  };
   const OVERVIEW_ROWS = 'button[aria-label^="Show the seat lines of"]';
   const goTo = async (label: string) => {
     let link = page.getByRole("link", { name: label, exact: true }).first();
     if (!(await link.isVisible().catch(() => false))) {
       await page.locator('[data-tour="nav-trigger"]').click({ timeout: 5_000 }).catch(() => {});
       link = page.getByRole("link", { name: label, exact: true }).first();
+      await link.waitFor({ timeout: 2_000 }).catch(() => {});
+    }
+    // A page this report does not have (no Schain, no Sellers.json): the
+    // menu closes, all the way, before the next step looks for a link.
+    if (!(await link.count())) {
+      await page.keyboard.press("Escape").catch(() => {});
+      await page.locator('[data-mobile="true"]').waitFor({ state: "detached", timeout: 5_000 }).catch(() => {});
+      throw new Absent(label);
     }
     await click(link);
     // On a phone the menu is a sheet: let it close before the next tap.
@@ -228,8 +251,8 @@ async function crawl(page: Page, vp: string): Promise<Run> {
         for (const kind of await page.getByRole("tablist", { name: "Inactive lists" }).getByRole("tab").all()) {
           await step(`${view} / Inactive / ${await kind.innerText()}`, () => click(kind));
           await openAll(`inactive`, OVERVIEW_ROWS);
-          await step(`${view} / Inactive / search`, () => page.getByPlaceholder(/^Search/).first().fill("a", { timeout: 3_000 }));
-          await step(`${view} / Inactive / clear search`, () => page.getByPlaceholder(/^Search/).first().fill("", { timeout: 3_000 }));
+          await fillIf(`${view} / Inactive / search`, page.getByPlaceholder(/^Search/), "a");
+          await fillIf(`${view} / Inactive / clear search`, page.getByPlaceholder(/^Search/), "");
         }
         continue;
       }
@@ -265,19 +288,21 @@ async function crawl(page: Page, vp: string): Promise<Run> {
     await tap(`${view} / previous page`, page.getByRole("button", { name: "Previous page", exact: true }).first());
     // Search: a term, one that finds nothing, and back.
     for (const term of ["tv", "zz-no-such-publisher", ""]) {
-      await step(`${view} / search "${term}"`, () => page.getByPlaceholder(view === "apps" ? "Search apps" : "Search publishers").fill(term, { timeout: 3_000 }));
+      await fillIf(`${view} / search "${term}"`, page.getByPlaceholder(view === "apps" ? "Search apps" : "Search publishers"), term);
       if (term === "tv") await openAll(`${view} search`, OVERVIEW_ROWS, 2);
     }
   }
   // The lines filter: one line on, the list re-read, and off again.
-  await step("lines filter open", () => click(page.getByRole("button", { name: "Filter by seat line" })));
-  await step("lines filter pick", () => click(page.getByRole("group", { name: "Seat lines" }).getByRole("menuitemcheckbox").first()));
-  await step("lines filter apply", () => click(page.getByRole("menuitem", { name: "Apply", exact: true })));
-  await openAll("filtered", OVERVIEW_ROWS, 2);
-  await step("lines filter reopen", () => click(page.getByRole("button", { name: "Filter by seat line" })));
-  await step("lines filter unpick", () => click(page.getByRole("group", { name: "Seat lines" }).getByRole("menuitemcheckbox").first()));
-  await step("lines filter apply again", () => click(page.getByRole("menuitem", { name: "Apply", exact: true })));
-  await step("lines filter close", () => page.keyboard.press("Escape"));
+  // The lines filter, on a report that carries its seat lines.
+  if (await page.getByRole("button", { name: "Filter by seat line" }).count()) {
+    await step("lines filter open", () => click(page.getByRole("button", { name: "Filter by seat line" })));
+    await step("lines filter pick", () => click(page.getByRole("group", { name: "Seat lines" }).getByRole("menuitemcheckbox").first()));
+    await step("lines filter apply", () => click(page.getByRole("menuitem", { name: "Apply", exact: true })));
+    await openAll("filtered", OVERVIEW_ROWS, 2);
+    await step("lines filter reopen", () => click(page.getByRole("button", { name: "Filter by seat line" })));
+    await step("lines filter unpick", () => click(page.getByRole("group", { name: "Seat lines" }).getByRole("menuitemcheckbox").first()));
+    await step("lines filter apply again", () => click(page.getByRole("menuitem", { name: "Apply", exact: true })));
+  }
 
   const CARDS = "button[aria-expanded='false']:not([aria-haspopup])";
   // "Export this list" on the fake API only: on a live link it would read
@@ -312,8 +337,8 @@ async function crawl(page: Page, vp: string): Promise<Run> {
 
   await step("page Sellers.json", () => goTo("Sellers.json"));
   await openAll("sellers", `main ${CARDS}`, API_CARDS);
-  await step("Sellers.json / roles search", () => page.getByLabel("Search seller roles").fill("tv", { timeout: 3_000 }));
-  await step("Sellers.json / roles clear", () => page.getByLabel("Search seller roles").fill("", { timeout: 3_000 }));
+  await fillIf("Sellers.json / roles search", page.getByLabel("Search seller roles"), "tv");
+  await fillIf("Sellers.json / roles clear", page.getByLabel("Search seller roles"), "");
 
   await step("page Schain", () => goTo("Schain"));
   await step("page Overview", () => goTo("Overview"));

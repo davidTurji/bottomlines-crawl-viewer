@@ -11,7 +11,12 @@
  * line-events request), for their reasons and dates.
  */
 import { api, type LineEvent, type LineEventKind, type WatchChange } from "./api";
-import { lineKey } from "./lineFilter";
+
+/** A line's ssp|id|REL, read safely whatever the fields hold. */
+export function certKey(l: { ssp_domain?: unknown; publisher_id?: unknown; relationship?: unknown }): string {
+  const t = (v: unknown) => (typeof v === "string" || typeof v === "number" ? String(v).trim() : "");
+  return `${t(l.ssp_domain).toLowerCase()}|${t(l.publisher_id)}|${t(l.relationship).toUpperCase()}`;
+}
 
 export type ScopeTab = "started" | "stopped" | "unconfirmed";
 
@@ -33,33 +38,69 @@ export const READ_PAGE = 500;
 
 export type Progress = (done: number, of: number) => void;
 
+type PageAnswer<T> = { rows?: T[] | null; total?: number | null; page_size?: number | null };
+
+/** One page, retried with a growing pause when the read fails (a passing
+ *  503, a dropped connection); never once the reader has cancelled. */
+async function readPage<T>(fetchPage: (page: number) => Promise<PageAnswer<T>>, page: number, signal?: AbortSignal) {
+  const pauses = [400, 1200, 3000];
+  for (let attempt = 0; ; attempt++) {
+    if (signal?.aborted) throw new DOMException("Aborted", "AbortError");
+    try {
+      return await fetchPage(page);
+    } catch (e) {
+      if (signal?.aborted || attempt >= pauses.length) throw e;
+      await new Promise((r) => setTimeout(r, pauses[attempt]));
+    }
+  }
+}
+
 /**
- * Every page of a paged list, one after another, until its rows add up to
- * its total. A total that moves between pages is refused: the list changed
- * under the read, so what came back is not one list.
+ * Every page of a paged list, one after another (never in parallel), each
+ * handed on as it arrives, until its rows add up to its total. Refused, and
+ * said: a total that moves between pages (the list changed under the read),
+ * and rows that fall short of the total (a report that keeps a shorter copy
+ * than it counts). Returns how many rows were read.
  */
+export async function eachPage<T>(
+  fetchPage: (page: number) => Promise<PageAnswer<T>>,
+  asked: number,
+  onRows: (rows: T[]) => void,
+  onProgress?: Progress,
+  signal?: AbortSignal,
+): Promise<number> {
+  let seen = 0;
+  let total: number | null = null;
+  for (let page = 1; page <= 100_000; page++) {
+    const r = await readPage(fetchPage, page, signal);
+    const rows = Array.isArray(r.rows) ? r.rows : [];
+    const t = typeof r.total === "number" ? r.total : seen + rows.length;
+    if (total === null) total = t;
+    else if (t !== total) throw new Error("The list changed while it was being read. Reload and try again.");
+    if (rows.length === 0 && seen < total)
+      throw new Error(
+        `This list counts ${total.toLocaleString()} rows but only ${seen.toLocaleString()} could be read. Nothing was exported.`,
+      );
+    seen += rows.length;
+    onRows(rows);
+    const size = Math.max(1, r.page_size || asked);
+    onProgress?.(page, Math.max(page, Math.ceil(total / size)));
+    if (seen >= total) return seen;
+  }
+  // The API's own ceiling (100,000 pages): said, never a silent cut.
+  throw new Error("This list is longer than one read can take (100,000 pages). Narrow it with a search or the line filter.");
+}
+
+/** Every page of a paged list, kept (see eachPage). */
 export async function readAllPages<T>(
-  fetchPage: (page: number) => Promise<{ rows?: T[] | null; total?: number | null; page_size?: number | null }>,
+  fetchPage: (page: number) => Promise<PageAnswer<T>>,
   asked: number,
   onProgress?: Progress,
   signal?: AbortSignal,
 ): Promise<T[]> {
   const out: T[] = [];
-  let total: number | null = null;
-  for (let page = 1; page <= 100_000; page++) {
-    if (signal?.aborted) throw new DOMException("Aborted", "AbortError");
-    const r = await fetchPage(page);
-    const rows = Array.isArray(r.rows) ? r.rows : [];
-    const t = typeof r.total === "number" ? r.total : out.length + rows.length;
-    if (total === null) total = t;
-    else if (t !== total) throw new Error("The list changed while it was being read. Reload and try again.");
-    out.push(...rows);
-    const size = Math.max(1, r.page_size || asked);
-    onProgress?.(page, Math.max(page, Math.ceil(total / size)));
-    if (rows.length === 0 || out.length >= total) return out;
-  }
-  // The API's own ceiling (100,000 pages): said, never a silent cut.
-  throw new Error("This list is longer than one read can take (100,000 pages). Narrow it with a search or the line filter.");
+  await eachPage(fetchPage, asked, (rows) => out.push(...rows), onProgress, signal);
+  return out;
 }
 
 /** A watch tab's filter on the matched lists (crawler #361). */
@@ -93,23 +134,30 @@ export function watchEvents(token: string, tab: ScopeTab, developerId: number, l
 
 const certs = new Map<string, Promise<Map<string, { old: string | null; next: string | null }>>>();
 
-/** Every cert change of the week, by publisher and line (ssp|id|REL): its
- *  old and new cert, for the Changed tab's "old to new". */
-export function certChanges(
+/** One publisher's cert changes of the week, by line (ssp|id|REL): its old
+ *  and new cert, read when its row opens on the Changed tab (never the
+ *  whole list: review of #75). */
+export function rowCertChanges(
   token: string,
+  developerId: number,
   lines: string[],
 ): Promise<Map<string, { old: string | null; next: string | null }>> {
-  const key = `${token}|${lines.join(",")}`;
+  const key = `${token}|${developerId}|${lines.join(",")}`;
   let p = certs.get(key);
   if (!p) {
     const read = readAllPages(
-      (page) => api.lineEvents(token, { event: "cert_changed", page, page_size: READ_PAGE, lines }),
+      (page) => api.lineEvents(token, { event: "cert_changed", developer_id: developerId, page, page_size: READ_PAGE, lines }),
       READ_PAGE,
     ).then((rows) => {
       const out = new Map<string, { old: string | null; next: string | null }>();
       for (const e of rows) {
-        const k = `${e.developer_id}|${lineKey(e)}`;
-        if (!out.has(k)) out.set(k, { old: e.old_cert_id ?? null, next: e.new_cert_id ?? null });
+        if (!e || typeof e !== "object") continue;
+        const k = certKey(e);
+        if (!out.has(k))
+          out.set(k, {
+            old: typeof e.old_cert_id === "string" ? e.old_cert_id : null,
+            next: typeof e.new_cert_id === "string" ? e.new_cert_id : null,
+          });
       }
       return out;
     });

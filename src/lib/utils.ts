@@ -155,8 +155,10 @@ export function appFileLine(
  * monitored, not removed. Null (a watchlist change) prints nothing; any
  * other sentence the crawler sends prints as it is.
  */
-export function scopeReasonText(reason: string | null | undefined): string | null {
-  const raw = (reason ?? "").trim();
+export function scopeReasonText(reason: unknown): string | null {
+  // Read safely: a reason the crawler sends as anything but text says
+  // nothing rather than taking the row down.
+  const raw = typeof reason === "string" ? reason.trim() : "";
   if (!raw) return null;
   if (raw === "host first read") return "first read of this file this crawl";
   if (raw === "host not read") return "this file was not read this crawl";

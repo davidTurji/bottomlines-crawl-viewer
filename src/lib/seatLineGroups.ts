@@ -5,16 +5,21 @@
  * its own file, and the ads.txt of every inventory partner that carries
  * the same line. tclchannel.com said "This week 9" over 20 rows, the same
  * "streamvantage.tv, 10020, RESELLER" five times, once per partner. Here
- * the copies fold into one row per line, carrying every partner it came
- * through, so the rows count what "This week" counts.
+ * the inventory partners' copies fold into one row per line, carrying every
+ * partner it came through, so the rows count what "This week" counts.
+ *
+ * ONLY PARTNER COPIES FOLD (review of #75, 2026-10-27). The same seat in
+ * the publisher's root file and in a declared host's file, or in its
+ * ads.txt and its app-ads.txt, are two lines for the crawler (its key holds
+ * the host and the file), so they stay two rows, each opening its own file.
  */
 import type { MatchedSeatLine } from "./api";
 
 export type SeatLineGroup = {
-  /** The line the row prints: its own-file copy when there is one (its
-   *  file, host and dates), else the first copy. */
+  /** The line the row prints (its file, host and dates). */
   line: MatchedSeatLine;
-  /** Found in the publisher's own file (or the host file named on it). */
+  /** Found in the publisher's own file (or the host file named on it); a
+   *  partners' row is never also an own row. */
   own: boolean;
   /** The inventory partners whose ads.txt carries it, first seen first. */
   partners: string[];
@@ -42,7 +47,16 @@ export function partnerOf(l: MatchedSeatLine, rowPartner: string | null | undefi
   return own(rowPartner);
 }
 
-/** The list's lines, one group per distinct line, in first-seen order. */
+/** Where an own copy of a line sits: its host and its file. Two copies
+ *  that differ in either are two lines. */
+export function placeKey(host: unknown, file: unknown): string {
+  const h = typeof host === "string" ? host.trim().toLowerCase() : "";
+  const f = typeof file === "string" ? file.trim().toLowerCase().replace(/[^a-z]/g, "") : "";
+  return `${h}|${f}`;
+}
+
+/** The list's lines, one group per line and place, in first-seen order:
+ *  an own copy per host and file, the partners' copies of a line as one. */
 export function groupSeatLines(
   lines: MatchedSeatLine[] | null | undefined,
   rowPartner?: string | null,
@@ -51,17 +65,13 @@ export function groupSeatLines(
   const byKey = new Map<string, SeatLineGroup>();
   for (const l of Array.isArray(lines) ? lines : []) {
     if (!l || typeof l !== "object") continue;
-    const key = seatKey(l);
     const partner = partnerOf(l, rowPartner);
+    const key = `${seatKey(l)}|${partner === null ? `own|${placeKey(l.host, l.found_in)}` : "ipd"}`;
     let g = byKey.get(key);
     if (!g) {
       g = { line: l, own: partner === null, partners: [] };
       byKey.set(key, g);
       out.push(g);
-    } else if (partner === null && !g.own) {
-      // The own-file copy speaks for the row: its file, host and dates.
-      g.line = l;
-      g.own = true;
     }
     if (partner && !g.partners.includes(partner)) g.partners.push(partner);
   }

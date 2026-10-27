@@ -104,8 +104,8 @@ function RolesList({ token, reads }: { token: string; reads: SellersJsonReads })
       .matchedDevelopers(token, page, filter)
       .then((r) => {
         if (cancelled) return;
-        setRows(r.rows ?? []);
-        setTotal(r.total ?? 0);
+        setRows(Array.isArray(r.rows) ? r.rows.filter((x) => !!x && typeof x === "object") : []);
+        setTotal(typeof r.total === "number" ? r.total : 0);
       })
       .catch(() => !cancelled && setError("Could not load the seller roles. Please try again."))
       .finally(() => !cancelled && setLoading(false));

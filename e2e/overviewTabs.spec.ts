@@ -19,6 +19,8 @@ import { expect, test, type Page } from "@playwright/test";
 
 import { mockDeveloperEvents, mockLineEvents, mockMatchedDevelopers } from "../src/lib/mockData";
 import { lineKey } from "../src/lib/lineFilter";
+import type { MatchedSeatLine } from "../src/lib/api";
+import { groupSeatLines } from "../src/lib/seatLineGroups";
 import { installFakeApi, TOKEN, type Calls, type Scenario } from "./fakeApi";
 
 const BASE = `/crawl-report/${TOKEN}`;
@@ -159,6 +161,7 @@ test.describe("the Changes page's statuses, as tabs", () => {
     const row = { ...mockDeveloperEvents("changed", 1).rows[0], developer_id: 777001 };
     const line = { ...(row.cert_changed_lines?.[0] ?? mockDeveloperEvents("changed", 1).rows[0].matched_lines![0]) };
     row.cert_changed_lines = [{ ...line, cert_id: "newcert77" }];
+    const certReads: (string | null)[] = [];
     const ev = {
       ...mockLineEvents({ event: "cert_changed", page_size: 1 }).rows[0],
       developer_id: 777001,
@@ -172,13 +175,20 @@ test.describe("the Changes page's statuses, as tabs", () => {
       await page.route("**/developer-events?*event=changed*", (route) =>
         route.fulfill({ json: { page: 1, page_size: 25, total: 1, rows: [row], match_type_counts: { all: 1, own: 1, ipd: 0 } } }),
       );
-      await page.route("**/line-events?*event=cert_changed*", (route) =>
-        route.fulfill({ json: { page: 1, page_size: 500, total: 1, rows: [ev] } }),
-      );
+      await page.route("**/line-events?*event=cert_changed*", (route) => {
+        certReads.push(new URL(route.request().url()).searchParams.get("developer_id"));
+        return route.fulfill({ json: { page: 1, page_size: 500, total: 1, rows: [ev] } });
+      });
     });
     await tab(page, "Changed").click();
+    await expect(rows(page).first()).toBeVisible();
+    // The rows land with no cert read at all (review of #75: it used to
+    // page every cert change of the report first) ...
+    expect(certReads).toEqual([]);
     await rows(page).first().click();
     await expect(page.locator("[data-cert-change]").first()).toHaveText("cert oldcert77 \u2192 newcert77");
+    // ... and the open row reads its own, by its publisher.
+    expect(certReads).toEqual(["777001"]);
     expect(errors).toEqual([]);
   });
 
@@ -262,6 +272,53 @@ test.describe("Export this list", () => {
     expect(f.suggestedFilename()).toBe("publishers-started-watching.csv");
     expect((await readFile((await f.path())!, "utf8")).split("\r\n").length - 1).toBe(total);
     expect(calls.filter((c) => c.path.endsWith("/matched-developers") && c.query.includes("change=started_watching") && c.query.includes("page_size=100")).length).toBeGreaterThan(0);
+    expect(errors).toEqual([]);
+  });
+});
+
+test.describe("Export this list, safe and whole (review of #75)", () => {
+  const base = mockMatchedDevelopers(1).rows[0];
+  const pub = (i: number, name = `Alder ${i}`) => ({ ...base, developer_id: 970000 + i, name, domain: `alder${i}.example` });
+
+  test("a UTF-8 file a spreadsheet never runs as a formula", async ({ page }) => {
+    const errors = watchErrors(page);
+    const rowsOf = [pub(1, '=HYPERLINK("https://madeupmedia.com","x")'), pub(2, "+1 Media"), pub(3, "Ålder Média")];
+    await open(page, {}, "", () =>
+      page.route("**/matched-developers?*", (route) =>
+        route.fulfill({ json: { page: 1, page_size: 100, total: rowsOf.length, rows: rowsOf } }),
+      ),
+    );
+    await expect(rows(page).first()).toBeVisible();
+    const d = page.waitForEvent("download");
+    await page.getByRole("button", { name: "Export this list" }).click();
+    const text = await readFile((await (await d).path())!, "utf8");
+    expect(text.startsWith("\uFEFF")).toBe(true);
+    expect(text).toContain(`"'=HYPERLINK(""https://madeupmedia.com"",""x"")"`);
+    expect(text).toContain(`"'+1 Media"`);
+    expect(text).toContain(`"Ålder Média"`);
+    expect(errors).toEqual([]);
+  });
+
+  test("a list that reads short of its count: said, and no file", async ({ page }) => {
+    const errors = watchErrors(page);
+    const TOTAL = 150;
+    await open(page, {}, "", () =>
+      page.route("**/matched-developers?*", (route) => {
+        const url = new URL(route.request().url());
+        const size = Number(url.searchParams.get("page_size") ?? "25");
+        const pg = Number(url.searchParams.get("page") ?? "1");
+        // The report keeps 100 rows but counts 150.
+        const from = (pg - 1) * size;
+        const rowsOf = Array.from({ length: Math.max(0, Math.min(size, 100 - from)) }, (_, i) => pub(from + i));
+        return route.fulfill({ json: { page: pg, page_size: size, total: TOTAL, rows: rowsOf } });
+      }),
+    );
+    await expect(rows(page).first()).toBeVisible();
+    let downloaded = false;
+    page.on("download", () => (downloaded = true));
+    await page.getByRole("button", { name: "Export this list" }).click();
+    await expect(page.getByRole("alert")).toHaveText("This list counts 150 rows but only 100 could be read. Nothing was exported.");
+    expect(downloaded).toBe(false);
     expect(errors).toEqual([]);
   });
 });
@@ -380,6 +437,64 @@ test.describe("one row per distinct seat line", () => {
       await expect(via.locator(`a[href^="https://${p}/ads.txt"]`)).toHaveCount(1);
     await via.locator("[data-line-via-more]").click();
     await expect(list.locator('[data-line-via] a[href^="https://example-partner.tv/ads.txt"]').first()).toBeVisible();
+    expect(errors).toEqual([]);
+  });
+});
+
+test.describe("only partner copies fold (review of #75)", () => {
+  // One seat, found six ways: the publisher's root ads.txt (twice, the
+  // same place), a declared host's ads.txt, its own app-ads.txt, and two
+  // inventory partners' ads.txt.
+  const seat = { ssp_domain: "madeupssp.com", publisher_id: "S-4410", relationship: "DIRECT", cert_id: "" };
+  const own = (host: string, found_in: string) => ({ ...seat, match_type: "own" as const, host, found_in });
+  const ipd = (partner: string) => ({ ...seat, match_type: "ipd" as const, ipd_partner: partner, found_in: "ads.txt" });
+  const LINES = [
+    own("alder.example", "ads.txt"),
+    own("alder.example", "ads.txt"),
+    own("cdn.alder.example", "ads.txt"),
+    own("alder.example", "app-ads.txt"),
+    ipd("northfold-tv.com"),
+    ipd("failarmy.tv"),
+  ];
+
+  test("root vs host and ads.txt vs app-ads.txt stay apart; the same place and the partners fold", () => {
+    const groups = groupSeatLines(LINES as MatchedSeatLine[]);
+    expect(groups.map((g) => [g.own, g.line.host ?? null, g.line.found_in, g.partners])).toEqual([
+      [true, "alder.example", "ads.txt", []],
+      [true, "cdn.alder.example", "ads.txt", []],
+      [true, "alder.example", "app-ads.txt", []],
+      [false, null, "ads.txt", ["northfold-tv.com", "failarmy.tv"]],
+    ]);
+  });
+
+  test("on the page: four rows, each saying its own file and host", async ({ page }) => {
+    const errors = watchErrors(page);
+    const base = mockMatchedDevelopers(1).rows[0];
+    const row = {
+      ...base,
+      developer_id: 990101,
+      name: "Alder Media",
+      domain: "alder.example",
+      matched_lines: LINES,
+      line_count: LINES.length,
+      added_lines: [],
+      removed_lines: [],
+      cert_changed_lines: [],
+    };
+    await open(page, {}, "", () =>
+      page.route("**/matched-developers?*", (route) =>
+        route.fulfill({ json: { page: 1, page_size: 25, total: 1, rows: [row] } }),
+      ),
+    );
+    await rows(page).first().click();
+    const list = page.locator("[data-seat-lines]").first();
+    const items = list.locator(":scope > li");
+    await expect(items).toHaveCount(4);
+    await expect(items.nth(0)).toContainText("Found in ads.txt");
+    await expect(items.nth(0).locator("[data-line-host]")).toHaveCount(0);
+    await expect(items.nth(1).locator("[data-line-host]")).toHaveText("at cdn.alder.example");
+    await expect(items.nth(2)).toContainText("Found in app-ads.txt");
+    await expect(items.nth(3).locator("[data-line-via]")).toContainText("via northfold-tv.com, failarmy.tv");
     expect(errors).toEqual([]);
   });
 });

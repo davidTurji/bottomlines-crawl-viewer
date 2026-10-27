@@ -119,8 +119,7 @@ export function reportTourSteps(f: ReportFeatures): ReportTourStep[] {
       title: "Every match",
       body: (
         <p>
-          <strong>Click a row</strong> to see its exact lines and this week&apos;s moves. <strong>Lines</strong> lists
-          every line that moved, one card each.
+          <strong>Click a row</strong> to see its exact lines. The <strong>tabs</strong> show what moved this week.
         </p>
       ),
     },
