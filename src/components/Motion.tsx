@@ -1,14 +1,5 @@
-import {
-  createContext,
-  useContext,
-  useEffect,
-  useLayoutEffect,
-  useRef,
-  useState,
-  type ReactNode,
-} from "react";
+import { useEffect, useState, type CSSProperties, type ReactNode } from "react";
 
-import { introMotion } from "@/lib/introMotion";
 import { cn } from "@/lib/utils";
 
 /**
@@ -141,15 +132,16 @@ export function glideTo(el: HTMLElement | null, offset = 24, durationMs = 900) {
   requestAnimationFrame(step);
 }
 
-/** False inside a ListSwap once its first list has landed: rows that
- *  arrive later (a filter, a tab, a search, a page) come in with the
- *  list's one fade, never one by one. Outside a ListSwap, true. */
-const ListIntro = createContext(true);
-
 /**
- * A list row that settles into place: up a few pixels and in from clear,
- * one row after another. The stagger stops growing after the first eight
- * rows, so a long page lands in well under a second.
+ * THE ROWS ROLL IN (David, 2026-10-27): every time a list lands, the first
+ * view and every switch after it (tab, match type, Popular, search, line
+ * filter, page, the publishers / apps tiles, Inactive), each row fades in
+ * and slides down 7px with a soft ease-out, 35ms after the row above it.
+ * The stagger stops at the seventh row, so a 25-row page is in within
+ * about 430ms, the rest arriving with the last batch: no long cascade.
+ * Transform and opacity only, so it stays on the compositor (no layout
+ * work, smooth on a phone); the row holds its space from the first frame,
+ * so nothing below it jumps. Less motion asked for: none (index.css).
  */
 export function Settle({
   index,
@@ -158,235 +150,9 @@ export function Settle({
   index: number;
   children: ReactNode;
 }) {
-  const intro = useContext(ListIntro);
-  // Only on the first page opened (lib/introMotion), like the count-ups,
-  // and only with the first list that page shows.
-  const [play] = useState(() => introMotion() && intro);
-  if (!play) return <div>{children}</div>;
   return (
-    <div
-      className="animate-in fade-in slide-in-from-bottom-1 fill-mode-both duration-500 ease-out motion-reduce:animate-none"
-      style={{ animationDelay: `${Math.min(index, 8) * 35}ms` }}
-    >
+    <div data-row-in className="bl-row-in" style={{ "--bl-row-delay": `${Math.min(index, 6) * 35}ms` } as CSSProperties}>
       {children}
-    </div>
-  );
-}
-
-/*
- * THE LIST SWAP: how a matched list changes its rows (David, 2026-10-26:
- * the Match type switch "is a bit violent as the results shift; make it
- * more premium"). One calm move for a filter, a tab, a search or a page,
- * on the publishers and the apps list alike:
- *
- * - The list stays mounted. Rows are never thrown away and faded in from
- *   nothing; a row in both lists keeps its place in the page.
- * - Asked for and not here yet: the rows on screen dim to 0.35 (120 ms),
- *   still readable, clearly the old answer. When the new rows land they
- *   take the old ones' place and come up to full (200 ms).
- * - Already here (read ahead, or seen before): one short fade through,
- *   60 ms down to half and 90 ms back up, 150 ms in all. Rows never swap
- *   at full strength, which is what made the switch look like a jolt.
- * - The list's height eases from the old to the new (240 ms), so the pager,
- *   the note and everything below glide instead of jumping. Once there it
- *   lets go (height auto), so an expanded card is never cut off; a card
- *   that opens mid-ease is followed.
- * - Less motion asked for: none of it. The new rows simply replace the old.
- */
-
-const SWAP_DIM = 0.35;
-const SWAP_DIM_MS = 120;
-const SWAP_RISE_MS = 200;
-/** The least a dimmed list stays down before its rows swap. */
-const SWAP_HOLD_MS = 60;
-const QUICK_DIM = 0.5;
-const QUICK_OUT_MS = 60;
-const QUICK_IN_MS = 90;
-const HEIGHT_MS = 240;
-
-let swapInstances = 0;
-let clipValue: string | null = null;
-/** overflow-y: clip keeps the cards' side shadows; hidden where unsupported. */
-function clipY(): string {
-  if (clipValue === null) {
-    try {
-      clipValue = CSS.supports("overflow-y", "clip") ? "clip" : "hidden";
-    } catch {
-      clipValue = "hidden";
-    }
-  }
-  return clipValue;
-}
-
-export function ListSwap({
-  version,
-  pending,
-  intro = true,
-  children,
-}: {
-  /** Changes whenever a new list is to be shown: a landed answer, or a
-   *  filter the browser applies itself. */
-  version: string | number;
-  /** A new list has been asked for and has not landed yet. */
-  pending: boolean;
-  /** Whether the first list shown may play the rows' settle (Settle). */
-  intro?: boolean;
-  children: ReactNode;
-}) {
-  // One id per mount: the browser tests read it to prove a switch keeps
-  // the list (and every row in both answers) in place.
-  const [instance] = useState(() => ++swapInstances);
-  const [first] = useState(version);
-  const [shown, setShown] = useState(version);
-  const [fade, setFade] = useState<{ opacity: number; ms: number }>({ opacity: 1, ms: 0 });
-
-  // The rows rendered for the list on screen. They stay up, dimmed, until
-  // the swap, even though the page already holds the next list's state.
-  const held = useRef<ReactNode>(children);
-  if (version === shown) held.current = children;
-  const content = version === shown ? children : held.current;
-
-  const outerRef = useRef<HTMLDivElement>(null);
-  const innerRef = useRef<HTMLDivElement>(null);
-  const latest = useRef(version);
-  latest.current = version;
-  const onScreen = useRef(version);
-  const dimSince = useRef<number | null>(null);
-  const holding = useRef(false);
-  const holdTimer = useRef(0);
-  const fromHeight = useRef<number | null>(null);
-  const easing = useRef(false);
-  const heightTimer = useRef(0);
-
-  const release = () => {
-    easing.current = false;
-    const outer = outerRef.current;
-    if (!outer) return;
-    outer.style.transition = "";
-    outer.style.height = "";
-    outer.style.overflowY = "";
-  };
-  const holdHeightUntilSettled = () => {
-    window.clearTimeout(heightTimer.current);
-    heightTimer.current = window.setTimeout(release, HEIGHT_MS + 40);
-  };
-
-  // A new list to show: swap, after the fade down where there is one.
-  useLayoutEffect(() => {
-    if (version === onScreen.current) {
-      // Back to the list on screen before the hold ended (there and back
-      // quickly): nothing to swap, just come back up.
-      if (holding.current) {
-        window.clearTimeout(holdTimer.current);
-        holding.current = false;
-        dimSince.current = null;
-        setFade({ opacity: 1, ms: SWAP_RISE_MS });
-      }
-      return;
-    }
-    // A hold already running swaps to whatever is latest when it ends.
-    if (holding.current) return;
-    const reduced = prefersReducedMotion();
-    const quick = dimSince.current === null;
-    const swap = () => {
-      holding.current = false;
-      dimSince.current = null;
-      const outer = outerRef.current;
-      fromHeight.current = !reduced && outer ? outer.getBoundingClientRect().height : null;
-      onScreen.current = latest.current;
-      setShown(latest.current);
-      setFade({ opacity: 1, ms: reduced ? 0 : quick ? QUICK_IN_MS : SWAP_RISE_MS });
-    };
-    if (reduced) {
-      swap();
-      return;
-    }
-    let wait: number;
-    if (quick) {
-      setFade({ opacity: QUICK_DIM, ms: QUICK_OUT_MS });
-      wait = QUICK_OUT_MS;
-    } else {
-      wait = (dimSince.current ?? 0) + SWAP_HOLD_MS - performance.now();
-    }
-    if (wait <= 0) {
-      swap();
-      return;
-    }
-    holding.current = true;
-    holdTimer.current = window.setTimeout(swap, wait);
-  }, [version]);
-
-  // Asked for, not here yet: dim. The ask ended without a new list (it
-  // failed, or answered with what is on screen): come back up.
-  useLayoutEffect(() => {
-    if (pending) {
-      if (dimSince.current !== null || prefersReducedMotion()) return;
-      dimSince.current = performance.now();
-      setFade({ opacity: SWAP_DIM, ms: SWAP_DIM_MS });
-      return;
-    }
-    if (dimSince.current !== null && !holding.current && latest.current === onScreen.current) {
-      dimSince.current = null;
-      setFade({ opacity: 1, ms: SWAP_RISE_MS });
-    }
-  }, [pending]);
-
-  // The swap has painted its rows: ease the height from the old list's.
-  useLayoutEffect(() => {
-    const from = fromHeight.current;
-    fromHeight.current = null;
-    const outer = outerRef.current;
-    const inner = innerRef.current;
-    if (from === null || !outer || !inner) return;
-    const to = inner.getBoundingClientRect().height;
-    if (easing.current) {
-      // Mid-ease already: carry on from where it is to the new height.
-      outer.style.height = `${to}px`;
-      holdHeightUntilSettled();
-      return;
-    }
-    if (Math.abs(to - from) < 1) return;
-    outer.style.transition = "none";
-    outer.style.height = `${from}px`;
-    outer.style.overflowY = clipY();
-    void outer.offsetHeight;
-    outer.style.transition = `height ${HEIGHT_MS}ms ${CALM_EASE}`;
-    outer.style.height = `${to}px`;
-    easing.current = true;
-    holdHeightUntilSettled();
-  }, [shown]);
-
-  // Rows that grow while the height eases (a card opening) are followed.
-  useEffect(() => {
-    const inner = innerRef.current;
-    if (!inner || typeof ResizeObserver === "undefined") return;
-    const ro = new ResizeObserver(() => {
-      const outer = outerRef.current;
-      if (!easing.current || !outer) return;
-      outer.style.height = `${inner.getBoundingClientRect().height}px`;
-      holdHeightUntilSettled();
-    });
-    ro.observe(inner);
-    return () => {
-      ro.disconnect();
-      window.clearTimeout(holdTimer.current);
-      window.clearTimeout(heightTimer.current);
-    };
-  }, []);
-
-  return (
-    <div ref={outerRef} data-list-swap={instance}>
-      <div
-        ref={innerRef}
-        data-list-fade
-        className="flow-root"
-        style={{
-          opacity: fade.opacity,
-          transition: fade.ms ? `opacity ${fade.ms}ms ${CALM_EASE}` : undefined,
-        }}
-      >
-        <ListIntro.Provider value={intro && shown === first}>{content}</ListIntro.Provider>
-      </div>
     </div>
   );
 }

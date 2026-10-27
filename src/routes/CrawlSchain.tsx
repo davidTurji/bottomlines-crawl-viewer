@@ -13,7 +13,7 @@ import { formatWeek, WeekLine } from "@/components/WeekLine";
 import { lineKey, lineLabel, sourceHint } from "@/lib/lineFilter";
 import { useReportScope } from "@/lib/reportScope";
 import { PAGE_SIZE } from "@/lib/paging";
-import { cn, foundInLabel, storeLabel } from "@/lib/utils";
+import { cn, foundInLabel, storeName } from "@/lib/utils";
 
 import {
   api,
@@ -581,7 +581,9 @@ function SdkCopy({ read, onRefresh }: { read: SchainSdkRead | "reading"; onRefre
   );
   if (!read.ok) {
     return (
-      <p className="flex w-full items-center gap-1.5 text-[11px] text-critical">
+      // A fact of the report (the crawl could not read the file), not an
+      // error of the page: the click-everything walk lets it be.
+      <p data-report-fact className="flex w-full items-center gap-1.5 text-[11px] text-critical">
         <CircleAlert className="h-3.5 w-3.5 flex-shrink-0" />
         <span className="min-w-0 truncate">Could not read {read.url.replace(/^https?:\/\//, "")}: {read.reason}</span>
         {refresh}
@@ -1303,7 +1305,7 @@ function SchainAppCard({ row, open, onToggle }: { row: SchainRow; open: boolean;
               {row.app_name}
             </span>
             <span className="flex-shrink-0 rounded-full border border-app-border bg-app-bg px-1.5 py-px text-[10px] font-medium text-app">
-              {storeLabel(row.store)}
+              {storeName(row)}
             </span>
           </div>
           <div className="truncate text-xs text-slate-500">

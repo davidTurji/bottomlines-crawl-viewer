@@ -16,7 +16,7 @@
  * no counts means no pills, no ``match_type`` means no chip. Old links
  * look exactly as they did (links are forever).
  */
-import { useRef, type KeyboardEvent } from "react";
+import { useId, useRef, useState, type KeyboardEvent } from "react";
 
 import type {
   IpdInconclusive,
@@ -79,8 +79,13 @@ export function MatchTypeControl({
     if (next !== index) onChange(OPTIONS[next].value);
   };
   return (
-    <div className="flex items-center gap-2 tabular-nums" data-testid="match-type">
-      <span id="match-type-label" className="text-[10px] font-medium text-slate-500">
+    // On a phone the label sits above the pills, as on Found in and
+    // Platform (demo of #75).
+    <div
+      className="flex flex-col items-start gap-1 tabular-nums sm:flex-row sm:items-center sm:gap-2"
+      data-testid="match-type"
+    >
+      <span id="match-type-label" className="whitespace-nowrap text-[10px] font-medium text-slate-500">
         Match type
       </span>
       <div
@@ -132,9 +137,19 @@ export type MatchTypeView = "publishers" | "apps";
  * `subject` = the app's publisher). The partner first, then whose
  * inventory partner it is.
  */
-export function ipdWhere(row: MatchTypeFields, subject: string | null | undefined): string | null {
+export function ipdWhere(
+  row: MatchTypeFields,
+  subject: string | null | undefined,
+  /** How many OTHER partners carry the row's lines (2026-10-27: a row named
+   *  only the first of 14). */
+  others = 0,
+): string | null {
   if (row.match_type !== "ipd" || !row.ipd_partner) return null;
   const of = (subject ?? "").trim();
+  if (others > 0) {
+    const more = `${row.ipd_partner} and ${others.toLocaleString()} other inventory ${others === 1 ? "partner" : "partners"}`;
+    return of ? `Via ${more} of ${of}` : `Via ${more}`;
+  }
   return of ? `Via ${row.ipd_partner}, inventory partner of ${of}` : `Via ${row.ipd_partner}`;
 }
 
@@ -156,8 +171,8 @@ export function linesDomain(row: MatchTypeFields, own: string | null | undefined
   return row.match_type === "ipd" && row.ipd_partner ? row.ipd_partner : (own ?? null);
 }
 
-function ipdTitle(row: MatchTypeFields, subject: string | null | undefined): string | undefined {
-  const where = ipdWhere(row, subject);
+function ipdTitle(row: MatchTypeFields, subject: string | null | undefined, others = 0): string | undefined {
+  const where = ipdWhere(row, subject, others);
   const parts = [where, row.declared_in ? `Declared in ${row.declared_in}` : null].filter(Boolean);
   return parts.length ? parts.join(". ") : undefined;
 }
@@ -180,12 +195,20 @@ export function platformLabel(raw: unknown): "CTV" | "Mobile" | "Web" | null {
 
 /** The small "IPD" chip beside the name; nothing on an own row. `subject`
  *  as on IpdWhere; absent means a publisher row. */
-export function IpdChip({ row, subject = PUBLISHER_SUBJECT }: { row: MatchTypeFields; subject?: string | null }) {
+export function IpdChip({
+  row,
+  subject = PUBLISHER_SUBJECT,
+  others = 0,
+}: {
+  row: MatchTypeFields;
+  subject?: string | null;
+  others?: number;
+}) {
   if (row.match_type !== "ipd") return null;
   return (
     <span
       data-ipd-chip
-      title={ipdTitle(row, subject)}
+      title={ipdTitle(row, subject, others)}
       className="inline-flex flex-shrink-0 items-center rounded-full border border-info-border bg-info-bg px-1.5 py-px text-[10px] font-semibold text-info"
     >
       IPD
@@ -195,94 +218,31 @@ export function IpdChip({ row, subject = PUBLISHER_SUBJECT }: { row: MatchTypeFi
 
 /** The quiet line under the name. `subject`: the app's publisher on an
  *  app row; absent means a publisher row ("this publisher"). */
-export function IpdWhere({ row, subject = PUBLISHER_SUBJECT }: { row: MatchTypeFields; subject?: string | null }) {
-  const where = ipdWhere(row, subject);
+export function IpdWhere({
+  row,
+  subject = PUBLISHER_SUBJECT,
+  others = 0,
+}: {
+  row: MatchTypeFields;
+  subject?: string | null;
+  others?: number;
+}) {
+  const where = ipdWhere(row, subject, others);
   if (!where) return null;
   return (
-    <div data-ipd-where title={ipdTitle(row, subject)} className="truncate text-[11px] text-slate-500">
+    <div data-ipd-where title={ipdTitle(row, subject, others)} className="truncate text-[11px] text-slate-500">
       {where}
     </div>
   );
 }
 
-function joinAnd(items: string[]): string {
-  if (items.length <= 1) return items.join("");
-  return `${items.slice(0, -1).join(", ")} and ${items[items.length - 1]}`;
-}
-
-const NOUNS: Record<MatchTypeView, { one: string; many: string }> = {
-  publishers: { one: "publisher", many: "publishers" },
-  apps: { one: "app", many: "apps" },
-};
-
-/**
- * The note, in the view's own shape:
- *   apps:       "Not counted: 2 inconclusive IPD apps via northfold-tv.com,
- *               inventory partner of Tidewick TV. This crawl could not read
- *               northfold-tv.com's ads.txt."
- *   publishers: "Not counted: 1 inconclusive IPD publisher (Tidewick TV, via
- *               northfold-tv.com, its inventory partner). This crawl could
- *               not read northfold-tv.com's ads.txt."
- * Several partner/platform pairs are listed with semicolons. The examples
- * are pairs, not one per row, so nothing like "and others" is inferred.
- */
-export function inconclusiveSentence(data: IpdInconclusive, view: MatchTypeView): string {
-  const noun = NOUNS[view];
-  const examples = (data.examples ?? []).filter((e) => e && e.partner);
-  const partners = [...new Set(examples.map((e) => e.partner))];
-  const n = data.count;
-  const head = `Not counted: ${n.toLocaleString()} inconclusive IPD ${n === 1 ? noun.one : noun.many}`;
-  let list = "";
-  if (examples.length && view === "apps") {
-    list = ` via ${examples
-      .map((e) => (e.platform ? `${e.partner}, inventory partner of ${e.platform}` : e.partner))
-      .join("; ")}`;
-  } else if (examples.length) {
-    const its = examples.length === 1 ? "its inventory partner" : "their inventory partners";
-    list = ` (${examples
-      .map((e) => (e.platform ? `${e.platform}, via ${e.partner}` : `via ${e.partner}`))
-      .join("; ")}, ${its})`;
-  }
-  const why = partners.length
-    ? ` This crawl could not read ${joinAnd(partners.map((p) => `${p}'s ads.txt`))}.`
-    : " This crawl could not read the partner's ads.txt.";
-  return `${head}${list}.${why}`;
-}
-
-/** The quiet note under a list: IPD matches not confirmed, not counted. */
-export function IpdInconclusiveNote({
-  data,
-  view,
-}: {
-  data: IpdInconclusive | null | undefined;
-  view: MatchTypeView;
-}) {
-  if (!data || !(data.count > 0)) return null;
-  return (
-    <p data-ipd-inconclusive className="mt-3 text-xs text-slate-500">
-      {inconclusiveSentence(data, view)}
-    </p>
-  );
-}
-
-/** "not in sellers.json" stays as it is after its first letter. */
-function roleLabel(role: string): string {
-  const r = role.trim();
-  return r ? r.charAt(0).toUpperCase() + r.slice(1) : r;
-}
-
-/**
- * Seller role, Managed by, Partner inventory on and the Alert, at the top
- * of an expanded row. Nothing when the row carries none of them (every
- * report frozen before the crawler sent them).
- */
 /**
  * A list field as the crawler really sends it (2026-10-27): the frozen
  * reports carry ``verdict_alerts`` as ONE string ("" when there is nothing
  * to say, several alerts joined by " | "), not the array the contract
  * described. A string, an array, or anything else is read safely here, so
- * an expanded row can never throw on it (a crash took the whole section
- * down on every report link).
+ * a row can never throw on it (a crash took the whole section down on
+ * every report link). Kept for any list field the page reads.
  */
 export function textList(value: unknown, split: RegExp = /\s\|\s|\n/): string[] {
   const parts: unknown[] = Array.isArray(value)
@@ -296,44 +256,109 @@ export function textList(value: unknown, split: RegExp = /\s\|\s|\n/): string[] 
     .filter(Boolean);
 }
 
-/** A plain text field, or nothing: never throws on an unexpected type. */
-function text(value: unknown): string {
-  return typeof value === "string" ? value.trim() : "";
+const NOUNS: Record<MatchTypeView, { one: string; many: string }> = {
+  publishers: { one: "publisher", many: "publishers" },
+  apps: { one: "app", many: "apps" },
+};
+
+/**
+ * THE INCONCLUSIVE NOTE, ONE SHORT QUIET LINE (David, 2026-10-27: the long
+ * "Not counted: 55 inconclusive IPD publishers (1015vibe.com, via
+ * gustotv.com; ...)" sentence confused him). What could not be checked, and
+ * why, in plain words; the names wait behind "Show them":
+ *
+ *   "55 publishers could not be checked this week: their inventory partner
+ *    gustotv.com's ads.txt could not be read."
+ *   "55 publishers could not be checked this week: their inventory
+ *    partners' ads.txt files (gustotv.com and 2 more) could not be read."
+ *
+ * The apps view says the same of apps. Never part of any count.
+ */
+export function inconclusiveSentence(data: IpdInconclusive, view: MatchTypeView): string {
+  const noun = NOUNS[view];
+  const n = data.count;
+  const one = n === 1;
+  const its = one ? "its" : "their";
+  const partners = [...new Set(inconclusivePairs(data).map((e) => e.partner))];
+  const why =
+    partners.length === 1
+      ? `${its} inventory partner ${partners[0]}'s ads.txt could not be read`
+      : partners.length > 1
+        ? `${its} inventory partners' ads.txt files (${partners[0]} and ${partners.length - 1} more) could not be read`
+        : `${its} inventory partner's ads.txt could not be read`;
+  return `${n.toLocaleString()} ${one ? noun.one : noun.many} could not be checked this week: ${why}.`;
 }
 
-export function RowRoles({ row }: { row: MatchTypeFields }) {
-  const partnerOn = textList(row.partner_inventory_on, /\s*[,;]\s*|\n/);
-  const alerts = Array.from(new Set(textList(row.verdict_alerts)));
-  const facts: [string, string][] = [];
-  const role = text(row.seller_role);
-  const managedBy = text(row.managed_by);
-  if (role) facts.push(["Seller role", roleLabel(role)]);
-  if (managedBy) facts.push(["Managed by", managedBy]);
-  if (partnerOn.length) facts.push(["Partner inventory on", partnerOn.join(", ")]);
-  if (facts.length === 0 && alerts.length === 0) return null;
+/** The pairs the note can name, safely read (never throws on a bad item). */
+function inconclusivePairs(data: IpdInconclusive): { partner: string; platform: string }[] {
+  const raw: unknown = data.examples;
+  if (!Array.isArray(raw)) return [];
+  return raw
+    .filter((e): e is { partner: unknown; platform: unknown } => !!e && typeof e === "object")
+    .map((e) => ({
+      partner: typeof e.partner === "string" ? e.partner.trim() : "",
+      platform: typeof e.platform === "string" ? e.platform.trim() : "",
+    }))
+    .filter((e) => e.partner);
+}
+
+/** One item of the list behind "Show them": the publisher (on the apps
+ *  view, the publisher whose apps they are) and the partner. */
+export function inconclusiveItem(e: { partner: string; platform: string }, view: MatchTypeView): string {
+  if (!e.platform) return `Via ${e.partner}`;
+  return view === "apps" ? `Apps of ${e.platform}, via ${e.partner}` : `${e.platform}, via ${e.partner}`;
+}
+
+/** The quiet note under a list: IPD matches not confirmed, not counted,
+ *  with the names one click away. */
+export function IpdInconclusiveNote({
+  data,
+  view,
+}: {
+  data: IpdInconclusive | null | undefined;
+  view: MatchTypeView;
+}) {
+  const [open, setOpen] = useState(false);
+  const listId = useId();
+  if (!data || !(data.count > 0)) return null;
+  const pairs = inconclusivePairs(data);
+  // The report keeps a few examples, not every one: on the publishers view
+  // the rest is counted ("Plus 30 more."). On the apps view the examples
+  // are publishers, not apps, so no app number is put beside them.
+  const more = view === "publishers" ? Math.max(0, data.count - pairs.length) : 0;
   return (
-    <div data-row-roles className="mb-3 space-y-2">
-      {facts.length > 0 && (
-        <dl className="flex flex-wrap gap-x-5 gap-y-1 text-xs">
-          {facts.map(([k, v]) => (
-            <div key={k} className="flex min-w-0 gap-1">
-              <dt className="flex-shrink-0 text-slate-500">{k}:</dt>
-              <dd className="min-w-0 break-words font-medium text-slate-800">{v}</dd>
-            </div>
-          ))}
-        </dl>
+    <div data-ipd-inconclusive-note className="mt-3">
+      <p className="text-xs text-slate-500">
+        <span data-ipd-inconclusive>{inconclusiveSentence(data, view)}</span>
+        {pairs.length > 0 && (
+          <>
+            {" "}
+            <button
+              type="button"
+              aria-expanded={open}
+              aria-controls={listId}
+              onClick={() => setOpen((o) => !o)}
+              className="rounded-sm font-medium text-slate-600 underline decoration-slate-300 underline-offset-2 transition-colors hover:text-primary hover:decoration-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40"
+            >
+              {open ? "Hide them" : "Show them"}
+            </button>
+          </>
+        )}
+      </p>
+      {open && pairs.length > 0 && (
+        <div id={listId} data-ipd-inconclusive-list className="mt-2 max-w-xl">
+          <ul className="divide-y divide-border rounded-md border border-border bg-white">
+            {pairs.map((e, i) => (
+              <li key={`${e.partner}|${e.platform}|${i}`} className="px-3 py-1.5 text-[11px] text-slate-700">
+                {inconclusiveItem(e, view)}
+              </li>
+            ))}
+          </ul>
+          {more > 0 && (
+            <p className="mt-1 text-[10px] text-slate-500">Plus {more.toLocaleString()} more.</p>
+          )}
+        </div>
       )}
-      {/* Each alert on its own quiet line. */}
-      {alerts.map((a) => (
-        <p
-          key={a}
-          data-row-alert
-          role="note"
-          className="rounded-lg border border-warn-border bg-warn-bg px-3 py-2 text-xs text-warn"
-        >
-          {a}
-        </p>
-      ))}
     </div>
   );
 }

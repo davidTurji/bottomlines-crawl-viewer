@@ -8,29 +8,38 @@ export function cn(...inputs: ClassValue[]) {
 }
 
 /**
- * The store code the crawler speaks, rendered to a name a reader knows.
- * Shared by the Discovery page's app placements and the overview's matched
- * apps list so both spell a store the same way.
+ * A store's name as a customer reads it: the crawler's ONE map
+ * (domain/platforms.py STORE_LABELS, crawler #370), word for word, so the
+ * page and the Excel say the same words. ``googleplay`` is Google Play's
+ * Android TV store, "Google TV". A store the map does not know reads as
+ * stored; none at all, "app". Prefer the row's own ``store_label`` (the
+ * API's, on a report built since #370): `storeName`.
  */
-export function storeLabel(store?: string): string {
-  switch ((store ?? "").toLowerCase()) {
-    case "ios":
-      return "iOS";
-    case "android":
-      return "Android";
-    case "roku":
-      return "Roku";
-    case "samsung":
-      return "Samsung";
-    case "vizio":
-      return "Vizio";
-    case "firetv":
-      return "Fire TV";
-    case "ctv":
-      return "CTV";
-    default:
-      return store || "app";
-  }
+export const STORE_LABELS: Record<string, string> = {
+  ios: "iOS",
+  android: "Android",
+  tvos: "Apple TV",
+  googleplay: "Google TV",
+  firetv: "Fire TV",
+  roku: "Roku",
+  samsung: "Samsung",
+  lg: "LG",
+  vizio: "Vizio",
+  website: "Website",
+};
+
+export function storeLabel(store?: string | null): string {
+  const raw = typeof store === "string" ? store.trim() : "";
+  if (!raw) return "app";
+  return STORE_LABELS[raw.toLowerCase()] ?? raw;
+}
+
+/** A row's store name: the API's `store_label` when it sends one, else
+ *  the same map (`storeLabel`). */
+export function storeName(row: { store?: string | null; store_label?: unknown } | null | undefined): string {
+  const given = row?.store_label;
+  if (typeof given === "string" && given.trim()) return given.trim();
+  return storeLabel(row?.store);
 }
 
 
@@ -155,8 +164,10 @@ export function appFileLine(
  * monitored, not removed. Null (a watchlist change) prints nothing; any
  * other sentence the crawler sends prints as it is.
  */
-export function scopeReasonText(reason: string | null | undefined): string | null {
-  const raw = (reason ?? "").trim();
+export function scopeReasonText(reason: unknown): string | null {
+  // Read safely: a reason the crawler sends as anything but text says
+  // nothing rather than taking the row down.
+  const raw = typeof reason === "string" ? reason.trim() : "";
   if (!raw) return null;
   if (raw === "host first read") return "first read of this file this crawl";
   if (raw === "host not read") return "this file was not read this crawl";

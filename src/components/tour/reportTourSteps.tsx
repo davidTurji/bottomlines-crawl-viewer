@@ -10,7 +10,7 @@
  * 2. **Only describe what the page does.** Every label below was read off the
  *    page it describes. A walkthrough that promises a feature is worse than
  *    none, because the reader trusts it.
- * 3. **Follow the rail.** Overview, Changes, Discovery, Declarations, the
+ * 3. **Follow the rail.** Overview, Discovery, Declarations, the
  *    sidebar's own order, so finishing leaves the reader able to find things
  *    again without it.
  * 4. **One line each.** A dozen words, the words that matter in bold
@@ -28,7 +28,7 @@
 import type { TourStep } from "./TourOverlay";
 
 /** The report page a step is about, relative to the report's base path. */
-export type ReportPage = "" | "changes" | "discovery" | "declarations" | "schain";
+export type ReportPage = "" | "discovery" | "declarations" | "schain";
 
 export interface ReportTourStep extends TourStep {
   /** The runner navigates here when the step opens. */
@@ -53,7 +53,6 @@ export interface ReportFeatures {
 export function reportTourSteps(f: ReportFeatures): ReportTourStep[] {
   const pages = [
     "Overview",
-    "Changes",
     ...(f.hasDiscovery ? ["Discovery"] : []),
     "Declarations",
     ...(f.hasSchain ? ["Schain"] : []),
@@ -120,7 +119,7 @@ export function reportTourSteps(f: ReportFeatures): ReportTourStep[] {
       title: "Every match",
       body: (
         <p>
-          <strong>Click a row</strong> to see its exact lines and this week&apos;s moves.
+          <strong>Click a row</strong> to see its exact lines. The <strong>tabs</strong> show what moved this week.
         </p>
       ),
     },
@@ -158,18 +157,6 @@ export function reportTourSteps(f: ReportFeatures): ReportTourStep[] {
       body: (
         <p>
           <strong>{pageList}</strong>. Next, a quick look at each.
-        </p>
-      ),
-    },
-    {
-      id: "changes",
-      page: "changes",
-      anchor: "changes-controls",
-      eyebrow: "Changes",
-      title: "Lines that moved",
-      body: (
-        <p>
-          One card per line. Narrow it by <strong>tab</strong> or <strong>SSP</strong>.
         </p>
       ),
     },

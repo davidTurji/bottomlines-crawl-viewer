@@ -1,11 +1,11 @@
 import { Search } from "lucide-react";
 import { useEffect, useState, type ComponentType } from "react";
 
-import { Dots } from "@/components/Dots";
 import { EmptyResult, Pager, TruncatedNotice, usePaging } from "@/components/ListControls";
 import LockedTail from "@/components/LockedTail";
 import { Settle } from "@/components/Motion";
-import { SkeletonRows } from "@/components/Skeleton";
+import { SkeletonRows, skeletonRowCount } from "@/components/Skeleton";
+import { expectedRows, knownKey, type Landed } from "@/lib/expectedRows";
 import {
   api,
   type GoneInventory,
@@ -16,10 +16,12 @@ import {
   type InactivePublisher,
   type TrialCaps,
 } from "@/lib/api";
-import { INACTIVE_KINDS, inactiveNoun } from "@/lib/inactive";
+import { INACTIVE_KINDS, inactiveNoun, reasonText } from "@/lib/inactive";
+import { csvName, ExportListButton, type CsvSink } from "@/components/ExportList";
+import { eachPage, READ_PAGE, type Progress } from "@/lib/scopeRows";
 import { usePageCache } from "@/lib/pageCache";
 import { PAGE_SIZE } from "@/lib/paging";
-import { cn } from "@/lib/utils";
+import { cn, storeName } from "@/lib/utils";
 
 /**
  * THE INACTIVE TAB of the matched list (David, 2026-10-08), which replaced
@@ -104,6 +106,8 @@ export default function InactiveSection({
   const [expanded, setExpanded] = useState<string | null>(null);
   // Bumps each time a list lands; 0 means nothing for this list yet.
   const [settled, setSettled] = useState(0);
+  // The size of the list last read, for the skeleton's row count.
+  const [landed, setLanded] = useState<Landed | null>(null);
   const linesKey = lines.join(",");
 
   useEffect(() => setPage(1), [kind, query, linesKey]);
@@ -115,6 +119,7 @@ export default function InactiveSection({
     const load = (pg: number) => api.inactive(token, kind, { page: pg, q: query, lines }, legacy);
     const keyFor = (pg: number) => [kind, pg, query, linesKey].join("|");
     const apply = (d: Loaded) => {
+      setLanded({ tab: kind, query, lines: linesKey, matchType: "all", filter: "all", total: d.total });
       setData(d);
       setSettled((n) => n + 1);
     };
@@ -157,6 +162,44 @@ export default function InactiveSection({
   const nounOne = inactiveNoun(kind, 1);
   const toggle = (key: string) => setExpanded((k) => (k === key ? null : key));
 
+  const exportList = async (sink: CsvSink, progress: Progress, signal: AbortSignal): Promise<string> => {
+    const lineText = (ls: unknown) =>
+      (Array.isArray(ls) ? ls : [])
+        .filter((l): l is { ssp_domain: string; publisher_id: string; relationship: string } => !!l && typeof l === "object")
+        .map((l) => `${l.ssp_domain}, ${l.publisher_id}, ${l.relationship}`)
+        .join("; ");
+    // The workbook's Inactive sheet headers (run_export.py), parity audit
+    // of #75; "Apps" as its publishers sheet says it.
+    sink.header(
+      kind === "publishers"
+        ? ["Publisher domain", "Publisher", "Inactive since", "Reason", "Evidence", "Apps", "Line"]
+        : ["App", "Store", "Bundle ID", "Publisher domain", "Publisher", "Inactive since", "Reason", "Evidence", "Line"],
+    );
+    await eachPage(
+      (pg) => api.inactive(token, kind, { page: pg, q: query, lines, pageSize: READ_PAGE }, legacy),
+      READ_PAGE,
+      (page) =>
+        sink.rows(
+          kind === "publishers"
+            ? (page as InactivePublisher[]).map((p) => [p.domain, p.name, p.inactive_since, reasonText(p), p.evidence_summary, p.apps, lineText(p.lines)])
+            : (page as InactiveApp[]).map((a) => [
+                a.name,
+                storeName(a),
+                a.bundle,
+                a.publisher,
+                a.publisher_name,
+                a.inactive_since,
+                reasonText(a),
+                a.evidence_summary,
+                lineText(a.lines),
+              ]),
+        ),
+      progress,
+      signal,
+    );
+    return csvName(kind === "publishers" ? "inactive publishers" : "inactive apps", query ? `search ${query}` : null);
+  };
+
   return (
     <div data-testid="inactive-section">
       <div className="mb-3 space-y-2">
@@ -184,7 +227,6 @@ export default function InactiveSection({
               </button>
             );
           })}
-          {loading && settled > 0 && <Dots />}
         </div>
         <p className="text-sm text-slate-500">
           {intro(kind, since)} Not counted in your totals.
@@ -193,6 +235,7 @@ export default function InactiveSection({
               ? " Showing only apps whose publisher carries the selected lines."
               : " Showing only those with the selected lines.")}
         </p>
+        <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:gap-3">
         <div className="relative w-full">
           <Search className="pointer-events-none absolute left-3.5 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
           <input
@@ -203,13 +246,32 @@ export default function InactiveSection({
             className="h-10 w-full rounded-full border border-border bg-white pl-10 pr-4 text-sm text-slate-900 outline-none transition-colors placeholder:text-slate-400 focus:border-slate-400/50"
           />
         </div>
+        {/* EXPORT THIS LIST (David, 2026-10-27): every page of it. */}
+        {ready && !loading && rows.length > 0 && !locked && <ExportListButton run={exportList} />}
+        </div>
       </div>
 
-      {loading && settled === 0 && <SkeletonRows rows={4} label={`Loading ${noun}`} />}
+      {/* The skeleton whenever the list waits for its rows, the first read
+          and every search, page or list switch after it (David,
+          2026-10-27), never last answer's rows dimmed. */}
+      {loading && (
+        <SkeletonRows
+          rows={skeletonRowCount(
+            expectedRows(
+              { tab: kind, query, lines: linesKey, matchType: "all", filter: "all" },
+              // The summary's whole counts answer the list unfiltered.
+              { landed, known: { [knownKey("publishers", "all", "")]: counts.publishers, [knownKey("apps", "all", "")]: counts.apps } },
+              page,
+              PAGE_SIZE,
+            ),
+          )}
+          label={`Loading ${noun}`}
+        />
+      )}
       {error && <p className="text-sm text-critical">{error}</p>}
 
-      {ready && rows.length === 0 && (
-        <div className={cn("transition-opacity duration-300", loading && "opacity-60")}>
+      {ready && !loading && rows.length === 0 && (
+        <div>
           {query ? (
             <EmptyResult query={query} noun={noun} />
           ) : (
@@ -224,7 +286,7 @@ export default function InactiveSection({
         </div>
       )}
 
-      {ready && rows.length > 0 && !locked && (
+      {ready && !loading && rows.length > 0 && !locked && (
         <Pager
           placement="top"
           anchorRef={paging.topRef}
@@ -238,14 +300,8 @@ export default function InactiveSection({
         />
       )}
 
-      {ready && rows.length > 0 && (
-        <div
-          key={settled}
-          className={cn(
-            "animate-in fade-in space-y-3 transition-opacity duration-300 ease-out",
-            loading && "opacity-60",
-          )}
-        >
+      {ready && !loading && rows.length > 0 && (
+        <div key={settled} className="animate-in fade-in space-y-3">
           {kind === "publishers" &&
             (rows as InactivePublisher[]).map((p, i) => {
               const key = `p:${p.developer_id ?? p.domain}`;
@@ -267,7 +323,7 @@ export default function InactiveSection({
         </div>
       )}
 
-      {ready && locked && (
+      {ready && !loading && locked && (
         <LockedTail
           slice={trial}
           caps={caps}
@@ -276,7 +332,7 @@ export default function InactiveSection({
           detail="inactive publisher and app, with the date and the reason"
         />
       )}
-      {ready && rows.length > 0 && !locked && (
+      {ready && !loading && rows.length > 0 && !locked && (
         <div className="mt-4">
           <Pager
             page={page}

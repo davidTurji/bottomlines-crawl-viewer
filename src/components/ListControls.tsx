@@ -378,19 +378,25 @@ export function EmptyResult({
   query,
   noun,
   onPage = false,
+  quiet,
 }: {
   query: string;
   noun: string;
   /** The list was filtered on the loaded page only: say so, never "on
    *  this report". */
   onPage?: boolean;
+  /** What a tab that is merely quiet this week says ("No publishers lost
+   *  a line this week."), in place of "on this report". */
+  quiet?: string;
 }) {
   return (
-    <div className="rounded-lg border border-dashed border-border px-4 py-8 text-center">
+    <div data-empty-list className="rounded-lg border border-dashed border-border px-4 py-8 text-center">
       <p className="text-sm text-slate-600">
         {query
           ? `No ${noun} match "${query}"${onPage ? " on this page" : ""}.`
-          : `No ${noun} on this ${onPage ? "page" : "report"}.`}
+          : !onPage && quiet
+            ? quiet
+            : `No ${noun} on this ${onPage ? "page" : "report"}.`}
       </p>
       {query && (
         <p className="mt-1 text-xs text-slate-500">

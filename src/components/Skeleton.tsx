@@ -28,6 +28,7 @@
 import type { CSSProperties } from "react";
 
 import { cn } from "@/lib/utils";
+import { PAGE_SIZE } from "@/lib/paging";
 
 /** Each row enters the sweep a beat after the one above it. */
 const stagger = (i: number): CSSProperties =>
@@ -173,7 +174,7 @@ function FilterBarBlock({ actions = 1 }: { actions?: number }) {
 function RowBlock({ i }: { i: number }) {
   const widths = ["w-[42%]", "w-[58%]", "w-[35%]", "w-[50%]", "w-[64%]"];
   return (
-    <div className="rounded-3xl border border-border bg-white px-4 py-4 shadow-sm sm:px-5">
+    <div data-skeleton-row className="rounded-3xl border border-border bg-white px-4 py-4 shadow-sm sm:px-5">
       <div className="flex items-center gap-4">
         <Skeleton
           className="h-11 w-11 flex-shrink-0 rounded-full"
@@ -248,6 +249,21 @@ export function SkeletonStatCards({
       <StatCard columns={columns} delay={1} />
     </div>
   );
+}
+
+/** A skeleton row and the gap under it, in pixels. */
+const ROW_PX = 90;
+
+/**
+ * HOW MANY SKELETON ROWS (reviews of #75): the rows the list will land
+ * with when the page knows (lib/expectedRows: a page already read, a
+ * count the pills, the tabs or the Popular choices hold), never more than
+ * fill the screen, so the list neither grows nor shrinks when they arrive.
+ * Null, nothing known: a full page, which fills the screen.
+ */
+export function skeletonRowCount(expected: number | null): number {
+  const fit = typeof window === "undefined" ? 6 : Math.max(3, Math.ceil(window.innerHeight / ROW_PX));
+  return Math.min(expected === null ? PAGE_SIZE : Math.max(1, expected), fit);
 }
 
 /**

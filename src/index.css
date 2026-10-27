@@ -893,3 +893,46 @@ All colors MUST be HSL.
   .mtile-corner { justify-self: start; align-items: flex-start; text-align: left; margin-top: 0.5rem; }
 }
 
+
+/* THE ROWS ROLL IN (David, 2026-10-27): see Settle in components/Motion.
+   A list's rows fade in and slide down 7px, staggered by --bl-row-delay;
+   an opened row's seat lines do the same, smaller and quicker. Transform
+   and opacity only. Less motion asked for: they simply appear. */
+@keyframes bl-row-in {
+  from {
+    opacity: 0;
+    transform: translate3d(0, -7px, 0);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+@keyframes bl-line-in {
+  from {
+    opacity: 0;
+    transform: translate3d(0, -3px, 0);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+.bl-row-in {
+  animation: bl-row-in 220ms cubic-bezier(0.2, 0.8, 0.2, 1) both;
+  animation-delay: var(--bl-row-delay, 0ms);
+}
+.bl-lines-in > li {
+  animation: bl-line-in 160ms ease-out both;
+}
+.bl-lines-in > li:nth-child(2) { animation-delay: 20ms; }
+.bl-lines-in > li:nth-child(3) { animation-delay: 40ms; }
+.bl-lines-in > li:nth-child(4) { animation-delay: 60ms; }
+.bl-lines-in > li:nth-child(5) { animation-delay: 80ms; }
+.bl-lines-in > li:nth-child(n + 6) { animation-delay: 100ms; }
+@media (prefers-reduced-motion: reduce) {
+  .bl-row-in,
+  .bl-lines-in > li {
+    animation: none;
+  }
+}

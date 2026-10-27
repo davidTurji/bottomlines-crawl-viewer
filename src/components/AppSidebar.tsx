@@ -98,7 +98,6 @@ export function AppSidebar() {
   // is about to open before it opens it (see ReportTour's page change).
   const items: { to: string; label: string; tour: string; end?: boolean }[] = [
     { to: basePath, label: "Overview", tour: "nav-overview", end: true },
-    { to: `${basePath}/changes`, label: "Changes", tour: "nav-changes" },
     // Listed ONLY when this crawl actually discovered something (David,
     // 2026-09-04: "only when you actually discover lines you show it").
     // A seat-line-only crawl has no discovery story to tell, so an entry

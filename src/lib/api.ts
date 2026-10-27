@@ -105,6 +105,33 @@ export function onLinkRefused(handler: (() => void) | null) {
   linkRefusedHandler = handler;
 }
 
+// ── Held until signed in (demo of #75, 2026-10-27) ─────────────────
+// Before the email link's sign-in landed, the page fired ~23 data
+// requests that all came back 401. While the sign-in form is up (the
+// link's own, or after a 401), every data request waits here and goes
+// once the session exists; the sign-in and resolve calls never wait.
+let held: { until: Promise<void>; release: () => void } | null = null;
+
+/** Hold every data request until `releaseDataRequests` (sign-in). */
+export function holdDataRequests(): void {
+  if (held) return;
+  let release!: () => void;
+  const until = new Promise<void>((r) => (release = r));
+  held = { until, release };
+}
+
+/** The session exists: every held request goes. */
+export function releaseDataRequests(): void {
+  const h = held;
+  held = null;
+  h?.release();
+}
+
+/** Waits while data requests are held (a no-op otherwise). */
+async function whenSignedIn(): Promise<void> {
+  while (held) await held.until;
+}
+
 // ── Auth epoch ───────────────────────────────────────────────────
 // Guards against a stale-401 re-lock race: a data request fired
 // before sign-in can come back 401 *after* the login succeeded, and
@@ -126,12 +153,15 @@ async function req<T>(
   body?: unknown,
   signal?: AbortSignal,
 ): Promise<T> {
-  const epochAtStart = authEpoch;
   // Path without its query string, so the two exemptions below compare
   // whole endpoints. A prefix test would misfire on a share token that
   // happens to start with "resolve" (/v1/viewer/resolveXYZ/summary) and
   // silently switch the sign-in gate off for that reader.
   const endpoint = path.split("?")[0];
+  // A data request waits for the sign-in; the sign-in and the resolve,
+  // which run before any session exists, never do.
+  if (!endpoint.endsWith("/viewer/auth") && endpoint !== "/v1/viewer/resolve") await whenSignedIn();
+  const epochAtStart = authEpoch;
   const res = await fetch(`${BASE}${path}`, {
     method,
     credentials: "include",
@@ -232,6 +262,7 @@ export const api = {
     // 404, and whatever goes wrong here falls back to the defaults. Nothing
     // here may touch the sign-in gate; the summary's own calls do that.
     try {
+      await whenSignedIn();
       const res = await fetch(`${BASE}/v1/viewer/${token}/export-info`, {
         credentials: "include",
       });
@@ -326,6 +357,10 @@ export const api = {
     q = "",
     lines?: string[],
     matchType: MatchTypeFilter = "all",
+    /** Rows per page; the lists ask for PAGE_SIZE, an export for more. */
+    pageSize: number = PAGE_SIZE,
+    /** The Found in switch (an API without it ignores it). */
+    foundIn: FoundInFilter = "all",
   ) => {
     if (MOCK) {
       const { mockDeveloperEvents } = await import("./mockData");
@@ -340,7 +375,7 @@ export const api = {
     }
     return req<DeveloperEventsPage>(
       "GET",
-      `/v1/viewer/${token}/developer-events?event=${event}&page=${page}&page_size=${PAGE_SIZE}${q ? `&q=${encodeURIComponent(q)}` : ""}${linesQuery(lines)}${matchTypeQuery(matchType)}`,
+      `/v1/viewer/${token}/developer-events?event=${event}&page=${page}&page_size=${pageSize}${q ? `&q=${encodeURIComponent(q)}` : ""}${linesQuery(lines)}${matchTypeQuery(matchType)}${foundIn !== "all" ? `&found_in=${foundIn}` : ""}`,
     );
   },
   changeGroups: async (
@@ -461,6 +496,12 @@ export const api = {
     q = "",
     lines?: string[],
     matchType: MatchTypeFilter = "all",
+    pageSize: number = PAGE_SIZE,
+    /** A watch tab's filter (crawler #361); an API without it ignores it
+     *  and echoes nothing, and the tab is then not offered. */
+    change?: WatchChange,
+    /** The Found in switch (an API without it ignores it). */
+    foundIn: FoundInFilter = "all",
   ) => {
     if (MOCK) {
       const { mockMatchedDevelopers } = await import("./mockData");
@@ -475,7 +516,7 @@ export const api = {
     }
     return req<MatchedDevelopersPage>(
       "GET",
-      `/v1/viewer/${token}/matched-developers?page=${page}&page_size=${PAGE_SIZE}${q ? `&q=${encodeURIComponent(q)}` : ""}${linesQuery(lines)}${matchTypeQuery(matchType)}`,
+      `/v1/viewer/${token}/matched-developers?page=${page}&page_size=${pageSize}${q ? `&q=${encodeURIComponent(q)}` : ""}${linesQuery(lines)}${matchTypeQuery(matchType)}${change ? `&change=${change}` : ""}${foundIn !== "all" ? `&found_in=${foundIn}` : ""}`,
     );
   },
   matchedBundles: async (token: string, page = 1, q = "") => {
@@ -517,6 +558,9 @@ export const api = {
     lines?: string[],
     matchType: MatchTypeFilter = "all",
     change?: AppChange,
+    pageSize: number = PAGE_SIZE,
+    /** The Platform switch (an API without it ignores it). */
+    platform: PlatformFilter = "all",
   ) => {
     if (MOCK) {
       const { mockMatchedApps } = await import("./mockData");
@@ -527,7 +571,7 @@ export const api = {
     }
     return req<MatchedAppsPage>(
       "GET",
-      `/v1/viewer/${token}/matched-apps?page=${page}&page_size=${PAGE_SIZE}${q ? `&q=${encodeURIComponent(q)}` : ""}${linesQuery(lines)}${matchTypeQuery(matchType)}${change ? `&change=${change}` : ""}`,
+      `/v1/viewer/${token}/matched-apps?page=${page}&page_size=${pageSize}${q ? `&q=${encodeURIComponent(q)}` : ""}${linesQuery(lines)}${matchTypeQuery(matchType)}${change ? `&change=${change}` : ""}${platform !== "all" ? `&platform=${platform}` : ""}`,
     );
   },
   /**
@@ -547,7 +591,7 @@ export const api = {
   inactive: async (
     token: string,
     kind: InactiveKind,
-    opts: { page?: number; q?: string; lines?: string[] } = {},
+    opts: { page?: number; q?: string; lines?: string[]; pageSize?: number } = {},
     legacy?: GoneInventory | null,
   ): Promise<InactivePage> => {
     const page = opts.page ?? 1;
@@ -574,7 +618,7 @@ export const api = {
     const q = new URLSearchParams({
       kind,
       page: String(page),
-      page_size: String(PAGE_SIZE),
+      page_size: String(opts.pageSize ?? PAGE_SIZE),
     });
     if (opts.q) q.set("q", opts.q);
     // Appended raw, as every list does: the keys are encoded once by
@@ -924,6 +968,7 @@ export const api = {
     // means exactly that, so it is answered here as null. Before 2026-10-06
     // req() read a 404 as a dead link, which took every report without the
     // page down.
+    await whenSignedIn();
     const res = await fetch(`${BASE}/v1/viewer/${token}/sellers-fix`, {
       credentials: "include",
     });
@@ -1049,6 +1094,7 @@ export const api = {
       sid2: sel.sid2,
     });
     if (sel.live) q.set("live", "true");
+    await whenSignedIn();
     const res = await fetch(
       `${BASE}/v1/viewer/${token}/schain/export.${format}?${q.toString()}`,
       {
@@ -1091,6 +1137,7 @@ export const api = {
       for await (const frame of mockChatStream(prompt)) yield frame;
       return;
     }
+    await whenSignedIn();
     const res = await fetch(`${BASE}/v1/viewer/${token}/chat`, {
       method: "POST",
       credentials: "include",
@@ -1287,7 +1334,27 @@ export type InactivePage<R = InactiveRow> = {
   derived_from?: string | null;
 };
 
+/** The sellers.json read summary on a report's summary (crawler #364):
+ *  the build's re-read tallies and the exchanges of each outcome; from
+ *  crawler #370 also `sentence`, the Excel Summary's "Sellers.json read"
+ *  line, frozen. Every field optional: read safely. */
+export type SellersJsonReads = {
+  sentence?: string;
+  wanted?: number;
+  fresh?: number;
+  read?: number;
+  failed?: number;
+  over_budget?: number;
+  read_domains?: string[];
+  failed_domains?: string[];
+  over_budget_domains?: string[];
+  budget_s?: number;
+};
+
 export type Summary = {
+  /** A crawl that did not finish says so in one line (crawler #370, the
+   *  Excel's "Crawl status"). Absent on a finished crawl and before. */
+  partial_line?: string | null;
   crawl_id: number;
   /** What carried the reader's lines and is gone; never in the counts. */
   gone?: GoneInventory | null;
@@ -1295,6 +1362,12 @@ export type Summary = {
    *  crawls: NOT in ``counters.matched``, which counts active only. Absent
    *  on links frozen before the section. */
   inactive_counts?: InactiveCounts | null;
+  /** What the report build's read of the seats' sellers.json files did
+   *  (crawler #364, "Sellers.json read" on the workbook's Summary). Only a
+   *  report that carries it has seller roles worth showing: before #364 a
+   *  seller ID that IS in sellers.json could read "not in sellers.json".
+   *  Absent on every report frozen before it. */
+  sellers_json_reads?: SellersJsonReads | null;
   /** When this crawl and the crawl it is compared with ran: the window the
    *  report covers (the Inactive section's, among others). Optional: until
    *  the backend sends them, this crawl's ``finished_at`` and the previous
@@ -1372,6 +1445,9 @@ export type MatchTypeFilter = "all" | MatchType;
 
 /** The per-row fields of the contract. */
 export type MatchTypeFields = {
+  /** The Excel's "IPD partner" cell, word for word (crawler #370): "Via
+   *  failarmy.tv, inventory partner of Samsung TV Plus". Absent before. */
+  ipd_partner_label?: string | null;
   match_type?: MatchType;
   /** IPD rows: the partner whose ads.txt carries the line. */
   ipd_partner?: string | null;
@@ -1407,7 +1483,26 @@ export type IpdInconclusive = {
 export type MatchTypeMeta = {
   match_type_counts?: MatchTypeCounts | null;
   ipd_inconclusive?: IpdInconclusive | null;
+  /** THE WATCH TABS (crawler #361, 2026-10-27): how many rows each change
+   *  filter of this list holds (``started_watching``, ``stopped_watching``,
+   *  ``unconfirmed`` ...). Absent on an API from before it: then those tabs
+   *  are not offered at all. */
+  change_counts?: Partial<Record<ListChange, number>> | null;
+  /** FOUND IN (crawler PR, 2026-10-27): on the publishers' lists, the
+   *  ``found_in`` filter the server applied to the whole list, echoed, and
+   *  the split counted before it. Absent on an API from before it: then no
+   *  Found in switch, and nothing filtered here. */
+  found_in?: FoundInFilter | null;
+  found_in_counts?: FoundInCounts | null;
 };
+
+/** The watch filters of crawler #361, on matched-developers and
+ *  matched-apps: rows with a line that started being watched, stopped
+ *  being watched, or could not be verified this crawl. */
+export type WatchChange = "started_watching" | "stopped_watching" | "unconfirmed";
+
+/** Every ``change`` filter a matched list may take. */
+export type ListChange = "added" | "removed" | "changed" | WatchChange;
 
 function matchTypeQuery(matchType: MatchTypeFilter | undefined): string {
   return matchType && matchType !== "all" ? `&match_type=${matchType}` : "";
@@ -1523,6 +1618,11 @@ export type LineEvent = RemovalFields & {
   event: string;
   old_cert_id: string | null;
   new_cert_id: string | null;
+  /** The line's cert (crawler #370, page parity): this crawl's, or the
+   *  compared crawl's for a line no longer here. Absent before. */
+  cert_id?: string | null;
+  /** The Excel's "IPD partner" cell, word for word (crawler #370). */
+  ipd_partner_label?: string | null;
   matched_seat: boolean;
   occurred_at: string | null;
   /** When this line was FIRST seen in the wild, from the watchlist-
@@ -1637,6 +1737,23 @@ export type MatchedSeatLine = RemovalFields & {
    * "ftmj.fortunemo.com"). Null or absent: the publisher's own domain file.
    */
   host?: string | null;
+  /** Per line (crawler #348): "own" when the line sits in the publisher's
+   *  own file, "ipd" when in an inventory partner's ads.txt, named by
+   *  ``ipd_partner``. One row's lines can come through several partners,
+   *  each line once per partner (2026-10-27). Absent on older reports:
+   *  the row's own match type then speaks for its lines. */
+  match_type?: MatchType;
+  ipd_partner?: string | null;
+  /** A cert change's previous cert, from the line events ("" when the line
+   *  had none); set by the Changed tab so a row says old to new. */
+  old_cert_id?: string;
+  /** A line this crawl did not re-check (crawler #370, page parity): the
+   *  Excel's Line status, word for word, and the day it was last confirmed
+   *  ("YYYY-MM-DD"). Absent on a line re-checked, and before #370. */
+  line_status?: string | null;
+  last_confirmed?: string | null;
+  /** The Excel's "IPD partner" cell, word for word (crawler #370). */
+  ipd_partner_label?: string | null;
 };
 
 /**
@@ -1693,6 +1810,9 @@ export type MatchedDeveloper = MatchTypeFields & {
 export type MatchedDevelopersPage = MatchTypeMeta & {
   /** Present on a trial report: this list was cut (see ``TrialSlice``). */
   trial?: TrialSlice | null;
+  /** The watch filter the server applied (crawler #361), echoed; absent
+   *  on an API from before it. */
+  change?: WatchChange | null;
   page: number;
   page_size: number;
   total: number;
@@ -1755,6 +1875,10 @@ export type MatchedBundlesPage = {
  * honest total.
  */
 export type MatchedApp = MatchTypeFields & {
+  /** The store's name as the Excel prints it (crawler #370). */
+  store_label?: string | null;
+  /** Which file credited the app, in the Excel's words (crawler #370). */
+  file_used?: string | null;
   store: string;
   bundle_id: string;
   app_name: string;
@@ -1801,7 +1925,17 @@ export type MatchedApp = MatchTypeFields & {
 };
 
 /** The change filter of the matched apps list (query param ``change``). */
-export type AppChange = "added" | "removed" | "changed";
+export type AppChange = "added" | "removed" | "changed" | WatchChange;
+
+/** All / CTV / Mobile / Web: the matched APPS list's Platform switch (an
+ *  app's platform comes from its store). */
+export type PlatformFilter = "all" | "ctv" | "mobile" | "web";
+export type PlatformCounts = { all: number; ctv: number; mobile: number; web: number; unknown?: number };
+
+/** All / ads.txt / app-ads.txt / Both: the matched PUBLISHERS list's
+ *  "Found in" switch (which file of theirs carries the seat lines). */
+export type FoundInFilter = "all" | "ads_txt" | "app_ads_txt" | "both";
+export type FoundInCounts = { all: number; ads_txt: number; app_ads_txt: number; both: number };
 
 export type MatchedAppsPage = MatchTypeMeta & {
   /** Present on a trial report: this list was cut (see ``TrialSlice``). */
@@ -1812,6 +1946,12 @@ export type MatchedAppsPage = MatchTypeMeta & {
    * the rows and ``total`` are the unfiltered list's.
    */
   change?: AppChange | null;
+  /** PLATFORM (crawler PR, 2026-10-27): the ``platform`` filter the server
+   *  applied to the whole list, echoed, and the list's split by platform
+   *  counted before it. Both absent on an API from before it: then no
+   *  Platform switch, and nothing filtered here. */
+  platform?: PlatformFilter | null;
+  platform_counts?: PlatformCounts | null;
   page: number;
   page_size: number;
   total: number;

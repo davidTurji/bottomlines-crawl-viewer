@@ -566,3 +566,82 @@ export function FoundInLinks({
     </span>
   );
 }
+
+/**
+ * "via failarmy.tv, familyhandyman.tv +3" at a seat line's margin (David,
+ * 2026-10-27): the inventory partners whose ads.txt carries the line, each
+ * a link to THAT partner's own ads.txt at the line (a line that has left
+ * the files opens it at the top). Two are named; "+N" names the rest, the
+ * full list on hover and on a press. Sits inside clickable rows, so its
+ * clicks never reach the row.
+ */
+export function PartnerLinks({
+  partners,
+  line,
+  gone = false,
+  className,
+}: {
+  partners: string[];
+  line: Pick<MatchedSeatLine, "ssp_domain" | "publisher_id">;
+  gone?: boolean;
+  className?: string;
+}) {
+  const [all, setAll] = useState(false);
+  const named = partners.filter(linkable);
+  if (!named.length) return null;
+  const shown = all ? named : named.slice(0, 2);
+  const more = named.length - shown.length;
+  const stop = (e: MouseEvent | KeyboardEvent | PointerEvent) => e.stopPropagation();
+  return (
+    <span
+      data-line-via
+      title={`Via ${named.join(", ")}`}
+      className={cn(all ? "min-w-0 max-w-[55%] whitespace-normal break-words text-right" : "flex-shrink-0", className)}
+    >
+      via{" "}
+      {shown.map((p, i) => (
+        <span key={p}>
+          {i > 0 && ", "}
+          <a
+            href={fileUrl(p, "ads.txt", gone ? null : line)}
+            target="_blank"
+            rel="noopener noreferrer"
+            title={`Open ${host(p)}/ads.txt${gone ? "" : " at this line"}`}
+            onClick={stop}
+            onKeyDown={stop}
+            onPointerDown={stop}
+            className={cn(
+              NESTED,
+              "rounded-[2px] underline decoration-slate-300 underline-offset-2 hover:text-primary hover:decoration-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40",
+            )}
+          >
+            {p}
+          </a>
+        </span>
+      ))}
+      {more > 0 && (
+        <>
+          {" "}
+          <button
+            type="button"
+            data-line-via-more
+            title={named.join(", ")}
+            aria-label={`Show all ${named.length} inventory partners`}
+            onClick={(e) => {
+              e.stopPropagation();
+              setAll(true);
+            }}
+            onKeyDown={stop}
+            onPointerDown={stop}
+            className={cn(
+              NESTED,
+              "rounded-full px-1 font-medium text-slate-500 hover:text-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40",
+            )}
+          >
+            +{more}
+          </button>
+        </>
+      )}
+    </span>
+  );
+}

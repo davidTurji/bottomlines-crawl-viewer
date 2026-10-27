@@ -2908,7 +2908,7 @@ Every one of these reseller nodes is a live counterparty in the seller list, so 
 - **appnexus.com, xf-4402, DIRECT**: Kite Interactive dropped this line entirely.
 - **rubiconproject.com, 22890, DIRECT**: Sable Broadcasting removed it (was your only direct with them on Samsung CTV).
 - **google.com, pub-9083..., DIRECT**: Cinder and Sky purged all Google lines this week.
-- **Plus 9 more**. Open the Changes page and filter to Removed to see the full list.
+- **Plus 9 more**. Open the Lines view on the Overview and pick Removed to see the full list.
 
 A removed line means the publisher no longer lists your partner as authorized. Buyers that check for authorization will start filtering these on the next crawl.`,
 };

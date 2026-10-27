@@ -28,7 +28,7 @@ import { formatWeek, WeekLine } from "@/components/WeekLine";
 import { PAGE_SIZE } from "@/lib/paging";
 import { useReportScope } from "@/lib/reportScope";
 import { useSellersPage } from "@/lib/useSellersPage";
-import { cn, foundInLabel, storeLabel } from "@/lib/utils";
+import { cn, foundInLabel, storeName } from "@/lib/utils";
 import { computeDelta, SplitStat } from "./CrawlReport";
 
 /**
@@ -412,7 +412,9 @@ export default function CrawlDiscovered() {
         </p>
       )}
 
-      {!error && !onTrial && total > 0 && (
+      {/* No pager while a new list is on the way: its count would be the
+          old filter's under the new one (David, 2026-10-27). */}
+      {!loading && !error && !onTrial && total > 0 && (
         <Pager
           placement="top"
           anchorRef={paging.topRef}
@@ -455,7 +457,7 @@ export default function CrawlDiscovered() {
           detail="line on the open web that starts with your domain, with every publisher carrying it"
         />
       )}
-      {!onTrial && total > 0 && (
+      {!loading && !onTrial && total > 0 && (
         <Pager
           className="border-t border-border/70 pt-4"
           page={page}
@@ -943,7 +945,7 @@ function PlacementCard({ line, p }: { line: DiscoveredLine; p: DiscoveredPlaceme
             <>
               <span className="truncate text-slate-700">{p.app_name}</span>
               <span className="flex-shrink-0 rounded-full border border-app-border bg-app-bg px-1.5 py-px text-[10px] font-medium text-app">
-                {storeLabel(p.store)}
+                {storeName(p)}
               </span>
               {p.bundle_id && (
                 <span className="truncate font-mono text-[10px] tabular-nums text-slate-400">{p.bundle_id}</span>
@@ -1034,7 +1036,7 @@ function NoDiscoveryCard() {
         This report did not look for lines starting with your domain
       </h2>
       <p className="mx-auto mt-2 max-w-xl text-sm leading-relaxed text-slate-500">
-        It looked for your exact seat lines, so every line it kept is already on the Overview and Changes pages.
+        It looked for your exact seat lines, so every line it kept is already on the Overview.
       </p>
     </div>
   );
@@ -1099,7 +1101,7 @@ async function downloadLineCsv(token: string, line: DiscoveredLine) {
         p.developer_domain,
         p.found_in,
         p.app_name ?? "",
-        p.app_name ? storeLabel(p.store) : "",
+        p.app_name ? storeName(p) : "",
         p.bundle_id ?? "",
       ]);
     }

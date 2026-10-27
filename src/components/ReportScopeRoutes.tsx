@@ -205,3 +205,15 @@ export function ReportSubpathRedirect() {
   const { basePath } = useReportScope();
   return <Navigate to={basePath || "/"} replace />;
 }
+
+/**
+ * /changes, and anything under it: the Changes page is gone, its statuses
+ * are tabs of the Overview's lists (David, 2026-10-27). The link's query
+ * (the line filter, the only filter the page kept in its address) and its
+ * fragment (a sign-in) ride along.
+ */
+export function ChangesRedirect() {
+  const { basePath } = useReportScope();
+  const { search, hash } = useLocation();
+  return <Navigate to={{ pathname: basePath || "/", search, hash }} replace />;
+}

@@ -157,7 +157,228 @@ export type Scenario = {
    *  ``change``. Default false: today's API, which ignores the parameter
    *  and answers the unfiltered list with no echo. */
   appChange?: boolean;
+  /** true: a report built after crawler #364, whose build read the seats'
+   *  sellers.json files first: the summary carries ``sellers_json_reads``
+   *  (SELLERS_READS) and the Sellers.json page shows its Seller roles
+   *  segment. Default false: every report frozen before it. */
+  sellersReads?: boolean | Record<string, unknown>;
+  /** Fields merged into the summary as served (crawler #370's
+   *  `partial_line`, for one). */
+  summaryExtra?: Record<string, unknown>;
+  /** true: every matched row, app, publisher change and line event in the
+   *  crawler's REAL field shapes, as a frozen report serves them on
+   *  2026-10-27 (see ``realShape``): roles as "; "-joined strings, alerts
+   *  as one " | "-joined string or "", ``partner_inventory_on`` a list,
+   *  the internal platform "ipd_partner", empty strings where the crawler
+   *  sends them, one line per IPD partner (the same line several times),
+   *  and an inconclusive note of 55 with 25 examples. For the
+   *  click-everything test: a type assumption must never pass. */
+  realShapes?: boolean;
+  /** true: a crawler with the watch filters (crawler #361): matched-
+   *  developers and matched-apps take ``?change=started_watching|
+   *  stopped_watching|unconfirmed``, filter the whole list, echo
+   *  ``change`` and answer ``change_counts``; a watch line event of a
+   *  publisher says why. Default false: today's API, none of it (the watch
+   *  tabs are not offered). */
+  watchTabs?: boolean;
+  /** true: a crawler with the Platform filter on the matched APPS list
+   *  (2026-10-27): ``?platform=ctv|mobile|web`` filters the whole list
+   *  (an app's platform from its store), echoed, with ``platform_counts``.
+   *  Default false: today's API (no Platform switch). */
+  appPlatform?: boolean;
+  /** true: a crawler with the Found in filter on the matched PUBLISHERS
+   *  lists (2026-10-27): ``?found_in=ads_txt|app_ads_txt|both`` on
+   *  matched-developers and developer-events, echoed, with
+   *  ``found_in_counts``. Default false: today's API (no switch). */
+  foundIn?: boolean;
 };
+
+/** Every row of a paged mock list. */
+function readAll<T>(readPage: (page: number) => { rows: T[]; total: number }): T[] {
+  const all: T[] = [];
+  for (let p = 1; p < 10_000; p++) {
+    const r = readPage(p);
+    all.push(...r.rows);
+    if (!r.rows.length || all.length >= r.total) break;
+  }
+  return all;
+}
+
+/** An app's platform, as the platform crawler names it: from its store. */
+export function fakeAppPlatform(a: { store?: string | null }): "ctv" | "mobile" | "web" | null {
+  const store = String(a.store ?? "").toLowerCase();
+  if (["ios", "android", "apple", "google"].includes(store)) return "mobile";
+  if (["roku", "samsung", "vizio", "firetv", "amazon", "lg", "tvos", "ctv"].includes(store)) return "ctv";
+  if (store === "web") return "web";
+  return null;
+}
+
+/** A publisher's files, as the Found in crawler names them: which of its
+ *  files carry the row's seat lines. */
+export function fakeFoundIn(row: Record<string, unknown>): "ads_txt" | "app_ads_txt" | "both" | null {
+  const lists = ["matched_lines", "added_lines", "removed_lines", "cert_changed_lines"].flatMap((k) =>
+    Array.isArray(row[k]) ? (row[k] as { found_in?: string }[]) : [],
+  );
+  const files = new Set(lists.map((l) => String(l.found_in ?? "").toLowerCase()));
+  const ads = files.has("ads.txt") || files.has("both");
+  const app = files.has("app-ads.txt") || files.has("both");
+  return ads && app ? "both" : ads ? "ads_txt" : app ? "app_ads_txt" : null;
+}
+
+/** Counts of a full list per choice, and the list kept by the asked one. */
+function split<T>(all: T[], of: (r: T) => string | null, keys: string[], asked: string | null) {
+  const counts: Record<string, number> = { all: all.length };
+  for (const k of keys) counts[k] = all.filter((r) => of(r) === k).length;
+  return { counts, kept: asked ? all.filter((r) => of(r) === asked) : all };
+}
+
+/** Which rows of a full list each watch filter keeps (by position, so a
+ *  test can count them): the crawler's own rule is its line events. */
+const WATCH_RULE: Record<string, (i: number) => boolean> = {
+  started_watching: (i) => i % 3 === 0,
+  stopped_watching: (i) => i % 7 === 1,
+  unconfirmed: (i) => i % 11 === 2,
+};
+
+/** A publisher's watch line events of one kind, from its own lines. */
+function watchEventsFor(developerId: number, event: string, declared: boolean): LineEvent[] {
+  // A host's file read for the first time (or not read) says so on a
+  // declared-host report; an unconfirmed line always says why.
+  const reason =
+    event === "unconfirmed"
+      ? "The file answered 503 on every read this crawl."
+      : !declared
+        ? null
+        : event === "newly_monitored"
+          ? "host first read"
+          : "host not read";
+  return linesForDeveloper(developerId)
+    .slice(0, 2)
+    .map((r, i) => ({
+      ...r,
+      event,
+      host: declared && i === 0 && event === "newly_monitored" ? DECLARED_HOST : (r.host ?? r.developer_domain),
+      reason,
+      last_seen_at: "2026-08-18T12:19:00+00:00",
+      read_at: "2026-08-25T12:18:00+00:00",
+      verified_at: null,
+      tries: 3,
+    })) as LineEvent[];
+}
+
+/** The ``sellersReads`` scenario's read summary (crawler #364's shape). */
+/** What crawler #364 freezes on the summary (ensure_recent_reads). */
+export const SELLERS_READS = {
+  wanted: 3,
+  fresh: 1,
+  read: 1,
+  failed: 1,
+  over_budget: 0,
+  read_domains: ["madeupssp.com"],
+  failed_domains: ["example-exchange.tv"],
+  over_budget_domains: [],
+  budget_s: 600,
+};
+
+/* ── THE CRAWLER'S REAL SHAPES (2026-10-27) ────────────────────────────
+   What a frozen report really sends, read off a live link the morning a
+   row's ``verdict_alerts`` (one string, not the contract's array) took
+   the whole Overview down. Applied on top of the fixtures by row index,
+   so every shape is on the first page of every list. */
+const REAL_ROLES: Record<string, unknown>[] = [
+  {
+    seller_role: "not in sellers.json; owner; reseller",
+    managed_by: "adnetwork-one.tv; adnetwork-two.com; adnetwork-three.com",
+    verdict_alerts:
+      "Listed as DIRECT, but sellers.json names adnetwork-three.com, not adnetwork-two.com: treated as a reseller. | Listed as RESELLER, but the sellers.json account is a publisher account: check the relationship.",
+    partner_inventory_on: [],
+    partner_inventory: [],
+  },
+  { seller_role: "", managed_by: "", verdict_alerts: "", partner_inventory_on: ["Tidewick TV"], partner_inventory: [] },
+  { seller_role: "reseller", managed_by: null, verdict_alerts: ["An alert as the old contract's array."], partner_inventory_on: "Tidewick TV, Platform B" },
+  { seller_role: null, managed_by: null, verdict_alerts: null, partner_inventory_on: null },
+  { seller_role: "owner", managed_by: "copperline-media.tv (GB)", verdict_alerts: " | ", partner_inventory_on: [] },
+];
+const REAL_PLATFORMS = ["ipd_partner", "", "CTV", null, "website", "Mobile"];
+const REAL_PARTNERS = ["northfold-tv.com", "failarmy.tv", "example-partner.tv"];
+
+/** One seat line as the crawler sends it: an empty cert, a null host, and
+ *  the row's match fields and (empty) roles repeated on the line. */
+function realLine(l: MatchedSeatLine, partner: string | null): MatchedSeatLine {
+  return {
+    cert_id: "",
+    host: null,
+    ...l,
+    ...(partner
+      ? { match_type: "ipd", ipd_partner: partner, ipd_platform: "Tidewick TV", declared_in: "Tidewick TV's app-ads.txt" }
+      : { match_type: "own" }),
+    seller_role: partner ? "not in sellers.json" : "",
+    managed_by: "",
+    verdict_alerts: "",
+  } as MatchedSeatLine;
+}
+
+/** A row in the real shapes. Its matched lines come once per IPD partner
+ *  on every other row: the same line two or three times. */
+function realShape<T extends LineArrays & Record<string, unknown>>(row: T, i: number): T {
+  const roles = REAL_ROLES[i % REAL_ROLES.length];
+  const platform = REAL_PLATFORMS[i % REAL_PLATFORMS.length];
+  const twice = i % 2 === 0;
+  const lines = (row.matched_lines ?? []) as MatchedSeatLine[];
+  // A change window lists its lines once per partner too.
+  const copies = (ls: MatchedSeatLine[]) =>
+    twice
+      ? ls.flatMap((l) => REAL_PARTNERS.slice(0, 2 + (i % 3 === 0 ? 1 : 0)).map((p) => realLine(l, p)))
+      : ls.map((l) => realLine(l, null));
+  const out: Record<string, unknown> = {
+    ...row,
+    ...roles,
+    ...("platform" in row ? { platform } : {}),
+    ...("developer_platform" in row ? { developer_platform: platform } : {}),
+    ...(row.matched_lines
+      ? {
+          matched_lines: twice
+            ? lines.flatMap((l) => REAL_PARTNERS.slice(0, 2 + (i % 3 === 0 ? 1 : 0)).map((p) => realLine(l, p)))
+            : lines.map((l) => realLine(l, null)),
+        }
+      : {}),
+    ...(row.added_lines ? { added_lines: copies(row.added_lines as MatchedSeatLine[]) } : {}),
+    ...(row.removed_lines ? { removed_lines: copies(row.removed_lines as MatchedSeatLine[]) } : {}),
+    ...(row.cert_changed_lines ? { cert_changed_lines: copies(row.cert_changed_lines as MatchedSeatLine[]) } : {}),
+  };
+  return out as T;
+}
+
+/** A line event as the crawler sends it: the match fields per line, some
+ *  through a partner, an empty cert, and nulls where it sends them. */
+function realEvent(e: LineEvent, i: number): LineEvent {
+  const partner = i % 3 === 1 ? REAL_PARTNERS[i % REAL_PARTNERS.length] : null;
+  return {
+    ...e,
+    cert_id: "",
+    ...(partner ? { match_type: "ipd", ipd_partner: partner, host: partner } : { match_type: "own" }),
+    reason: i % 4 === 0 ? null : e.reason ?? "",
+  } as unknown as LineEvent;
+}
+
+/** The real inconclusive note: 55 publishers, 25 examples, two partners. */
+const REAL_INCONCLUSIVE = {
+  count: 55,
+  examples: Array.from({ length: 25 }, (_, i) => ({
+    partner: i < 20 ? "gusto-example.tv" : "northfold-tv.com",
+    platform: `station${100 + i}.example`,
+  })),
+};
+
+function realList<P extends { rows: unknown[] }>(page: P): P {
+  return {
+    ...page,
+    rows: page.rows.map((r, i) => realShape(r as LineArrays & Record<string, unknown>, i)),
+    // Only a list that says how it splits carries the note, as on a real
+    // report (pair ``realShapes`` with ``matchType``).
+    ...((page as Record<string, unknown>).match_type_counts ? { ipd_inconclusive: REAL_INCONCLUSIVE } : {}),
+  };
+}
 
 /* ── THE FILE-HOST FIELDS (snapshot version 5, 2026-10-21) ────────────
    Every seat line, publisher, app and line event now says where its file
@@ -290,6 +511,12 @@ function schainOverview(status: "ok") {
 export type Calls = { method: string; path: string; status: number; query: string }[];
 
 export async function installFakeApi(page: Page, scenario: Scenario = {}): Promise<Calls> {
+  // THE TOUR IS OFFERED ON EVERY LOAD (David, 2026-10-02; not a setting a
+  // browser keeps), a few seconds in, over whatever the test was clicking.
+  // Every test declines it whenever it shows, as a reader would.
+  await page.addLocatorHandler(page.getByRole("button", { name: "No thanks", exact: true }), async (b) => {
+    await b.click();
+  });
   const s: Required<Scenario> = {
     firstReport: false,
     sellers: "none",
@@ -312,6 +539,12 @@ export async function installFakeApi(page: Page, scenario: Scenario = {}): Promi
     matchType: false,
     removalReasons: false,
     appChange: false,
+    sellersReads: false,
+    summaryExtra: {},
+    realShapes: false,
+    watchTabs: false,
+    appPlatform: false,
+    foundIn: false,
     ...scenario,
   };
   const hostApp = s.declaredHost ? declaredHostApp() : null;
@@ -425,8 +658,12 @@ export async function installFakeApi(page: Page, scenario: Scenario = {}): Promi
         const full = s.crawlDates ? dated : { ...dated, crawl_at: undefined, compared_crawl_at: undefined };
         const withGone = s.gone ? full : { ...full, gone: undefined };
         const withInactive = s.inactive === "ok" ? withGone : { ...withGone, inactive_counts: undefined };
-        const sum = s.firstReport ? { ...withInactive, previous_job_id: null } : withInactive;
-        return reply(200, s.trial ? { ...sum, trial: TRIAL_CAPS } : sum);
+        const first = s.firstReport ? { ...withInactive, previous_job_id: null } : withInactive;
+        const sum = s.sellersReads
+          ? { ...first, sellers_json_reads: typeof s.sellersReads === "object" ? s.sellersReads : SELLERS_READS }
+          : first;
+        const extra = { ...sum, ...s.summaryExtra };
+        return reply(200, s.trial ? { ...extra, trial: TRIAL_CAPS } : extra);
       }
       case "export-info":
         if (s.exportInfo === "none") return notFound();
@@ -435,40 +672,105 @@ export async function installFakeApi(page: Page, scenario: Scenario = {}): Promi
         return reply(200, { format: "xlsx", line_export: true, excel_row_limit: 1_048_576 });
       case "developer-events": {
         const event = (q.get("event") ?? "added") as "added" | "removed" | "changed";
-        const r = mockDeveloperEvents(event, page_, lines, matchType);
+        let r = mockDeveloperEvents(event, page_, lines, matchType);
+        if (s.foundIn) {
+          const asked = q.get("found_in");
+          const f = split(readAll((p) => mockDeveloperEvents(event, p, lines, matchType)), (d) => fakeFoundIn(d as unknown as Record<string, unknown>), ["ads_txt", "app_ads_txt", "both"], asked);
+          r = { ...r, rows: f.kept.slice((page_ - 1) * 25, page_ * 25), total: f.kept.length, found_in_counts: f.counts, found_in: asked ?? "all" } as typeof r;
+        }
         r.rows = r.rows.map(eventRow).map((d) => (s.removalReasons ? withRemovalReasons(d) : d));
-        return reply(200, s.trial ? { ...r, page: 1, ...cut(r.rows, TRIAL_CAPS.publishers, r.total) } : r);
+        const ev = s.realShapes ? realList(r) : r;
+        return reply(200, s.trial ? { ...ev, page: 1, ...cut(ev.rows, TRIAL_CAPS.publishers, ev.total) } : ev);
       }
       case "line-events": {
         const filters: Record<string, unknown> = {};
         for (const [k, v] of q.entries()) if (k !== "lines") filters[k] = /^\d+$/.test(v) ? Number(v) : v;
+        if (filters.developer_id !== undefined && s.watchTabs && typeof filters.event === "string" && ["newly_monitored", "monitoring_stopped", "unconfirmed"].includes(filters.event)) {
+          const rows = watchEventsFor(Number(filters.developer_id), filters.event, s.declaredHost);
+          return reply(200, { page: 1, page_size: rows.length || 1, total: rows.length, rows });
+        }
         if (filters.developer_id !== undefined) {
-          const rows = linesForDeveloper(Number(filters.developer_id)).map(lineEvent);
+          const rows = linesForDeveloper(Number(filters.developer_id))
+            .map(lineEvent)
+            .map((r, i) => (s.realShapes ? (realShape(r as unknown as LineArrays & Record<string, unknown>, i) as unknown as LineEvent) : r));
           return reply(200, { page: 1, page_size: rows.length || 1, total: rows.length, rows });
         }
         const r = mockLineEvents(filters as Parameters<typeof mockLineEvents>[0]);
-        return reply(200, { ...r, rows: r.rows.map(lineEvent) });
+        // The host's file, read for the first time this crawl: each newly
+        // monitored line's first publisher (as on the change-groups roster).
+        const firstOf = new Set<string>();
+        const rows = r.rows.map(lineEvent).map((e) => {
+          if (!s.declaredHost || e.event !== "newly_monitored") return e;
+          const k = `${e.ssp_domain}|${e.publisher_id}|${e.relationship}`;
+          if (firstOf.has(k)) return e;
+          firstOf.add(k);
+          return { ...e, host: DECLARED_HOST, reason: "host first read" };
+        });
+        return reply(200, { ...r, rows: s.realShapes ? rows.map((e, i) => realEvent(e, i)) : rows });
       }
       case "matched-developers": {
-        const r = mockMatchedDevelopers(page_, q.get("q") ?? "", lines, matchType);
+        let r = mockMatchedDevelopers(page_, q.get("q") ?? "", lines, matchType);
+        if (s.watchTabs || s.foundIn) {
+          let all = readAll((p) => mockMatchedDevelopers(p, q.get("q") ?? "", lines, matchType));
+          const extra: Record<string, unknown> = {};
+          if (s.watchTabs) {
+            extra.change_counts = Object.fromEntries(Object.entries(WATCH_RULE).map(([k, f]) => [k, all.filter((_, i) => f(i)).length]));
+            const ch = q.get("change");
+            if (ch && WATCH_RULE[ch]) {
+              all = all.filter((_, i) => WATCH_RULE[ch](i));
+              extra.change = ch;
+            }
+          }
+          if (s.foundIn) {
+            const asked = q.get("found_in");
+            const f = split(all, (d) => fakeFoundIn(d as unknown as Record<string, unknown>), ["ads_txt", "app_ads_txt", "both"], asked);
+            all = f.kept;
+            extra.found_in_counts = f.counts;
+            extra.found_in = asked ?? "all";
+          }
+          r = { ...r, ...extra, rows: all.slice((page_ - 1) * 25, page_ * 25), total: all.length } as typeof r;
+        }
         r.rows = r.rows
           .map((d) =>
             hostApp && d.domain === hostApp.owner_domain ? publisherWithHost(publisherRow(d)) : publisherRow(d),
           )
           .map((d) => (s.removalReasons ? withRemovalReasons(d) : d));
-        return reply(200, s.trial ? { ...r, page: 1, ...cut(r.rows, TRIAL_CAPS.publishers, r.total) } : r);
+        const md = s.realShapes ? realList(r) : r;
+        return reply(200, s.trial ? { ...md, page: 1, ...cut(md.rows, TRIAL_CAPS.publishers, md.total) } : md);
       }
       case "matched-bundles": {
         const r = mockMatchedBundles(page_, q.get("q") ?? "");
         return reply(200, { ...r, rows: r.rows.map(bundleRow) });
       }
       case "matched-apps": {
-        const change = s.appChange ? ((q.get("change") || null) as AppChange | null) : null;
-        const r = mockMatchedApps(page_, q.get("q") ?? "", lines, matchType, change);
+        const asked = q.get("change") || null;
+        const watch = s.watchTabs && asked !== null && asked in WATCH_RULE;
+        const change = s.appChange && !watch ? (asked as AppChange | null) : null;
+        let r = mockMatchedApps(page_, q.get("q") ?? "", lines, matchType, change);
+        if (s.watchTabs || s.appPlatform) {
+          let all = readAll((p) => mockMatchedApps(p, q.get("q") ?? "", lines, matchType, change));
+          const extra: Record<string, unknown> = {};
+          if (s.watchTabs) {
+            extra.change_counts = Object.fromEntries(Object.entries(WATCH_RULE).map(([k, f]) => [k, all.filter((_, i) => f(i)).length]));
+            if (watch && asked) {
+              all = all.filter((_, i) => WATCH_RULE[asked](i));
+              extra.change = asked;
+            }
+          }
+          if (s.appPlatform) {
+            const pf = q.get("platform");
+            const f = split(all, (a) => fakeAppPlatform(a), ["ctv", "mobile", "web"], pf);
+            all = f.kept;
+            extra.platform_counts = f.counts;
+            extra.platform = pf ?? "all";
+          }
+          r = { ...r, ...extra, rows: all.slice((page_ - 1) * 25, page_ * 25), total: all.length } as typeof r;
+        }
         r.rows = r.rows
           .map((a) => (hostApp && appKey(a) === appKey(hostApp) ? appAtHost(appRow(a)) : appRow(a)))
           .map((a) => (s.removalReasons ? withRemovalReasons(a) : a));
-        return reply(200, s.trial ? { ...r, page: 1, ...cut(r.rows, TRIAL_CAPS.apps, r.total) } : r);
+        const ma = s.realShapes ? realList(r) : r;
+        return reply(200, s.trial ? { ...ma, page: 1, ...cut(ma.rows, TRIAL_CAPS.apps, ma.total) } : ma);
       }
       case "discovered-lines": {
         if (!s.discovery) return reply(200, { page: 1, page_size: Number(q.get("page_size") ?? 50), total: 0, rows: [] });

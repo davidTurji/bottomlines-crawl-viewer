@@ -4,6 +4,7 @@ import { BrowserRouter, Navigate, Route, Routes } from "react-router-dom";
 
 import {
   ReadableReportScope,
+  ChangesRedirect,
   ReportSubpathRedirect,
   TokenReportScope,
 } from "./components/ReportScopeRoutes";
@@ -12,7 +13,6 @@ import {
   ReportNoticeCard,
 } from "./components/ReportNoticeCard";
 import CrawlReport from "./routes/CrawlReport";
-import CrawlChanges from "./routes/CrawlChanges";
 import CrawlDiscovered from "./routes/CrawlDiscovered";
 import CrawlDeclarations from "./routes/CrawlDeclarations";
 import CrawlSchain from "./routes/CrawlSchain";
@@ -54,7 +54,10 @@ import "./index.css";
 const reportPages = (
   <>
     <Route index element={<CrawlReport />} />
-    <Route path="changes" element={<CrawlChanges />} />
+    {/* The Changes page is gone: its statuses are tabs of the Overview's
+        lists (David, 2026-10-27). A /changes link, and anything under it,
+        lands on the Overview, its line filter kept (links are forever). */}
+    <Route path="changes/*" element={<ChangesRedirect />} />
     <Route path="discovery" element={<CrawlDiscovered />} />
     <Route path="declarations" element={<CrawlDeclarations />} />
     <Route path="schain" element={<CrawlSchain />} />

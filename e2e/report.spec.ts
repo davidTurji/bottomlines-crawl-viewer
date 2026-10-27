@@ -98,7 +98,9 @@ test.describe("the rail lists only what the report has", () => {
   test("none of them", async ({ page }) => {
     await open(page, { sellers: "none", schain: "none", discovery: false });
     await expectOverview(page);
-    await expect(rail(page).getByRole("link", { name: "Changes" })).toBeVisible();
+    // No Changes page (2026-10-27): its statuses are the Overview lists'
+    // tabs, so the menu has no entry for it.
+    await expect(rail(page).getByRole("link", { name: "Changes" })).toHaveCount(0);
     await expect(rail(page).getByRole("link", { name: "Declarations" })).toBeVisible();
     await expect(rail(page).getByRole("link", { name: "Sellers.json" })).toHaveCount(0);
     await expect(rail(page).getByRole("link", { name: "Schain" })).toHaveCount(0);
@@ -189,6 +191,22 @@ test.describe("sign-in", () => {
     await page.getByRole("button", { name: "Sign in" }).click();
     await expectOverview(page);
     await expect(rail(page).getByRole("link", { name: "Sellers.json" })).toBeVisible();
+    expect(errors).toEqual([]);
+  });
+
+  test("the email's sign-in link: no data request before the sign-in, so not one 401", async ({ page }) => {
+    // Demo of #75: before the link's sign-in landed the page fired ~23 data
+    // requests that came back "not signed in". Every one waits for it now.
+    const errors = watchErrors(page);
+    const signin = Buffer.from("andres:secret").toString("base64url");
+    const calls = await open(page, { signedOut: true, sellers: "page", matchType: true }, `#signin=${signin}`);
+    await expect(page.locator('input[autocomplete="username"]')).toHaveValue("andres");
+    expect(calls.filter((c) => !c.path.endsWith("/viewer/auth"))).toEqual([]);
+    await page.getByRole("button", { name: "Sign in" }).click();
+    await expectOverview(page);
+    await expect(page.locator('button[aria-label^="Show the seat lines of"]').first()).toBeVisible();
+    expect(calls.filter((c) => c.status === 401)).toEqual([]);
+    expect(calls.length).toBeGreaterThan(3);
     expect(errors).toEqual([]);
   });
 
@@ -525,6 +543,8 @@ test.describe("sellers.json links", () => {
 
   test("every closed row shows the link its problem points to, before any hover", async ({ page }) => {
     await open(page, { sellers: "page" }, "/sellers");
+    // The page first (a loop that looks before it lands opens nothing).
+    await expect(page.getByRole("button", { name: /^Show all/ }).first()).toBeVisible();
     while ((await page.getByRole("button", { name: /^Show all/ }).count()) > 0) {
       await page.getByRole("button", { name: /^Show all/ }).first().click();
     }
@@ -858,6 +878,8 @@ test.describe("discovery checks each line against your sellers.json", () => {
 test.describe("a seller seen only in its own file", () => {
   test("is seen, never told to change its type, and says where it was seen", async ({ page }) => {
     await open(page, { sellers: "page" }, "/sellers");
+    // The page first (a loop that looks before it lands opens nothing).
+    await expect(page.getByRole("button", { name: /^Show all/ }).first()).toBeVisible();
     while ((await page.getByRole("button", { name: /^Show all/ }).count()) > 0) {
       await page.getByRole("button", { name: /^Show all/ }).first().click();
     }
@@ -892,7 +914,7 @@ test.describe("where the files are", () => {
 
   test("an app credited from its declared host, its publisher's hosts, and a host's first read", async ({ page }) => {
     const errors = watchErrors(page);
-    await open(page, { declaredHost: true });
+    await open(page, { declaredHost: true, watchTabs: true });
     await expectOverview(page);
     const app = declaredHostApp();
 
@@ -911,19 +933,21 @@ test.describe("where the files are", () => {
     await page.getByRole("textbox", { name: "Search matched publishers" }).fill(app.owner_domain);
     await expect(page.locator("[data-file-hosts]", { hasText: `Files at: ${DECLARED_HOST}` })).toHaveCount(1);
 
-    // A newly monitored line says why, in plain words, and where its file is.
+    // A newly monitored line says why, in plain words, and where its file
+    // is: on the Overview's Started watching tab (the Changes page is gone,
+    // its old address lands on the Overview).
     await page.goto(`${BASE}/changes`);
+    await page.getByRole("textbox", { name: "Search matched publishers" }).fill("");
     await page.getByRole("tab", { name: "Started watching" }).click();
-    await page.locator("button[aria-expanded]").filter({ has: page.locator("code") }).first().click();
-    await expect(page.getByText("Loading publishers…")).toHaveCount(0);
-    await expect(page.locator("[data-line-reason]", { hasText: "first read of this file this crawl" })).toHaveCount(1);
-    await expect(page.locator("[data-line-host]", { hasText: `at ${DECLARED_HOST}` })).toHaveCount(1);
+    await page.locator('button[aria-label^="Show the seat lines of"]').first().click();
+    await expect(page.locator("[data-line-reason]", { hasText: "first read of this file this crawl" }).first()).toBeVisible();
+    await expect(page.locator("[data-line-host]", { hasText: `at ${DECLARED_HOST}` }).first()).toBeVisible();
     expect(errors).toEqual([]);
   });
 
   test("a report of own-domain files says nothing extra", async ({ page }) => {
     const errors = watchErrors(page);
-    await open(page, {});
+    await open(page, { watchTabs: true });
     await expectOverview(page);
     const app = declaredHostApp();
     await page.getByRole("button", { name: /Matched apps/ }).click();
@@ -937,9 +961,8 @@ test.describe("where the files are", () => {
     await expect(page.locator("[data-file-hosts]")).toHaveCount(0);
     await page.goto(`${BASE}/changes`);
     await page.getByRole("tab", { name: "Started watching" }).click();
-    await page.locator("button[aria-expanded]").filter({ has: page.locator("code") }).first().click();
-    await expect(page.getByText("Loading publishers…")).toHaveCount(0);
-    await expect(page.locator("[data-line-text]").first()).toBeVisible();
+    await page.locator('button[aria-label^="Show the seat lines of"]').first().click();
+    await expect(page.locator("[data-scope-window] [data-line-text]").first()).toBeVisible();
     await expect(page.locator("[data-line-reason]")).toHaveCount(0);
     await expect(page.locator("[data-line-host]")).toHaveCount(0);
     expect(errors).toEqual([]);
