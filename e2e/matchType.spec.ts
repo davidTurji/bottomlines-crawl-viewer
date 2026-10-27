@@ -4,7 +4,8 @@
  * Two halves. The CONTRACT tests read the fake API's answers (the mock the
  * fake serves) and pin the row shape the client destructures: per row
  * ``match_type``, ``ipd_partner``, ``ipd_platform``, ``declared_in`` and
- * the roles; per list ``match_type_counts`` and ``ipd_inconclusive``; and
+ * the roles (read for the type, shown nowhere on a matching page since
+ * 2026-10-27); per list ``match_type_counts`` and ``ipd_inconclusive``; and
  * on a report frozen before them, none of those keys at all. The BROWSER
  * tests run the production build against the fake API: the owner's golden
  * scenario (the Samsung TV Plus app, matched through failarmy.tv, which
@@ -23,7 +24,7 @@ import {
 } from "../src/lib/mockData";
 import type { MatchTypeFields } from "../src/lib/api";
 import { PAGE_SIZE } from "../src/lib/paging";
-import { inconclusiveSentence } from "../src/components/MatchType";
+import { inconclusiveItem, inconclusiveSentence } from "../src/components/MatchType";
 import { installFakeApi, TOKEN, type Calls, type Scenario } from "./fakeApi";
 
 const BASE = `/crawl-report/${TOKEN}`;
@@ -153,21 +154,49 @@ test.describe("the contract the client reads", () => {
     }
   });
 
-  test("the note's sentence, word for word, in each view's shape", () => {
+  test("the note's one short line, word for word, in each view's shape (David, 2026-10-27)", () => {
     expect(APP_NOTE).toBe(
-      "Not counted: 2 inconclusive IPD apps via northfold-tv.com, inventory partner of Tidewick TV. This crawl could not read northfold-tv.com's ads.txt.",
+      "2 apps could not be checked this week: their inventory partner northfold-tv.com's ads.txt could not be read.",
     );
     expect(PUBLISHER_NOTE).toBe(
-      "Not counted: 1 inconclusive IPD publisher (Tidewick TV, via northfold-tv.com, its inventory partner). This crawl could not read northfold-tv.com's ads.txt.",
+      "1 publisher could not be checked this week: its inventory partner northfold-tv.com's ads.txt could not be read.",
     );
+    // Several partners: the first named, the rest counted.
     expect(
       inconclusiveSentence(
-        { count: 3, examples: [...MT_INCONCLUSIVE, { partner: "example-b.tv", platform: "Platform B" }] },
-        "apps",
+        {
+          count: 55,
+          examples: [
+            { partner: "gustotv.com", platform: "1015vibe.com" },
+            { partner: "gustotv.com", platform: "b985.com" },
+            { partner: "example-b.tv", platform: "Platform B" },
+            { partner: "example-c.tv", platform: "Platform C" },
+          ],
+        },
+        "publishers",
       ),
     ).toBe(
-      "Not counted: 3 inconclusive IPD apps via northfold-tv.com, inventory partner of Tidewick TV; example-b.tv, inventory partner of Platform B. This crawl could not read northfold-tv.com's ads.txt and example-b.tv's ads.txt.",
+      "55 publishers could not be checked this week: their inventory partners' ads.txt files (gustotv.com and 2 more) could not be read.",
     );
+    // No partner named at all: still one plain sentence, never a crash.
+    expect(inconclusiveSentence({ count: 3, examples: [] }, "apps")).toBe(
+      "3 apps could not be checked this week: their inventory partner's ads.txt could not be read.",
+    );
+    expect(
+      inconclusiveSentence({ count: 2, examples: "garbage" as unknown as [] }, "publishers"),
+    ).toBe("2 publishers could not be checked this week: their inventory partner's ads.txt could not be read.");
+    // The list behind "Show them": publisher, via partner; on the apps view
+    // the publisher whose apps they are.
+    expect(inconclusiveItem({ partner: "gustotv.com", platform: "1015vibe.com" }, "publishers")).toBe(
+      "1015vibe.com, via gustotv.com",
+    );
+    expect(inconclusiveItem({ partner: "gustotv.com", platform: "1015vibe.com" }, "apps")).toBe(
+      "Apps of 1015vibe.com, via gustotv.com",
+    );
+    // Never "Not counted" jargon, never an em dash.
+    for (const t of [APP_NOTE, PUBLISHER_NOTE]) {
+      expect(t).not.toMatch(/Not counted|inconclusive|\u2014/);
+    }
   });
 });
 
@@ -264,32 +293,66 @@ test.describe("match type on a report that has it", () => {
     await expect(page.locator("[data-list-count] p")).toHaveText("1 publisher");
     const closed = page.getByRole("button", { name: "Show the seat lines of Samsung TV Plus" });
     if (await closed.count()) await closed.click();
-    await expect(page.locator("[data-row-roles]")).toContainText("Seller role:Reseller");
+    // No sellers.json facts on a matching page (David, 2026-10-27).
+    await expect(page.getByText(/Seller role|Managed by|Partner inventory on/)).toHaveCount(0);
     // The lines open failarmy.tv's ads.txt, where they are.
     await expect(page.locator("a[href*='failarmy.tv/ads.txt']").first()).toBeAttached();
     await expect(page.locator("a[href*='samsungtvplus.com/ads.txt']")).toHaveCount(0);
     expect(errors).toEqual([]);
   });
 
-  test("roles show where a row is expanded: seller role, managed by, partner inventory on, alert", async ({ page }) => {
+  test("no sellers.json facts on an expanded row: no seller role, managed by, partner inventory on or alert", async ({ page }) => {
+    // Northfold TV carries all four in the fixtures (David, 2026-10-27:
+    // "This page is all about matching and removing, nothing else").
     const errors = watchErrors(page);
     await open(page, { matchType: true });
     await page.getByRole("textbox", { name: "Search matched publishers" }).fill("Northfold");
-    // The searched row first: the list swaps to it once the answer lands.
     await expect(card(page, "Northfold TV")).toHaveCount(1);
     const closed = page.getByRole("button", { name: "Show the seat lines of Northfold TV" });
     if (await closed.count()) await closed.click();
-    const roles = page.locator("[data-row-roles]");
-    await expect(roles).toContainText("Seller role:Reseller");
-    await expect(roles).toContainText("Managed by:copperline-media.tv (GB)");
-    await expect(roles).toContainText("Partner inventory on:Tidewick TV");
-    // Each alert on its own line.
-    await expect(page.locator("[data-row-alert]")).toHaveText([
-      "Listed as DIRECT, but sellers.json names copperline-media.tv, not northfold-tv.com: treated as a reseller.",
-      "Two managers for one country (GB): neither counts there.",
-    ]);
+    await expect(page.locator("[data-line-text]").first()).toBeVisible();
+    await expect(page.getByText(/Seller role|Managed by|Partner inventory on|sellers\.json names/)).toHaveCount(0);
+    await expect(page.locator("[data-row-roles], [data-row-alert]")).toHaveCount(0);
     // An own row: no chip.
     await expect(page.locator("[data-ipd-chip]")).toHaveCount(0);
+    // Nor on the apps list, nor on the Changes page.
+    await toApps(page);
+    await page.locator('button[aria-label^="Show the seat lines of"]').first().click();
+    await expect(page.locator("[data-line-text]").first()).toBeVisible();
+    await expect(page.getByText(/Seller role|Managed by|Partner inventory on/)).toHaveCount(0);
+    await page.goto(`${BASE}/changes`);
+    await page.locator("button[aria-expanded]").filter({ has: page.locator("code") }).first().click();
+    await expect(page.locator("[data-seat-lines-skeleton]")).toHaveCount(0);
+    await expect(page.locator("[data-line-text]").first()).toBeVisible();
+    await expect(page.getByText(/Seller role|Managed by|Partner inventory on/)).toHaveCount(0);
+    expect(errors).toEqual([]);
+  });
+
+  test("the inconclusive note: one quiet line, the names behind Show them, never counted", async ({ page }) => {
+    const errors = watchErrors(page);
+    await open(page, { matchType: true });
+    const note = page.locator("[data-ipd-inconclusive-note]");
+    await expect(page.locator("[data-ipd-inconclusive]")).toHaveText(PUBLISHER_NOTE);
+    await expect(page.locator("[data-ipd-inconclusive-list]")).toHaveCount(0);
+    const show = note.getByRole("button", { name: "Show them" });
+    await expect(show).toHaveAttribute("aria-expanded", "false");
+    await show.click();
+    const list = page.locator("[data-ipd-inconclusive-list]");
+    await expect(list.locator("li")).toHaveText(
+      MT_INCONCLUSIVE.map((e) => inconclusiveItem(e, "publishers")),
+    );
+    await note.getByRole("button", { name: "Hide them" }).click();
+    await expect(list).toHaveCount(0);
+    // The apps view, in its own words.
+    await toApps(page);
+    await expect(page.locator("[data-ipd-inconclusive]")).toHaveText(APP_NOTE);
+    await page.locator("[data-ipd-inconclusive-note]").getByRole("button", { name: "Show them" }).click();
+    await expect(page.locator("[data-ipd-inconclusive-list] li")).toHaveText(
+      MT_INCONCLUSIVE.map((e) => inconclusiveItem(e, "apps")),
+    );
+    // Never part of a count: the list's count is the matched total.
+    const counts = mockMatchedApps(1, "", [], "all").match_type_counts!;
+    await expect(page.locator("[data-list-count] p")).toHaveText(`1–${PAGE_SIZE} of ${counts.all.toLocaleString()} apps`);
     expect(errors).toEqual([]);
   });
 
@@ -349,111 +412,92 @@ test.describe("match type on a report that has it", () => {
 });
 
 /*
- * THE SWITCH IS CALM (owner, 2026-10-26: "a bit violent as the results
- * shift; make it more premium"). A switch keeps the list mounted (the same
- * element, the same id), dims the rows on screen rather than blanking
- * them, swaps, and eases the list's height; the one thumb slides under the
- * chosen option. Less motion asked for: none of that motion, an instant
- * swap.
+ * ONE WAY TO WAIT (owner, 2026-10-27, replacing the dimmed swap of
+ * 2026-10-26). Whenever a list waits for new rows (a tab, a match type, a
+ * search, a page) it shows the same skeleton as the first load: never the
+ * old rows dimmed, never the "..." dots, never the old count or pager. A
+ * page already read lands at once. The one thumb still slides under the
+ * chosen option; less motion asked for, it jumps.
  */
-type ListWatch = { el: Element | null; opacities: string[]; transitions: string[]; heights: string[] };
-
-/** Records what a switch does to the list: its fade layer's opacities and
- *  transitions, and any height set on it while it eases. */
-async function watchList(page: Page) {
-  await page.evaluate(() => {
-    const outer = document.querySelector<HTMLElement>("[data-list-swap]");
-    const fade = outer?.querySelector<HTMLElement>("[data-list-fade]");
-    const w: ListWatch = { el: outer ?? null, opacities: [], transitions: [], heights: [] };
-    (window as unknown as { __listWatch: ListWatch }).__listWatch = w;
-    if (!outer || !fade) return;
-    new MutationObserver(() => {
-      w.opacities.push(fade.style.opacity);
-      if (fade.style.transition) w.transitions.push(fade.style.transition);
-    }).observe(fade, { attributes: true, attributeFilter: ["style"] });
-    new MutationObserver(() => {
-      if (outer.style.height) w.heights.push(outer.style.height);
-    }).observe(outer, { attributes: true, attributeFilter: ["style"] });
-  });
-}
-
-async function watched(page: Page) {
-  // The height lets go (back to auto) once it has eased.
-  await expect
-    .poll(() => page.locator("[data-list-swap]").evaluate((el) => (el as HTMLElement).style.height))
-    .toBe("");
-  return page.evaluate(() => {
-    const w = (window as unknown as { __listWatch: ListWatch }).__listWatch;
-    const now = document.querySelector<HTMLElement>("[data-list-swap]");
-    return {
-      same: w.el !== null && now === w.el,
-      opacity: now?.querySelector<HTMLElement>("[data-list-fade]")?.style.opacity ?? null,
-      opacities: w.opacities,
-      transitions: w.transitions,
-      heights: w.heights,
-    };
-  });
-}
-
 const thumb = (page: Page) => page.locator("[data-match-type-thumb]");
 const centreX = async (l: ReturnType<Page["locator"]>) => {
   const b = await l.boundingBox();
   return b ? Math.round(b.x + b.width / 2) : -1;
 };
 
-test.describe("the switch is calm", () => {
-  test("a switch keeps the list, dims the rows (never blank), swaps and eases the height; the thumb follows", async ({ page }) => {
+/** Holds every answer of one list route until `release` is called, so a
+ *  test can see what the page shows while it waits. */
+async function holdList(page: Page, glob: string) {
+  let open!: () => void;
+  const gate = new Promise<void>((r) => (open = r));
+  await page.route(glob, async (route) => {
+    await gate;
+    await route.fallback();
+  });
+  return { release: () => open() };
+}
+
+const listSkeleton = (page: Page, noun: "publishers" | "apps") =>
+  page.getByRole("status").filter({ hasText: `Loading matched ${noun}` });
+
+test.describe("a list that waits shows the skeleton", () => {
+  test("a tab switch: the skeleton in the rows' place, no old rows, no dots, no old count; then the new rows", async ({ page }) => {
+    const errors = watchErrors(page);
+    await open(page, { matchType: true });
+    await expect(anyCard(page)).toBeVisible();
+    await expect(page.locator("[data-list-count] p")).toBeVisible();
+    const held = await holdList(page, "**/developer-events?*");
+    await page.getByRole("tab", { name: "Added" }).click();
+    await expect(page.getByRole("tab", { name: "Added" })).toHaveAttribute("aria-selected", "true");
+    // While it waits: the skeleton, and nothing of the old answer.
+    await expect(listSkeleton(page, "publishers")).toBeVisible();
+    await expect(anyCard(page)).toHaveCount(0);
+    await expect(page.locator("[data-count-skeleton]")).toBeVisible();
+    await expect(page.locator("[data-list-count] p")).toHaveCount(0);
+    await expect(page.locator("[data-list-fade]")).toHaveCount(0);
+    held.release();
+    await expect(anyCard(page)).toBeVisible();
+    await expect(listSkeleton(page, "publishers")).toHaveCount(0);
+    await expect(page.locator("[data-count-skeleton]")).toHaveCount(0);
+    await expect(page.locator("[data-list-count]")).toContainText("with changes");
+    expect(errors).toEqual([]);
+  });
+
+  test("a match type switch on either list: the skeleton while it waits; the thumb follows", async ({ page }) => {
     const errors = watchErrors(page);
     await open(page, { matchType: true });
     await expect(thumb(page)).toHaveAttribute("data-match-type-thumb", "all");
     for (const view of ["publishers", "apps"] as const) {
       if (view === "apps") await toApps(page);
       await expect(anyCard(page)).toBeVisible();
-      const id = await page.locator("[data-list-swap]").getAttribute("data-list-swap");
-      expect(id).toBeTruthy();
-
-      // All (or IPD, carried over from publishers) to Own: a long list.
-      await watchList(page);
+      const held = await holdList(page, view === "apps" ? "**/matched-apps?*" : "**/matched-developers?*");
       await pill(page, "Own").click();
       await expect(pill(page, "Own")).toHaveAttribute("aria-pressed", "true");
       await expect(thumb(page)).toHaveAttribute("data-match-type-thumb", "own");
       await expect.poll(() => centreX(thumb(page))).toBe(await centreX(pill(page, "Own")));
+      await expect(listSkeleton(page, view)).toBeVisible();
+      await expect(anyCard(page)).toHaveCount(0);
+      held.release();
       await expect(anyCard(page)).toBeVisible();
-      let w = await watched(page);
-      expect(w.same).toBe(true);
-      await expect(page.locator("[data-list-swap]")).toHaveAttribute("data-list-swap", id!);
-      // Dimmed, never blank, and back to full.
-      expect(w.opacities.some((o) => Number(o) < 1)).toBe(true);
-      expect(w.opacities.filter((o) => o !== "").every((o) => Number(o) >= 0.35)).toBe(true);
-      expect(w.opacity).toBe("1");
-
-      // Own to IPD: one row, so the list's height eases down to it.
-      await watchList(page);
-      await pill(page, "IPD").click();
-      await expect(card(page, "Samsung TV Plus")).toHaveCount(1);
-      await expect.poll(() => centreX(thumb(page))).toBe(await centreX(pill(page, "IPD")));
-      w = await watched(page);
-      expect(w.same).toBe(true);
-      expect(w.heights.length).toBeGreaterThan(0);
-      expect(w.opacity).toBe("1");
-      await expect(page.locator("[data-list-swap]")).toHaveAttribute("data-list-swap", id!);
+      await expect(listSkeleton(page, view)).toHaveCount(0);
+      // Back to All: read before, so it lands at once (no skeleton needed).
+      await pill(page, "All").click();
+      await expect(anyCard(page)).toBeVisible();
     }
     expect(errors).toEqual([]);
   });
 
-  test("the status tabs swap the rows the same way, in the same list", async ({ page }) => {
+  test("a search waits the same way, and never shows the old count", async ({ page }) => {
     const errors = watchErrors(page);
     await open(page, { matchType: true });
     await expect(anyCard(page)).toBeVisible();
-    const id = await page.locator("[data-list-swap]").getAttribute("data-list-swap");
-    await watchList(page);
-    await page.getByRole("tab", { name: "Added" }).click();
-    await expect(page.getByRole("tab", { name: "Added" })).toHaveAttribute("aria-selected", "true");
-    await expect(anyCard(page)).toBeVisible();
-    const w = await watched(page);
-    expect(w.same).toBe(true);
-    expect(w.opacities.some((o) => Number(o) < 1)).toBe(true);
-    await expect(page.locator("[data-list-swap]")).toHaveAttribute("data-list-swap", id!);
+    const held = await holdList(page, "**/matched-developers?*");
+    await page.getByRole("textbox", { name: "Search matched publishers" }).fill("Northfold");
+    await expect(listSkeleton(page, "publishers")).toBeVisible();
+    await expect(page.locator("[data-list-count] p")).toHaveCount(0);
+    held.release();
+    await expect(card(page, "Northfold TV")).toHaveCount(1);
+    await expect(page.locator("[data-list-count] p")).toHaveText("1 publisher");
     expect(errors).toEqual([]);
   });
 
@@ -481,26 +525,18 @@ test.describe("the switch is calm", () => {
 test.describe("less motion asked for", () => {
   test.use({ contextOptions: { reducedMotion: "reduce" } });
 
-  test("no thumb slide, no fade, no height ease: an instant swap in the same list", async ({ page }) => {
+  test("no thumb slide, no fade: the rows simply arrive", async ({ page }) => {
     const errors = watchErrors(page);
     await open(page, { matchType: true });
     await expect(anyCard(page)).toBeVisible();
     expect(await thumb(page).evaluate((el) => getComputedStyle(el).transitionProperty)).toBe("none");
-    const id = await page.locator("[data-list-swap]").getAttribute("data-list-swap");
-    await watchList(page);
     await pill(page, "IPD").click();
     await expect(card(page, "Samsung TV Plus")).toHaveCount(1);
     // The thumb is already there: nothing to wait for.
     expect(await centreX(thumb(page))).toBe(await centreX(pill(page, "IPD")));
-    const w = await watched(page);
-    expect(w.same).toBe(true);
-    expect(w.heights).toEqual([]);
-    expect(w.transitions).toEqual([]);
-    expect(w.opacities.filter((o) => o !== "" && o !== "1")).toEqual([]);
     expect(
       await page.locator("[data-list-fade]").evaluate((el) => getComputedStyle(el).transitionDuration),
     ).toBe("0s");
-    await expect(page.locator("[data-list-swap]")).toHaveAttribute("data-list-swap", id!);
     expect(errors).toEqual([]);
   });
 });

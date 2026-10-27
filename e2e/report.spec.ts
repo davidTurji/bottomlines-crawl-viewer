@@ -915,7 +915,7 @@ test.describe("where the files are", () => {
     await page.goto(`${BASE}/changes`);
     await page.getByRole("tab", { name: "Started watching" }).click();
     await page.locator("button[aria-expanded]").filter({ has: page.locator("code") }).first().click();
-    await expect(page.getByText("Loading publishers…")).toHaveCount(0);
+    await expect(page.locator("[data-seat-lines-skeleton]")).toHaveCount(0);
     await expect(page.locator("[data-line-reason]", { hasText: "first read of this file this crawl" })).toHaveCount(1);
     await expect(page.locator("[data-line-host]", { hasText: `at ${DECLARED_HOST}` })).toHaveCount(1);
     expect(errors).toEqual([]);
@@ -938,7 +938,7 @@ test.describe("where the files are", () => {
     await page.goto(`${BASE}/changes`);
     await page.getByRole("tab", { name: "Started watching" }).click();
     await page.locator("button[aria-expanded]").filter({ has: page.locator("code") }).first().click();
-    await expect(page.getByText("Loading publishers…")).toHaveCount(0);
+    await expect(page.locator("[data-seat-lines-skeleton]")).toHaveCount(0);
     await expect(page.locator("[data-line-text]").first()).toBeVisible();
     await expect(page.locator("[data-line-reason]")).toHaveCount(0);
     await expect(page.locator("[data-line-host]")).toHaveCount(0);

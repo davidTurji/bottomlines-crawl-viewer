@@ -1,0 +1,223 @@
+/**
+ * SELLER ROLES, ON THE SELLERS.JSON PAGE ONLY (David, 2026-10-27: "I don't
+ * want to see any sellers in the overview page. It should all go to the
+ * Sellers.json page. Segment it."). The matched lists are about matching
+ * and removing; what the seats' sellers.json files say of each matched
+ * publisher lives here, as one segment of plain rows: the seller role, who
+ * manages it, and each sellers.json alert ("Listed as DIRECT, but
+ * sellers.json names ...") as a quiet line, never an amber box (David
+ * wants to see them here before deciding on them). Searchable and paged on
+ * the server, the skeleton while a page loads. "Partner inventory on" is
+ * shown nowhere (David, 2026-10-27).
+ *
+ * ONLY ON A REPORT THAT READ SELLERS.JSON FIRST. Before crawler #364 the
+ * roles were derived without a recent read of the exchanges' files, so a
+ * seller ID that IS in sellers.json could read "not in sellers.json". A
+ * report carries #364's read summary (``sellers_json_reads`` on its
+ * summary) or this segment is one quiet line and nothing else.
+ */
+import { Search } from "lucide-react";
+import { useEffect, useState } from "react";
+
+import { Pager, usePaging } from "@/components/ListControls";
+import { textList } from "@/components/MatchType";
+import { gutterDigits, LineNo, SEAT_ROW, SeatLinesFrame } from "@/components/SeatLines";
+import { SkeletonInlineRows } from "@/components/Skeleton";
+import { api, type MatchedDeveloper, type SellersJsonReads, type Summary } from "@/lib/api";
+import { PAGE_SIZE } from "@/lib/paging";
+
+/** "not in sellers.json; owner; reseller" reads "Not in sellers.json; owner;
+ *  reseller": the first letter up, the rest as the crawler wrote it. */
+function roleText(value: unknown): string {
+  const r = typeof value === "string" ? value.trim() : "";
+  return r ? r.charAt(0).toUpperCase() + r.slice(1) : "";
+}
+
+/** The read summary, when the report carries one (crawler #364). */
+export function sellersReadsOf(summary: Summary | null | undefined): SellersJsonReads | null {
+  const r: unknown = summary?.sellers_json_reads;
+  return r && typeof r === "object" && !Array.isArray(r) ? (r as SellersJsonReads) : null;
+}
+
+/** "Read from the sellers.json files of 14 exchanges. Not read this time:
+ *  a.com and b.com." Plain words, the exchanges named. */
+export function readsSentence(reads: SellersJsonReads): string {
+  const wanted = typeof reads.wanted === "number" ? reads.wanted : null;
+  const missed = [
+    ...textList(reads.failed_domains, /\s*[,;]\s*/),
+    ...textList(reads.over_budget_domains, /\s*[,;]\s*/),
+  ];
+  const head =
+    wanted != null
+      ? `Read from the sellers.json files of ${wanted.toLocaleString()} ${wanted === 1 ? "exchange" : "exchanges"} when this report was built.`
+      : "Read from the exchanges' sellers.json files when this report was built.";
+  if (!missed.length) return head;
+  const names =
+    missed.length === 1 ? missed[0] : `${missed.slice(0, -1).join(", ")} and ${missed[missed.length - 1]}`;
+  return `${head} Not read this time: ${names}.`;
+}
+
+export const ROLES_LATER = "Seller roles will appear here from the next report.";
+
+export default function SellerRoles({
+  token,
+  summary,
+  settled,
+}: {
+  token: string;
+  summary: Summary | null;
+  /** Whether the summary request has answered (or failed). */
+  settled: boolean;
+}) {
+  if (!settled) return null;
+  const reads = sellersReadsOf(summary);
+  if (!reads) {
+    return (
+      <p data-testid="seller-roles-later" className="text-[12px] text-slate-500">
+        {ROLES_LATER}
+      </p>
+    );
+  }
+  return <RolesList token={token} reads={reads} />;
+}
+
+function RolesList({ token, reads }: { token: string; reads: SellersJsonReads }) {
+  const [query, setQuery] = useState("");
+  const [filter, setFilter] = useState("");
+  const [page, setPage] = useState(1);
+  const paging = usePaging(setPage);
+  const [rows, setRows] = useState<MatchedDeveloper[]>([]);
+  const [total, setTotal] = useState(0);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    const t = window.setTimeout(() => setFilter(query.trim()), 250);
+    return () => window.clearTimeout(t);
+  }, [query]);
+  useEffect(() => setPage(1), [filter]);
+
+  useEffect(() => {
+    let cancelled = false;
+    setLoading(true);
+    setError(null);
+    api
+      .matchedDevelopers(token, page, filter)
+      .then((r) => {
+        if (cancelled) return;
+        setRows(r.rows ?? []);
+        setTotal(r.total ?? 0);
+      })
+      .catch(() => !cancelled && setError("Could not load the seller roles. Please try again."))
+      .finally(() => !cancelled && setLoading(false));
+    return () => {
+      cancelled = true;
+    };
+  }, [token, page, filter]);
+
+  const first = (page - 1) * PAGE_SIZE;
+  const digits = gutterDigits(first + Math.max(rows.length, 1));
+  return (
+    <section data-testid="seller-roles" ref={paging.topRef} className="space-y-3">
+      <div>
+        <h2 className="font-display text-sm font-medium text-slate-700">Seller roles</h2>
+        <p className="mt-0.5 text-[12px] leading-relaxed text-slate-500">
+          What your seats&apos; sellers.json files say of each matched publisher: its role and who manages it.
+        </p>
+        <p data-testid="seller-roles-read" className="text-[11px] leading-relaxed text-slate-400">
+          {readsSentence(reads)}
+        </p>
+      </div>
+      <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between sm:gap-x-6">
+        <div className="relative w-full min-w-0 sm:min-w-[12rem] sm:flex-1">
+          <Search className="pointer-events-none absolute left-3.5 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
+          <input
+            value={query}
+            onChange={(e) => setQuery(e.target.value)}
+            placeholder="Search publishers"
+            aria-label="Search seller roles"
+            className="h-10 w-full rounded-full border border-border bg-white pl-10 pr-4 text-sm text-slate-900 outline-none transition-colors placeholder:text-slate-400 focus:border-primary/40"
+          />
+        </div>
+        {/* No count while a page is on the way: never the old one under a
+            new search. */}
+        {!loading && !error && total > 0 && (
+          <div className="flex min-h-10 items-center justify-end sm:ml-auto sm:flex-shrink-0">
+            <Pager
+              placement="inline"
+              page={page}
+              pageSize={PAGE_SIZE}
+              total={total}
+              onPage={paging.onPage}
+              noun="publishers"
+              nounOne="publisher"
+            />
+          </div>
+        )}
+      </div>
+      {loading ? (
+        <SkeletonInlineRows rows={6} label="Loading seller roles" />
+      ) : error ? (
+        <p className="text-sm text-critical">{error}</p>
+      ) : rows.length === 0 ? (
+        <p className="rounded-lg border border-dashed border-border bg-muted/20 p-6 text-center text-sm text-slate-500">
+          {filter ? `No publishers match "${filter}".` : "No matched publishers in this report."}
+        </p>
+      ) : (
+        <SeatLinesFrame>
+          {rows.map((r, i) => (
+            <RoleRow key={r.developer_id} row={r} n={first + i + 1} digits={digits} />
+          ))}
+        </SeatLinesFrame>
+      )}
+      {!loading && !error && total > PAGE_SIZE && (
+        <Pager page={page} pageSize={PAGE_SIZE} total={total} onPage={paging.onPage} noun="publishers" />
+      )}
+    </section>
+  );
+}
+
+function RoleRow({ row, n, digits }: { row: MatchedDeveloper; n: number; digits: number }) {
+  const role = roleText(row.seller_role);
+  const managedBy = typeof row.managed_by === "string" ? row.managed_by.trim() : "";
+  // One string joined by " | " as the crawler sends it, or an array; read
+  // safely either way (the shape that crashed the Overview on 2026-10-27).
+  const alerts = Array.from(new Set(textList(row.verdict_alerts)));
+  const name = row.domain || row.name || "Unnamed publisher";
+  return (
+    <li data-seller-role-row className={SEAT_ROW}>
+      <LineNo n={n} digits={digits} />
+      <div className="min-w-0 flex-1 space-y-0.5">
+        <div className="flex min-w-0 items-baseline gap-3">
+          <code className="truncate font-mono text-[11px] text-slate-800">{name}</code>
+          {row.name && row.domain && row.name !== row.domain && (
+            <span className="hidden truncate text-[11px] text-slate-500 sm:inline">{row.name}</span>
+          )}
+        </div>
+        {role || managedBy ? (
+          <dl className="flex flex-wrap gap-x-5 gap-y-0.5 text-[11px]">
+            {role && (
+              <div className="flex min-w-0 gap-1">
+                <dt className="flex-shrink-0 text-slate-500">Seller role:</dt>
+                <dd className="min-w-0 break-words text-slate-700">{role}</dd>
+              </div>
+            )}
+            {managedBy && (
+              <div className="flex min-w-0 gap-1">
+                <dt className="flex-shrink-0 text-slate-500">Managed by:</dt>
+                <dd className="min-w-0 break-words text-slate-700">{managedBy}</dd>
+              </div>
+            )}
+          </dl>
+        ) : (
+          <p className="text-[11px] text-slate-400">No seller role recorded.</p>
+        )}
+        {alerts.map((a) => (
+          <p key={a} data-seller-role-alert className="text-[11px] leading-snug text-slate-600">
+            {a}
+          </p>
+        ))}
+      </div>
+    </li>
+  );
+}

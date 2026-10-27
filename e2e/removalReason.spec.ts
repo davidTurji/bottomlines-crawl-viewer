@@ -90,7 +90,7 @@ test.describe("why a removed line was removed", () => {
     await open(page, { removalReasons: true }, "/changes");
     await page.getByRole("tab", { name: "Removed", exact: true }).click();
     await page.locator("button[aria-expanded]").filter({ has: page.locator("code") }).first().click();
-    await expect(page.getByText("Loading publishers…")).toHaveCount(0);
+    await expect(page.locator("[data-seat-lines-skeleton]")).toHaveCount(0);
     const roster = page.locator("[data-line-text]");
     await expect(roster.first()).toBeVisible();
     const n = await roster.count();
@@ -114,7 +114,7 @@ test.describe("why a removed line was removed", () => {
     await page.goto(`${BASE}/changes`);
     await page.getByRole("tab", { name: "Removed", exact: true }).click();
     await page.locator("button[aria-expanded]").filter({ has: page.locator("code") }).first().click();
-    await expect(page.getByText("Loading publishers…")).toHaveCount(0);
+    await expect(page.locator("[data-seat-lines-skeleton]")).toHaveCount(0);
     await expect(page.locator("[data-line-text]").first()).toBeVisible();
     await expect(reasons(page)).toHaveCount(0);
     expect(errors).toEqual([]);

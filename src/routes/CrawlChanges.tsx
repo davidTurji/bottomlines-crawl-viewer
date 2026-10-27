@@ -5,8 +5,8 @@ import { Collapse, Settle } from "@/components/Motion";
 import LockedTail from "@/components/LockedTail";
 import TrialBanner from "@/components/TrialBanner";
 import { SkeletonRows, SkeletonStatCards } from "@/components/Skeleton";
+import { gutterDigits, RowNote, RowText, SeatLinesFrame, SeatLinesHead, SeatLinesSkeleton } from "@/components/SeatLines";
 import { useEffect, useMemo, useRef, useState } from "react";
-import { Dots } from "@/components/Dots";
 import { LineFilter } from "@/components/LineFilter";
 import { PAGE_SIZE } from "@/lib/paging";
 import { useLineFilter } from "@/lib/lineFilter";
@@ -26,7 +26,6 @@ import {
 import {
   addedDates,
   certDates,
-  dateTitle,
   removedDates,
   removalReasonText,
   unconfirmedDates,
@@ -39,12 +38,9 @@ import { formatWeek, WeekLine } from "@/components/WeekLine";
 import { useReportScope } from "@/lib/reportScope";
 import { PageShell } from "@/components/PageShell";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { cn, foundInLabel, lineHostLabel, scopeReasonText } from "@/lib/utils";
-import {
-  ActionableLine,
-  PublisherDomainLink,
-} from "@/components/PublisherLinks";
-import { computeDelta, MiniStat, SplitStat } from "./CrawlReport";
+import { cn, scopeReasonText } from "@/lib/utils";
+import { PublisherDomainLink } from "@/components/PublisherLinks";
+import { computeDelta, MiniStat, SeatLineRow, SplitStat } from "./CrawlReport";
 import { BEAT_PAUSE_MS, landsAfterMs } from "@/components/CountUp";
 
 /**
@@ -659,7 +655,6 @@ export default function CrawlChanges() {
               </TabsList>
             </Tabs>
           </div>
-          {loading && rows.length > 0 && <Dots />}
         </div>
         {/* ONE QUIET LINE, NEVER A CARD (David, 2026-10-20): the lines the
             crawler could not verify, under the tabs, on every tab but their
@@ -777,15 +772,18 @@ export default function CrawlChanges() {
 
 /* ── The card ──────────────────────────────────────────────────────── */
 
+/** Publishers per page of an expanded card's roster. */
+const ROSTER_PAGE = 50;
+
 /**
  * One changed line, built as a deliberate sibling of PublisherCard and of
  * the Discovered lines card: same rounded-3xl white card, same shadow, same
- * 44px disc, same right-aligned MiniStats, same chevron, same tinted body.
+ * 44px disc, same right-aligned MiniStats, same chevron, and the very body
+ * an Overview row opens (David, 2026-10-27).
  *
- * The difference is that the disc, the chip and the tint all carry the tone
- * of the EVENT, because on this page the event is the fact the reader came
- * for. The chip spells it out in words; the disc and tint mean a card's
- * event is readable from the edge of vision, before any word is read.
+ * The difference is that the disc carries the tone of the EVENT, because on
+ * this page the event is the fact the reader came for. The disc means a
+ * card's event is readable from the edge of vision, before any word is read.
  */
 function ChangeCard({
   group,
@@ -806,6 +804,9 @@ function ChangeCard({
   const [publishers, setPublishers] = useState<LineEvent[]>([]);
   const [publisherPage, setPublisherPage] = useState(1);
   const [rosterLoading, setRosterLoading] = useState(false);
+  // The roster page on screen: until the first one lands the body shows the
+  // skeleton, never an empty list for a frame.
+  const [loadedPage, setLoadedPage] = useState<number | null>(null);
   const [rosterError, setRosterError] = useState<string | null>(null);
   const [exporting, setExporting] = useState(false);
   const linesKey = filters.lines?.join(",") ?? "";
@@ -822,12 +823,14 @@ function ChangeCard({
           ssp_domain: filters.ssp_domain,
           lines: linesKey ? linesKey.split(",") : undefined,
           page: publisherPage,
-          page_size: 50,
+          page_size: ROSTER_PAGE,
         },
         controller.signal,
       )
       .then((r) => {
-        if (!controller.signal.aborted) setPublishers(r.rows);
+        if (controller.signal.aborted) return;
+        setPublishers(r.rows);
+        setLoadedPage(publisherPage);
       })
       .catch(
         (e: Error) =>
@@ -1025,33 +1028,13 @@ function ChangeCard({
         />
       </button>
 
+      {/* THE SAME OPENING AS AN OVERVIEW ROW (David, 2026-10-27): the same
+          eased Collapse, the same tinted body, the same heading, the same
+          skeleton while the publishers load, and the same rows (the
+          Overview's SeatLineRow, gutter numbers included). The card's
+          disc keeps the event's tone; the body is the Overview's. */}
       <Collapse open={open}>
-        <div
-          className={cn(
-            "border-t border-border px-4 pb-4 pt-3 sm:px-5",
-            tone.tint,
-          )}
-        >
-          <div className="mb-2 flex items-center justify-between gap-3">
-            <span className="text-xs font-medium text-slate-700">
-              {tone.expandedTitle}
-              <span className="ml-2 font-mono tabular-nums font-normal text-slate-500">
-                {count.toLocaleString()}
-              </span>
-            </span>
-            {/* The list on screen stays capped and scrollable; anyone who
-                needs to act on the whole roster (chase a removal, brief a
-                partner) needs it in a spreadsheet, not in a scroll box. */}
-            <button
-              type="button"
-              onClick={downloadRoster}
-              disabled={exporting}
-              className="inline-flex flex-shrink-0 items-center gap-1.5 rounded-full border border-border bg-white px-2.5 py-1 text-[11px] font-medium text-slate-600 shadow-sm transition-colors hover:bg-muted"
-            >
-              <Download aria-hidden className="h-3 w-3" />
-              {exporting ? "Preparing…" : "Export"}
-            </button>
-          </div>
+        <div className="border-t border-border bg-accent/30 px-4 pb-4 pt-3 sm:px-5">
           {/* Who vouched for this line's developer. One quiet sentence, not
               a list: the declarers are context on the match, not the roster
               the reader opened the card for. */}
@@ -1060,118 +1043,118 @@ function ChangeCard({
               declared inventory partner by {declaredBy(group.ipd_declared_by)}
             </p>
           )}
-          {/* Capped and scrollable: a line that moved on hundreds of
-              publishers would otherwise push every other card off screen. */}
-          {rosterLoading && (
-            <p role="status" className="py-3 text-xs text-slate-500">
-              Loading publishers…
-            </p>
-          )}
-          {rosterError && (
+          {rosterError ? (
             <p role="alert" className="py-3 text-xs text-critical">
               {rosterError}
             </p>
-          )}
-          <div className="scroll-y max-h-[320px] overflow-y-auto rounded-md border border-border bg-white">
-            <ul className="divide-y divide-border">
-              {!rosterLoading &&
-                !rosterError &&
-                publishers.map((p, i) => (
-                  // Click the row: the line is copied and this publisher's
-                  // file opens at it (David, 2026-10-06). The domain itself
-                  // links to their site.
-                  <ActionableLine
-                    key={`${p.developer_id}|${p.file_kind}|${i}`}
-                    line={{ ...group, cert_id: inlineCert ?? undefined }}
-                    // The file is at its host (2026-10-21): a declared
-                    // sub-domain's, or the publisher's own domain.
-                    publisherDomain={p.host || p.developer_domain}
-                    foundIn={fileLabel(p.file_kind)}
-                    gone={
-                      group.event === "removed" ||
-                      group.event === "monitoring_stopped"
-                    }
-                    className="flex items-baseline gap-3 px-3 py-1.5 text-[11px]"
+          ) : rosterLoading || loadedPage !== publisherPage ? (
+            <SeatLinesSkeleton
+              rows={Math.min(4, Math.max(1, count - (publisherPage - 1) * ROSTER_PAGE))}
+              label="Loading publishers"
+            />
+          ) : (
+            <div>
+              <SeatLinesHead
+                title={tone.expandedTitle}
+                count={count}
+                // The list on screen is paged; anyone who needs to act on
+                // the whole roster (chase a removal, brief a partner) needs
+                // it in a spreadsheet.
+                action={
+                  <button
+                    type="button"
+                    onClick={downloadRoster}
+                    disabled={exporting}
+                    className="inline-flex flex-shrink-0 items-center gap-1.5 rounded-full border border-border bg-white px-2.5 py-0.5 text-[11px] font-medium text-slate-600 shadow-sm transition-colors hover:bg-muted"
                   >
-                    <div className="min-w-0 flex-1">
+                    <Download aria-hidden className="h-3 w-3" />
+                    {exporting ? "Preparing…" : "Export"}
+                  </button>
+                }
+              />
+              <SeatLinesFrame>
+                {publishers.map((p, i) => (
+                  // Click the row: the line is copied and this publisher's
+                  // file opens at it (David, 2026-10-06); a line that has
+                  // left the file copies, and its file opens from the margin
+                  // (as on the Overview). The domain itself links to their
+                  // site.
+                  <SeatLineRow
+                    key={`${p.developer_id}|${p.file_kind}|${i}`}
+                    // Numbered across the roster's pages: page 2 starts at 51.
+                    n={(publisherPage - 1) * ROSTER_PAGE + i + 1}
+                    digits={gutterDigits(count)}
+                    line={{
+                      ssp_domain: group.ssp_domain,
+                      publisher_id: group.publisher_id,
+                      relationship: group.relationship,
+                      cert_id: inlineCert ?? undefined,
+                      found_in: fileLabel(p.file_kind),
+                      // The file is at its host (2026-10-21): a declared
+                      // sub-domain's, or the publisher's own domain.
+                      host: p.host ?? null,
+                      date_source: p.date_source,
+                    }}
+                    publisherDomain={p.developer_domain}
+                    gone={group.event === "removed" || group.event === "monitoring_stopped"}
+                    label={
                       <div className="flex min-w-0 items-baseline gap-3">
-                        {/* Never the internal id (David, 2026-10-06): the domain,
-                          else the name, else a plain word. */}
-                        <span className="min-w-0 truncate font-mono tabular-nums text-slate-800">
+                        {/* Never the internal id (David, 2026-10-06): the
+                            domain, else the name, else a plain word. */}
+                        <RowText as="span">
                           {p.developer_domain ? (
                             <PublisherDomainLink domain={p.developer_domain} />
                           ) : (
                             p.developer_name || "Unnamed publisher"
                           )}
-                        </span>
+                        </RowText>
                         {p.developer_domain && p.developer_name && (
-                          <span className="hidden truncate text-slate-500 sm:inline">
+                          <span className="hidden truncate text-[11px] text-slate-500 sm:inline">
                             {p.developer_name}
                           </span>
                         )}
-                        {/* The file's host, when it is not the publisher's
-                            own domain (2026-10-21). */}
-                        {lineHostLabel(p.host, p.developer_domain) && (
-                          <span data-line-host className="truncate text-[10px] text-slate-400">
-                            {lineHostLabel(p.host, p.developer_domain)}
-                          </span>
-                        )}
                       </div>
-                      {/* Why, in the crawler's words, before the dates. */}
-                      {group.event === "unconfirmed" && (
-                        <div className="text-[10px] leading-snug text-slate-600">
-                          {p.reason || "No reason recorded."}
-                        </div>
-                      )}
-                      {/* WHY THE WATCH MOVED ON THIS FILE (2026-10-21): a
-                          host's file read for the first time this crawl, or
-                          not read this crawl. Said in plain words; a change
-                          to the customer's list carries no reason and says
-                          nothing here. */}
-                      {(group.event === "newly_monitored" ||
-                        group.event === "monitoring_stopped") &&
-                        scopeReasonText(p.reason) && (
-                          <div data-line-reason className="text-[10px] leading-snug text-slate-600">
-                            {scopeReasonText(p.reason)}
-                          </div>
+                    }
+                    notes={
+                      <>
+                        {/* Why, in the crawler's words, before the dates. */}
+                        {group.event === "unconfirmed" && (
+                          <RowNote tone="reason">{p.reason || "No reason recorded."}</RowNote>
                         )}
-                      {/* WHY THE LINE WAS REMOVED (2026-10-26): the line left
-                          the file, or the file was not served. Nothing on a
-                          report frozen before the crawler said. */}
-                      {group.event === "removed" && removalReasonText(p) && (
-                        <div data-removal-reason className="text-[10px] leading-snug text-slate-600">
-                          {removalReasonText(p)}
-                        </div>
-                      )}
-                      {rowDates(p) && (
-                        <div
-                          data-line-dates
-                          title={dateTitle(p.date_source)}
-                          className="text-[10px] leading-snug text-slate-500"
-                        >
-                          {rowDates(p)}
-                        </div>
-                      )}
-                    </div>
-                    {/* Rendered, never the raw enum: this is a customer's
-                      screen, and "APP_ADS_TXT" is not a file name. Said as
-                      a sentence, the same one every other surface uses, so
-                      a bare filename is never left to explain itself. */}
-                    {/* The file this row opens, so it is what reads as the link. */}
-                    <span
-                      data-line-text
-                      className="ml-auto flex-shrink-0 text-[10px] text-slate-400"
-                    >
-                      {foundInLabel(fileLabel(p.file_kind))}
-                    </span>
-                  </ActionableLine>
+                        {/* WHY THE WATCH MOVED ON THIS FILE (2026-10-21): a
+                            host's file read for the first time this crawl,
+                            or not read this crawl. Said in plain words; a
+                            change to the customer's list carries no reason
+                            and says nothing here. */}
+                        {(group.event === "newly_monitored" || group.event === "monitoring_stopped") &&
+                          scopeReasonText(p.reason) && (
+                            <RowNote tone="reason" data-line-reason>
+                              {scopeReasonText(p.reason)}
+                            </RowNote>
+                          )}
+                        {/* WHY THE LINE WAS REMOVED (2026-10-26): the line
+                            left the file, or the file was not served.
+                            Nothing on a report frozen before the crawler
+                            said. */}
+                        {group.event === "removed" && removalReasonText(p) && (
+                          <RowNote tone="reason" data-removal-reason>
+                            {removalReasonText(p)}
+                          </RowNote>
+                        )}
+                      </>
+                    }
+                    // WHEN, per publisher (David, 2026-10-20): the dates are
+                    // a fact of the read of THAT publisher's file.
+                    dates={rowDates(p)}
+                  />
                 ))}
-            </ul>
-          </div>
-          {count > 50 && (
+              </SeatLinesFrame>
+            </div>
+          )}
+          {count > ROSTER_PAGE && (
             <Pager
               page={publisherPage}
-              pageSize={50}
+              pageSize={ROSTER_PAGE}
               total={count}
               onPage={setPublisherPage}
               noun="publishers"
@@ -1192,7 +1175,6 @@ const TONES: Record<
     preposition: string;
     expandedTitle: string;
     disc: string;
-    tint: string;
     icon: typeof Plus;
     /** What the round icon means, shown on hover (owner, 2026-10-15). */
     hint: string;
@@ -1203,7 +1185,6 @@ const TONES: Record<
     preposition: "to",
     expandedTitle: "Publishers that added this line",
     disc: "bg-ok-bg text-ok",
-    tint: "bg-ok-bg/40",
     icon: Plus,
     hint: "Line added: publishers started carrying it this week",
   },
@@ -1212,7 +1193,6 @@ const TONES: Record<
     preposition: "from",
     expandedTitle: "Publishers that dropped this line",
     disc: "bg-critical-bg text-critical",
-    tint: "bg-critical-bg/40",
     icon: Minus,
     hint: "Line removed: publishers dropped it this week",
   },
@@ -1221,7 +1201,6 @@ const TONES: Record<
     preposition: "on",
     expandedTitle: "Publishers carrying the new cert",
     disc: "bg-warn-bg text-warn",
-    tint: "bg-warn-bg/40",
     icon: RefreshCw,
     hint: "Cert changed: publishers changed this line's cert ID this week",
   },
@@ -1239,7 +1218,6 @@ const TONES: Record<
     // Blue, not the green of "added" (David, 2026-10-05): a change to
     // the customer's own list, kept visibly apart from market news.
     disc: "bg-info-bg text-info",
-    tint: "bg-info-bg/40",
     icon: Eye,
     hint: "Started watching: you added this line to your list this week",
   },
@@ -1250,7 +1228,6 @@ const TONES: Record<
     // Amber, not the red of "removed" (David, 2026-10-05): worth noticing,
     // but the publishers still carry these lines.
     disc: "bg-warn-bg text-warn",
-    tint: "bg-warn-bg/40",
     icon: EyeOff,
     hint: "Stopped watching: you took this line off your list this week",
   },
@@ -1262,7 +1239,6 @@ const TONES: Record<
     preposition: "on",
     expandedTitle: "Publishers appearing in your report for the first time",
     disc: "bg-muted text-muted-foreground",
-    tint: "bg-muted/40",
     icon: Sparkles,
     hint: "First appearance: these publishers are in your report for the first time",
   },
@@ -1274,7 +1250,6 @@ const TONES: Record<
     preposition: "on",
     expandedTitle: "Publishers whose file could not be verified for this line",
     disc: "bg-muted text-muted-foreground",
-    tint: "bg-muted/40",
     icon: CircleHelp,
     hint: "Unconfirmed: the crawler could not verify this line this crawl, so it is kept as matched",
   },

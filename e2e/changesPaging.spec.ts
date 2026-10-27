@@ -64,7 +64,7 @@ test("publisher expansion pages independently and does not prefetch other cards"
     ),
   ).toHaveLength(0);
   await card.click();
-  await expect(page.getByText("Loading publishers…")).toHaveCount(0);
+  await expect(page.locator("[data-seat-lines-skeleton]")).toHaveCount(0);
   await expect(page.locator("[data-line-text]").first()).toBeVisible();
   expect(
     calls.filter(

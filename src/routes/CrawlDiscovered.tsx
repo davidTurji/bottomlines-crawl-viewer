@@ -412,7 +412,9 @@ export default function CrawlDiscovered() {
         </p>
       )}
 
-      {!error && !onTrial && total > 0 && (
+      {/* No pager while a new list is on the way: its count would be the
+          old filter's under the new one (David, 2026-10-27). */}
+      {!loading && !error && !onTrial && total > 0 && (
         <Pager
           placement="top"
           anchorRef={paging.topRef}
@@ -455,7 +457,7 @@ export default function CrawlDiscovered() {
           detail="line on the open web that starts with your domain, with every publisher carrying it"
         />
       )}
-      {!onTrial && total > 0 && (
+      {!loading && !onTrial && total > 0 && (
         <Pager
           className="border-t border-border/70 pt-4"
           page={page}

@@ -17,6 +17,7 @@ import { useEffect, useMemo, useState } from "react";
 import { EntryDiff, JsonDiff } from "@/components/JsonDiff";
 import { Collapse, Settle, glideTo } from "@/components/Motion";
 import { PageShell } from "@/components/PageShell";
+import SellerRoles from "@/components/SellerRoles";
 import { ActionableLine, fileUrl, filesOf, linkable, PublisherDomainLink, ShownLink, siteUrl } from "@/components/PublisherLinks";
 import { SkeletonRows, SkeletonStatCards } from "@/components/Skeleton";
 import { formatWeek, WeekLine } from "@/components/WeekLine";
@@ -659,6 +660,10 @@ export default function CrawlSellers() {
           </div>
         </>
       )}
+
+      {/* SELLER ROLES (David, 2026-10-27): moved here from the Overview's
+          expanded rows, a segment of its own, below the file. */}
+      <SellerRoles token={token} summary={summary} settled={summarySettled} />
     </PageShell>
   );
 }

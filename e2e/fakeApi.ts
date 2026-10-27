@@ -157,7 +157,118 @@ export type Scenario = {
    *  ``change``. Default false: today's API, which ignores the parameter
    *  and answers the unfiltered list with no echo. */
   appChange?: boolean;
+  /** true: a report built after crawler #364, whose build read the seats'
+   *  sellers.json files first: the summary carries ``sellers_json_reads``
+   *  (SELLERS_READS) and the Sellers.json page shows its Seller roles
+   *  segment. Default false: every report frozen before it. */
+  sellersReads?: boolean;
+  /** true: every matched row, app, publisher change and line event in the
+   *  crawler's REAL field shapes, as a frozen report serves them on
+   *  2026-10-27 (see ``realShape``): roles as "; "-joined strings, alerts
+   *  as one " | "-joined string or "", ``partner_inventory_on`` a list,
+   *  the internal platform "ipd_partner", empty strings where the crawler
+   *  sends them, one line per IPD partner (the same line several times),
+   *  and an inconclusive note of 55 with 25 examples. For the
+   *  click-everything test: a type assumption must never pass. */
+  realShapes?: boolean;
 };
+
+/** The ``sellersReads`` scenario's read summary (crawler #364's shape). */
+export const SELLERS_READS = {
+  wanted: 3,
+  fresh: 1,
+  read: 1,
+  failed: 1,
+  over_budget: 0,
+  read_domains: ["madeupssp.com"],
+  failed_domains: ["example-exchange.tv"],
+  over_budget_domains: [],
+};
+
+/* ── THE CRAWLER'S REAL SHAPES (2026-10-27) ────────────────────────────
+   What a frozen report really sends, read off a live link the morning a
+   row's ``verdict_alerts`` (one string, not the contract's array) took
+   the whole Overview down. Applied on top of the fixtures by row index,
+   so every shape is on the first page of every list. */
+const REAL_ROLES: Record<string, unknown>[] = [
+  {
+    seller_role: "not in sellers.json; owner; reseller",
+    managed_by: "adnetwork-one.tv; adnetwork-two.com; adnetwork-three.com",
+    verdict_alerts:
+      "Listed as DIRECT, but sellers.json names adnetwork-three.com, not adnetwork-two.com: treated as a reseller. | Listed as RESELLER, but the sellers.json account is a publisher account: check the relationship.",
+    partner_inventory_on: [],
+    partner_inventory: [],
+  },
+  { seller_role: "", managed_by: "", verdict_alerts: "", partner_inventory_on: ["Tidewick TV"], partner_inventory: [] },
+  { seller_role: "reseller", managed_by: null, verdict_alerts: ["An alert as the old contract's array."], partner_inventory_on: "Tidewick TV, Platform B" },
+  { seller_role: null, managed_by: null, verdict_alerts: null, partner_inventory_on: null },
+  { seller_role: "owner", managed_by: "copperline-media.tv (GB)", verdict_alerts: " | ", partner_inventory_on: [] },
+];
+const REAL_PLATFORMS = ["ipd_partner", "", "CTV", null, "website", "Mobile"];
+const REAL_PARTNERS = ["northfold-tv.com", "failarmy.tv", "example-partner.tv"];
+
+/** One seat line as the crawler sends it: an empty cert, a null host, and
+ *  the row's match fields and (empty) roles repeated on the line. */
+function realLine(l: MatchedSeatLine, partner: string | null): MatchedSeatLine {
+  return {
+    cert_id: "",
+    host: null,
+    ...l,
+    ...(partner
+      ? { match_type: "ipd", ipd_partner: partner, ipd_platform: "Tidewick TV", declared_in: "Tidewick TV's app-ads.txt" }
+      : { match_type: "own" }),
+    seller_role: partner ? "not in sellers.json" : "",
+    managed_by: "",
+    verdict_alerts: "",
+  } as MatchedSeatLine;
+}
+
+/** A row in the real shapes. Its matched lines come once per IPD partner
+ *  on every other row: the same line two or three times. */
+function realShape<T extends LineArrays & Record<string, unknown>>(row: T, i: number): T {
+  const roles = REAL_ROLES[i % REAL_ROLES.length];
+  const platform = REAL_PLATFORMS[i % REAL_PLATFORMS.length];
+  const twice = i % 2 === 0;
+  const lines = (row.matched_lines ?? []) as MatchedSeatLine[];
+  const out: Record<string, unknown> = {
+    ...row,
+    ...roles,
+    ...("platform" in row ? { platform } : {}),
+    ...("developer_platform" in row ? { developer_platform: platform } : {}),
+    ...(row.matched_lines
+      ? {
+          matched_lines: twice
+            ? lines.flatMap((l) => REAL_PARTNERS.slice(0, 2 + (i % 3 === 0 ? 1 : 0)).map((p) => realLine(l, p)))
+            : lines.map((l) => realLine(l, null)),
+        }
+      : {}),
+    ...(row.added_lines ? { added_lines: (row.added_lines as MatchedSeatLine[]).map((l) => realLine(l, null)) } : {}),
+    ...(row.removed_lines ? { removed_lines: (row.removed_lines as MatchedSeatLine[]).map((l) => realLine(l, null)) } : {}),
+    ...(row.cert_changed_lines
+      ? { cert_changed_lines: (row.cert_changed_lines as MatchedSeatLine[]).map((l) => realLine(l, null)) }
+      : {}),
+  };
+  return out as T;
+}
+
+/** The real inconclusive note: 55 publishers, 25 examples, two partners. */
+const REAL_INCONCLUSIVE = {
+  count: 55,
+  examples: Array.from({ length: 25 }, (_, i) => ({
+    partner: i < 20 ? "gusto-example.tv" : "northfold-tv.com",
+    platform: `station${100 + i}.example`,
+  })),
+};
+
+function realList<P extends { rows: unknown[] }>(page: P): P {
+  return {
+    ...page,
+    rows: page.rows.map((r, i) => realShape(r as LineArrays & Record<string, unknown>, i)),
+    // Only a list that says how it splits carries the note, as on a real
+    // report (pair ``realShapes`` with ``matchType``).
+    ...((page as Record<string, unknown>).match_type_counts ? { ipd_inconclusive: REAL_INCONCLUSIVE } : {}),
+  };
+}
 
 /* ── THE FILE-HOST FIELDS (snapshot version 5, 2026-10-21) ────────────
    Every seat line, publisher, app and line event now says where its file
@@ -312,6 +423,8 @@ export async function installFakeApi(page: Page, scenario: Scenario = {}): Promi
     matchType: false,
     removalReasons: false,
     appChange: false,
+    sellersReads: false,
+    realShapes: false,
     ...scenario,
   };
   const hostApp = s.declaredHost ? declaredHostApp() : null;
@@ -425,7 +538,8 @@ export async function installFakeApi(page: Page, scenario: Scenario = {}): Promi
         const full = s.crawlDates ? dated : { ...dated, crawl_at: undefined, compared_crawl_at: undefined };
         const withGone = s.gone ? full : { ...full, gone: undefined };
         const withInactive = s.inactive === "ok" ? withGone : { ...withGone, inactive_counts: undefined };
-        const sum = s.firstReport ? { ...withInactive, previous_job_id: null } : withInactive;
+        const first = s.firstReport ? { ...withInactive, previous_job_id: null } : withInactive;
+        const sum = s.sellersReads ? { ...first, sellers_json_reads: SELLERS_READS } : first;
         return reply(200, s.trial ? { ...sum, trial: TRIAL_CAPS } : sum);
       }
       case "export-info":
@@ -437,13 +551,16 @@ export async function installFakeApi(page: Page, scenario: Scenario = {}): Promi
         const event = (q.get("event") ?? "added") as "added" | "removed" | "changed";
         const r = mockDeveloperEvents(event, page_, lines, matchType);
         r.rows = r.rows.map(eventRow).map((d) => (s.removalReasons ? withRemovalReasons(d) : d));
-        return reply(200, s.trial ? { ...r, page: 1, ...cut(r.rows, TRIAL_CAPS.publishers, r.total) } : r);
+        const ev = s.realShapes ? realList(r) : r;
+        return reply(200, s.trial ? { ...ev, page: 1, ...cut(ev.rows, TRIAL_CAPS.publishers, ev.total) } : ev);
       }
       case "line-events": {
         const filters: Record<string, unknown> = {};
         for (const [k, v] of q.entries()) if (k !== "lines") filters[k] = /^\d+$/.test(v) ? Number(v) : v;
         if (filters.developer_id !== undefined) {
-          const rows = linesForDeveloper(Number(filters.developer_id)).map(lineEvent);
+          const rows = linesForDeveloper(Number(filters.developer_id))
+            .map(lineEvent)
+            .map((r, i) => (s.realShapes ? (realShape(r as unknown as LineArrays & Record<string, unknown>, i) as unknown as LineEvent) : r));
           return reply(200, { page: 1, page_size: rows.length || 1, total: rows.length, rows });
         }
         const r = mockLineEvents(filters as Parameters<typeof mockLineEvents>[0]);
@@ -456,7 +573,8 @@ export async function installFakeApi(page: Page, scenario: Scenario = {}): Promi
             hostApp && d.domain === hostApp.owner_domain ? publisherWithHost(publisherRow(d)) : publisherRow(d),
           )
           .map((d) => (s.removalReasons ? withRemovalReasons(d) : d));
-        return reply(200, s.trial ? { ...r, page: 1, ...cut(r.rows, TRIAL_CAPS.publishers, r.total) } : r);
+        const md = s.realShapes ? realList(r) : r;
+        return reply(200, s.trial ? { ...md, page: 1, ...cut(md.rows, TRIAL_CAPS.publishers, md.total) } : md);
       }
       case "matched-bundles": {
         const r = mockMatchedBundles(page_, q.get("q") ?? "");
@@ -468,7 +586,8 @@ export async function installFakeApi(page: Page, scenario: Scenario = {}): Promi
         r.rows = r.rows
           .map((a) => (hostApp && appKey(a) === appKey(hostApp) ? appAtHost(appRow(a)) : appRow(a)))
           .map((a) => (s.removalReasons ? withRemovalReasons(a) : a));
-        return reply(200, s.trial ? { ...r, page: 1, ...cut(r.rows, TRIAL_CAPS.apps, r.total) } : r);
+        const ma = s.realShapes ? realList(r) : r;
+        return reply(200, s.trial ? { ...ma, page: 1, ...cut(ma.rows, TRIAL_CAPS.apps, ma.total) } : ma);
       }
       case "discovered-lines": {
         if (!s.discovery) return reply(200, { page: 1, page_size: Number(q.get("page_size") ?? 50), total: 0, rows: [] });

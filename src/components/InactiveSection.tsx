@@ -1,7 +1,6 @@
 import { Search } from "lucide-react";
 import { useEffect, useState, type ComponentType } from "react";
 
-import { Dots } from "@/components/Dots";
 import { EmptyResult, Pager, TruncatedNotice, usePaging } from "@/components/ListControls";
 import LockedTail from "@/components/LockedTail";
 import { Settle } from "@/components/Motion";
@@ -184,7 +183,6 @@ export default function InactiveSection({
               </button>
             );
           })}
-          {loading && settled > 0 && <Dots />}
         </div>
         <p className="text-sm text-slate-500">
           {intro(kind, since)} Not counted in your totals.
@@ -205,11 +203,14 @@ export default function InactiveSection({
         </div>
       </div>
 
-      {loading && settled === 0 && <SkeletonRows rows={4} label={`Loading ${noun}`} />}
+      {/* The skeleton whenever the list waits for its rows, the first read
+          and every search, page or list switch after it (David,
+          2026-10-27), never last answer's rows dimmed. */}
+      {loading && <SkeletonRows rows={4} label={`Loading ${noun}`} />}
       {error && <p className="text-sm text-critical">{error}</p>}
 
-      {ready && rows.length === 0 && (
-        <div className={cn("transition-opacity duration-300", loading && "opacity-60")}>
+      {ready && !loading && rows.length === 0 && (
+        <div>
           {query ? (
             <EmptyResult query={query} noun={noun} />
           ) : (
@@ -224,7 +225,7 @@ export default function InactiveSection({
         </div>
       )}
 
-      {ready && rows.length > 0 && !locked && (
+      {ready && !loading && rows.length > 0 && !locked && (
         <Pager
           placement="top"
           anchorRef={paging.topRef}
@@ -238,14 +239,8 @@ export default function InactiveSection({
         />
       )}
 
-      {ready && rows.length > 0 && (
-        <div
-          key={settled}
-          className={cn(
-            "animate-in fade-in space-y-3 transition-opacity duration-300 ease-out",
-            loading && "opacity-60",
-          )}
-        >
+      {ready && !loading && rows.length > 0 && (
+        <div key={settled} className="animate-in fade-in space-y-3">
           {kind === "publishers" &&
             (rows as InactivePublisher[]).map((p, i) => {
               const key = `p:${p.developer_id ?? p.domain}`;
@@ -267,7 +262,7 @@ export default function InactiveSection({
         </div>
       )}
 
-      {ready && locked && (
+      {ready && !loading && locked && (
         <LockedTail
           slice={trial}
           caps={caps}
@@ -276,7 +271,7 @@ export default function InactiveSection({
           detail="inactive publisher and app, with the date and the reason"
         />
       )}
-      {ready && rows.length > 0 && !locked && (
+      {ready && !loading && rows.length > 0 && !locked && (
         <div className="mt-4">
           <Pager
             page={page}

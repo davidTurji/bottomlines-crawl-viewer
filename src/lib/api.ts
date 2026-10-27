@@ -1287,6 +1287,19 @@ export type InactivePage<R = InactiveRow> = {
   derived_from?: string | null;
 };
 
+/** The sellers.json read summary (crawler #364): tallies, and the
+ *  exchanges of each outcome. Every field optional: read safely. */
+export type SellersJsonReads = {
+  wanted?: number;
+  fresh?: number;
+  read?: number;
+  failed?: number;
+  over_budget?: number;
+  read_domains?: string[];
+  failed_domains?: string[];
+  over_budget_domains?: string[];
+};
+
 export type Summary = {
   crawl_id: number;
   /** What carried the reader's lines and is gone; never in the counts. */
@@ -1295,6 +1308,12 @@ export type Summary = {
    *  crawls: NOT in ``counters.matched``, which counts active only. Absent
    *  on links frozen before the section. */
   inactive_counts?: InactiveCounts | null;
+  /** What the report build's read of the seats' sellers.json files did
+   *  (crawler #364, "Sellers.json read" on the workbook's Summary). Only a
+   *  report that carries it has seller roles worth showing: before #364 a
+   *  seller ID that IS in sellers.json could read "not in sellers.json".
+   *  Absent on every report frozen before it. */
+  sellers_json_reads?: SellersJsonReads | null;
   /** When this crawl and the crawl it is compared with ran: the window the
    *  report covers (the Inactive section's, among others). Optional: until
    *  the backend sends them, this crawl's ``finished_at`` and the previous

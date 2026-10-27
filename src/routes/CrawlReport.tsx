@@ -1,17 +1,17 @@
 import InactiveSection, { type InactiveCards } from "@/components/InactiveSection";
 import LockedTail from "@/components/LockedTail";
 import { MiniStat } from "@/components/MiniStat";
-import { Collapse, ListSwap, Settle, glideTo, useLingering } from "@/components/Motion";
+import { Collapse, ListSwap, Settle, glideTo } from "@/components/Motion";
 import TrialBanner from "@/components/TrialBanner";
 import {
   OverviewSkeleton,
+  Skeleton,
   SkeletonRows,
   SkeletonStatCards,
 } from "@/components/Skeleton";
 import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { BEAT_PAUSE_MS, CountUp, landsAfterMs, payoffStyle } from "@/components/CountUp";
 import { LineFilter } from "@/components/LineFilter";
-import { Dots } from "@/components/Dots";
 import { HoverHint } from "@/components/HoverHint";
 import {
   appSubject,
@@ -21,7 +21,6 @@ import {
   IpdWhere,
   linesDomain,
   MatchTypeControl,
-  RowRoles,
 } from "@/components/MatchType";
 import { PAGE_SIZE } from "@/lib/paging";
 import { usePageCache } from "@/lib/pageCache";
@@ -85,6 +84,17 @@ import {
   PublisherDomainLink,
 } from "@/components/PublisherLinks";
 import { useReportScope } from "@/lib/reportScope";
+import {
+  gutterDigits,
+  LineNo,
+  ROW_MARGIN,
+  RowNote,
+  RowText,
+  SEAT_ROW,
+  SeatLinesFrame,
+  SeatLinesHead,
+  SeatLinesSkeleton,
+} from "@/components/SeatLines";
 
 const OVERVIEW_SUGGESTIONS = [
   "What lines were added this week?",
@@ -1391,10 +1401,6 @@ function matchTypeFieldsOf(d: MatchTypeFields): MatchTypeFields {
   if (d.ipd_partner !== undefined) out.ipd_partner = d.ipd_partner;
   if (d.ipd_platform !== undefined) out.ipd_platform = d.ipd_platform;
   if (d.declared_in !== undefined) out.declared_in = d.declared_in;
-  if (d.seller_role !== undefined) out.seller_role = d.seller_role;
-  if (d.managed_by !== undefined) out.managed_by = d.managed_by;
-  if (d.verdict_alerts !== undefined) out.verdict_alerts = d.verdict_alerts;
-  if (d.partner_inventory_on !== undefined) out.partner_inventory_on = d.partner_inventory_on;
   return out;
 }
 
@@ -1469,6 +1475,17 @@ function CountLine({ count, noun }: { count: number; noun: string }) {
   );
 }
 
+/** The count and pager's place while a list waits for its rows: the
+ *  skeleton's tone, at the pager's height, so nothing moves when the
+ *  real count lands and no old number stands under a new filter. */
+function CountSkeleton() {
+  return (
+    <div data-count-skeleton aria-hidden className="flex h-10 items-center">
+      <Skeleton className="h-3.5 w-44 rounded-md" />
+    </div>
+  );
+}
+
 function DrilldownList({
   token,
   lines,
@@ -1524,9 +1541,6 @@ function DrilldownList({
   useEffect(() => {
     if (settled > 0) landed.current = true;
   }, [settled]);
-  // The dots beside the tabs, only for an answer that keeps the reader
-  // waiting: one that lands at once never flashes them.
-  const slow = useLingering(loading && settled > 0, 300);
 
   // A new search, a new tab or a new line selection is a new list, so it
   // starts at its first page. Without this, searching from page 7 asks
@@ -1536,12 +1550,13 @@ function DrilldownList({
     setPage(1);
   }, [tab, query, lines, matchType]);
 
-  // ONE WEIGHT OF RELOAD (David, 2026-10-26). A new tab, line selection,
-  // match type, search or page keeps the list on screen and lets ListSwap
-  // carry it across: the rows dim, the new ones take their place, the
-  // height eases. The skeleton is for a list with nothing on screen to
-  // carry: the cold open, and coming back from Inactive, whose section
-  // took the list's place.
+  // ONE WAY TO WAIT (David, 2026-10-27, replacing the dimmed swap of
+  // 2026-10-26). Whenever the list waits for new rows (a new tab, line
+  // selection, match type, search or page) it shows the same skeleton as
+  // the cold open, never last answer's rows dimmed under a "..." sign. A
+  // page already read (read ahead, or seen before) lands at once, through
+  // ListSwap's short fade. Coming back from Inactive, whose section took
+  // the list's place, starts the list afresh.
   const prevTab = useRef(tab);
   useEffect(() => {
     if (prevTab.current === "inactive" && tab !== "inactive") setSettled(0);
@@ -1681,9 +1696,6 @@ function DrilldownList({
               {inactive && <TabsTrigger value="inactive">Inactive</TabsTrigger>}
             </TabsList>
           </Tabs>
-          {/* The dots say new rows are on the way while the old ones stay
-              in place; the count itself sits on row 2. */}
-          {slow && tab !== "inactive" && <Dots />}
             </>
           }
           right={
@@ -1701,11 +1713,13 @@ function DrilldownList({
             placeholder="Search publishers"
             label="Search matched publishers"
             right={
-              // Silent until a list has landed (the skeleton states no
-              // number). After that it is the count of the rows on screen,
-              // worded for the tab they were read for, and it changes when
-              // they do.
-              settled > 0 && !error && rows.length > 0
+              // While new rows are on the way the count waits with them (a
+              // skeleton in its place: no number for the old filter under
+              // the new one). Then it is the count of the rows on screen,
+              // worded for the tab they were read for.
+              loading
+                ? <CountSkeleton />
+                : settled > 0 && !error && rows.length > 0
                 ? trial || caps
                   // A trial's list is cut: the count, no pages.
                   ? <CountLine count={total} noun={rowsTab === "all" ? "publishers" : "with changes"} />
@@ -1725,11 +1739,11 @@ function DrilldownList({
           />
         )}
       </div>
-      {/* The skeleton until a first list lands; from then on every change
-          (tab, seat lines, match type, search, page) is one ListSwap: the
-          rows dim, the new ones take their place, the height eases. The
+      {/* The skeleton whenever the list waits for its rows, the cold open
+          and every change after it (tab, seat lines, match type, search,
+          page) alike. A page already read swaps in through ListSwap. The
           trial card, the pager under the list and the IPD note ride inside
-          it, so they move with the rows instead of jumping. */}
+          it, so they come and go with the rows. */}
       {tab === "inactive" && inactive ? (
         <InactiveSection
           token={token}
@@ -1744,13 +1758,11 @@ function DrilldownList({
         />
       ) : (
       <div>
-        {loading && settled === 0 && (
-          <SkeletonRows rows={5} label="Loading matched publishers" />
-        )}
+        {loading && <SkeletonRows rows={5} label="Loading matched publishers" />}
         {error && <p className="text-sm text-critical">{error}</p>}
-        {/* `settled > 0`: nothing to carry before a first list lands. */}
-        {settled > 0 && !error && (
-          <ListSwap version={settled} pending={loading} intro={!landed.current}>
+        {/* `settled > 0`: nothing to show before a first list lands. */}
+        {settled > 0 && !error && !loading && (
+          <ListSwap version={settled} pending={false} intro={!landed.current}>
             {rows.length === 0 ? (
               <EmptyResult query={query} noun="publishers" />
             ) : (
@@ -2048,9 +2060,6 @@ function PublisherCard({
             )
           ) : (
             <>
-              {/* Seller role, Managed by, Alert (crawler #348): nothing on
-                  a row that carries none. */}
-              <RowRoles row={row} />
               {hasEmbeddedLines ? (
                 <ChangeExpansion
                   added={row.added_lines}
@@ -2125,17 +2134,28 @@ const CHANGE_WINDOW: Record<
  * One seat line in the mono grammar the whole report prints a line in:
  * `ssp_domain, publisher_id, RELATIONSHIP` with an optional dimmed cert hash.
  * `muted` dims a removed line so it reads as gone without losing legibility.
- * Shared by the change windows and the flat matched-seat-lines list so a line
- * looks identical wherever it appears.
+ * Shared by the change windows, the flat matched-seat-lines list AND the
+ * Changes page's expanded cards (David, 2026-10-27: one look for matched
+ * seat lines on both pages), so a row looks identical wherever it appears.
+ * Each row leads with its gutter number (`n`), its place in its own list.
  */
-function SeatLineRow({
+export function SeatLineRow({
   line,
+  n,
+  digits,
   muted,
   gone,
   publisherDomain,
   change,
+  label,
+  notes,
+  dates: givenDates,
 }: {
   line: MatchedSeatLine;
+  /** The row's place in its list (1, 2, 3 ...), and the width of the
+   *  list's longest number, so the gutter is one right-aligned column. */
+  n: number;
+  digits: number;
   muted?: boolean;
   /** The line has left the publisher's file: a click copies it. */
   gone?: boolean;
@@ -2147,48 +2167,49 @@ function SeatLineRow({
    *  cert was seen. A date the report does not carry reads "date not
    *  available", never the crawl's time dressed up as the file's. */
   change?: ChangeKind;
+  /** The row's text when it is not the line itself (the Changes page's
+   *  cards name the publisher; the line is the card's own title). */
+  label?: ReactNode;
+  /** Notes under the text, before the dates (a reason, in the caller's
+   *  words). */
+  notes?: ReactNode;
+  /** The dates, when the caller knows them better than `change` does. */
+  dates?: string | null;
 }) {
   const dates =
-    change === "removed"
-      ? removedDates(line)
-      : change === "added"
-        ? addedDates(line)
-        : change === "cert"
-          ? certDates(line)
-          : null;
+    givenDates !== undefined
+      ? givenDates
+      : change === "removed"
+        ? removedDates(line)
+        : change === "added"
+          ? addedDates(line)
+          : change === "cert"
+            ? certDates(line)
+            : null;
   // Why it was removed, when the report says (2026-10-26).
   const removal = change === "removed" ? removalReasonText(line) : null;
   const text = (
     <div className="min-w-0 flex-1">
-      <code
-        data-line-text
-        className={cn(
-          "block truncate font-mono text-[11px] tabular-nums",
-          muted ? "text-slate-500" : "text-slate-800",
-        )}
-      >
-        {line.ssp_domain}, {line.publisher_id}, {line.relationship}
-        {line.cert_id && (
-          <span className="font-normal text-slate-400">, {line.cert_id}</span>
-        )}
-      </code>
+      {label ?? (
+        <RowText muted={muted}>
+          {line.ssp_domain}, {line.publisher_id}, {line.relationship}
+          {line.cert_id && <span className="font-normal text-slate-400">, {line.cert_id}</span>}
+        </RowText>
+      )}
+      {notes}
       {removal && (
-        <div data-removal-reason className="text-[10px] leading-snug text-slate-600">
+        <RowNote tone="reason" data-removal-reason>
           {removal}
-        </div>
+        </RowNote>
       )}
       {dates && (
-        <div
-          data-line-dates
-          title={dateTitle(line.date_source)}
-          className="text-[10px] leading-snug text-slate-500"
-        >
+        <RowNote data-line-dates title={dateTitle(line.date_source)}>
           {dates}
-        </div>
+        </RowNote>
       )}
     </div>
   );
-  const row = "flex items-baseline gap-3 px-3 py-1.5";
+  const gutter = <LineNo n={n} digits={digits} />;
   // THE FILE'S HOST (2026-10-21): a line credited from a declared host's
   // app-ads.txt lives in THAT file, so the row opens it there and says so
   // at the margin, after the file name. The publisher's own file, or a
@@ -2196,7 +2217,7 @@ function SeatLineRow({
   const fileDomain = line.host || publisherDomain;
   const hostLabel = lineHostLabel(line.host, publisherDomain);
   const host = hostLabel && (
-    <span data-line-host className="flex-shrink-0 text-[10px] text-slate-400">
+    <span data-line-host className={ROW_MARGIN}>
       {hostLabel}
     </span>
   );
@@ -2204,13 +2225,10 @@ function SeatLineRow({
   // the file, so the file opens from its own link at the margin instead.
   if (gone)
     return (
-      <CopyableLine line={line} className={row}>
+      <CopyableLine line={line} className={SEAT_ROW}>
+        {gutter}
         {text}
-        <FoundInLinks
-          publisherDomain={fileDomain}
-          foundIn={line.found_in}
-          className="flex-shrink-0 text-[10px] text-slate-400"
-        />
+        <FoundInLinks publisherDomain={fileDomain} foundIn={line.found_in} className={ROW_MARGIN} />
         {host}
       </CopyableLine>
     );
@@ -2224,14 +2242,11 @@ function SeatLineRow({
       line={line}
       publisherDomain={fileDomain}
       foundIn={line.found_in}
-      className={row}
+      className={SEAT_ROW}
     >
+      {gutter}
       {text}
-      {foundInLabel(line.found_in) && (
-        <span className={"flex-shrink-0 text-[10px] text-slate-400"}>
-          {foundInLabel(line.found_in)}
-        </span>
-      )}
+      {foundInLabel(line.found_in) && <span className={ROW_MARGIN}>{foundInLabel(line.found_in)}</span>}
       {host}
     </ActionableLine>
   );
@@ -2295,6 +2310,8 @@ function ChangeWindow({
           <SeatLineRow
             key={`${l.ssp_domain}:${l.publisher_id}:${l.relationship}:${l.cert_id ?? ""}:${i}`}
             line={l}
+            n={i + 1}
+            digits={gutterDigits(shown.length)}
             muted={s.muted}
             gone={kind === "removed"}
             publisherDomain={publisherDomain}
@@ -2404,25 +2421,21 @@ function MatchedSeatLines({
   title?: string;
 }) {
   if (lines.length === 0) return null;
+  const digits = gutterDigits(lines.length);
   return (
     <div>
-      <div className="mb-1 flex items-baseline justify-between">
-        <span className="text-xs font-medium text-slate-700">
-          {title}
-        </span>
-        <span className="font-mono text-[11px] tabular-nums text-slate-500">
-          {lines.length}
-        </span>
-      </div>
-      <ul className="divide-y divide-border rounded-md border border-border bg-white">
+      <SeatLinesHead title={title} count={lines.length} />
+      <SeatLinesFrame>
         {lines.map((l, i) => (
           <SeatLineRow
             key={`${l.ssp_domain}:${l.publisher_id}:${l.relationship}:${l.cert_id ?? ""}:${i}`}
             line={l}
+            n={i + 1}
+            digits={digits}
             publisherDomain={publisherDomain}
           />
         ))}
-      </ul>
+      </SeatLinesFrame>
     </div>
   );
 }
@@ -2476,8 +2489,10 @@ function LazyMatchedSeatLines({
       </p>
     );
   }
+  // The same loading state as a Changes card (David, 2026-10-27): the
+  // block's own shape in the theme's muted tone, never a word.
   if (lines === null) {
-    return <p className="text-xs text-slate-500">Loading seat lines...</p>;
+    return <SeatLinesSkeleton label="Loading seat lines" />;
   }
   if (lines.length === 0) {
     return (
@@ -2582,13 +2597,11 @@ function MatchedAppsList({
   const [serverFiltered, setServerFiltered] = useState(false);
   // The match type the rows on screen were read for (the note follows it).
   const [rowsMatchType, setRowsMatchType] = useState<MatchTypeFilter>(matchType);
-  // As on the publishers list: the rows settle in with the first list
-  // only, and the dots wait for an answer that keeps the reader waiting.
+  // As on the publishers list: the rows settle in with the first list only.
   const landed = useRef(false);
   useEffect(() => {
     if (settled > 0) landed.current = true;
   }, [settled]);
-  const slow = useLingering(loading && settled > 0, 300);
 
   // A new search, a new tab or a new line selection is a new list and
   // starts at its first page.
@@ -2596,9 +2609,9 @@ function MatchedAppsList({
     setPage(1);
   }, [tab, query, lines, matchType]);
 
-  // Same rule as the publishers list above: every change keeps the list on
-  // screen and ListSwap carries it across. Under Inactive the rows stay as
-  // they were (that section reads its own lists).
+  // Same rule as the publishers list above: whenever the list waits for
+  // rows it shows the skeleton. Under Inactive the rows stay as they were
+  // (that section reads its own lists).
 
   useEffect(() => {
     if (tab === "inactive") return;
@@ -2707,7 +2720,6 @@ function MatchedAppsList({
               {inactive && <TabsTrigger value="inactive">Inactive</TabsTrigger>}
             </TabsList>
           </Tabs>
-          {slow && tab !== "inactive" && <Dots />}
             </>
           }
           right={
@@ -2735,7 +2747,9 @@ function MatchedAppsList({
               // change tab the server filtered. A change tab filtered in
               // the browser counts the page it got, says so, and pages
               // nothing: paging it would be a claim the data cannot support.
-              settled > 0 && !failed && rows.length > 0
+              loading
+                ? <CountSkeleton />
+                : settled > 0 && !failed && rows.length > 0
                 ? pageFiltered
                   ? <CountLine count={rows.length} noun="on this page" />
                   : trial || caps
@@ -2770,13 +2784,11 @@ function MatchedAppsList({
         />
       ) : (
       <>
-      {loading && settled === 0 && (
-        <SkeletonRows rows={5} label="Loading matched apps" />
-      )}
-      {/* One ListSwap for every change, as on the publishers list: a tab
-          is a new list read, and the rows swap when it lands. */}
-      {settled > 0 && (
-        <ListSwap version={settled} pending={loading} intro={!landed.current}>
+      {loading && <SkeletonRows rows={5} label="Loading matched apps" />}
+      {/* The skeleton while the rows are on the way, as on the publishers
+          list; a page already read swaps in through ListSwap. */}
+      {settled > 0 && !loading && (
+        <ListSwap version={settled} pending={false} intro={!landed.current}>
           {rows.length === 0 ? (
             failed ? (
               <p className="rounded-lg border border-dashed border-border bg-muted/20 p-6 text-center text-sm text-slate-500">
@@ -3007,7 +3019,6 @@ function MatchedAppCard({
             </p>
           ) : (
             <>
-              <RowRoles row={app} />
               {!hasEmbeddedLines && app.developer_id != null ? (
                 <LazyMatchedSeatLines
                   token={token}
