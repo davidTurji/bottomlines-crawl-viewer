@@ -1763,6 +1763,10 @@ const MT_IPD: MatchTypeFields = {
   // The crawler sends the declaring file by its display name.
   declared_in: `${MT_PLATFORM.name}'s app-ads.txt`,
   seller_role: "reseller",
+  // What every real row without an alert carries: empty strings, not nulls
+  // or arrays (opening such a row crashed the section on 2026-10-27).
+  managed_by: "",
+  verdict_alerts: "",
 };
 /** The partner's ads.txt gained two of the customer's lines this week, so
  *  the platform's IPD rows (publisher, app, and the Added event) move. */
@@ -1776,10 +1780,9 @@ const NORTHFOLD_LINES = (): MatchedSeatLine[] =>
 const NORTHFOLD_ROLES: MatchTypeFields = {
   seller_role: "reseller",
   managed_by: "copperline-media.tv (GB)",
-  verdict_alerts: [
-    "Listed as DIRECT, but sellers.json names copperline-media.tv, not northfold-tv.com: treated as a reseller.",
-    "Two managers for one country (GB): neither counts there.",
-  ],
+  // The crawler's real shape (2026-10-27): ONE string, alerts joined by " | ".
+  verdict_alerts:
+    "Listed as DIRECT, but sellers.json names copperline-media.tv, not northfold-tv.com: treated as a reseller. | Two managers for one country (GB): neither counts there.",
   partner_inventory_on: ["Tidewick TV"],
 };
 
