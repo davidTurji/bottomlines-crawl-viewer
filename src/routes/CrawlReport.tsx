@@ -16,6 +16,7 @@ import { HoverHint } from "@/components/HoverHint";
 import {
   appSubject,
   IpdChip,
+  platformLabel,
   IpdInconclusiveNote,
   IpdWhere,
   linesDomain,
@@ -1964,12 +1965,16 @@ function PublisherCard({
                 row.developer_name || "Unnamed publisher"
               )}
             </span>
-            {row.developer_platform && (
-              <span className="flex-shrink-0 text-[11px] text-slate-400">
-                {row.developer_platform}
+            {/* IPD first, then the platform (David, 2026-10-27). The platform
+                shows only as CTV, Mobile or Web: a stored value the page cannot
+                name (the crawler's internal "ipd_partner" on partner rows the
+                IPD chase added) shows no badge at all, never the raw word. */}
+            {!inactive && <IpdChip row={row} />}
+            {platformLabel(row.developer_platform) && (
+              <span data-platform className="flex-shrink-0 text-[11px] text-slate-400">
+                {platformLabel(row.developer_platform)}
               </span>
             )}
-            {!inactive && <IpdChip row={row} />}
             {inactive && <InactiveChip />}
           </div>
           {row.developer_domain && row.developer_name && (

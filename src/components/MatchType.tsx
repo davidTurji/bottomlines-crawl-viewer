@@ -162,6 +162,22 @@ function ipdTitle(row: MatchTypeFields, subject: string | null | undefined): str
   return parts.length ? parts.join(". ") : undefined;
 }
 
+
+/**
+ * A publisher's platform as the page shows it: CTV, Mobile or Web, spelled
+ * once, the way the crawler's own exports spell it (domain/platforms.py).
+ * Anything else, including the internal "ipd_partner" of partner rows the
+ * IPD chase added, is a platform we cannot name: null, so no badge.
+ */
+export function platformLabel(raw: unknown): "CTV" | "Mobile" | "Web" | null {
+  if (typeof raw !== "string") return null;
+  const v = raw.trim().toLowerCase();
+  if (v === "ctv") return "CTV";
+  if (v === "mobile") return "Mobile";
+  if (v === "web" || v === "website") return "Web";
+  return null;
+}
+
 /** The small "IPD" chip beside the name; nothing on an own row. `subject`
  *  as on IpdWhere; absent means a publisher row. */
 export function IpdChip({ row, subject = PUBLISHER_SUBJECT }: { row: MatchTypeFields; subject?: string | null }) {
