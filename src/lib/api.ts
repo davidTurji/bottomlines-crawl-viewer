@@ -105,6 +105,33 @@ export function onLinkRefused(handler: (() => void) | null) {
   linkRefusedHandler = handler;
 }
 
+// ── Held until signed in (demo of #75, 2026-10-27) ─────────────────
+// Before the email link's sign-in landed, the page fired ~23 data
+// requests that all came back 401. While the sign-in form is up (the
+// link's own, or after a 401), every data request waits here and goes
+// once the session exists; the sign-in and resolve calls never wait.
+let held: { until: Promise<void>; release: () => void } | null = null;
+
+/** Hold every data request until `releaseDataRequests` (sign-in). */
+export function holdDataRequests(): void {
+  if (held) return;
+  let release!: () => void;
+  const until = new Promise<void>((r) => (release = r));
+  held = { until, release };
+}
+
+/** The session exists: every held request goes. */
+export function releaseDataRequests(): void {
+  const h = held;
+  held = null;
+  h?.release();
+}
+
+/** Waits while data requests are held (a no-op otherwise). */
+async function whenSignedIn(): Promise<void> {
+  while (held) await held.until;
+}
+
 // ── Auth epoch ───────────────────────────────────────────────────
 // Guards against a stale-401 re-lock race: a data request fired
 // before sign-in can come back 401 *after* the login succeeded, and
@@ -126,12 +153,15 @@ async function req<T>(
   body?: unknown,
   signal?: AbortSignal,
 ): Promise<T> {
-  const epochAtStart = authEpoch;
   // Path without its query string, so the two exemptions below compare
   // whole endpoints. A prefix test would misfire on a share token that
   // happens to start with "resolve" (/v1/viewer/resolveXYZ/summary) and
   // silently switch the sign-in gate off for that reader.
   const endpoint = path.split("?")[0];
+  // A data request waits for the sign-in; the sign-in and the resolve,
+  // which run before any session exists, never do.
+  if (!endpoint.endsWith("/viewer/auth") && endpoint !== "/v1/viewer/resolve") await whenSignedIn();
+  const epochAtStart = authEpoch;
   const res = await fetch(`${BASE}${path}`, {
     method,
     credentials: "include",
@@ -232,6 +262,7 @@ export const api = {
     // 404, and whatever goes wrong here falls back to the defaults. Nothing
     // here may touch the sign-in gate; the summary's own calls do that.
     try {
+      await whenSignedIn();
       const res = await fetch(`${BASE}/v1/viewer/${token}/export-info`, {
         credentials: "include",
       });
@@ -937,6 +968,7 @@ export const api = {
     // means exactly that, so it is answered here as null. Before 2026-10-06
     // req() read a 404 as a dead link, which took every report without the
     // page down.
+    await whenSignedIn();
     const res = await fetch(`${BASE}/v1/viewer/${token}/sellers-fix`, {
       credentials: "include",
     });
@@ -1062,6 +1094,7 @@ export const api = {
       sid2: sel.sid2,
     });
     if (sel.live) q.set("live", "true");
+    await whenSignedIn();
     const res = await fetch(
       `${BASE}/v1/viewer/${token}/schain/export.${format}?${q.toString()}`,
       {
@@ -1104,6 +1137,7 @@ export const api = {
       for await (const frame of mockChatStream(prompt)) yield frame;
       return;
     }
+    await whenSignedIn();
     const res = await fetch(`${BASE}/v1/viewer/${token}/chat`, {
       method: "POST",
       credentials: "include",

@@ -453,12 +453,12 @@ test.describe("one row per distinct seat line", () => {
     const texts = await items.locator("[data-line-text]").allInnerTexts();
     expect(new Set(texts).size).toBe(texts.length);
     expect((await items.locator("[data-line-no]").allInnerTexts()).map(Number)).toEqual(texts.map((_, i) => i + 1));
-    const via = list.locator("[data-line-via]").filter({ has: page.locator("[data-line-via-more]") }).first();
+    const via = list.locator("[data-line-via]").filter({ visible: true }).filter({ has: page.locator("[data-line-via-more]") }).first();
     await expect(via).toContainText("via northfold-tv.com, failarmy.tv");
     for (const p of ["northfold-tv.com", "failarmy.tv"])
       await expect(via.locator(`a[href^="https://${p}/ads.txt"]`)).toHaveCount(1);
     await via.locator("[data-line-via-more]").click();
-    await expect(list.locator('[data-line-via] a[href^="https://example-partner.tv/ads.txt"]').first()).toBeVisible();
+    await expect(list.locator('[data-line-via] a[href^="https://example-partner.tv/ads.txt"]').filter({ visible: true }).first()).toBeVisible();
     expect(errors).toEqual([]);
   });
 });
@@ -516,7 +516,7 @@ test.describe("only partner copies fold (review of #75)", () => {
     await expect(items.nth(0).locator("[data-line-host]")).toHaveCount(0);
     await expect(items.nth(1).locator("[data-line-host]")).toHaveText("at cdn.alder.example");
     await expect(items.nth(2)).toContainText("Found in app-ads.txt");
-    await expect(items.nth(3).locator("[data-line-via]")).toContainText("via northfold-tv.com, failarmy.tv");
+    await expect(items.nth(3).locator("[data-line-via]").filter({ visible: true })).toContainText("via northfold-tv.com, failarmy.tv");
     expect(errors).toEqual([]);
   });
 });

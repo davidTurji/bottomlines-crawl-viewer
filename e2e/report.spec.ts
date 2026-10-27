@@ -194,6 +194,22 @@ test.describe("sign-in", () => {
     expect(errors).toEqual([]);
   });
 
+  test("the email's sign-in link: no data request before the sign-in, so not one 401", async ({ page }) => {
+    // Demo of #75: before the link's sign-in landed the page fired ~23 data
+    // requests that came back "not signed in". Every one waits for it now.
+    const errors = watchErrors(page);
+    const signin = Buffer.from("andres:secret").toString("base64url");
+    const calls = await open(page, { signedOut: true, sellers: "page", matchType: true }, `#signin=${signin}`);
+    await expect(page.locator('input[autocomplete="username"]')).toHaveValue("andres");
+    expect(calls.filter((c) => !c.path.endsWith("/viewer/auth"))).toEqual([]);
+    await page.getByRole("button", { name: "Sign in" }).click();
+    await expectOverview(page);
+    await expect(page.locator('button[aria-label^="Show the seat lines of"]').first()).toBeVisible();
+    expect(calls.filter((c) => c.status === 401)).toEqual([]);
+    expect(calls.length).toBeGreaterThan(3);
+    expect(errors).toEqual([]);
+  });
+
   test("still signed in when the link expires: the expired card, on every page", async ({ page }) => {
     // The API answers 403 on every data route for a session whose link
     // expired or was revoked. Before 2026-10-06 the reader saw "Could not
@@ -527,6 +543,8 @@ test.describe("sellers.json links", () => {
 
   test("every closed row shows the link its problem points to, before any hover", async ({ page }) => {
     await open(page, { sellers: "page" }, "/sellers");
+    // The page first (a loop that looks before it lands opens nothing).
+    await expect(page.getByRole("button", { name: /^Show all/ }).first()).toBeVisible();
     while ((await page.getByRole("button", { name: /^Show all/ }).count()) > 0) {
       await page.getByRole("button", { name: /^Show all/ }).first().click();
     }
@@ -860,6 +878,8 @@ test.describe("discovery checks each line against your sellers.json", () => {
 test.describe("a seller seen only in its own file", () => {
   test("is seen, never told to change its type, and says where it was seen", async ({ page }) => {
     await open(page, { sellers: "page" }, "/sellers");
+    // The page first (a loop that looks before it lands opens nothing).
+    await expect(page.getByRole("button", { name: /^Show all/ }).first()).toBeVisible();
     while ((await page.getByRole("button", { name: /^Show all/ }).count()) > 0) {
       await page.getByRole("button", { name: /^Show all/ }).first().click();
     }

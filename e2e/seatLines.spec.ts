@@ -164,7 +164,9 @@ test.describe("the seat line reads in full on a phone (David, 2026-10-27)", () =
     lis.evaluateAll((els) =>
       els.map((li) => {
         const text = li.querySelector("[data-line-text]") as HTMLElement;
-        const via = li.querySelector("[data-line-via]") as HTMLElement;
+        // The copy shown at this width (one under the line on a phone, one
+        // at the margin wider).
+        const via = [...li.querySelectorAll("[data-line-via]")].find((e) => e.getClientRects().length > 0) as HTMLElement;
         const no = li.querySelector("[data-line-no]") as HTMLElement;
         const t = text.getBoundingClientRect();
         const v = via.getBoundingClientRect();
@@ -173,7 +175,7 @@ test.describe("the seat line reads in full on a phone (David, 2026-10-27)", () =
         return {
           clipped: text.scrollWidth > text.clientWidth + 1 || getComputedStyle(text).textOverflow === "ellipsis" && text.scrollWidth > text.clientWidth,
           ellipsis: getComputedStyle(text).textOverflow,
-          viaBelow: v.top >= t.bottom - 1,
+          viaBelow: v.top >= t.bottom - 1 && v.top - t.bottom <= 2,
           sameLine: Math.abs(v.top - t.top) <= 2,
           dx: Math.abs(v.left - t.left),
           noOnFirstLine: Math.abs(n.top - t.top) <= 1 && n.height <= lineH + 1,
@@ -192,7 +194,7 @@ test.describe("the seat line reads in full on a phone (David, 2026-10-27)", () =
     for (const r of out) {
       expect(r.clipped, "line text clipped").toBe(false);
       expect(r.ellipsis).not.toBe("ellipsis");
-      expect(r.viaBelow, "partners under the line").toBe(true);
+      expect(r.viaBelow, "partners right under the line").toBe(true);
       expect(r.dx, "partners at the line's left edge").toBeLessThanOrEqual(1);
       expect(r.noOnFirstLine, "number on the first line").toBe(true);
       expect(r.inside, "partners inside the row").toBe(true);

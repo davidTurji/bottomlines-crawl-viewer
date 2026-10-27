@@ -1434,16 +1434,19 @@ function ListHead({
 
 export type ListView = "publishers" | "apps";
 
+// Both files match a publisher (demo of #75: "whose ads.txt" left out
+// app-ads.txt, the Found in switch's other half); an app matches by its
+// app-ads.txt, or by an inventory partner's ads.txt it names (IPD).
 const VIEW_TITLE: Record<ListView, { title: string; blurb: string }> = {
   publishers: {
     title: "Matched publishers",
     blurb:
-      "Every publisher whose ads.txt matched your seats. Click a row to see the exact seat lines it carried, and what moved this week.",
+      "Every publisher whose ads.txt or app-ads.txt matched your seats, or whose inventory partner's ads.txt did. Click a row to see the exact seat lines it carried, and what moved this week.",
   },
   apps: {
     title: "Matched apps",
     blurb:
-      "Every app whose app-ads.txt matched your seats, with the publisher that owns it. Click a row to see the exact seat lines it carried, and what moved this week.",
+      "Every app whose app-ads.txt matched your seats, or whose inventory partner's ads.txt did, with the publisher that owns it. Click a row to see the exact seat lines it carried, and what moved this week.",
   },
 };
 
@@ -2420,8 +2423,10 @@ function DrilldownList({
           left={
             <>
           <Tabs value={tab} onValueChange={(v) => setTab(v as DrillTab)} className="max-w-full">
-            {/* Scrolls sideways on a narrow phone rather than pushing the page wider. */}
-            <TabsList className="max-w-full justify-start overflow-x-auto">
+            {/* EVERY TAB IN SIGHT (demo of #75): on a narrow screen the
+                tabs wrap onto a second row rather than scroll out of view
+                with nothing to say more are there. */}
+            <TabsList className="h-auto max-w-full flex-wrap justify-start">
               <TabsTrigger value="all">All matched</TabsTrigger>
               <TabsTrigger value="added">Added</TabsTrigger>
               <TabsTrigger value="removed">Removed</TabsTrigger>
@@ -2435,7 +2440,9 @@ function DrilldownList({
           right={
             // Not on Inactive: those lists are not split by these.
             tab !== "inactive" && (typeCounts || foundInCounts) && (
-              <span className="flex flex-wrap items-center justify-end gap-x-4 gap-y-2">
+              // A phone stacks the switches, each label over its pills;
+              // wider, they sit right of the tabs, as before.
+              <span className="flex w-full min-w-0 flex-col items-start gap-2 sm:w-auto sm:flex-row sm:flex-wrap sm:items-center sm:justify-end sm:gap-x-4">
                 {foundInCounts && <FoundInControl value={foundIn} onChange={setFoundIn} counts={foundInCounts} />}
                 {typeCounts && <MatchTypeControl value={matchType} onChange={setMatchType} counts={typeCounts} />}
               </span>
@@ -2958,6 +2965,25 @@ export function SeatLineRow({
             : null;
   // Why it was removed, when the report says (2026-10-26).
   const removal = change === "removed" ? removalReasonText(line) : null;
+  // ON A PHONE THE PARTNERS GO UNDER THE LINE (David, 2026-10-27): at
+  // the right margin they took the width and cut the line to "st...".
+  // Below the sm breakpoint they are a line of their own right under the
+  // seat line, at its left edge (before its dates and reasons); from sm up
+  // they sit at the right margin exactly as before. Two copies, one shown
+  // per width (display: none takes the other out of the accessibility
+  // tree, so a screen reader hears the partners once).
+  const viaAt = (where: "under" | "margin") =>
+    partners.length > 0 && (
+      <PartnerLinks
+        partners={partners}
+        line={line}
+        gone={gone}
+        className={cn(
+          "text-[10px] leading-4 text-slate-400",
+          where === "under" ? "block min-w-0 max-w-none whitespace-normal break-words text-left sm:hidden" : "hidden sm:inline",
+        )}
+      />
+    );
   const text = (
     <div className="min-w-0 flex-1">
       {label ?? (
@@ -2966,6 +2992,7 @@ export function SeatLineRow({
           {line.cert_id && <span className="font-normal text-slate-400">, {line.cert_id}</span>}
         </RowText>
       )}
+      {viaAt("under")}
       {notes}
       {change === "cert" && typeof line.old_cert_id === "string" && (
         <RowNote data-cert-change>
@@ -3000,24 +3027,8 @@ export function SeatLineRow({
       {hostLabel}
     </span>
   );
-  // ON A PHONE THE PARTNERS GO UNDER THE LINE (David, 2026-10-27): at
-  // the right margin they took the width and cut the line to "st...". Below
-  // the sm breakpoint they are a line of their own under it, at the line
-  // text's left edge (a spacer the gutter's width); from sm up the wrapper
-  // is `display: contents`, so they sit at the margin exactly as before.
-  const via = partners.length > 0 && (
-    <span data-line-via-row className="order-last flex min-w-0 basis-full gap-3 sm:contents">
-      <span aria-hidden className="flex-shrink-0 font-mono text-[11px] leading-4 sm:hidden" style={{ width: `${Math.max(4, digits)}ch` }} />
-      <PartnerLinks
-        partners={partners}
-        line={line}
-        gone={gone}
-        className="text-[10px] leading-4 text-slate-400 max-sm:min-w-0 max-sm:max-w-none max-sm:flex-shrink max-sm:whitespace-normal max-sm:break-words max-sm:text-left"
-      />
-    </span>
-  );
-  // The row may wrap on a phone (the partners' own line); never wider up.
-  const rowClass = cn(SEAT_ROW, "flex-wrap gap-y-0.5 sm:flex-nowrap");
+  const via = viaAt("margin");
+  const rowClass = SEAT_ROW;
   // A removed line copies on click (David, 2026-10-20): it is no longer in
   // the file, so the file opens from its own link at the margin instead.
   if (gone)
@@ -3636,8 +3647,10 @@ function MatchedAppsList({
           left={
             <>
           <Tabs value={tab} onValueChange={(v) => setTab(v as DrillTab)} className="max-w-full">
-            {/* Scrolls sideways on a narrow phone rather than pushing the page wider. */}
-            <TabsList className="max-w-full justify-start overflow-x-auto">
+            {/* EVERY TAB IN SIGHT (demo of #75): on a narrow screen the
+                tabs wrap onto a second row rather than scroll out of view
+                with nothing to say more are there. */}
+            <TabsList className="h-auto max-w-full flex-wrap justify-start">
               <TabsTrigger value="all">All matched</TabsTrigger>
               <TabsTrigger value="added">Added</TabsTrigger>
               <TabsTrigger value="removed">Removed</TabsTrigger>
@@ -3650,7 +3663,7 @@ function MatchedAppsList({
           }
           right={
             tab !== "inactive" && (typeCounts || platformCounts) && (
-              <span className="flex flex-wrap items-center justify-end gap-x-4 gap-y-2">
+              <span className="flex w-full min-w-0 flex-col items-start gap-2 sm:w-auto sm:flex-row sm:flex-wrap sm:items-center sm:justify-end sm:gap-x-4">
                 {platformCounts && <PlatformControl value={platform} onChange={setPlatform} counts={platformCounts} />}
                 {typeCounts && (
                   <MatchTypeControl

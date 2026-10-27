@@ -79,8 +79,13 @@ export function MatchTypeControl({
     if (next !== index) onChange(OPTIONS[next].value);
   };
   return (
-    <div className="flex items-center gap-2 tabular-nums" data-testid="match-type">
-      <span id="match-type-label" className="text-[10px] font-medium text-slate-500">
+    // On a phone the label sits above the pills, as on Found in and
+    // Platform (demo of #75).
+    <div
+      className="flex flex-col items-start gap-1 tabular-nums sm:flex-row sm:items-center sm:gap-2"
+      data-testid="match-type"
+    >
+      <span id="match-type-label" className="whitespace-nowrap text-[10px] font-medium text-slate-500">
         Match type
       </span>
       <div
