@@ -25,10 +25,38 @@
  *   Read-only and light: one sign-in per viewport, clicks one after
  *   another, one worker, the export route blocked and Export never
  *   clicked. The token and the sign-in never reach the output.
+ *
+ * COUNTS (real-user QA, David, 2026-10-27). On the way it reads every
+ * count it is shown (e2e/counts.ts): the Matched tiles are their lists'
+ * totals, every tab, pill, Found in / Platform and Popular choice lists
+ * as many rows as it names, "1-25 of N" is the rows on screen, on the
+ * first page and on a page in the middle and the last. A mismatch does not
+ * stop the walk (a crash does); both fail it.
+ *
+ * REAL-USER QA (e2e/realUserQa.mjs, .github/workflows/real-user-qa.yml)
+ * runs this walk on every link in a secret list after every viewer deploy,
+ * every crawler deploy and every night; with REAL_USER_QA_RESULT set the
+ * walk writes what it found there (redacted) for the run's summary. Its
+ * dry run points the live mode at a local build with VIEWER_SMOKE_FAKE
+ * (the fake API behind the live sign-in), so the workflow itself is tested.
  */
+import { mkdirSync, writeFileSync } from "node:fs";
+import { dirname } from "node:path";
+
 import { expect, test, type Browser, type BrowserContext, type Page } from "@playwright/test";
 
-import { installFakeApi, TOKEN } from "./fakeApi";
+import {
+  activeTile,
+  inactiveState,
+  laterPages,
+  listProblem,
+  listState,
+  matchTypeCount,
+  popularCount,
+  splitCount,
+  type ListState,
+} from "./counts";
+import { installFakeApi, TOKEN, type Scenario } from "./fakeApi";
 
 const LIVE =
   process.env.VIEWER_SMOKE_BASE && process.env.VIEWER_SMOKE_TOKEN && process.env.VIEWER_SMOKE_SIGNIN
@@ -39,9 +67,46 @@ const LIVE =
       }
     : null;
 
+/** The real-user QA dry run: the live mode's sign-in and walk, against a
+ *  local build with the fake API answering ("clean", or "count-mismatch":
+ *  the tile one off its list). Never on a real link. */
+const FAKE = LIVE ? (process.env.VIEWER_SMOKE_FAKE ?? "") : "";
+if (FAKE && LIVE && !/^http:\/\/(localhost|127\.0\.0\.1)(:\d+)?$/.test(LIVE.base))
+  throw new Error("VIEWER_SMOKE_FAKE runs against a local build only");
+
+/** Every form a link's secrets can take in the output: the token, the
+ *  sign-in as given, URL-encoded, and decoded (user:password, the
+ *  password, the user). Longest first, so a part never leaves the rest. */
+const SECRETS: [string, string][] = (() => {
+  if (!LIVE) return [];
+  const out: [string, string][] = [[LIVE.token, "<TOKEN>"], [LIVE.signin, "<SIGNIN>"], [encodeURIComponent(LIVE.signin), "<SIGNIN>"]];
+  const plain = Buffer.from(LIVE.signin, "base64url").toString("utf8");
+  const colon = plain.indexOf(":");
+  if (colon > 0) out.push([plain, "<SIGNIN>"], [plain.slice(colon + 1), "<PASSWORD>"], [plain.slice(0, colon), "<USER>"]);
+  return out.filter(([v]) => v.length >= 4).sort((a, b) => b[0].length - a[0].length);
+})();
+
 /** Never print the link's secrets. */
-const redact = (t: string) =>
-  LIVE ? t.split(LIVE.token).join("<TOKEN>").split(LIVE.signin).join("<SIGNIN>") : t;
+const redact = (t: string) => SECRETS.reduce((acc, [v, mark]) => acc.split(v).join(mark), t);
+
+/** The walk's scenario on the fake API: the crawler's real field shapes,
+ *  every page and switch on, the tiles counted from their lists. */
+const CLICK_SCENARIO: Scenario = {
+  signedOut: true,
+  matchType: true,
+  realShapes: true,
+  sellersReads: true,
+  sellers: "page",
+  schain: "ok",
+  inactive: "ok",
+  removalReasons: true,
+  appChange: true,
+  declaredHost: true,
+  watchTabs: true,
+  appPlatform: true,
+  foundIn: true,
+  countsMatchLists: true,
+};
 
 const VIEWPORTS = [
   { name: "desktop", viewport: { width: 1440, height: 900 }, isMobile: false, hasTouch: false },
@@ -63,6 +128,11 @@ const ERROR_PANEL = /could not be shown|did not render/i;
 
 type Run = {
   failures: string[];
+  /** Counts shown that are not the rows listed (e2e/counts.ts). They do
+   *  not stop the walk; they fail it. */
+  counts: string[];
+  /** How many counts were compared. */
+  countChecks: number;
   /** Rows (cards) opened, per list: the crawl really reached them. */
   opened: Record<string, number>;
   steps: number;
@@ -76,16 +146,20 @@ async function signIn(browser: Browser, vp: (typeof VIEWPORTS)[number]): Promise
     isMobile: vp.isMobile,
     hasTouch: vp.hasTouch,
     reducedMotion: "reduce",
+    // The counts are read as the reader reads them: "8,412".
+    locale: "en-US",
   });
   const page = await ctx.newPage();
   // Read-only: the report's export is never fetched, whatever is clicked.
   await page.route(/\/export\.xlsx|\/export(\?|$)|\/schain\/export\./, (r) => r.abort());
   // The tour's offer, declined whenever it shows (the fake API's install
   // does the same for every test).
-  if (LIVE)
+  if (LIVE && !FAKE)
     await page.addLocatorHandler(page.getByRole("button", { name: "No thanks", exact: true }), async (b) => {
       await b.click();
     });
+  // The dry run: the same sign-in and walk, the fake API answering.
+  if (FAKE) await installFakeApi(page, { ...CLICK_SCENARIO, countMismatch: FAKE === "count-mismatch" });
   if (LIVE) {
     await page
       .goto(`${LIVE.base}/crawl-report/${LIVE.token}#signin=${LIVE.signin}`, { waitUntil: "domcontentloaded" })
@@ -100,21 +174,7 @@ async function signIn(browser: Browser, vp: (typeof VIEWPORTS)[number]): Promise
     if (await button.isVisible().catch(() => false)) await button.click();
     await expect(overview).toBeVisible({ timeout: 120_000 });
   } else {
-    await installFakeApi(page, {
-      signedOut: true,
-      matchType: true,
-      realShapes: true,
-      sellersReads: true,
-      sellers: "page",
-      schain: "ok",
-      inactive: "ok",
-      removalReasons: true,
-      appChange: true,
-      declaredHost: true,
-      watchTabs: true,
-      appPlatform: true,
-      foundIn: true,
-    });
+    await installFakeApi(page, CLICK_SCENARIO);
     await page.goto(`/crawl-report/${TOKEN}`);
     await page.locator("input[autocomplete=username]").fill("reader", { timeout: 3_000 });
     await page.locator("input[autocomplete=current-password]").fill("any-password", { timeout: 3_000 });
@@ -124,8 +184,10 @@ async function signIn(browser: Browser, vp: (typeof VIEWPORTS)[number]): Promise
   return { ctx, page };
 }
 
-async function crawl(page: Page, vp: string): Promise<Run> {
-  const run: Run = { failures: [], opened: {}, steps: 0 };
+/** `samplePages`: also turn to later pages of every tab (the first
+ *  viewport walked; the next only reads the pages the walk opens). */
+async function crawl(page: Page, vp: string, { samplePages: sampling = true } = {}): Promise<Run> {
+  const run: Run = { failures: [], counts: [], countChecks: 0, opened: {}, steps: 0 };
   const t0 = Date.now();
   const lap = (what: string) => console.log(`${vp}: ${what} at ${Math.round((Date.now() - t0) / 1000)} s`);
   let where = "sign in";
@@ -243,19 +305,88 @@ async function crawl(page: Page, vp: string): Promise<Run> {
       });
     }
   };
-  /** Clicks a control when the page has it; never waits for one it lacks. */
-  const tap = async (name: string, l: ReturnType<Page["locator"]>) => {
-    if (!(await l.count())) return;
+  /** Clicks a control when the page has it; never waits for one it lacks.
+   *  True when it clicked. */
+  const tap = async (name: string, l: ReturnType<Page["locator"]>): Promise<boolean> => {
+    if (!(await l.count())) return false;
     // There, but maybe a beat from shown (a list that just landed): a short
     // wait, so a present control is never skipped by a race.
     await l.waitFor({ state: "visible", timeout: 3_000 }).catch(() => {});
-    if ((await l.isVisible().catch(() => false)) && (await l.isEnabled().catch(() => false))) await step(name, () => click(l));
-    else if (process.env.SMOKE_DEBUG) console.log(`${vp}: hidden or disabled ${name}`);
+    if ((await l.isVisible().catch(() => false)) && (await l.isEnabled().catch(() => false))) {
+      await step(name, () => click(l));
+      return true;
+    }
+    if (process.env.SMOKE_DEBUG) console.log(`${vp}: hidden or disabled ${name}`);
+    return false;
   };
   /** Fills a box when the page has it; never waits for one it lacks. */
   const fillIf = async (name: string, l: ReturnType<Page["locator"]>, value: string) => {
     if (await l.count()) await step(name, () => l.first().fill(value, { timeout: 3_000 }));
   };
+  /* ── Counts (e2e/counts.ts): what a control names is what its list lists.
+     Read after the click's step has settled, named after that step. ── */
+  const countBad = (what: string) => run.counts.push(redact(`${vp} / ${where}: count mismatch: ${what}`).slice(0, 300));
+  /** The list on screen against its own count line and, given `want`,
+   *  against the number the clicked control named. `want.tab`: the tab
+   *  the number was read on; a list that moved to another tab (a watch tab
+   *  with no rows under the chosen pill is not offered, so the list goes
+   *  back to All matched) is only checked against its own count line. */
+  const checkList = async (want?: { n: number | null; by: string; tab?: string | null }, pageNo?: number): Promise<ListState | null> => {
+    // A crashed page counts nothing: its crash is the finding.
+    if (run.failures.length) return null;
+    const s = await listState(page);
+    if (!s) return null;
+    run.countChecks++;
+    const named = want && want.n != null && (want.tab === undefined || want.tab === s.tab) ? { n: want.n, by: want.by } : undefined;
+    const problem = listProblem(s, named, pageNo);
+    if (problem) countBad(problem);
+    return s;
+  };
+  /** The chosen Matched tile against its list, while the list is the
+   *  tile's own: All matched, match type All, no search, no Found in or
+   *  Platform choice. Under a seat line filter both count those lines. */
+  const checkTile = async () => {
+    if (run.failures.length) return;
+    const tile = await activeTile(page);
+    const s = await listState(page);
+    if (!tile || !s || s.tab !== "All matched" || (s.matchType && s.matchType !== "All") || s.query || (s.split && s.split !== "All")) return;
+    run.countChecks++;
+    const problem = listProblem(s, { n: tile.n, by: `the ${tile.label} tile` });
+    if (problem) countBad(problem);
+  };
+  /** Later pages of the list on screen, one in the middle and the last,
+   *  each holding exactly its share of the total; then page 1 again. */
+  const samplePages = async (list: string) => {
+    if (run.failures.length || !sampling) return;
+    const first = await listState(page);
+    if (!first?.count?.paged || first.count.page !== 1 || first.trial) return;
+    const total = first.count.total;
+    const pageButton = (n: number) => page.locator(`[data-tour="overview-list"] [data-list-count] button[aria-label="Page ${n}"]`);
+    for (const n of laterPages(total)) {
+      if (!(await pageButton(n).count())) {
+        countBad(`${total.toLocaleString()} in all, and the pager offers no page ${n}`);
+        continue;
+      }
+      await step(`${list} / page ${n}`, () => click(pageButton(n)));
+      const s = await checkList(undefined, n);
+      if (s?.count && s.count.total !== total) countBad(`page 1 says ${total.toLocaleString()} in all, page ${n} says ${s.count.total.toLocaleString()}`);
+    }
+    if (await tap(`${list} / page 1`, pageButton(1))) await checkList(undefined, 1);
+  };
+  /** The Inactive list on screen against its pill and the line under the
+   *  tiles (`pill` false: after a search, its pager against its rows). */
+  const checkInactive = async (pill = true) => {
+    if (run.failures.length) return;
+    const s = await inactiveState(page);
+    if (!s?.kind || s.trial) return;
+    run.countChecks++;
+    const n = s.kinds[s.kind];
+    const problem = listProblem({ count: s.count, rows: s.rows, trial: false }, pill ? { n, by: `the Inactive ${s.kind} pill` } : undefined);
+    if (problem) countBad(problem);
+    const quiet = s.quiet?.[s.kind === "apps" ? "apps" : "publishers"];
+    if (pill && s.quiet && quiet !== n) countBad(`the line under the tiles says ${quiet} inactive ${s.kind}, the pill says ${n}`);
+  };
+
   const OVERVIEW_ROWS = 'button[aria-label^="Show the seat lines of"]';
   const goTo = async (label: string) => {
     let link = page.getByRole("link", { name: label, exact: true }).first();
@@ -283,6 +414,7 @@ async function crawl(page: Page, vp: string): Promise<Run> {
   /* ── The Overview: both lists, every tab, every pill, every row. ── */
   for (const view of ["publishers", "apps"] as const) {
     await step(`view ${view}`, () => click(page.getByRole("button", { name: view === "apps" ? /Matched apps/ : /Matched publishers/ }).first()));
+    await checkTile();
     for (const tab of ["All matched", "Added", "Removed", "Changed", "Started watching", "Stopped watching", "Unconfirmed", "Inactive"]) {
       const t = page.getByRole("tab", { name: tab, exact: true }).first();
       if (!(await t.count())) continue;
@@ -290,45 +422,60 @@ async function crawl(page: Page, vp: string): Promise<Run> {
       if (tab === "Inactive") {
         for (const kind of await page.getByRole("tablist", { name: "Inactive lists" }).getByRole("tab").all()) {
           await step(`${view} / Inactive / ${await kind.innerText()}`, () => click(kind));
+          await checkInactive();
           await openAll(`inactive`, OVERVIEW_ROWS);
           await fillIf(`${view} / Inactive / search`, page.getByPlaceholder(/^Search/), "a");
+          await checkInactive(false);
           await fillIf(`${view} / Inactive / clear search`, page.getByPlaceholder(/^Search/), "");
+          await checkInactive();
         }
         continue;
       }
+      // The tab's count against its rows, here and on later pages.
+      await checkList();
+      await samplePages(`${view} / ${tab}`);
       // Every row under All; the first few under Own and IPD (the same
       // rows, filtered), then back to All.
       await openAll(view, OVERVIEW_ROWS);
       const pills = page.getByTestId("match-type").getByRole("button");
       if (await pills.count()) {
-        for (const pill of ["Own", "IPD"]) {
+        for (const pill of ["Own", "IPD", "All"]) {
+          // The pill's tooltip names its count (when the list has one).
+          const n = await matchTypeCount(page, pill);
           await step(`${view} / ${tab} / ${pill}`, () => click(pills.getByText(pill, { exact: true })));
-          await openAll(view, OVERVIEW_ROWS, 3);
+          await checkList({ n, by: `the ${pill} pill`, tab });
+          if (pill !== "All") await openAll(view, OVERVIEW_ROWS, 3);
         }
-        await step(`${view} / ${tab} / All`, () => click(pills.getByText("All", { exact: true })));
       }
       // Found in (publishers) and Platform (apps), when the list splits.
       for (const id of ["found-in", "platform"]) {
         const sw = page.getByTestId(id).getByRole("button");
         const words = (await sw.allInnerTexts().catch(() => [] as string[])).map((l) => l.trim().split(/\s+/)[0]);
         for (const word of words.slice(1)) {
+          const n = await splitCount(page, id, word);
           await step(`${view} / ${tab} / ${id} ${word}`, () => click(sw.filter({ hasText: new RegExp(`^${word.replace(/[.]/g, "\\.")}`) })));
+          await checkList({ n, by: `${id} ${word}`, tab });
           await openAll(view, OVERVIEW_ROWS, 2);
         }
-        if (words.length) await tap(`${view} / ${tab} / ${id} All`, sw.filter({ hasText: /^All/ }));
+        if (words.length) {
+          const n = await splitCount(page, id, "All");
+          if (await tap(`${view} / ${tab} / ${id} All`, sw.filter({ hasText: /^All/ }))) await checkList({ n, by: `${id} All`, tab });
+        }
       }
     }
     await step(`${view} / All matched again`, () => click(page.getByRole("tab", { name: "All matched", exact: true }).first()));
+    await checkTile();
     // The note's names, open and shut.
     await tap(`${view} / Show them`, page.getByRole("button", { name: "Show them", exact: true }));
     await tap(`${view} / Hide them`, page.getByRole("button", { name: "Hide them", exact: true }));
     // Paging: on and back, a row opened on the way.
-    await tap(`${view} / next page`, page.getByRole("button", { name: "Next page", exact: true }).first());
+    if (await tap(`${view} / next page`, page.getByRole("button", { name: "Next page", exact: true }).first())) await checkList(undefined, 2);
     await openAll(`${view} page 2`, OVERVIEW_ROWS, 2);
-    await tap(`${view} / previous page`, page.getByRole("button", { name: "Previous page", exact: true }).first());
+    if (await tap(`${view} / previous page`, page.getByRole("button", { name: "Previous page", exact: true }).first())) await checkList(undefined, 1);
     // Search: a term, one that finds nothing, and back.
     for (const term of ["tv", "zz-no-such-publisher", ""]) {
       await fillIf(`${view} / search "${term}"`, page.getByPlaceholder(view === "apps" ? "Search apps" : "Search publishers"), term);
+      await checkList();
       if (term === "tv") await openAll(`${view} search`, OVERVIEW_ROWS, 2);
     }
   }
@@ -338,10 +485,14 @@ async function crawl(page: Page, vp: string): Promise<Run> {
     await step("lines filter open", () => click(page.getByRole("button", { name: "Filter by seat line" })));
     await step("lines filter pick", () => click(page.getByRole("group", { name: "Seat lines" }).getByRole("menuitemcheckbox").first()));
     await step("lines filter apply", () => click(page.getByRole("menuitem", { name: "Apply", exact: true })));
+    // Under a seat line, the tile and its list count that line alike.
+    await checkTile();
+    await checkList();
     await openAll("filtered", OVERVIEW_ROWS, 2);
     await step("lines filter reopen", () => click(page.getByRole("button", { name: "Filter by seat line" })));
     await step("lines filter unpick", () => click(page.getByRole("group", { name: "Seat lines" }).getByRole("menuitemcheckbox").first()));
     await step("lines filter apply again", () => click(page.getByRole("menuitem", { name: "Apply", exact: true })));
+    await checkTile();
   }
 
   const CARDS = "button[aria-expanded='false']:not([aria-haspopup])";
@@ -352,7 +503,9 @@ async function crawl(page: Page, vp: string): Promise<Run> {
   /* ── Popular: every choice, then the last one again (it clears). ── */
   const choices = await page.locator("[data-popular]").evaluateAll((els) => els.map((e) => e.getAttribute("data-popular") ?? ""));
   for (const id of choices) {
+    const n = await popularCount(page, id);
     await step(`popular ${id}`, () => click(page.locator(`[data-popular="${id}"]`)));
+    await checkList({ n, by: `the Popular choice "${id}"` });
     await openAll(`popular ${id}`, OVERVIEW_ROWS, 1);
   }
   if (choices.length)
@@ -360,6 +513,7 @@ async function crawl(page: Page, vp: string): Promise<Run> {
   await tap("popular next", page.getByRole("button", { name: "More choices" }));
   await tap("popular previous", page.getByRole("button", { name: "Previous choices" }));
   await step("back to publishers", () => click(page.getByRole("button", { name: /Matched publishers/ }).first()));
+  await checkTile();
 
   lap("overview done");
   /* ── Every other page in the menu. ── */
@@ -397,36 +551,85 @@ async function crawl(page: Page, vp: string): Promise<Run> {
   return run;
 }
 
+/** One viewport's walk, as the real-user QA summary reads it. */
+type Walked = {
+  viewport: string;
+  seconds: number;
+  steps: number;
+  countChecks: number;
+  opened: Record<string, number>;
+  failures: string[];
+  counts: string[];
+};
+
+/** What the walk found, for e2e/realUserQa.mjs (REAL_USER_QA_RESULT):
+ *  redacted, written whatever happened, even when sign-in failed. */
+function writeResult(walked: Walked[]) {
+  const out = process.env.REAL_USER_QA_RESULT;
+  if (!out) return;
+  mkdirSync(dirname(out), { recursive: true });
+  writeFileSync(out, redact(JSON.stringify({ viewports: walked }, null, 1)));
+}
+
 test.describe("click everything", () => {
   // One reader at a time: on a live link, light on the API.
   test.describe.configure({ mode: "serial", retries: LIVE ? 0 : undefined });
 
-  test(LIVE ? "a real link: every click, desktop and phone, no crash" : "every click, desktop and phone, on the crawler's real shapes: no crash", async ({ browser }) => {
-    test.setTimeout(LIVE ? 20 * 60_000 : 6 * 60_000);
+  test(LIVE ? "a real link: every click, desktop and phone, no crash, every count adds up" : "every click, desktop and phone, on the crawler's real shapes: no crash, every count adds up", async ({ browser }) => {
+    test.setTimeout(LIVE ? 30 * 60_000 : 10 * 60_000);
     const failures: string[] = [];
-    // SMOKE_VIEWPORT=phone (or desktop) walks one screen only.
-    for (const vp of VIEWPORTS.filter((v) => !process.env.SMOKE_VIEWPORT || v.name === process.env.SMOKE_VIEWPORT)) {
-      const { ctx, page } = await signIn(browser, vp);
-      const run = await crawl(page, vp.name);
-      failures.push(...run.failures);
-      if (run.failures.length) {
-        await ctx.close();
-        break;
+    const walked: Walked[] = [];
+    try {
+      // SMOKE_VIEWPORT=phone (or desktop) walks one screen only.
+      for (const vp of VIEWPORTS.filter((v) => !process.env.SMOKE_VIEWPORT || v.name === process.env.SMOKE_VIEWPORT)) {
+        const t0 = Date.now();
+        let opened: { ctx: BrowserContext; page: Page } | null = null;
+        let run: Run;
+        try {
+          opened = await signIn(browser, vp);
+          run = await crawl(opened.page, vp.name, { samplePages: walked.length === 0 });
+        } catch (e) {
+          // A link that never signs in, or a walk that died: the finding.
+          const msg = redact(String((e as Error)?.message ?? e)).split("\n")[0].slice(0, 300);
+          run = { failures: [`${vp.name} / sign in: ${msg}`], counts: [], countChecks: 0, opened: {}, steps: 0 };
+        }
+        failures.push(...run.failures, ...run.counts);
+        walked.push({
+          viewport: vp.name,
+          seconds: Math.round((Date.now() - t0) / 1000),
+          steps: run.steps,
+          countChecks: run.countChecks,
+          opened: run.opened,
+          failures: run.failures,
+          counts: run.counts,
+        });
+        // A picture of what went wrong, on fake data only: a real link's
+        // page is the customer's, and this repository's runs are public.
+        if (opened && (run.failures.length || run.counts.length) && (!LIVE || FAKE))
+          await opened.page
+            .screenshot({ path: `${process.env.REAL_USER_QA_SHOT_DIR ?? "test-results"}/click-everything-${vp.name}.png` })
+            .catch(() => {});
+        await opened?.ctx.close().catch(() => {});
+        // The first crash ends the walk (the phone would only repeat it).
+        if (run.failures.length) break;
+        console.log(
+          redact(
+            `${vp.name}: ${run.steps} steps, ${run.countChecks} counts checked; rows opened: ${Object.entries(run.opened)
+              .map(([k, v]) => `${k} ${v}`)
+              .join(", ")}`,
+          ),
+        );
+        if (!LIVE) {
+          // The crawl really reached every list (a renamed control would
+          // otherwise make this test pass by clicking nothing), and really
+          // read the counts (a renamed count line would check none).
+          for (const list of ["publishers", "apps", "inactive", "discovery", "declarations", "sellers"])
+            expect(run.opened[list] ?? 0, `${vp.name}: rows opened on ${list}`).toBeGreaterThan(0);
+          expect(run.countChecks, `${vp.name}: counts checked`).toBeGreaterThan(40);
+        }
       }
-      console.log(
-        redact(
-          `${vp.name}: ${run.steps} steps; rows opened: ${Object.entries(run.opened)
-            .map(([k, v]) => `${k} ${v}`)
-            .join(", ")}`,
-        ),
-      );
-      if (!LIVE) {
-        // The crawl really reached every list (a renamed control would
-        // otherwise make this test pass by clicking nothing).
-        for (const list of ["publishers", "apps", "inactive", "discovery", "declarations", "sellers"])
-          expect(run.opened[list] ?? 0, `${vp.name}: rows opened on ${list}`).toBeGreaterThan(0);
-      }
-      await ctx.close();
+    } finally {
+      writeResult(walked);
     }
     expect(failures).toEqual([]);
   });
