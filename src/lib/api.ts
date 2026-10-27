@@ -326,6 +326,8 @@ export const api = {
     q = "",
     lines?: string[],
     matchType: MatchTypeFilter = "all",
+    /** Rows per page; the lists ask for PAGE_SIZE, an export for more. */
+    pageSize: number = PAGE_SIZE,
   ) => {
     if (MOCK) {
       const { mockDeveloperEvents } = await import("./mockData");
@@ -340,7 +342,7 @@ export const api = {
     }
     return req<DeveloperEventsPage>(
       "GET",
-      `/v1/viewer/${token}/developer-events?event=${event}&page=${page}&page_size=${PAGE_SIZE}${q ? `&q=${encodeURIComponent(q)}` : ""}${linesQuery(lines)}${matchTypeQuery(matchType)}`,
+      `/v1/viewer/${token}/developer-events?event=${event}&page=${page}&page_size=${pageSize}${q ? `&q=${encodeURIComponent(q)}` : ""}${linesQuery(lines)}${matchTypeQuery(matchType)}`,
     );
   },
   changeGroups: async (
@@ -461,6 +463,7 @@ export const api = {
     q = "",
     lines?: string[],
     matchType: MatchTypeFilter = "all",
+    pageSize: number = PAGE_SIZE,
   ) => {
     if (MOCK) {
       const { mockMatchedDevelopers } = await import("./mockData");
@@ -475,7 +478,7 @@ export const api = {
     }
     return req<MatchedDevelopersPage>(
       "GET",
-      `/v1/viewer/${token}/matched-developers?page=${page}&page_size=${PAGE_SIZE}${q ? `&q=${encodeURIComponent(q)}` : ""}${linesQuery(lines)}${matchTypeQuery(matchType)}`,
+      `/v1/viewer/${token}/matched-developers?page=${page}&page_size=${pageSize}${q ? `&q=${encodeURIComponent(q)}` : ""}${linesQuery(lines)}${matchTypeQuery(matchType)}`,
     );
   },
   matchedBundles: async (token: string, page = 1, q = "") => {
@@ -517,6 +520,7 @@ export const api = {
     lines?: string[],
     matchType: MatchTypeFilter = "all",
     change?: AppChange,
+    pageSize: number = PAGE_SIZE,
   ) => {
     if (MOCK) {
       const { mockMatchedApps } = await import("./mockData");
@@ -527,7 +531,7 @@ export const api = {
     }
     return req<MatchedAppsPage>(
       "GET",
-      `/v1/viewer/${token}/matched-apps?page=${page}&page_size=${PAGE_SIZE}${q ? `&q=${encodeURIComponent(q)}` : ""}${linesQuery(lines)}${matchTypeQuery(matchType)}${change ? `&change=${change}` : ""}`,
+      `/v1/viewer/${token}/matched-apps?page=${page}&page_size=${pageSize}${q ? `&q=${encodeURIComponent(q)}` : ""}${linesQuery(lines)}${matchTypeQuery(matchType)}${change ? `&change=${change}` : ""}`,
     );
   },
   /**
@@ -547,7 +551,7 @@ export const api = {
   inactive: async (
     token: string,
     kind: InactiveKind,
-    opts: { page?: number; q?: string; lines?: string[] } = {},
+    opts: { page?: number; q?: string; lines?: string[]; pageSize?: number } = {},
     legacy?: GoneInventory | null,
   ): Promise<InactivePage> => {
     const page = opts.page ?? 1;
@@ -574,7 +578,7 @@ export const api = {
     const q = new URLSearchParams({
       kind,
       page: String(page),
-      page_size: String(PAGE_SIZE),
+      page_size: String(opts.pageSize ?? PAGE_SIZE),
     });
     if (opts.q) q.set("q", opts.q);
     // Appended raw, as every list does: the keys are encoded once by
@@ -1663,6 +1667,9 @@ export type MatchedSeatLine = RemovalFields & {
    *  the row's own match type then speaks for its lines. */
   match_type?: MatchType;
   ipd_partner?: string | null;
+  /** A cert change's previous cert, from the line events ("" when the line
+   *  had none); set by the Changed tab so a row says old to new. */
+  old_cert_id?: string;
 };
 
 /**

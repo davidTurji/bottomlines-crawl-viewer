@@ -1,12 +1,5 @@
-import {
-  createContext,
-  useContext,
-  useEffect,
-  useState,
-  type ReactNode,
-} from "react";
+import { useEffect, useState, type CSSProperties, type ReactNode } from "react";
 
-import { introMotion } from "@/lib/introMotion";
 import { cn } from "@/lib/utils";
 
 /**
@@ -139,15 +132,16 @@ export function glideTo(el: HTMLElement | null, offset = 24, durationMs = 900) {
   requestAnimationFrame(step);
 }
 
-/** Whether a list's rows may play their settle. Always true since the
- *  list swap went (2026-10-27: a list that waits shows the skeleton, and
- *  rows simply replace it); kept as the one switch Settle reads. */
-const ListIntro = createContext(true);
-
 /**
- * A list row that settles into place: up a few pixels and in from clear,
- * one row after another. The stagger stops growing after the first eight
- * rows, so a long page lands in well under a second.
+ * THE ROWS ROLL IN (David, 2026-10-27): every time a list lands, the first
+ * view and every switch after it (tab, match type, Popular, search, line
+ * filter, page, the publishers / apps tiles, Inactive), each row fades in
+ * and slides down 7px with a soft ease-out, 35ms after the row above it.
+ * The stagger stops at the seventh row, so a 25-row page is in within
+ * about 430ms, the rest arriving with the last batch: no long cascade.
+ * Transform and opacity only, so it stays on the compositor (no layout
+ * work, smooth on a phone); the row holds its space from the first frame,
+ * so nothing below it jumps. Less motion asked for: none (index.css).
  */
 export function Settle({
   index,
@@ -156,16 +150,8 @@ export function Settle({
   index: number;
   children: ReactNode;
 }) {
-  const intro = useContext(ListIntro);
-  // Only on the first page opened (lib/introMotion), like the count-ups,
-  // and only with the first list that page shows.
-  const [play] = useState(() => introMotion() && intro);
-  if (!play) return <div>{children}</div>;
   return (
-    <div
-      className="animate-in fade-in slide-in-from-bottom-1 fill-mode-both duration-500 ease-out motion-reduce:animate-none"
-      style={{ animationDelay: `${Math.min(index, 8) * 35}ms` }}
-    >
+    <div data-row-in className="bl-row-in" style={{ "--bl-row-delay": `${Math.min(index, 6) * 35}ms` } as CSSProperties}>
       {children}
     </div>
   );

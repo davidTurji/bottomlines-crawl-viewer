@@ -44,7 +44,6 @@ async function hold(page: Page, url: string | RegExp | ((u: URL) => boolean)) {
 }
 
 const rows = (page: Page) => page.locator('button[aria-label^="Show the seat lines of"]');
-const lineCards = (page: Page) => page.locator("main button[aria-expanded]").filter({ has: page.locator("code") });
 const skeleton = (page: Page) => page.locator('[role="status"][aria-busy="true"]').first();
 
 /** While it waits: the skeleton, none of the old rows, no dots. */
@@ -165,29 +164,29 @@ test("Inactive: its lists switch the same way", async ({ page }) => {
   expect(errors).toEqual([]);
 });
 
-test("the Publishers / Apps / Lines switch, and a Lines tab", async ({ page }) => {
+test("the publishers / apps tiles, and a watch tab", async ({ page }) => {
   const errors = watchErrors(page);
-  await open(page);
+  // The watch tab's read is held from the start (the Popular bar asks for
+  // it at load, and the tab then waits on that same read).
+  let stopped!: () => void;
+  await open(page, "", async () => {
+    stopped = await hold(page, (u) => u.pathname.endsWith("/line-events") && u.searchParams.get("event") === "monitoring_stopped");
+  });
   await lands(page, rows(page));
   let release = await hold(
     page,
     (u) => u.pathname.endsWith("/matched-apps") && !u.searchParams.has("change") && u.searchParams.get("page") === "1",
   );
-  await page.getByTestId("list-view").getByRole("button", { name: "Apps", exact: true }).click();
+  await page.getByRole("button", { name: /Matched apps/ }).first().click();
   await waits(page, rows(page));
   release();
   await lands(page, rows(page));
 
-  release = await hold(page, (u) => u.pathname.endsWith("/change-groups") && u.searchParams.get("page_size") !== "1");
-  await page.getByTestId("list-view").getByRole("button", { name: "Lines", exact: true }).click();
-  await waits(page, lineCards(page));
-  release();
-  await lands(page, lineCards(page));
-
-  release = await hold(page, (u) => u.pathname.endsWith("/change-groups") && u.searchParams.get("event") === "removed");
-  await page.getByRole("tab", { name: "Removed", exact: true }).click();
-  await waits(page, lineCards(page));
-  release();
-  await expect(page.locator('[role="status"][aria-busy="true"]')).toHaveCount(0);
+  await page.getByRole("button", { name: /Matched publishers/ }).first().click();
+  await lands(page, rows(page));
+  await page.getByRole("tab", { name: "Stopped watching", exact: true }).click();
+  await waits(page, rows(page));
+  stopped();
+  await lands(page, rows(page));
   expect(errors).toEqual([]);
 });

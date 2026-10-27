@@ -85,21 +85,6 @@ test.describe("why a removed line was removed", () => {
     expect(errors).toEqual([]);
   });
 
-  test("Changes, Removed: each publisher of a removed line says why", async ({ page }) => {
-    const errors = watchErrors(page);
-    await open(page, { removalReasons: true }, "/changes");
-    await page.getByRole("tab", { name: "Removed", exact: true }).click();
-    await page.locator("button[aria-expanded]").filter({ has: page.locator("code") }).first().click();
-    await expect(page.locator("[data-seat-lines-skeleton]")).toHaveCount(0);
-    const roster = page.locator("[data-line-text]");
-    await expect(roster.first()).toBeVisible();
-    const n = await roster.count();
-    await expect(reasons(page)).toHaveText(Array.from({ length: n }, (_, i) => expected(i)));
-    // Quiet, on the line's row, before its dates.
-    await expect(reasons(page).first()).toHaveClass(/text-\[10px\]/);
-    expect(errors).toEqual([]);
-  });
-
   test("a report frozen before the field says nothing about why", async ({ page }) => {
     const errors = watchErrors(page);
     await open(page, {});
@@ -109,13 +94,6 @@ test.describe("why a removed line was removed", () => {
     const name = first.developer_name || first.developer_domain!;
     await page.getByRole("button", { name: `Show the seat lines of ${name}`, exact: true }).first().click();
     await expect(removedWindow(page).locator("li").first()).toBeVisible();
-    await expect(reasons(page)).toHaveCount(0);
-
-    await page.goto(`${BASE}/changes`);
-    await page.getByRole("tab", { name: "Removed", exact: true }).click();
-    await page.locator("button[aria-expanded]").filter({ has: page.locator("code") }).first().click();
-    await expect(page.locator("[data-seat-lines-skeleton]")).toHaveCount(0);
-    await expect(page.locator("[data-line-text]").first()).toBeVisible();
     await expect(reasons(page)).toHaveCount(0);
     expect(errors).toEqual([]);
   });

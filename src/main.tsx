@@ -54,9 +54,9 @@ import "./index.css";
 const reportPages = (
   <>
     <Route index element={<CrawlReport />} />
-    {/* The Changes page was folded into the Overview as its Lines view
-        (David, 2026-10-27). A /changes link, and anything under it, lands
-        there, its line filter kept (links are forever). */}
+    {/* The Changes page is gone: its statuses are tabs of the Overview's
+        lists (David, 2026-10-27). A /changes link, and anything under it,
+        lands on the Overview, its line filter kept (links are forever). */}
     <Route path="changes/*" element={<ChangesRedirect />} />
     <Route path="discovery" element={<CrawlDiscovered />} />
     <Route path="declarations" element={<CrawlDeclarations />} />

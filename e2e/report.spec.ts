@@ -912,13 +912,15 @@ test.describe("where the files are", () => {
     await page.getByRole("textbox", { name: "Search matched publishers" }).fill(app.owner_domain);
     await expect(page.locator("[data-file-hosts]", { hasText: `Files at: ${DECLARED_HOST}` })).toHaveCount(1);
 
-    // A newly monitored line says why, in plain words, and where its file is.
+    // A newly monitored line says why, in plain words, and where its file
+    // is: on the Overview's Started watching tab (the Changes page is gone,
+    // its old address lands on the Overview).
     await page.goto(`${BASE}/changes`);
+    await page.getByRole("textbox", { name: "Search matched publishers" }).fill("");
     await page.getByRole("tab", { name: "Started watching" }).click();
-    await page.locator("button[aria-expanded]").filter({ has: page.locator("code") }).first().click();
-    await expect(page.locator("[data-seat-lines-skeleton]")).toHaveCount(0);
-    await expect(page.locator("[data-line-reason]", { hasText: "first read of this file this crawl" })).toHaveCount(1);
-    await expect(page.locator("[data-line-host]", { hasText: `at ${DECLARED_HOST}` })).toHaveCount(1);
+    await page.locator('button[aria-label^="Show the seat lines of"]').first().click();
+    await expect(page.locator("[data-line-reason]", { hasText: "first read of this file this crawl" }).first()).toBeVisible();
+    await expect(page.locator("[data-line-host]", { hasText: `at ${DECLARED_HOST}` }).first()).toBeVisible();
     expect(errors).toEqual([]);
   });
 
@@ -938,9 +940,8 @@ test.describe("where the files are", () => {
     await expect(page.locator("[data-file-hosts]")).toHaveCount(0);
     await page.goto(`${BASE}/changes`);
     await page.getByRole("tab", { name: "Started watching" }).click();
-    await page.locator("button[aria-expanded]").filter({ has: page.locator("code") }).first().click();
-    await expect(page.locator("[data-seat-lines-skeleton]")).toHaveCount(0);
-    await expect(page.locator("[data-line-text]").first()).toBeVisible();
+    await page.locator('button[aria-label^="Show the seat lines of"]').first().click();
+    await expect(page.locator("[data-scope-window] [data-line-text]").first()).toBeVisible();
     await expect(page.locator("[data-line-reason]")).toHaveCount(0);
     await expect(page.locator("[data-line-host]")).toHaveCount(0);
     expect(errors).toEqual([]);

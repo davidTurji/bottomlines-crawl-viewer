@@ -217,7 +217,7 @@ async function crawl(page: Page, vp: string): Promise<Run> {
   /* ── The Overview: both lists, every tab, every pill, every row. ── */
   for (const view of ["publishers", "apps"] as const) {
     await step(`view ${view}`, () => click(page.getByRole("button", { name: view === "apps" ? /Matched apps/ : /Matched publishers/ }).first()));
-    for (const tab of ["All matched", "Added", "Removed", "Changed", "Inactive"]) {
+    for (const tab of ["All matched", "Added", "Removed", "Changed", "Started watching", "Stopped watching", "Unconfirmed", "Inactive"]) {
       const t = page.getByRole("tab", { name: tab, exact: true }).first();
       if (!(await t.count())) continue;
       await step(`${view} / ${tab}`, () => click(t));
@@ -266,18 +266,10 @@ async function crawl(page: Page, vp: string): Promise<Run> {
   await step("lines filter apply again", () => click(page.getByRole("menuitem", { name: "Apply", exact: true })));
   await step("lines filter close", () => page.keyboard.press("Escape"));
 
-  /* ── The Lines view (the old Changes page, folded in 2026-10-27). ── */
   const CARDS = "button[aria-expanded='false']:not([aria-haspopup])";
-  const LINE_CARDS = `main ${CARDS}:has(code)`;
-  await step("view lines", () => click(page.getByTestId("list-view").getByRole("button", { name: "Lines", exact: true })));
-  const tabs = await page.getByRole("tab").allInnerTexts();
-  for (const label of tabs) {
-    await step(`Lines / ${label}`, () => click(page.getByRole("tab", { name: label.trim(), exact: true })));
-    await openAll("changes", LINE_CARDS, API_CARDS);
-  }
-  await step("Lines / search", () => page.getByPlaceholder("Filter by SSP domain").fill("tv", { timeout: 3_000 }));
-  await step("Lines / clear search", () => page.getByPlaceholder("Filter by SSP domain").fill("", { timeout: 3_000 }));
-  await tap("Lines / next page", page.getByRole("button", { name: "Next page", exact: true }).first());
+  // "Export this list" on the fake API only: on a live link it would read
+  // every page of the list (it is never the metered export, but it is load).
+  if (!LIVE) await tap("export this list", page.getByRole("button", { name: "Export this list" }).first());
 
   /* ── Popular: every choice, then the last one again (it clears). ── */
   const choices = await page.locator("[data-popular]").evaluateAll((els) => els.map((e) => e.getAttribute("data-popular") ?? ""));
@@ -289,7 +281,7 @@ async function crawl(page: Page, vp: string): Promise<Run> {
     await step("popular clear", () => click(page.locator(`[data-popular="${choices[choices.length - 1]}"]`)));
   await tap("popular next", page.getByRole("button", { name: "More choices" }));
   await tap("popular previous", page.getByRole("button", { name: "Previous choices" }));
-  await step("view publishers", () => click(page.getByTestId("list-view").getByRole("button", { name: "Publishers", exact: true })));
+  await step("back to publishers", () => click(page.getByRole("button", { name: /Matched publishers/ }).first()));
 
   lap("overview done");
   /* ── Every other page in the menu. ── */
@@ -353,7 +345,7 @@ test.describe("click everything", () => {
       if (!LIVE) {
         // The crawl really reached every list (a renamed control would
         // otherwise make this test pass by clicking nothing).
-        for (const list of ["publishers", "apps", "inactive", "changes", "discovery", "declarations", "sellers"])
+        for (const list of ["publishers", "apps", "inactive", "discovery", "declarations", "sellers"])
           expect(run.opened[list] ?? 0, `${vp.name}: rows opened on ${list}`).toBeGreaterThan(0);
       }
       await ctx.close();

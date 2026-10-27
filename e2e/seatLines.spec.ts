@@ -4,17 +4,13 @@
  *   - Every list of matched seat lines numbers its rows like a code
  *     editor: 1, 2, 3 ... in a quiet gutter, restarting per list and
  *     running on across the pages of one list.
- *   - A card on the Changes page opens exactly like a row on the
- *     Overview: the same body, heading, skeleton and rows.
+ *   - The gutter sits on its line's baseline, in one fixed column.
  *   - Seller roles live on the Sellers.json page only, as a segment of
  *     plain rows, and only on a report whose build read the sellers.json
  *     files first (crawler #364); otherwise one quiet line.
  */
 import { expect, test, type Locator, type Page } from "@playwright/test";
 
-import { mockLineEvents } from "../src/lib/mockData";
-import { pageChangeGroups } from "../src/lib/changeGroups";
-import type { LineEvent } from "../src/lib/api";
 import { installFakeApi, SELLERS_READS, TOKEN, type Scenario } from "./fakeApi";
 
 const BASE = `/crawl-report/${TOKEN}`;
@@ -71,8 +67,6 @@ async function openSteadyRow(page: Page): Promise<Locator> {
   throw new Error("no steady row on the first page");
 }
 
-const changeCards = (page: Page) =>
-  page.locator("button[aria-expanded]").filter({ has: page.locator("code") });
 
 test.describe("line numbers", () => {
   test("an expanded publisher row and an app row number their lines 1, 2, 3, per list", async ({ page }) => {
@@ -104,79 +98,43 @@ test.describe("line numbers", () => {
     expect(errors).toEqual([]);
   });
 
-  test("a Changes card numbers its publishers, and page 2 of the roster starts at 51", async ({ page }) => {
-    const errors = watchErrors(page);
-    // One line added on 120 publishers: one card, a roster of three pages.
-    const seed = mockLineEvents({ page_size: 1 }).rows[0];
-    const all: LineEvent[] = Array.from({ length: 120 }, (_, i) => ({
-      ...seed,
-      event: "added",
-      developer_id: 9000 + i,
-      developer_domain: `publisher${i}.example`,
-      developer_name: `Publisher ${i}`,
-    }));
-    await open(page, {}, "/changes", () =>
-      page.route("**/change-groups**", (route) => {
-        const url = new URL(route.request().url());
-        const p = Number(url.searchParams.get("page") ?? 1);
-        const size = Number(url.searchParams.get("page_size") ?? 25);
-        if (!url.pathname.endsWith("/publishers"))
-          return route.fulfill({ json: pageChangeGroups(all, { page: p, page_size: size }) });
-        return route.fulfill({ json: { page: p, page_size: size, total: 120, rows: all.slice((p - 1) * size, p * size) } });
-      }),
-    );
-    const card = changeCards(page).first();
-    await card.click();
-    const body = card.locator("..");
-    const list = body.locator("[data-seat-lines]");
-    await expect(list.locator(":scope > li")).toHaveCount(50);
-    expect(await numbers(list)).toEqual(oneToN(50));
-    await body.getByRole("button", { name: "Next page", exact: true }).click();
-    await expect(body.getByRole("link", { name: "publisher50.example", exact: true })).toBeVisible();
-    expect(await numbers(list)).toEqual(oneToN(50, 51));
-    expect(errors).toEqual([]);
-  });
-});
-
-test.describe("a Changes card opens like an Overview row", () => {
-  test("the same body, heading and rows; the same skeleton while its publishers load", async ({ page }) => {
+  test("the gutter sits on the line's baseline, in one fixed column, on every list", async ({ page }) => {
+    // David, 2026-10-27: the numbers sat off their line, worst on a row
+    // with a "first seen" line under it. Every row, every kind of list: the
+    // number's baseline within 1px of the line text's, and every line text
+    // starting at one x.
     const errors = watchErrors(page);
     await open(page, {});
     await expect(page.getByRole("heading", { name: "Your weekly crawl" })).toBeVisible();
-    const overviewList = await openSteadyRow(page);
-    const look = (l: Locator) =>
-      l.evaluate((el) => {
-        const body = el.closest("[class*='border-t']") as HTMLElement;
-        const row = el.querySelector(":scope > li") as HTMLElement;
-        const text = row.querySelector("[data-line-text]") as HTMLElement;
-        const cs = (e: HTMLElement) => getComputedStyle(e);
-        return {
-          bodyBg: cs(body).backgroundColor,
-          listClass: el.className,
-          rowPad: `${cs(row).paddingTop} ${cs(row).paddingLeft}`,
-          textFont: `${cs(text).fontFamily} ${cs(text).fontSize}`,
-          gutter: cs(row.querySelector("[data-line-no]") as HTMLElement).color,
+    const check = async (where: string) => {
+      const rows = page.locator("li:has([data-line-no])");
+      await expect(rows.first(), where).toBeVisible();
+      const out = await rows.evaluateAll((lis) => {
+        const baseline = (el: Element) => {
+          const m = document.createElement("span");
+          m.style.cssText = "display:inline-block;width:0;height:0;vertical-align:baseline";
+          el.insertBefore(m, el.firstChild);
+          const y = m.getBoundingClientRect().top;
+          m.remove();
+          return y;
         };
+        return lis.map((li) => {
+          const no = li.querySelector("[data-line-no]")!;
+          const text = li.querySelector("[data-line-text]")!;
+          return { dy: Math.abs(baseline(no) - baseline(text)), x: Math.round(text.getBoundingClientRect().left), w: Math.round(no.getBoundingClientRect().width) };
+        });
       });
-    const overview = await look(overviewList);
-
-    await page.goto(`${BASE}/changes`);
-    let release!: () => void;
-    const gate = new Promise<void>((r) => (release = r));
-    await page.route("**/change-groups/*/publishers?*", async (route) => {
-      await gate;
-      await route.fallback();
-    });
-    const card = changeCards(page).first();
-    await card.click();
-    // While the publishers load: the seat lines skeleton, never a word.
-    await expect(page.locator("[data-seat-lines-skeleton]")).toBeVisible();
-    await expect(page.getByText("Loading publishers…")).toHaveCount(0);
-    release();
-    const changesList = card.locator("..").locator("[data-seat-lines]");
-    await expect(changesList.locator(":scope > li").first()).toBeVisible();
-    await expect(page.locator("[data-seat-lines-skeleton]")).toHaveCount(0);
-    expect(await look(changesList)).toEqual(overview);
+      for (const r of out) expect(r.dy, `${where}: baseline gap`).toBeLessThanOrEqual(1);
+      expect(new Set(out.map((r) => r.x)).size, `${where}: one start x`).toBe(1);
+      expect(new Set(out.map((r) => r.w)).size, `${where}: one gutter width`).toBe(1);
+    };
+    // A steady row, then a row on Added (each line with its dates under it).
+    await openSteadyRow(page);
+    await check("matched seat lines");
+    await page.getByRole("tab", { name: "Added", exact: true }).click();
+    await page.locator('button[aria-label^="Show the seat lines of"]').first().click();
+    await expect(openCard(page).locator("[data-line-dates]").first()).toBeVisible();
+    await check("added window");
     expect(errors).toEqual([]);
   });
 });

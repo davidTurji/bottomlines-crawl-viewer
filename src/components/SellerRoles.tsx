@@ -185,7 +185,7 @@ function RoleRow({ row, n, digits }: { row: MatchedDeveloper; n: number; digits:
       <LineNo n={n} digits={digits} />
       <div className="min-w-0 flex-1 space-y-0.5">
         <div className="flex min-w-0 items-baseline gap-3">
-          <code className="truncate font-mono text-[11px] text-slate-800">{name}</code>
+          <code className="truncate font-mono text-[11px] leading-4 text-slate-800">{name}</code>
           {row.name && row.domain && row.name !== row.domain && (
             <span className="hidden truncate text-[11px] text-slate-500 sm:inline">{row.name}</span>
           )}

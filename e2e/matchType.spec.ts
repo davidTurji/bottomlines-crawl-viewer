@@ -216,7 +216,7 @@ test.describe("an old report shows nothing of this", () => {
       await page.getByRole("tab", { name: "All matched" }).click();
       // Row 1 is the tabs alone; row 2 the search and the count with the pager.
       const row = page.getByRole("tablist").first().locator("xpath=../../..");
-      await expect(row).toHaveText(/^All matchedAddedRemovedChangedInactive$/);
+      await expect(row).toHaveText(/^All matchedAddedRemovedChanged(Started watching)?(Stopped watching)?(Unconfirmed)?Inactive$/);
       await expect(page.locator("[data-list-count] p")).toHaveText(
         new RegExp(`^1–${PAGE_SIZE} of [\\d,]+ ${view}$`),
       );
@@ -315,14 +315,13 @@ test.describe("match type on a report that has it", () => {
     await expect(page.locator("[data-row-roles], [data-row-alert]")).toHaveCount(0);
     // An own row: no chip.
     await expect(page.locator("[data-ipd-chip]")).toHaveCount(0);
-    // Nor on the apps list, nor on the Changes page.
+    // Nor on the apps list, nor on any change tab.
     await toApps(page);
     await page.locator('button[aria-label^="Show the seat lines of"]').first().click();
     await expect(page.locator("[data-line-text]").first()).toBeVisible();
     await expect(page.getByText(/Seller role|Managed by|Partner inventory on/)).toHaveCount(0);
-    await page.goto(`${BASE}/changes`);
-    await page.locator("button[aria-expanded]").filter({ has: page.locator("code") }).first().click();
-    await expect(page.locator("[data-seat-lines-skeleton]")).toHaveCount(0);
+    await page.getByRole("tab", { name: "Added", exact: true }).click();
+    await page.locator('button[aria-label^="Show the seat lines of"]').first().click();
     await expect(page.locator("[data-line-text]").first()).toBeVisible();
     await expect(page.getByText(/Seller role|Managed by|Partner inventory on/)).toHaveCount(0);
     expect(errors).toEqual([]);

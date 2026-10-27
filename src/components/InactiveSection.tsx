@@ -15,7 +15,9 @@ import {
   type InactivePublisher,
   type TrialCaps,
 } from "@/lib/api";
-import { INACTIVE_KINDS, inactiveNoun } from "@/lib/inactive";
+import { INACTIVE_KINDS, inactiveNoun, reasonText } from "@/lib/inactive";
+import { csvName, ExportListButton, type CsvTable } from "@/components/ExportList";
+import { READ_PAGE, readAllPages, type Progress } from "@/lib/scopeRows";
 import { usePageCache } from "@/lib/pageCache";
 import { PAGE_SIZE } from "@/lib/paging";
 import { cn } from "@/lib/utils";
@@ -156,6 +158,46 @@ export default function InactiveSection({
   const nounOne = inactiveNoun(kind, 1);
   const toggle = (key: string) => setExpanded((k) => (k === key ? null : key));
 
+  const exportList = async (progress: Progress, signal: AbortSignal): Promise<CsvTable> => {
+    const all = await readAllPages(
+      (pg) => api.inactive(token, kind, { page: pg, q: query, lines, pageSize: READ_PAGE }, legacy),
+      READ_PAGE,
+      progress,
+      signal,
+    );
+    const lineText = (ls: { ssp_domain: string; publisher_id: string; relationship: string }[] | null | undefined) =>
+      (ls ?? []).map((l) => `${l.ssp_domain}, ${l.publisher_id}, ${l.relationship}`).join("; ");
+    if (kind === "publishers")
+      return {
+        filename: csvName("inactive publishers", query ? `search ${query}` : null),
+        header: ["publisher_domain", "publisher_name", "inactive_since", "reason", "evidence", "apps", "lines"],
+        rows: (all as InactivePublisher[]).map((p) => [
+          p.domain,
+          p.name,
+          p.inactive_since,
+          reasonText(p),
+          p.evidence_summary,
+          p.apps,
+          lineText(p.lines),
+        ]),
+      };
+    return {
+      filename: csvName("inactive apps", query ? `search ${query}` : null),
+      header: ["app_name", "store", "bundle_id", "publisher_domain", "publisher_name", "inactive_since", "reason", "evidence", "lines"],
+      rows: (all as InactiveApp[]).map((a) => [
+        a.name,
+        a.store,
+        a.bundle,
+        a.publisher,
+        a.publisher_name,
+        a.inactive_since,
+        reasonText(a),
+        a.evidence_summary,
+        lineText(a.lines),
+      ]),
+    };
+  };
+
   return (
     <div data-testid="inactive-section">
       <div className="mb-3 space-y-2">
@@ -191,6 +233,7 @@ export default function InactiveSection({
               ? " Showing only apps whose publisher carries the selected lines."
               : " Showing only those with the selected lines.")}
         </p>
+        <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:gap-3">
         <div className="relative w-full">
           <Search className="pointer-events-none absolute left-3.5 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
           <input
@@ -200,6 +243,9 @@ export default function InactiveSection({
             aria-label={`Search ${noun}`}
             className="h-10 w-full rounded-full border border-border bg-white pl-10 pr-4 text-sm text-slate-900 outline-none transition-colors placeholder:text-slate-400 focus:border-slate-400/50"
           />
+        </div>
+        {/* EXPORT THIS LIST (David, 2026-10-27): every page of it. */}
+        {ready && !loading && rows.length > 0 && !locked && <ExportListButton run={exportList} />}
         </div>
       </div>
 

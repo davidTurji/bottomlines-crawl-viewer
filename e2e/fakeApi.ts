@@ -254,6 +254,18 @@ function realShape<T extends LineArrays & Record<string, unknown>>(row: T, i: nu
   return out as T;
 }
 
+/** A line event as the crawler sends it: the match fields per line, some
+ *  through a partner, an empty cert, and nulls where it sends them. */
+function realEvent(e: LineEvent, i: number): LineEvent {
+  const partner = i % 3 === 1 ? REAL_PARTNERS[i % REAL_PARTNERS.length] : null;
+  return {
+    ...e,
+    cert_id: "",
+    ...(partner ? { match_type: "ipd", ipd_partner: partner, host: partner } : { match_type: "own" }),
+    reason: i % 4 === 0 ? null : e.reason ?? "",
+  } as unknown as LineEvent;
+}
+
 /** The real inconclusive note: 55 publishers, 25 examples, two partners. */
 const REAL_INCONCLUSIVE = {
   count: 55,
@@ -567,7 +579,17 @@ export async function installFakeApi(page: Page, scenario: Scenario = {}): Promi
           return reply(200, { page: 1, page_size: rows.length || 1, total: rows.length, rows });
         }
         const r = mockLineEvents(filters as Parameters<typeof mockLineEvents>[0]);
-        return reply(200, { ...r, rows: r.rows.map(lineEvent) });
+        // The host's file, read for the first time this crawl: each newly
+        // monitored line's first publisher (as on the change-groups roster).
+        const firstOf = new Set<string>();
+        const rows = r.rows.map(lineEvent).map((e) => {
+          if (!s.declaredHost || e.event !== "newly_monitored") return e;
+          const k = `${e.ssp_domain}|${e.publisher_id}|${e.relationship}`;
+          if (firstOf.has(k)) return e;
+          firstOf.add(k);
+          return { ...e, host: DECLARED_HOST, reason: "host first read" };
+        });
+        return reply(200, { ...r, rows: s.realShapes ? rows.map((e, i) => realEvent(e, i)) : rows });
       }
       case "matched-developers": {
         const r = mockMatchedDevelopers(page_, q.get("q") ?? "", lines, matchType);

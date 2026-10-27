@@ -21,16 +21,30 @@ import type { CSSProperties, ReactNode } from "react";
 import { Skeleton } from "@/components/Skeleton";
 import { cn } from "@/lib/utils";
 
-/** One row's box: the gutter number, the text, the margin. */
-export const SEAT_ROW = "flex items-baseline gap-3 px-3 py-1.5";
+/**
+ * One row's box: the gutter number, the text, the margin.
+ *
+ * ALIGNED BY LINE BOX, NOT BY BASELINE (David, 2026-10-27: the numbers sat
+ * off their line, worst on a row with a "first seen" line under it). The
+ * line text truncates, and an element that clips its overflow gives a flex
+ * row no baseline, so ``items-baseline`` lined the number up with the NEXT
+ * line, or with the row's bottom. Now every item starts at the top and
+ * the gutter, the line and the margin labels share one 16px line box and
+ * the line's 11px mono size, so the number sits on the line's baseline.
+ */
+export const SEAT_ROW = "flex items-start gap-3 px-3 py-1.5";
+
+/** The one line box every first line of a row shares. */
+export const ROW_LINE = "text-[11px] leading-4";
 
 /** The quiet margin labels at a row's right edge (the file, the host). */
-export const ROW_MARGIN = "flex-shrink-0 text-[10px] text-slate-400";
+export const ROW_MARGIN = "flex-shrink-0 text-[10px] leading-4 text-slate-400";
 
-/** How many digits the longest number in a list has: every gutter in the
- *  list takes that width, so the numbers right-align in one column. */
+/** How many digits the gutter holds: four at least, so "1" and "1000"
+ *  right-align in one fixed column and the lines start at one x on every
+ *  row of every list; more only past 9,999. */
 export function gutterDigits(last: number): number {
-  return String(Math.max(1, Math.floor(last))).length;
+  return Math.max(4, String(Math.max(1, Math.floor(last))).length);
 }
 
 /** The gutter number. Decorative for a screen reader: the row reads as
@@ -40,8 +54,8 @@ export function LineNo({ n, digits }: { n: number; digits: number }) {
     <span
       aria-hidden
       data-line-no
-      className="flex-shrink-0 select-none text-right font-mono text-[10px] tabular-nums text-slate-400"
-      style={{ width: `${Math.max(1, digits)}ch` }}
+      className="flex-shrink-0 select-none text-right font-mono text-[11px] leading-4 tabular-nums text-slate-400"
+      style={{ width: `${Math.max(4, digits)}ch` }}
     >
       {n}
     </span>
@@ -76,7 +90,7 @@ export function SeatLinesHead({
 /** The white list every seat-line block prints its rows in. */
 export function SeatLinesFrame({ children, className }: { children: ReactNode; className?: string }) {
   return (
-    <ul data-seat-lines className={cn("divide-y divide-border rounded-md border border-border bg-white", className)}>
+    <ul data-seat-lines className={cn("bl-lines-in divide-y divide-border rounded-md border border-border bg-white", className)}>
       {children}
     </ul>
   );
@@ -97,7 +111,7 @@ export function RowText({
     <Tag
       data-line-text
       className={cn(
-        "block truncate font-mono text-[11px] tabular-nums",
+        "block truncate font-mono text-[11px] leading-4 tabular-nums",
         muted ? "text-slate-500" : "text-slate-800",
       )}
     >
