@@ -1,0 +1,150 @@
+name: Real-user QA
+
+# A reader who clicks everything, on REAL report links (David, 2026-10-27).
+#
+# The click-everything walk (e2e/clickEverything.spec.ts, its live mode)
+# signs in with each link's own #signin, declines the tour, then on a desktop
+# and on a phone clicks every tab, pill, row, filter, page and the tour, and
+# reads every count it is shown (e2e/counts.ts). Read-only: the metered
+# export is blocked at the network layer and never clicked. The runner
+# (e2e/realUserQa.mjs) walks the links one after another.
+#
+# WHEN
+#   - after every viewer deploy that succeeded (workflow_run of Deploy viewer)
+#   - after every crawler deploy (repository_dispatch "crawler-deployed",
+#     sent by bottomlines-crawl's deploy-main.yml)
+#   - every night at 03:30 UTC
+#   - by hand (Run workflow; "only" walks one link, "dry_run" the dry run)
+#   - on a pull request that touches the walk, the runner or this file: the
+#     DRY RUN, a local build with the fake API behind the live sign-in. Its
+#     clean link must pass and its broken link (the Matched publishers tile
+#     one off its list) must fail, so this workflow is itself tested. It
+#     never reads the links secret.
+#
+# WHAT FAILS IT: any page error or crash in the console, an error panel, an
+# error or "Could not load" on screen, a list still loading after 30 s, a
+# count that is not its rows (a tile vs its list, a tab, pill, Found in,
+# Platform or Popular choice vs the rows it lists, "1-25 of N" vs the rows
+# on screen, on the first page, a middle one and the last), a link that
+# does not sign in, a walk that does not finish. The job summary names the
+# link, the screen, the step.
+#
+# THE ALERT is this run failing: GitHub mails a failed run to David (the
+# deploys and the dispatch run as him; the nightly run as whoever last
+# edited its cron line). Nothing here sends a notification of its own: no
+# push leaves GitHub Actions (HARD RULE 2026-10-25, pushes only from Cloud
+# Run), and neither core-api nor the crawler has an alert endpoint meant
+# for an outside caller.
+#
+# SECRET (Settings > Secrets and variables > Actions)
+#   REAL_USER_QA_LINKS  JSON, one entry per link:
+#     [{"name": "qa-nightly", "token": "<share token>", "signin": "<the link's #signin= value>"}]
+#     Optional per link: "base" (default https://pathfinder.bottomlines.ai),
+#     "on" (any of "viewer", "crawler", "nightly", "manual"; default all),
+#     "viewport" ("desktop" or "phone"; default both).
+#
+# THIS REPOSITORY IS PUBLIC, and so are its run logs and summaries. Each
+# link's token and sign-in (as given, URL-encoded and decoded) are masked
+# before anything runs and cut from every line printed; findings name steps,
+# never a publisher; no screenshot or trace of a live page is kept (the dry
+# run's pictures are of fake data). Keep every "name" a neutral label, never
+# a customer's name.
+
+on:
+  workflow_run:
+    workflows: ["Deploy viewer"]
+    types: [completed]
+  repository_dispatch:
+    types: [crawler-deployed]
+  schedule:
+    - cron: "30 3 * * *"
+  workflow_dispatch:
+    inputs:
+      only:
+        description: Walk only the link with this name (empty walks every link)
+        required: false
+        default: ""
+      dry_run:
+        description: The dry run instead (a local build, fake data, no secret)
+        type: boolean
+        default: false
+  pull_request:
+    paths:
+      - .github/workflows/real-user-qa.yml
+      - e2e/realUserQa.mjs
+      - e2e/clickEverything.spec.ts
+      - e2e/counts.ts
+      - e2e/fakeApi.ts
+      - playwright.config.ts
+      - package.json
+      - package-lock.json
+
+permissions:
+  contents: read
+
+concurrency:
+  # One reader at a time on the live links (light on the API); a deploy and
+  # the night queue behind each other, never cut. A pull request's dry run
+  # is its own group, a newer push replacing it.
+  group: real-user-qa-${{ github.event_name == 'pull_request' && github.ref || 'live' }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  walk:
+    name: walk every link, desktop and phone
+    # After a deploy only when it succeeded: a failed deploy changed
+    # nothing live. The live runs only on this repository, never a fork.
+    if: >-
+      github.event_name == 'pull_request' ||
+      (github.repository == 'davidTurji/bottomlines-crawl-viewer' &&
+       (github.event_name != 'workflow_run' || github.event.workflow_run.conclusion == 'success'))
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    env:
+      DRY_RUN: ${{ github.event_name == 'pull_request' || (github.event_name == 'workflow_dispatch' && inputs.dry_run) }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: npm
+      - run: npm ci --no-audit --no-fund
+      - run: npx playwright install --with-deps chromium
+
+      - name: What started this run
+        id: why
+        env:
+          EVENT: ${{ github.event_name }}
+          VIEWER_SHA: ${{ github.event.workflow_run.head_sha }}
+          CRAWLER_SHA: ${{ github.event.client_payload.sha }}
+        run: |
+          case "$EVENT" in
+            workflow_run)        trigger=viewer;  context="viewer deploy ${VIEWER_SHA:0:7}" ;;
+            repository_dispatch) trigger=crawler; context="crawler deploy ${CRAWLER_SHA:0:7}" ;;
+            schedule)            trigger=nightly; context="03:30 UTC" ;;
+            *)                   trigger=manual;  context="$EVENT" ;;
+          esac
+          echo "trigger=$trigger" >> "$GITHUB_OUTPUT"
+          echo "context=$context" >> "$GITHUB_OUTPUT"
+
+      - name: Dry run (a local build, the fake API behind the live sign-in)
+        if: env.DRY_RUN == 'true'
+        run: npm run qa:dry-run
+
+      - name: Walk the live links
+        if: env.DRY_RUN != 'true'
+        env:
+          REAL_USER_QA_LINKS: ${{ secrets.REAL_USER_QA_LINKS }}
+          REAL_USER_QA_TRIGGER: ${{ steps.why.outputs.trigger }}
+          REAL_USER_QA_CONTEXT: ${{ steps.why.outputs.context }}
+          REAL_USER_QA_ONLY: ${{ inputs.only }}
+        run: npm run qa:real-user
+
+      # Pictures of the dry run's fake data only: a live page is the
+      # customer's, and this repository's artifacts are public.
+      - uses: actions/upload-artifact@v4
+        if: failure() && env.DRY_RUN == 'true'
+        with:
+          name: real-user-qa-dry-run
+          path: real-user-qa-results/
+          retention-days: 3

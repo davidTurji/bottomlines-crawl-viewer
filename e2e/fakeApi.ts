@@ -188,6 +188,15 @@ export type Scenario = {
    *  matched-developers and developer-events, echoed, with
    *  ``found_in_counts``. Default false: today's API (no switch). */
   foundIn?: boolean;
+  /** true: the summary's Matched publishers and Matched apps tiles are
+   *  their lists' own totals (All matched, match type All, under the same
+   *  seat lines), the invariant of a real report. The fixtures' summary
+   *  is a screenshot's numbers (8,412 and 24,781) over a few dozen rows,
+   *  so a test that reads counts asks for this. Default false. */
+  countsMatchLists?: boolean;
+  /** true: the Matched publishers tile says one more than its list. The
+   *  real-user QA dry run's broken link: its count check must fail. */
+  countMismatch?: boolean;
 };
 
 /** Every row of a paged mock list. */
@@ -227,6 +236,19 @@ function split<T>(all: T[], of: (r: T) => string | null, keys: string[], asked: 
   const counts: Record<string, number> = { all: all.length };
   for (const k of keys) counts[k] = all.filter((r) => of(r) === k).length;
   return { counts, kept: asked ? all.filter((r) => of(r) === asked) : all };
+}
+
+/** A list's match type split, as the crawler counts it (viewer_frozen
+ *  ``_with_match_meta``): over the rows before the match type filter. */
+function typeCounts(rows: { match_type?: string | null }[]) {
+  const own = rows.filter((r) => r.match_type !== "ipd").length;
+  return { all: rows.length, own, ipd: rows.length - own };
+}
+
+/** One row of a list: a publisher (or app) is a row per match type and
+ *  IPD partner, so its id alone is not the row. */
+function rowKey(r: { developer_id?: number | null; match_type?: string | null; ipd_partner?: string | null }): string {
+  return `${r.developer_id ?? ""}|${r.match_type ?? ""}|${r.ipd_partner ?? ""}`;
 }
 
 /** Which rows of a full list each watch filter keeps (by position, so a
@@ -540,6 +562,8 @@ export async function installFakeApi(page: Page, scenario: Scenario = {}): Promi
     watchTabs: false,
     appPlatform: false,
     foundIn: false,
+    countsMatchLists: false,
+    countMismatch: false,
     ...scenario,
   };
   const hostApp = s.declaredHost ? declaredHostApp() : null;
@@ -654,7 +678,18 @@ export async function installFakeApi(page: Page, scenario: Scenario = {}): Promi
         const withGone = s.gone ? full : { ...full, gone: undefined };
         const withInactive = s.inactive === "ok" ? withGone : { ...withGone, inactive_counts: undefined };
         const first = s.firstReport ? { ...withInactive, previous_job_id: null } : withInactive;
-        const sum = s.sellersReads ? { ...first, sellers_json_reads: SELLERS_READS } : first;
+        const read = s.sellersReads ? { ...first, sellers_json_reads: SELLERS_READS } : first;
+        // The tiles, counted from the lists themselves (countsMatchLists),
+        // one too many on the broken link (countMismatch).
+        const tiles = s.countsMatchLists || s.countMismatch
+          ? {
+              developers: mockMatchedDevelopers(1, "", lines, matchType).total + (s.countMismatch ? 1 : 0),
+              apps: mockMatchedApps(1, "", lines, matchType, null).total,
+            }
+          : null;
+        const sum = tiles
+          ? { ...read, counters: { ...read.counters, matched: { ...read.counters.matched, ...tiles } } }
+          : read;
         return reply(200, s.trial ? { ...sum, trial: TRIAL_CAPS } : sum);
       }
       case "export-info":
@@ -709,7 +744,15 @@ export async function installFakeApi(page: Page, scenario: Scenario = {}): Promi
             extra.change_counts = Object.fromEntries(Object.entries(WATCH_RULE).map(([k, f]) => [k, all.filter((_, i) => f(i)).length]));
             const ch = q.get("change");
             if (ch && WATCH_RULE[ch]) {
-              all = all.filter((_, i) => WATCH_RULE[ch](i));
+              if (s.countsMatchLists && matchType !== null) {
+                // A watch list is decided on the whole list, so its Own
+                // rows are the All list's own ones, and its pills count it.
+                const whole = readAll((p) => mockMatchedDevelopers(p, q.get("q") ?? "", lines, "all"));
+                const watched = whole.filter((_, i) => WATCH_RULE[ch](i));
+                const keep = new Set(watched.map(rowKey));
+                all = all.filter((d) => keep.has(rowKey(d)));
+                extra.match_type_counts = typeCounts(watched);
+              } else all = all.filter((_, i) => WATCH_RULE[ch](i));
               extra.change = ch;
             }
           }
@@ -745,7 +788,14 @@ export async function installFakeApi(page: Page, scenario: Scenario = {}): Promi
           if (s.watchTabs) {
             extra.change_counts = Object.fromEntries(Object.entries(WATCH_RULE).map(([k, f]) => [k, all.filter((_, i) => f(i)).length]));
             if (watch && asked) {
-              all = all.filter((_, i) => WATCH_RULE[asked](i));
+              if (s.countsMatchLists && matchType !== null) {
+                // As on the publishers: decided on the whole list.
+                const whole = readAll((p) => mockMatchedApps(p, q.get("q") ?? "", lines, "all", change));
+                const watched = whole.filter((_, i) => WATCH_RULE[asked](i));
+                const keep = new Set(watched.map((a) => `${appKey(a)}|${rowKey(a)}`));
+                all = all.filter((a) => keep.has(`${appKey(a)}|${rowKey(a)}`));
+                extra.match_type_counts = typeCounts(watched);
+              } else all = all.filter((_, i) => WATCH_RULE[asked](i));
               extra.change = asked;
             }
           }

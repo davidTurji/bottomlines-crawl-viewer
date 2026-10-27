@@ -3,7 +3,8 @@ import { defineConfig, devices } from "@playwright/test";
 // Browser tests against the PRODUCTION build (no VITE_MOCK), so api.ts and
 // req() run exactly as they do for a customer; e2e/fakeApi.ts answers the
 // network. See e2e/report.spec.ts for why.
-const PORT = 4179;
+// E2E_PORT: another port, for a second checkout testing at the same time.
+const PORT = Number(process.env.E2E_PORT || 4179);
 // The live smoke (npm run smoke:live, e2e/clickEverything.spec.ts) runs
 // against a real link instead: no build, no server, the link's own origin.
 const LIVE = process.env.VIEWER_SMOKE_BASE;
