@@ -1976,6 +1976,8 @@ export type MatchedAppsPage = MatchTypeMeta & {
  * NULL, so they are plain strings here.
  */
 export type DiscoveredPlacement = {
+  /** The actual host that served this file; older reports may omit it. */
+  file_host?: string;
   developer_domain: string;
   developer_name: string;
   platform: string;

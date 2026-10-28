@@ -925,7 +925,7 @@ function PlacementCard({ line, p }: { line: DiscoveredLine; p: DiscoveredPlaceme
   return (
     <ActionableLine
       line={line}
-      publisherDomain={p.developer_domain}
+      publisherDomain={p.file_host || p.developer_domain}
       foundIn={p.found_in}
       shown
       className="flex items-center gap-3 rounded-2xl border border-border bg-white px-4 py-3 shadow-sm"
@@ -1077,6 +1077,7 @@ async function downloadLineCsv(token: string, line: DiscoveredLine) {
     "cert_id",
     "publisher_name",
     "publisher_domain",
+    "file_host",
     "found_in",
     "app_name",
     "store",
@@ -1099,6 +1100,7 @@ async function downloadLineCsv(token: string, line: DiscoveredLine) {
         line.cert_id,
         p.developer_name || p.developer_domain,
         p.developer_domain,
+        p.file_host || p.developer_domain,
         p.found_in,
         p.app_name ?? "",
         p.app_name ? storeName(p) : "",
@@ -1109,11 +1111,11 @@ async function downloadLineCsv(token: string, line: DiscoveredLine) {
   }
   // App columns only when the report carries apps (a report names
   // publishers and their files; app details ride along only when present).
-  const hasApps = rows.some((r) => r[7] !== "");
+  const hasApps = rows.some((r) => r[8] !== "");
   saveCsv(
     `discovery-${fileSafe(line.ssp_domain)}-${fileSafe(line.publisher_id)}-${line.relationship.toLowerCase()}-${today()}.csv`,
-    hasApps ? header : header.slice(0, 7),
-    hasApps ? rows : rows.map((r) => r.slice(0, 7)),
+    hasApps ? header : header.slice(0, 8),
+    hasApps ? rows : rows.map((r) => r.slice(0, 8)),
   );
 }
 
