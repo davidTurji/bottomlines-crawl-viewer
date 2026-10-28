@@ -761,6 +761,28 @@ test.describe("discovery checks each line against your sellers.json", () => {
     void wide;
   });
 
+  test("discovery links and CSV preserve the actual file host", async ({ page }) => {
+    await open(page, { discovery: true }, "/discovery");
+    await noTour(page);
+    await page.route("**/discovered-lines/placements?*", async route => {
+      const q = new URL(route.request().url()).searchParams;
+      const r = mockDiscoveredLinePlacements(WIDE_KEY, {
+        page: Number(q.get("page") || 1), page_size: Number(q.get("page_size") || 50),
+      });
+      await route.fulfill({ json: { ...r, rows: r.rows.map(p => ({ ...p, file_host: `files.${p.developer_domain}` })) } });
+    });
+    const c = await find(page, WIDE);
+    await c.getByRole("button", { expanded: false }).first().click();
+    await expect(c.locator('a[href*="#:~:text="]').first()).toHaveAttribute("href", /^https?:\/\/files\./);
+    const [download] = await Promise.all([
+      page.waitForEvent("download"),
+      c.getByRole("button", { name: "Export every publisher and app carrying this line as CSV" }).click(),
+    ]);
+    const csv = await (await import("node:fs/promises")).readFile((await download.path())!, "utf8");
+    expect(csv.split("\r\n")[0]).toContain('"file_host"');
+    expect(csv).toContain('"files.');
+  });
+
   test("a cut baseline says so, and nothing is new this week", async ({ page }) => {
     const errors = watchErrors(page);
     await open(page, { discovery: true, discoveryApi: "baseline_cut" }, "/discovery");
