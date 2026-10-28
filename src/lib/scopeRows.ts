@@ -36,60 +36,8 @@ export function isScopeTab(tab: string): tab is ScopeTab {
  *  matched-apps caps). */
 export const READ_PAGE = 500;
 
-export type Progress = (done: number, of: number) => void;
-
-type PageAnswer<T> = { rows?: T[] | null; total?: number | null; page_size?: number | null };
-
-/** One page, retried with a growing pause when the read fails (a passing
- *  503, a dropped connection); never once the reader has cancelled. */
-async function readPage<T>(fetchPage: (page: number) => Promise<PageAnswer<T>>, page: number, signal?: AbortSignal) {
-  const pauses = [400, 1200, 3000];
-  for (let attempt = 0; ; attempt++) {
-    if (signal?.aborted) throw new DOMException("Aborted", "AbortError");
-    try {
-      return await fetchPage(page);
-    } catch (e) {
-      if (signal?.aborted || attempt >= pauses.length) throw e;
-      await new Promise((r) => setTimeout(r, pauses[attempt]));
-    }
-  }
-}
-
-/**
- * Every page of a paged list, one after another (never in parallel), each
- * handed on as it arrives, until its rows add up to its total. Refused, and
- * said: a total that moves between pages (the list changed under the read),
- * and rows that fall short of the total (a report that keeps a shorter copy
- * than it counts). Returns how many rows were read.
- */
-export async function eachPage<T>(
-  fetchPage: (page: number) => Promise<PageAnswer<T>>,
-  asked: number,
-  onRows: (rows: T[]) => void | Promise<void>,
-  onProgress?: Progress,
-  signal?: AbortSignal,
-): Promise<number> {
-  let seen = 0;
-  let total: number | null = null;
-  for (let page = 1; page <= 100_000; page++) {
-    const r = await readPage(fetchPage, page, signal);
-    const rows = Array.isArray(r.rows) ? r.rows : [];
-    const t = typeof r.total === "number" ? r.total : seen + rows.length;
-    if (total === null) total = t;
-    else if (t !== total) throw new Error("The list changed while it was being read. Reload and try again.");
-    if (rows.length === 0 && seen < total)
-      throw new Error(
-        `This list counts ${total.toLocaleString()} rows but only ${seen.toLocaleString()} could be read. Nothing was exported.`,
-      );
-    seen += rows.length;
-    await onRows(rows);
-    const size = Math.max(1, r.page_size || asked);
-    onProgress?.(page, Math.max(page, Math.ceil(total / size)));
-    if (seen >= total) return seen;
-  }
-  // The API's own ceiling (100,000 pages): said, never a silent cut.
-  throw new Error("This list is longer than one read can take (100,000 pages). Narrow it with a search or the line filter.");
-}
+export { eachPage, type Progress } from "./completePages";
+import { eachPage, type PageAnswer, type Progress } from "./completePages";
 
 /** Every page of a paged list, kept (see eachPage). */
 export async function readAllPages<T>(
