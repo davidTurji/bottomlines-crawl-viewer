@@ -783,6 +783,28 @@ test.describe("discovery checks each line against your sellers.json", () => {
     expect(csv).toContain('"files.');
   });
 
+  test("an incomplete discovery artifact never downloads a partial CSV", async ({ page }) => {
+    await open(page, { discovery: true, discoveryApi: "cut" }, "/discovery");
+    await noTour(page);
+    const downloads: string[] = [];
+    page.on("download", d => downloads.push(d.suggestedFilename()));
+    await page.getByRole("button", { name: /^Export CSV$/ }).first().click();
+    await expect(page.getByRole("alert")).toContainText("Nothing was exported");
+    expect(downloads).toEqual([]);
+  });
+
+  test("a historical short roster refuses export instead of hiding missing files", async ({ page }) => {
+    await open(page, { discovery: true, discoveryApi: "old_uncompared" }, "/discovery");
+    await noTour(page);
+    const c = await find(page, WIDE);
+    await c.getByRole("button", { expanded: false }).first().click();
+    const downloads: string[] = [];
+    page.on("download", d => downloads.push(d.suggestedFilename()));
+    await c.getByRole("button", { name: "Export every publisher and app carrying this line as CSV" }).click();
+    await expect(c.getByRole("alert")).toContainText("does not contain all");
+    expect(downloads).toEqual([]);
+  });
+
   test("a cut baseline says so, and nothing is new this week", async ({ page }) => {
     const errors = watchErrors(page);
     await open(page, { discovery: true, discoveryApi: "baseline_cut" }, "/discovery");

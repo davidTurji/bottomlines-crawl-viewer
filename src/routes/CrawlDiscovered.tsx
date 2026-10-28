@@ -1,3 +1,4 @@
+import { eachPage } from "@/lib/completePages";
 import { Pager, usePaging } from "@/components/ListControls";
 import { Collapse, Settle } from "@/components/Motion";
 import { usePageCache } from "@/lib/pageCache";
@@ -93,6 +94,7 @@ export default function CrawlDiscovered() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [exporting, setExporting] = useState(false);
+  const [exportError, setExportError] = useState<string | null>(null);
   const [open, setOpen] = useState<Set<string>>(new Set());
   // Whether this crawl has any discovered lines at all, independent of the
   // filter, so an over-narrow filter never renders the "did not look"
@@ -387,12 +389,15 @@ export default function CrawlDiscovered() {
               disabled={exporting || total === 0}
               onClick={() => {
                 setExporting(true);
-                downloadCsv(token, filter, show).finally(() => setExporting(false));
+                setExportError(null);
+                downloadCsv(token, filter, show).catch((e: unknown) => setExportError(e instanceof Error ? e.message : "Export failed. Please try again."))
+                  .finally(() => setExporting(false));
               }}
             >
               {exporting ? "Preparing..." : "Export CSV"}
             </FilterAction>
           </FilterBar>
+          {exportError && <p role="alert" className="text-sm text-red-700">{exportError}</p>}
           {localOnly && (
             <p className="text-[11px] leading-relaxed text-slate-400">
               This sort reorders the {rows.length.toLocaleString()} lines on this page. The full list of{" "}
@@ -745,6 +750,7 @@ function Roster({
   const [q, setQ] = useState(initialQ);
   const [data, setData] = useState<RosterData>("loading");
   const [exporting, setExporting] = useState(false);
+  const [exportError, setExportError] = useState<string | null>(null);
   // Liveness, not per-run cancellation: setData("loading") re-renders, and
   // a `let cancelled` closure would then discard the very response it
   // waited for.
@@ -809,7 +815,9 @@ function Roster({
               disabled={exporting || total === 0}
               onClick={() => {
                 setExporting(true);
-                downloadLineCsv(token, line).finally(() => setExporting(false));
+                setExportError(null);
+                downloadLineCsv(token, line).catch((e: unknown) => setExportError(e instanceof Error ? e.message : "Export failed. Please try again."))
+                  .finally(() => setExporting(false));
               }}
               className="inline-flex items-center gap-1.5 text-xs font-medium text-slate-700 transition-colors hover:text-primary disabled:opacity-50"
               aria-label="Export every publisher and app carrying this line as CSV"
@@ -820,6 +828,7 @@ function Roster({
           )}
         </span>
       </div>
+      {exportError && <p role="alert" className="mb-3 text-sm text-red-700">{exportError}</p>}
       {data !== "toolarge" && (
         /* The Overview's search: round, the icon inside. */
         <div className="relative mb-3 w-full">
@@ -1090,9 +1099,10 @@ async function downloadLineCsv(token: string, line: DiscoveredLine) {
     cert_id: line.cert_id,
   };
   const rows: string[][] = [];
-  for (let pageNo = 1; pageNo <= 1_000; pageNo += 1) {
-    const r = await api.discoveredLinePlacements(token, id, { page: pageNo, page_size: 500 });
-    for (const p of r.rows) {
+  await eachPage(
+    (page) => api.discoveredLinePlacements(token, id, { page, page_size: 500 }),
+    500,
+    (pageRows) => { for (const p of pageRows) {
       rows.push([
         line.ssp_domain,
         line.publisher_id,
@@ -1107,8 +1117,11 @@ async function downloadLineCsv(token: string, line: DiscoveredLine) {
         p.bundle_id ?? "",
       ]);
     }
-    if (r.rows.length === 0 || rows.length >= r.total) break;
-  }
+    }, undefined, undefined, {
+      expectedTotal: line.placements_count,
+      key: (p) => JSON.stringify([p.developer_domain, p.file_host || p.developer_domain, p.found_in, p.store || "", p.bundle_id || ""]),
+    },
+  );
   // App columns only when the report carries apps (a report names
   // publishers and their files; app details ride along only when present).
   const hasApps = rows.some((r) => r[8] !== "");
@@ -1136,15 +1149,19 @@ async function downloadCsv(token: string, q: string, show: ShowFilter) {
     "needs_fixing",
   ] as const;
   const acc: string[][] = [];
+  // Check the unfiltered artifact too: filtering cannot restore omitted rows.
+  const whole = await api.discoveredLines(token, { page: 1, page_size: 1 });
+  if (whole.cut || whole.total !== whole.totals.lines ||
+      (whole.totals.listed_lines != null && whole.totals.listed_lines !== whole.totals.lines))
+    throw new Error("This report contains an incomplete discovery list. Request a complete new report. Nothing was exported.");
   const pageSize = 200;
-  for (let pageNo = 1; pageNo <= 2_000; pageNo += 1) {
-    const r = await api.discoveredLines(token, {
-      page: pageNo,
+  await eachPage((page) => api.discoveredLines(token, {
+      page,
       page_size: pageSize,
       q: q || undefined,
       show: show === "all" ? undefined : show,
-    });
-    for (const row of r.rows) {
+    }), pageSize, (pageRows) => {
+    for (const row of pageRows) {
       acc.push([
         row.ssp_domain,
         row.publisher_id,
@@ -1160,9 +1177,8 @@ async function downloadCsv(token: string, q: string, show: ShowFilter) {
         (row.issues ?? []).map((i) => i.text).join("; "),
       ]);
     }
-    // Stop on a short page, and on the report's own count: a server that
-    // caps page_size below what was asked must not end the file early.
-    if (r.rows.length === 0 || acc.length >= r.total) break;
-  }
+  }, undefined, undefined, {
+    key: (row) => JSON.stringify([row.ssp_domain, row.publisher_id, row.relationship, row.cert_id]),
+  });
   saveCsv(`discovery-lines-${today()}.csv`, header, acc);
 }
