@@ -7,6 +7,7 @@ const BASE = (import.meta.env.VITE_API_BASE as string) ?? "/api";
 // The mock adapter lives in src/lib/mockData.ts.
 import { LINES_PARAM, linesQuery, serializeLines } from "./lineFilter";
 import { PAGE_SIZE } from "./paging";
+import { downloadBlob } from "./fileDownload";
 import { pageFromGone } from "./inactive";
 
 export const MOCK = (import.meta.env.VITE_MOCK as string | undefined) === "true";
@@ -1118,14 +1119,7 @@ export const api = {
       /filename="?([^";]+)"?/.exec(
         res.headers.get("Content-Disposition") ?? "",
       )?.[1] ?? `schain.${format}`;
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement("a");
-    a.href = url;
-    a.download = name;
-    document.body.appendChild(a);
-    a.click();
-    document.body.removeChild(a);
-    URL.revokeObjectURL(url);
+    downloadBlob(blob, name);
     return { used, limit };
   },
   chat: async function* (

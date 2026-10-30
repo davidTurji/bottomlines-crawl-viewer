@@ -50,7 +50,7 @@ test('Discovery connects search, filters, export and pagination with inline comp
   await installFakeApi(page, { discovery: true });
   await page.goto(`/crawl-report/${TOKEN}/discovery`);
   const search = page.getByRole('textbox', { name: 'Search seller IDs or publishers' });
-  const pager = page.locator('.discovery-pager');
+  const pager = page.locator('.list-toolbar-pager').first();
   await expect(search).toBeVisible();
   await expect(pager).toBeVisible();
   const s = (await search.boundingBox())!;
@@ -58,7 +58,7 @@ test('Discovery connects search, filters, export and pagination with inline comp
   const toolbar = page.locator('[data-list-toolbar]').filter({ has: search });
   await expect(toolbar.getByRole('button', { name: 'Show which lines' })).toBeVisible();
   await expect(toolbar.getByRole('button', { name: 'Export CSV' })).toBeVisible();
-  await expect(toolbar.locator('.discovery-pager')).toBeVisible();
+  await expect(toolbar.locator('.list-toolbar-pager')).toBeVisible();
   expect(Math.abs((s.y + s.height / 2) - (p.y + p.height / 2))).toBeLessThan(3);
   for (const delta of await page.locator('.report-kpi-discovery .report-delta').all()) {
     const amount = (await delta.locator(':scope > span').first().boundingBox())!;

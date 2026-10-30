@@ -3,6 +3,9 @@ import { Collapse, Settle } from "@/components/Motion";
 import LockedTail from "@/components/LockedTail";
 import TrialBanner from "@/components/TrialBanner";
 import { DeclarationsSkeleton } from "@/components/Skeleton";
+import { SourceFileButton, PublisherDomainLink } from "@/components/PublisherLinks";
+import { ReportButton } from "@/components/ReportButton";
+import { ReportDescription } from "@/components/ReportDescription";
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { ChevronDown, Download } from "lucide-react";
 
@@ -489,7 +492,10 @@ function KindSection({
             />
             {copy.title}
           </h2>
-          <p className="mt-0.5 text-sm text-slate-500"><span className="hidden sm:inline">{copy.blurb}</span><span className="sm:hidden">{section.kind === "inventory partner" ? "Partners named in publisher files." : section.kind === "owner domain" ? "Owners named in publisher files." : "Sales managers named in publisher files."}</span></p>
+          <ReportDescription className="mt-0.5" label={copy.title}
+            summary={section.kind === "inventory partner" ? "Partners named in publisher files." : section.kind === "owner domain" ? "Owners named in publisher files." : "Sales managers named in publisher files."}>
+            {copy.blurb}
+          </ReportDescription>
         </div>
         {total > 0 && (
           <div className="hidden flex-shrink-0 text-right text-xs text-slate-500 sm:block">
@@ -576,9 +582,9 @@ function SubjectCard({
   return (
     <div
       className={cn(
-        "report-row declaration-card overflow-hidden rounded-xl border bg-white transition-colors",
-        tone.border,
+        "report-row declaration-card overflow-hidden rounded-xl border border-border bg-white transition-colors",
       )}
+      data-declaration-kind={subject.kind}
     >
       <button
         type="button"
@@ -644,7 +650,7 @@ function SubjectCard({
             the other numbers across. */}
         <div className="hidden items-center gap-6 text-right sm:flex">
           <div className="w-[76px]">
-            <MiniStat label="Declarations" value={subject.total} emphasis />
+            <MiniStat label="Publishers" value={subject.total} emphasis />
           </div>
           <div className="w-[64px]">
             <MiniStat label="ads.txt" value={subject.ads_txt} />
@@ -664,7 +670,7 @@ function SubjectCard({
       </button>
 
       <Collapse open={open}>
-        <div className={cn("declaration-detail border-t px-4 pb-4 pt-3 sm:px-5", tone.border, tone.tint)}>
+        <div className="declaration-detail border-t border-border px-4 pb-4 pt-3 sm:px-5">
           <div className="mb-1 flex items-center justify-between gap-3">
             <span className="text-xs font-medium text-slate-700">
               Named by{" "}
@@ -678,8 +684,8 @@ function SubjectCard({
                 domain and kind. Built from the frozen payload in the
                 browser, so it costs no request and works while the
                 crawler sleeps. */}
-            <button
-              type="button"
+            <ReportButton
+              title={notShown > 0 ? `Download the ${subject.declarers.length} publishers captured in this older report` : "Download every publisher that names this domain"}
               onClick={(e) => {
                 e.stopPropagation();
                 // Named like the workbook: the customer's domain, the
@@ -689,11 +695,11 @@ function SubjectCard({
                   subjectCsv(subject),
                 );
               }}
-              className="inline-flex items-center gap-1.5 rounded-full border border-border bg-white px-3 py-1 text-[11px] text-slate-700 transition-colors hover:border-primary/30"
+              className="report-download-action"
             >
               <Download className="h-3 w-3" />
               Export CSV
-            </button>
+            </ReportButton>
           </div>
           {/* Three rows tall, the rest by scrolling inside the card (David,
               2026-09-15), so a domain named by forty files does not push
@@ -707,28 +713,33 @@ function SubjectCard({
               {subject.declarers.map((d, i) => (
                 <li
                   key={`${d.domain}|${i}`}
-                  className="declaration-publisher flex flex-wrap items-center gap-x-3 gap-y-1 px-3 py-3 text-xs tabular-nums"
+                  className="declaration-publisher text-xs tabular-nums"
                 >
-                  <span className="min-w-0 break-all font-medium text-slate-800">{d.domain}</span>
-                  {d.is_new && <NewMark className="text-primary">new</NewMark>}
-                  {d.country && (
-                    <span
-                      className={cn("flex-shrink-0 text-[10px]", tone.text)}
-                      title={countryName(d.country)}
-                    >
-                      {d.country}
-                    </span>
-                  )}
-                  <span className="ml-auto flex-shrink-0 font-sans text-[10px] text-slate-400">
-                    {d.found_in}
-                  </span>
+                  <span className="declaration-match-number" aria-label={`Publisher ${i + 1}`}>{i + 1}</span>
+                  <div className="min-w-0">
+                    <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
+                      <PublisherDomainLink domain={d.domain} className="break-all font-medium text-slate-800" />
+                      {d.is_new && <NewMark className="text-primary">new</NewMark>}
+                      {d.country && (
+                        <span className={cn("flex-shrink-0 text-[10px]", tone.text)} title={countryName(d.country)}>
+                          {d.country}
+                        </span>
+                      )}
+                    </div>
+                    <div className="mt-1 text-[11px] text-slate-500">
+                      {d.files.length > 0 ? `${d.files.length} ${d.files.length === 1 ? "file" : "files"} · ${d.files.join(" + ")}` : "Source file not recorded"}
+                    </div>
+                  </div>
+                  <div className="declaration-publisher-actions">
+                    <SourceFileButton domain={d.domain} foundIn={d.files.length > 1 ? "both" : d.files[0]} />
+                  </div>
                 </li>
               ))}
             </ul>
           </div>
           {capped && notShown > 0 && (
             <p className="mt-1 text-[10px] text-slate-500">
-              and {notShown.toLocaleString()} more
+              {notShown.toLocaleString()} more were not captured in this older report. CSV includes the captured publishers only.
             </p>
           )}
         </div>

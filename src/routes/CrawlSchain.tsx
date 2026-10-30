@@ -8,7 +8,8 @@ import { PageShell } from "@/components/PageShell";
 import SchainHowItWorks from "@/components/SchainHowItWorks";
 import { Pager, usePaging } from "@/components/ListControls";
 import LockedTail from "@/components/LockedTail";
-import { SkeletonRows, SkeletonStatCards } from "@/components/Skeleton";
+import { ReportButton } from "@/components/ReportButton";
+import { SkeletonRows, SkeletonScreen, SkeletonStatCards } from "@/components/Skeleton";
 import TrialBanner from "@/components/TrialBanner";
 import { formatWeek, WeekLine } from "@/components/WeekLine";
 import { lineKey, lineLabel, sourceHint } from "@/lib/lineFilter";
@@ -167,7 +168,7 @@ export default function CrawlSchain() {
       </div>
 
       {error && <p className="py-4 text-sm text-critical">{error}</p>}
-      {!overview && !error && <SkeletonStatCards />}
+      {!overview && !error && <SkeletonScreen label="Loading schain"><SkeletonStatCards /></SkeletonScreen>}
       {overview && overview.status !== "ok" && <NotAvailable overview={overview} />}
 
       {overview && overview.status === "ok" && (
@@ -1034,7 +1035,7 @@ function Result({
   }, [token, selection, page, view]);
 
   if (error) return <p className="py-2 text-sm text-critical">{error}</p>;
-  if (!preview) return <SkeletonStatCards />;
+  if (!preview) return <SkeletonScreen label="Loading schain preview"><SkeletonStatCards /></SkeletonScreen>;
 
   const f = preview.funnel;
   const t = preview.totals;
@@ -1493,23 +1494,12 @@ function Download3({
             {error && <p className="mt-2 text-[12px] text-critical">{error}</p>}
             <div className="mt-5 flex justify-end gap-2">
               <Dialog.Close asChild>
-                <button
-                  type="button"
-                  disabled={busy}
-                  className="h-10 rounded-full border border-border px-4 text-sm font-medium text-slate-700 hover:bg-muted/50"
-                >
-                  Cancel
-                </button>
+                <ReportButton variant="outline" disabled={busy}>Cancel</ReportButton>
               </Dialog.Close>
-              <button
-                type="button"
-                onClick={go}
-                disabled={busy || !agreed}
-                className="inline-flex h-10 items-center gap-2 rounded-lg report-action bg-primary px-5 text-sm font-medium text-primary-foreground transition-colors disabled:opacity-60"
-              >
+              <ReportButton onClick={go} disabled={busy || !agreed}>
                 {busy ? <Loader2 className="h-4 w-4 animate-spin" /> : <Download className="h-4 w-4" />}
                 {busy ? "Preparing" : "Download"}
-              </button>
+              </ReportButton>
             </div>
           </Dialog.Content>
         </Dialog.Portal>

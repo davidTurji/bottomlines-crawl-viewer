@@ -1,3 +1,6 @@
+import { csvLine, downloadCsvParts } from "@/lib/csvDownload";
+import { ReportButton } from "@/components/ReportButton";
+import { ReportDescription } from "@/components/ReportDescription";
 import { eachPage } from "@/lib/completePages";
 import { Pager, usePaging } from "@/components/ListControls";
 import { Collapse, Settle } from "@/components/Motion";
@@ -243,7 +246,7 @@ export default function CrawlDiscovered() {
         <h1 className="text-xl font-bold leading-tight tracking-tight text-slate-900 sm:text-2xl">
           Discovery
         </h1>
-        <p className="mt-1 text-sm text-slate-500">
+        <ReportDescription className="mt-1" label="Discovery" summary="Lines across publisher files that start with your domain.">
           Every ads.txt and app-ads.txt line on the open web that starts with your domain
           {domains.length > 0 && (
             <>
@@ -266,7 +269,7 @@ export default function CrawlDiscovered() {
               .
             </>
           )}
-        </p>
+        </ReportDescription>
         <WeekLine
           week={weekLabel}
           previousWeek={prevWeekLabel}
@@ -647,7 +650,7 @@ function LineCard({
                       : undefined
                   }
                   className={cn(
-                    "inline-flex max-w-full flex-shrink-0 items-center gap-1.5 rounded-sm text-[12px] font-medium leading-5 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2",
+                    "discovery-seller-mark inline-flex max-w-full flex-shrink-0 items-center gap-1.5 rounded-sm text-[12px] font-medium leading-5 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2",
                     MARK_STYLE[mark.kind].cls,
                     sellersPage && cn("cursor-pointer", MARK_STYLE[mark.kind].hover),
                   )}
@@ -814,8 +817,7 @@ function Roster({
           <FilterSearch value={q} onChange={setQ} placeholder="Search publishers" ariaLabel="Search publishers carrying this line" />
           {/* The page toolbar's Export, the same look, for this line alone. */}
           {canExport && (
-            <button
-              type="button"
+            <ReportButton
               disabled={exporting || total === 0}
               onClick={() => {
                 setExporting(true);
@@ -823,12 +825,12 @@ function Roster({
                 downloadLineCsv(token, line).catch((e: unknown) => setExportError(e instanceof Error ? e.message : "Export failed. Please try again."))
                   .finally(() => setExporting(false));
               }}
-              className="list-toolbar-action inline-flex items-center gap-1.5 px-3 text-xs font-medium text-slate-700 transition-colors hover:text-primary disabled:opacity-50"
+              className="report-download-action list-toolbar-action"
               aria-label="Export every publisher source file carrying this line as CSV"
             >
               <Download className="h-3.5 w-3.5" />
               {exporting ? "Preparing..." : "Export CSV"}
-            </button>
+            </ReportButton>
           )}
           {whole && typeof data === "object" && <Pager placement="inline" className="list-toolbar-pager" page={page}
             pageSize={ROSTER_PAGE} total={total ?? 0} onPage={setPage} noun="source files" />}
@@ -1030,21 +1032,9 @@ function NoDiscoveryCard() {
  * carrying the active search and Show filter. Walks every page; the cap
  * that remains is a runaway guard far above any real report.
  */
-/** One CSV cell: always quoted, inner quotes doubled (RFC 4180). */
-const csvCell = (v: string) => `"${v.replace(/"/g, '""')}"`;
-
-/** Save rows as a CSV file Excel opens with accents intact (the BOM). */
+/** Save through the shared CSV writer used by all report lists. */
 function saveCsv(name: string, header: readonly string[], rows: string[][]) {
-  const csv = "\uFEFF" + [header, ...rows].map((r) => r.map(csvCell).join(",")).join("\r\n");
-  const blob = new Blob([csv], { type: "text/csv;charset=utf-8" });
-  const url = URL.createObjectURL(blob);
-  const a = document.createElement("a");
-  a.href = url;
-  a.download = name;
-  document.body.appendChild(a);
-  a.click();
-  document.body.removeChild(a);
-  URL.revokeObjectURL(url);
+  downloadCsvParts(["\uFEFF", csvLine([...header]), ...rows.map(row => "\r\n" + csvLine(row))], name);
 }
 
 const today = () => new Date().toISOString().slice(0, 10);

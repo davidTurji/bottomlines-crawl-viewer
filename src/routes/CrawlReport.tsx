@@ -1619,7 +1619,7 @@ function StatusControls({ tab, setTab, counts, off, inactive }: {
         {extra.length > 0 && <button type="button" className={cn("status-more", selectedExtra && "status-more-active")} aria-label="More statuses"
           title={expanded ? "Hide additional statuses" : selectedExtra ? `${selectedExtra.label} selected · More statuses` : "More statuses"}
           aria-expanded={expanded} aria-controls={moreId} onClick={() => setExpanded(value => !value)}>
-          <ChevronRight aria-hidden className={cn("h-4 w-4 transition-transform", expanded && "rotate-180")} />
+          <span>+{extra.length} statuses</span><ChevronRight aria-hidden className={cn("h-4 w-4 transition-transform", expanded && "rotate-180")} />
         </button>}
         {extra.length > 0 && <span id={moreId} hidden={!expanded} className="status-extra-inline">
           {extra.map(option => <TabsTrigger key={option.value} value={option.value}>{option.label}</TabsTrigger>)}

@@ -329,8 +329,20 @@ export function LineActionGroup({ children, className, tone = "neutral" }: {
 }
 
 function SelectedLineActions({ target }: { target: LineTarget }) {
-  const { domain, line, foundIn, gone } = target;
-  const text = lineText(line);
+  return <>
+    <LineCopyButton key={target.key} text={lineText(target.line)} />
+    <SourceFileButton domain={target.domain} foundIn={target.foundIn} line={target.line} gone={target.gone} />
+  </>;
+}
+
+/** Shared source action for matched lines, Discovery and declaration rosters. */
+export function SourceFileButton({ domain, foundIn, line, gone = false }: {
+  domain: string | null;
+  foundIn?: string | null;
+  line?: LineRecord;
+  gone?: boolean;
+}) {
+  const text = line ? lineText(line) : "declaration";
   const files = filesOf(foundIn);
   const at = gone ? null : line;
   const stop = (e: MouseEvent | KeyboardEvent | PointerEvent) => e.stopPropagation();
@@ -339,7 +351,6 @@ function SelectedLineActions({ target }: { target: LineTarget }) {
     : `Open ${text} in ${host(domain!)}/${f}`;
   return (
     <>
-      <LineCopyButton key={target.key} text={text} />
       {domain && (files.length === 1 ? (
         <a href={fileUrl(domain, files[0], at)} target="_blank" rel="noopener noreferrer"
           aria-label={label(files[0])} title={`${gone ? "Current file" : "Source"}: ${host(domain)}/${files[0]}`}

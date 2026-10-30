@@ -9,6 +9,7 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { cn } from "@/lib/utils";
+import { ReportButton } from "@/components/ReportButton";
 
 /** One shared control surface: search, filters, actions, then results/paging. */
 export function FilterBar({
@@ -133,15 +134,14 @@ export function FilterAction({
   return (
     <>
       <div className="list-toolbar-divider" />
-      <button
-        type="button"
+      <ReportButton
         onClick={onClick}
         disabled={disabled}
-        className="list-toolbar-action flex items-center justify-center gap-1.5 whitespace-nowrap px-3 text-xs font-medium text-slate-600 transition-colors hover:bg-slate-50 hover:text-primary disabled:opacity-40"
+        className="report-download-action list-toolbar-action"
       >
         {Icon && <Icon aria-hidden className="h-3.5 w-3.5 flex-shrink-0" />}
         {children}
-      </button>
+      </ReportButton>
     </>
   );
 }

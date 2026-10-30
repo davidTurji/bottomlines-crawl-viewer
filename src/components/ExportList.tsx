@@ -19,34 +19,11 @@ import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuLabel,
 
 import { cn } from "@/lib/utils";
 
-export type CsvCell = string | number | null | undefined;
+import { csvLine, downloadCsvParts, type CsvCell } from "@/lib/csvDownload";
+export { csvCell, csvLine, type CsvCell } from "@/lib/csvDownload";
 
 /** Where an export writes: its header once, then each page's rows. */
 export type CsvSink = { header: (cols: string[]) => void; rows: (rows: CsvCell[][]) => void };
-
-/** One cell, RFC 4180 quoted, never a formula. */
-export function csvCell(v: CsvCell): string {
-  const t = v == null ? "" : String(v);
-  const safe = /^[=+\-@\t\r]/.test(t) ? `'${t}` : t;
-  return `"${safe.replace(/"/g, '""')}"`;
-}
-
-/** One CSV line (no line end). */
-export function csvLine(cells: CsvCell[]): string {
-  return cells.map(csvCell).join(",");
-}
-
-function download(parts: string[], filename: string) {
-  const url = URL.createObjectURL(new Blob(parts, { type: "text/csv;charset=utf-8" }));
-  const a = document.createElement("a");
-  a.href = url;
-  a.download = filename;
-  document.body.appendChild(a);
-  a.click();
-  a.remove();
-  // Safari starts the download after the click returns: let it go first.
-  window.setTimeout(() => URL.revokeObjectURL(url), 1500);
-}
 
 /** A file name from words: lower case, dashes, ".csv". */
 export function csvName(...parts: (string | null | undefined)[]): string {
@@ -109,7 +86,7 @@ export function ExportListButton({
       const done = await run(sink, (n, of) => !c.signal.aborted && setProgress({ done: n, of }), c.signal);
       const filename = typeof done === "string" ? done : done.name;
       if (!c.signal.aborted && lines > 0) {
-        download(parts, filename);
+        downloadCsvParts(parts, filename);
         if (typeof done === "object" && done.note) setNote(done.note);
       }
     } catch (e) {
@@ -125,7 +102,7 @@ export function ExportListButton({
       <DropdownMenu>
         <DropdownMenuTrigger asChild>
           <button type="button" data-export-list disabled={busy} aria-label={busy ? "Preparing CSV download" : "Download"}
-            aria-describedby={helpId} title={busy ? "Preparing CSV download" : explanation} className="list-options-trigger">
+            aria-describedby={helpId} title={busy ? "Preparing CSV download" : explanation} className="list-options-trigger report-download-action">
             {busy ? <Loader2 aria-hidden className="list-download-icon h-3.5 w-3.5 animate-spin" /> : <Download aria-hidden className="list-download-icon h-3.5 w-3.5" />}
             <span>{busy ? "Preparing" : "Download"}</span>
             <Info aria-hidden className="list-download-info h-3.5 w-3.5 flex-none opacity-70" />

@@ -20,7 +20,7 @@ for (const width of [1440,390,320]) {
     if(width>640) {
       await expect(page.getByRole('tab',{name:'All matched',exact:true})).toBeVisible();
       await expect(page.getByRole('tab',{name:'Inactive',exact:true})).not.toBeVisible();
-      await expect(page.getByRole('button',{name:'More statuses',exact:true})).toHaveText('');
+      await expect(page.getByRole('button',{name:'More statuses',exact:true})).toHaveText('+4 statuses');
       await revealStatuses(page);
       await expect(page.getByRole('tab',{name:'Started watching',exact:true})).toBeVisible();
     }
@@ -178,7 +178,7 @@ for(const width of [1440,960]){
     await page.setViewportSize({width,height:900});await page.addInitScript(quietTour);
     await installFakeApi(page,{watchTabs:true,appChange:true,inactive:'ok'});await page.goto(BASE);
     const arrow=page.getByRole('button',{name:'More statuses',exact:true});
-    await expect(arrow).toHaveText('');await expect(arrow).toHaveAttribute('aria-expanded','false');
+    await expect(arrow).toHaveText('+4 statuses');await expect(arrow).toHaveAttribute('aria-expanded','false');
     await revealStatuses(page);await expect(page.getByRole('tab',{name:'Started watching',exact:true})).toBeVisible();
     const tops=await page.getByRole('tab').evaluateAll(nodes=>nodes.filter(n=>n.getClientRects().length).map(n=>n.getBoundingClientRect().top));
     expect(Math.max(...tops)-Math.min(...tops)).toBeLessThanOrEqual(1);
