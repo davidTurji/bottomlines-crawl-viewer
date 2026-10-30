@@ -49,7 +49,7 @@ const oneToN = (n: number, from = 1) => Array.from({ length: n }, (_, i) => from
 
 /** The open row's card on the Overview. */
 const openCard = (page: Page) =>
-  page.locator("button[aria-expanded='true']").first().locator("xpath=ancestor::div[contains(@class,'rounded-3xl')][1]");
+  page.locator("button[aria-expanded='true']").first().locator("xpath=ancestor::div[contains(@class,'report-row')][1]");
 
 /** Opens Overview rows in turn until one shows the flat "Matched seat
  *  lines" list (a row that moved shows change windows instead). */
@@ -169,7 +169,7 @@ test.describe("the seat line reads in full on a phone (David, 2026-10-27)", () =
         const via = [...li.querySelectorAll("[data-line-via]")].find((e) => e.getClientRects().length > 0) as HTMLElement;
         const no = li.querySelector("[data-line-no]") as HTMLElement;
         const t = text.getBoundingClientRect();
-        const v = via.getBoundingClientRect();
+        const v = (li.querySelector("[data-ipd-explanation]") ?? via).getBoundingClientRect();
         const n = no.getBoundingClientRect();
         const lineH = parseFloat(getComputedStyle(text).lineHeight);
         return {
@@ -202,12 +202,12 @@ test.describe("the seat line reads in full on a phone (David, 2026-10-27)", () =
     expect(errors).toEqual([]);
   });
 
-  test("desktop: unchanged, the partners at the right margin of the line", async ({ page }) => {
+  test("desktop: IPD explanation stays directly under its seat line", async ({ page }) => {
     const errors = watchErrors(page);
     await open(page, { matchType: true, realShapes: true });
     const out = await geometry(await partnerRows(page));
     for (const r of out) {
-      expect(r.sameLine, "partners on the line's own row").toBe(true);
+      expect(r.viaBelow, "match explanation below its seat line").toBe(true);
       expect(r.ellipsis).toBe("ellipsis");
     }
     expect(errors).toEqual([]);

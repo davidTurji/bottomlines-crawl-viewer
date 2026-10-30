@@ -42,7 +42,7 @@
  */
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 
-import { Check, ChevronsUpDown, ListFilter, Loader2 } from "lucide-react";
+import { Check, ChevronsUpDown, ListFilter, Loader2, Search, X } from "lucide-react";
 
 import {
   DropdownMenu,
@@ -195,7 +195,14 @@ export function LineFilter({
   const [open, setOpen] = useState(false);
   // The ticks in progress. Only ever read inside the open menu.
   const [draft, setDraft] = useState<string[]>(selected);
+  const [query, setQuery] = useState("");
+  const searchRef = useRef<HTMLInputElement | null>(null);
   const listRef = useRef<HTMLDivElement | null>(null);
+  useEffect(() => {
+    if (!open) return;
+    const frame = requestAnimationFrame(() => searchRef.current?.focus());
+    return () => cancelAnimationFrame(frame);
+  }, [open]);
 
   // Seeded from the URL on every open, so it cannot carry a stale draft
   // across a back button, a link arriving with ?lines=, or the other
@@ -207,7 +214,10 @@ export function LineFilter({
   // key makes the state explicit: what is ticked is what you get.
   const allKeys = seats.map(lineKey);
   const handleOpenChange = (next: boolean) => {
-    if (next) setDraft(selected.length === 0 ? allKeys : selected);
+    if (next) {
+      setDraft(selected.length === 0 ? allKeys : selected);
+      setQuery("");
+    }
     setOpen(next);
   };
 
@@ -227,11 +237,22 @@ export function LineFilter({
   // commit as "all", which is the opposite of what the reader just did.
   const emptyPick = draft.length === 0;
   const allTicked = draft.length === seats.length;
+  // Search changes only which choices are visible; hidden choices retain their ticks.
+  const terms = query.trim().toLowerCase().split(/\s+/).filter(Boolean);
+  const visibleSeats = terms.length ? seats.filter(s => {
+    const text = `${lineLabel(s)} ${s.cert_id ?? ""} ${sourceHint(s) ?? ""}`.toLowerCase();
+    return terms.every(term => text.includes(term));
+  }) : seats;
 
   const toggle = (key: string) => {
     setDraft((prev) =>
       prev.includes(key) ? prev.filter((k) => k !== key) : [...prev, key],
     );
+  };
+  // Filtering repositions rows beneath a stationary pointer. Hover must not
+  // take keyboard focus away from the search while someone is still typing.
+  const keepSearchFocus = (event: { preventDefault: () => void }) => {
+    if (document.activeElement === searchRef.current) event.preventDefault();
   };
 
   const apply = () => {
@@ -250,7 +271,7 @@ export function LineFilter({
           data-tour="line-filter"
           className={cn(
             HEADER_PILL,
-            "flex flex-shrink-0 items-center gap-2 rounded-full border bg-white px-3.5 text-xs font-medium text-slate-900 shadow-sm transition-colors hover:bg-slate-50",
+            "flex flex-shrink-0 items-center gap-2 rounded-lg border bg-white px-3.5 text-xs font-medium text-slate-900 transition-colors hover:bg-slate-50",
             applied > 0 ? "border-primary/50" : "border-border",
             className,
           )}
@@ -290,6 +311,12 @@ export function LineFilter({
       <DropdownMenuContent
         align="end"
         collisionPadding={16}
+        onKeyDown={event => {
+          if (event.key === "ArrowUp" && event.target === listRef.current?.querySelector('[role="menuitemcheckbox"]')) {
+            event.preventDefault();
+            searchRef.current?.focus();
+          }
+        }}
         className="flex w-[420px] max-w-[calc(100vw-2rem)] flex-col"
         style={{ maxHeight: "var(--radix-dropdown-menu-content-available-height)" }}
       >
@@ -301,8 +328,24 @@ export function LineFilter({
               already says where it came from and when. The count earns
               its place because the list scrolls. */}
           <span>Show only these lines</span>
-          <span className="font-normal tabular-nums text-slate-400">{seats.length}</span>
+          <span className="font-normal tabular-nums text-slate-400">{terms.length ? `${visibleSeats.length} of ${seats.length}` : seats.length}</span>
         </DropdownMenuLabel>
+        <div className="mx-1 mb-2 flex h-9 flex-shrink-0 items-center gap-2 rounded-md border border-border bg-white px-2.5 focus-within:border-primary/40 focus-within:ring-2 focus-within:ring-primary/5">
+          <Search aria-hidden className="h-3.5 w-3.5 flex-none text-slate-400" />
+          <input ref={searchRef} type="text" aria-label="Search seat lines" placeholder="Search domain, seller ID or relationship"
+            value={query} onChange={e => { setQuery(e.target.value); if (listRef.current) listRef.current.scrollTop = 0; }}
+            onKeyDown={e => {
+              if (e.key === "Escape") return;
+              e.stopPropagation();
+              if (e.key === "ArrowDown") {
+                e.preventDefault();
+                listRef.current?.querySelector<HTMLElement>('[role="menuitemcheckbox"]')?.focus();
+              }
+            }}
+            className="min-w-0 flex-1 bg-transparent text-xs text-slate-900 outline-none placeholder:text-slate-400" />
+          {query && <button type="button" aria-label="Clear line search" className="grid h-6 w-6 flex-none place-items-center rounded text-slate-400 hover:bg-muted hover:text-slate-700"
+            onClick={() => { setQuery(""); searchRef.current?.focus(); }}><X aria-hidden className="h-3.5 w-3.5" /></button>}
+        </div>
         {/* The wrapper is a flex column too, so the list is a flex item
             with a definite height (a percentage height would not resolve
             against a max-height-capped menu) and the rail can sit beside
@@ -314,7 +357,8 @@ export function LineFilter({
           aria-label="Seat lines"
           className="scrollbar-none min-h-0 flex-1 overflow-y-auto overscroll-contain pr-4"
         >
-        {seats.map((s) => {
+        {visibleSeats.length === 0 && <p role="status" className="px-3 py-6 text-center text-xs text-slate-500">No matching lines. Try a domain or seller ID.</p>}
+        {visibleSeats.map((s) => {
           const key = lineKey(s);
           const on = chosen.has(key);
           // Every line hints where it came from and the day it was added,
@@ -327,6 +371,8 @@ export function LineFilter({
           return (
             <DropdownMenuItem
               key={key}
+              onPointerMove={keepSearchFocus}
+              onPointerLeave={keepSearchFocus}
               // Keep the menu open: the reader is ticking several.
               onSelect={(e) => {
                 e.preventDefault();
@@ -397,10 +443,12 @@ export function LineFilter({
           );
         })}
         </div>
-        <ScrollRail target={listRef} deps={[seats.length]} />
+        <ScrollRail target={listRef} deps={[visibleSeats.length]} />
         </div>
         <DropdownMenuSeparator className="flex-shrink-0" />
         <DropdownMenuItem
+          onPointerMove={keepSearchFocus}
+          onPointerLeave={keepSearchFocus}
           onSelect={(e) => {
             e.preventDefault();
             // A real select-all now, not a clear. Ticked, it fills every
@@ -451,6 +499,8 @@ export function LineFilter({
           </span>
           <DropdownMenuItem
             asChild
+            onPointerMove={keepSearchFocus}
+            onPointerLeave={keepSearchFocus}
             disabled={!dirty || emptyPick}
             onSelect={(e) => {
               // Radix closes the menu on select by default; `apply` needs

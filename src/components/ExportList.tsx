@@ -13,8 +13,9 @@
  * or return is written with a leading ' so it is never run as a formula;
  * the file starts with a UTF-8 byte order mark so accents survive Excel.
  */
-import { Download } from "lucide-react";
-import { useEffect, useRef, useState } from "react";
+import { Download, Info, Loader2 } from "lucide-react";
+import { useEffect, useId, useRef, useState } from "react";
+import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuLabel, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
 
 import { cn } from "@/lib/utils";
 
@@ -65,17 +66,21 @@ export type ExportDone = string | { name: string; note?: string };
 export function ExportListButton({
   run,
   className,
+  noun = "results",
 }: {
   /** Reads the whole list into the sink, page by page, reporting its pages
    *  as it goes; answers the file's name. */
   run: (sink: CsvSink, onProgress: (done: number, of: number) => void, signal: AbortSignal) => Promise<ExportDone>;
   className?: string;
+  noun?: string;
 }) {
   const [busy, setBusy] = useState(false);
   const [progress, setProgress] = useState<{ done: number; of: number } | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [note, setNote] = useState<string | null>(null);
   const controller = useRef<AbortController | null>(null);
+  const helpId = useId();
+  const explanation = `Current ${noun} view as CSV. All matching pages, with filters applied.`;
   useEffect(() => () => controller.current?.abort(), []);
 
   const go = async () => {
@@ -115,22 +120,26 @@ export function ExportListButton({
   };
 
   return (
-    <span className={cn("inline-flex flex-shrink-0 items-center gap-2", className)}>
-      <button
-        type="button"
-        data-export-list
-        onClick={go}
-        disabled={busy}
-        title="A CSV of this list as it stands: its tab, filters and search, every page"
-        className="inline-flex h-8 flex-shrink-0 items-center gap-1.5 whitespace-nowrap rounded-full border border-border bg-white px-3 text-[12px] font-medium text-slate-600 shadow-sm transition-colors hover:bg-muted disabled:cursor-progress"
-      >
-        <Download aria-hidden className="h-3.5 w-3.5" />
-        {busy
-          ? progress && progress.of > 1
-            ? `Preparing ${progress.done.toLocaleString()} of ${progress.of.toLocaleString()}`
-            : "Preparing…"
-          : "Export this list"}
-      </button>
+    <span className={cn("list-export-options", className)}>
+      <span id={helpId} className="sr-only">{explanation}</span>
+      <DropdownMenu>
+        <DropdownMenuTrigger asChild>
+          <button type="button" data-export-list disabled={busy} aria-label={busy ? "Preparing CSV download" : "Download"}
+            aria-describedby={helpId} title={busy ? "Preparing CSV download" : explanation} className="list-options-trigger">
+            {busy ? <Loader2 aria-hidden className="list-download-icon h-3.5 w-3.5 animate-spin" /> : <Download aria-hidden className="list-download-icon h-3.5 w-3.5" />}
+            <span>{busy ? "Preparing" : "Download"}</span>
+            <Info aria-hidden className="list-download-info h-3.5 w-3.5 flex-none opacity-70" />
+          </button>
+        </DropdownMenuTrigger>
+        <DropdownMenuContent align="end" className="w-72">
+          <DropdownMenuLabel className="px-2 pb-1 pt-2 text-xs font-medium text-slate-800">What this downloads</DropdownMenuLabel>
+          <p className="px-2 pb-3 text-xs leading-relaxed text-slate-500">{explanation}</p>
+          <DropdownMenuItem onSelect={() => void go()} className="cursor-pointer gap-2">
+            <Download aria-hidden className="h-4 w-4" /> Download {noun} (CSV)
+          </DropdownMenuItem>
+        </DropdownMenuContent>
+      </DropdownMenu>
+      {busy && <span role="status" className="sr-only">{progress ? `Preparing ${progress.done} of ${progress.of}` : "Preparing CSV download"}</span>}
       {error && (
         <span role="alert" className="text-[11px] text-critical">
           {error}

@@ -1,3 +1,4 @@
+import { selectStatus } from "./statusChoice";
 /**
  * The report must open in every shape a real report comes in.
  *
@@ -265,27 +266,30 @@ test.describe("the matched list", () => {
     expect(errors).toEqual([]);
   });
 
-  test("a removed line copies on click, says Copied, and opens no tab; its file is its own link", async ({ page }) => {
+  test("a removed line has a separate copy action and source link", async ({ page }) => {
     const errors = watchErrors(page);
     await page.context().grantPermissions(["clipboard-read", "clipboard-write"]);
     await open(page, {});
     await expectOverview(page);
     await page.getByRole("tab", { name: "Removed" }).click();
-    await page.getByText(/-[1-9]/).first().click();
+    const toggle = page.getByRole("button", { name: /^Show the seat lines of/ }).first();
+    const box = await toggle.boundingBox();
+    await toggle.click({ position: { x: (box?.width ?? 100) - 35, y: 24 } });
     const removed = page.locator("section", { hasText: "Removed lines" }).first();
     const row = removed.locator("li").first();
     const line = (await row.locator("[data-line-text]").innerText()).trim();
     const tabs = page.context().pages().length;
-    await row.getByRole("button", { name: /^Copy / }).click();
-    await expect(row.getByText("Copied", { exact: true })).toBeVisible();
+    await row.locator("[data-line-text]").click();
+    await removed.getByRole("button", { name: /^Copy / }).click();
+    await expect(removed.getByText("Copied", { exact: true })).toBeVisible();
     expect(await page.evaluate(() => navigator.clipboard.readText())).toBe(line);
     expect(page.context().pages().length).toBe(tabs);
-    await expect(row.getByRole("link", { name: /ads\.txt$/ }).first()).toHaveAttribute(
+    await expect(removed.locator("[data-line-actions] a").first()).toHaveAttribute(
       "href",
       /^https:\/\/[^#]+\/(app-)?ads\.txt$/,
     );
     // The confirmation settles back, as every Copied in the report does.
-    await expect(row.getByText("Copied", { exact: true })).toHaveCount(0, { timeout: 4000 });
+    await expect(removed.getByText("Copied", { exact: true })).toHaveCount(0, { timeout: 4000 });
     expect(errors).toEqual([]);
   });
 });
@@ -293,7 +297,7 @@ test.describe("the matched list", () => {
 test.describe("inactive", () => {
   const counts = mockInactiveBlock.counts;
   const section = (page: Page) => page.getByTestId("inactive-section");
-  const sub = (page: Page, name: string) => section(page).getByRole("tab", { name: new RegExp(`^${name}`) });
+  const sub = (page: Page, name: string) => page.getByRole("button", { name: new RegExp(`Matched ${name.toLowerCase()}`) }).first();
   // The mock report compares the crawl of Aug 25 with the one of Aug 18.
   const SINCE = /since Aug 18, 2026/;
 
@@ -308,11 +312,11 @@ test.describe("inactive", () => {
     await expect(quiet).not.toContainText("lines");
     await quiet.getByRole("button", { name: "See them" }).click();
     await expect(page.getByRole("tab", { name: "Inactive", exact: true })).toHaveAttribute("aria-selected", "true");
-    await expect(page.getByRole("heading", { name: "Inactive" })).toBeVisible();
+    await expect(page.getByRole("heading", { name: "Inactive publishers" })).toBeVisible();
     // Two lists, never a third.
-    await expect(section(page).getByRole("tab")).toHaveCount(2);
-    await expect(sub(page, "Lines")).toHaveCount(0);
-    await expect(sub(page, "Publishers")).toHaveAttribute("aria-selected", "true");
+    await expect(section(page).getByRole("tab")).toHaveCount(0);
+    await expect(section(page).getByRole("tablist")).toHaveCount(0);
+    await expect(section(page).getByPlaceholder("Search inactive publishers")).toBeVisible();
     await expect(section(page).getByText(SINCE).first()).toBeVisible();
     await expect(section(page).getByRole("button", { name: /Show the seat lines of/ })).toHaveCount(counts.publishers);
     await expect(section(page).getByText("Quokkaplay Legacy")).toBeVisible();
@@ -331,7 +335,7 @@ test.describe("inactive", () => {
   test("only what went inactive between the two compared crawls shows", async ({ page }) => {
     await open(page, {});
     await expectOverview(page);
-    await page.getByRole("tab", { name: "Inactive", exact: true }).click();
+    await selectStatus(page, "Inactive");
     await expect(section(page).getByText("Quokkaplay Legacy")).toBeVisible();
     // Found dead by the compared crawl itself (Aug 18), and older: the
     // report before, never this one.
@@ -349,7 +353,7 @@ test.describe("inactive", () => {
   test("a row keeps its date, reason, evidence and what it carried", async ({ page }) => {
     await open(page, {});
     await expectOverview(page);
-    await page.getByRole("tab", { name: "Inactive", exact: true }).click();
+    await selectStatus(page, "Inactive");
     await expect(section(page).getByText("Failed in 3 crawls in a row, from Aug 11, 2026 to Aug 25, 2026").first()).toBeVisible();
     await section(page).getByRole("button", { name: "Show the seat lines of Quokkaplay Legacy" }).click();
     await expect(section(page).getByText("Your seat lines it carried")).toBeVisible();
@@ -365,7 +369,7 @@ test.describe("inactive", () => {
     const errors = watchErrors(page);
     const calls = await open(page, {});
     await expectOverview(page);
-    await page.getByRole("tab", { name: "Inactive", exact: true }).click();
+    await selectStatus(page, "Inactive");
     await sub(page, "Apps").click();
     const before = calls.length;
     for (const a of mockInactiveBlock.apps) {
@@ -424,19 +428,19 @@ test.describe("inactive", () => {
     await open(page, {});
     await expectOverview(page);
     await expect(page.getByText("Quokkaplay Legacy")).toHaveCount(0);
-    await page.getByRole("tab", { name: "Inactive", exact: true }).click();
+    await selectStatus(page, "Inactive");
     await sub(page, "Apps").click();
     await page.getByRole("button", { name: /Matched publishers/ }).click();
     await expect(page.getByRole("tab", { name: "Inactive", exact: true })).toHaveAttribute("aria-selected", "true");
-    await expect(sub(page, "Publishers")).toHaveAttribute("aria-selected", "true");
+    await expect(section(page).getByPlaceholder("Search inactive publishers")).toBeVisible();
     await page.getByRole("button", { name: /Matched apps/ }).click();
-    await expect(sub(page, "Apps")).toHaveAttribute("aria-selected", "true");
+    await expect(section(page).getByPlaceholder("Search inactive apps")).toBeVisible();
   });
 
   test("search narrows a list", async ({ page }) => {
     await open(page, {});
     await expectOverview(page);
-    await page.getByRole("tab", { name: "Inactive", exact: true }).click();
+    await selectStatus(page, "Inactive");
     const box = section(page).getByRole("textbox", { name: "Search inactive publishers" });
     await box.fill("tinplover");
     await expect(section(page).getByText("Tinplover Studio")).toBeVisible();
@@ -447,7 +451,7 @@ test.describe("inactive", () => {
     const errors = watchErrors(page);
     await open(page, { trial: true });
     await expectOverview(page);
-    await page.getByRole("tab", { name: "Inactive", exact: true }).click();
+    await selectStatus(page, "Inactive");
     await sub(page, "Apps").click();
     await expect(section(page).getByRole("button", { name: /Show the seat lines of/ })).toHaveCount(3);
     await expect(section(page).getByText("publisher:")).toHaveCount(0);
@@ -464,12 +468,12 @@ test.describe("inactive", () => {
   test("one row is counted in the singular, and the publisher line has no blank before its comma", async ({ page }) => {
     await open(page, {});
     await expectOverview(page);
-    await page.getByRole("tab", { name: "Inactive", exact: true }).click();
+    await selectStatus(page, "Inactive");
     await section(page).getByRole("textbox", { name: "Search inactive publishers" }).fill("Quokkaplay");
-    await expect(section(page).getByText("1 inactive publisher", { exact: true })).toBeVisible();
+    await expect(section(page).getByText("1 inactive publisher", { exact: true }).first()).toBeVisible();
     await sub(page, "Apps").click();
     await section(page).getByRole("textbox", { name: "Search inactive apps" }).fill("Glintfox");
-    await expect(section(page).getByText("1 inactive app", { exact: true })).toBeVisible();
+    await expect(section(page).getByText("1 inactive app", { exact: true }).first()).toBeVisible();
     // The domain link ends where its text ends: no hidden arrow holding a
     // blank between it and the comma after it.
     const link = section(page).getByRole("link", { name: "quokkaplay-legacy.com" });
@@ -487,8 +491,8 @@ test.describe("inactive", () => {
       await open(page, scenario);
       await expectOverview(page);
       await expect(page.getByTestId("inactive-quiet")).toContainText("3 publishers and 5 apps went inactive since Aug 18, 2026");
-      await page.getByRole("tab", { name: "Inactive", exact: true }).click();
-      await expect(section(page).getByRole("tab")).toHaveCount(2);
+      await selectStatus(page, "Inactive");
+      await expect(section(page).getByRole("tab")).toHaveCount(0);
       await expect(section(page).getByText("Quokkaplay Legacy")).toBeVisible();
       await sub(page, "Apps").click();
       await expect(section(page).getByText("Hex World War")).toBeVisible();
@@ -694,14 +698,14 @@ test.describe("discovery checks each line against your sellers.json", () => {
     expect(narrowed).toBeGreaterThan(0);
     expect(narrowed).toBeLessThan(all);
     const answered = page.waitForResponse((r) => r.url().includes("/discovered-lines?") && r.url().includes(`q=${encodeURIComponent(domain)}`));
-    await page.getByPlaceholder("Search seller IDs, publishers or apps").fill(domain);
+    await page.getByPlaceholder("Search seller IDs or publishers").fill(domain);
     await answered;
     await expect(cards(page)).toHaveCount(Math.min(PAGE_SIZE, narrowed));
     // The wide line carries this publisher, so it is still listed; its
     // roster opens on the same search.
     const c = await find(page, WIDE);
     await c.getByRole("button", { expanded: false }).first().click();
-    await expect(c.getByRole("textbox", { name: "Search the publishers and apps carrying this line" })).toHaveValue(domain);
+    await expect(c.getByRole("textbox", { name: "Search publishers carrying this line" })).toHaveValue(domain);
     // A search shows every match (paged), not just the first three.
     const onLine = mockDiscoveredLinePlacements(WIDE_KEY, { page: 1, page_size: 500, q: domain }).total;
     await expect(c.locator("li.rounded-2xl")).toHaveCount(Math.min(onLine, 25));
@@ -717,11 +721,11 @@ test.describe("discovery checks each line against your sellers.json", () => {
     await c.getByRole("button", { expanded: false }).first().click();
     await expect(c.getByText(`${wide.publishers_count} publishers, ${wide.placements_count} files`)).toBeVisible();
     await expect(c.locator("li.rounded-2xl")).toHaveCount(3);
-    await expect(c.getByText(`${(wide.placements_count - 3).toLocaleString()} more publishers and apps carry this line`)).toBeVisible();
+    await expect(c.getByText(`${(wide.placements_count - 3).toLocaleString()} more source files carry this line`)).toBeVisible();
     await c.getByRole("button", { name: /^Show \d+ more$/ }).click();
     await expect(c.locator("li.rounded-2xl")).toHaveCount(25);
-    await expect(c.getByText(/more publishers and apps carry this line/)).toHaveCount(0);
-    await c.getByRole("navigation", { name: "Pages" }).first().getByRole("button", { name: "Page 2", exact: true }).click();
+    await expect(c.getByText(/more source files carry this line/)).toHaveCount(0);
+    await c.getByRole("navigation", { name: "Pages" }).first().getByRole("button", { name: "Next page", exact: true }).click();
     await expect(c.locator("li.rounded-2xl")).toHaveCount(25);
     expect(calls.filter((x) => x.path.endsWith("/discovered-lines/placements") && /[?&]page=2(&|$)/.test(x.query))).toHaveLength(1);
   });
@@ -750,7 +754,7 @@ test.describe("discovery checks each line against your sellers.json", () => {
     await c.getByRole("button", { expanded: false }).first().click();
     const [dl] = await Promise.all([
       page.waitForEvent("download"),
-      c.getByRole("button", { name: "Export every publisher and app carrying this line as CSV" }).click(),
+      c.getByRole("button", { name: "Export every publisher source file carrying this line as CSV" }).click(),
     ]);
     const body = await (await import("node:fs/promises")).readFile((await dl.path())!, "utf8");
     expect(body.charCodeAt(0)).toBe(0xfeff);
@@ -776,7 +780,7 @@ test.describe("discovery checks each line against your sellers.json", () => {
     await expect(c.locator('a[href*="#:~:text="]').first()).toHaveAttribute("href", /^https?:\/\/files\./);
     const [download] = await Promise.all([
       page.waitForEvent("download"),
-      c.getByRole("button", { name: "Export every publisher and app carrying this line as CSV" }).click(),
+      c.getByRole("button", { name: "Export every publisher source file carrying this line as CSV" }).click(),
     ]);
     const csv = await (await import("node:fs/promises")).readFile((await download.path())!, "utf8");
     expect(csv.split("\r\n")[0]).toContain('"file_host"');
@@ -800,7 +804,7 @@ test.describe("discovery checks each line against your sellers.json", () => {
     await c.getByRole("button", { expanded: false }).first().click();
     const downloads: string[] = [];
     page.on("download", d => downloads.push(d.suggestedFilename()));
-    await c.getByRole("button", { name: "Export every publisher and app carrying this line as CSV" }).click();
+    await c.getByRole("button", { name: "Export every publisher source file carrying this line as CSV" }).click();
     await expect(c.getByRole("alert")).toContainText("does not contain all");
     expect(downloads).toEqual([]);
   });
@@ -842,7 +846,7 @@ test.describe("discovery checks each line against your sellers.json", () => {
     const c = await find(page, WIDE);
     await c.getByRole("button", { expanded: false }).first().click();
     await expect(c.getByText(`This report kept the first 200 of ${wide.placements_count.toLocaleString()} files for this line.`)).toBeVisible();
-    await expect(c.getByText("197 more publishers and apps carry this line")).toBeVisible();
+    await expect(c.getByText("197 more source files carry this line")).toBeVisible();
     expect(errors).toEqual([]);
   });
 
@@ -982,7 +986,7 @@ test.describe("where the files are", () => {
     // its old address lands on the Overview).
     await page.goto(`${BASE}/changes`);
     await page.getByRole("textbox", { name: "Search matched publishers" }).fill("");
-    await page.getByRole("tab", { name: "Started watching" }).click();
+    await selectStatus(page, "Started watching");
     await page.locator('button[aria-label^="Show the seat lines of"]').first().click();
     await expect(page.locator("[data-line-reason]", { hasText: "first read of this file this crawl" }).first()).toBeVisible();
     await expect(page.locator("[data-line-host]", { hasText: `at ${DECLARED_HOST}` }).first()).toBeVisible();
@@ -1004,7 +1008,7 @@ test.describe("where the files are", () => {
     await expect(page.getByRole("heading", { name: "Matched publishers" })).toBeVisible();
     await expect(page.locator("[data-file-hosts]")).toHaveCount(0);
     await page.goto(`${BASE}/changes`);
-    await page.getByRole("tab", { name: "Started watching" }).click();
+    await selectStatus(page, "Started watching");
     await page.locator('button[aria-label^="Show the seat lines of"]').first().click();
     await expect(page.locator("[data-scope-window] [data-line-text]").first()).toBeVisible();
     await expect(page.locator("[data-line-reason]")).toHaveCount(0);

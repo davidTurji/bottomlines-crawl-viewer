@@ -1,4 +1,4 @@
-import { Search } from "lucide-react";
+import { FilterBar, FilterSearch } from "@/components/FilterBar";
 import { useEffect, useState, type ComponentType } from "react";
 
 import { EmptyResult, Pager, TruncatedNotice, usePaging } from "@/components/ListControls";
@@ -16,12 +16,12 @@ import {
   type InactivePublisher,
   type TrialCaps,
 } from "@/lib/api";
-import { INACTIVE_KINDS, inactiveNoun, reasonText } from "@/lib/inactive";
+import { inactiveNoun, reasonText } from "@/lib/inactive";
 import { csvName, ExportListButton, type CsvSink } from "@/components/ExportList";
 import { eachPage, READ_PAGE, type Progress } from "@/lib/scopeRows";
 import { usePageCache } from "@/lib/pageCache";
 import { PAGE_SIZE } from "@/lib/paging";
-import { cn, storeName } from "@/lib/utils";
+import { storeName } from "@/lib/utils";
 
 /**
  * THE INACTIVE TAB of the matched list (David, 2026-10-08), which replaced
@@ -46,14 +46,13 @@ export type InactiveCards = {
   App: ComponentType<{ app: InactiveApp; open: boolean; onToggle: () => void; token: string }>;
 };
 
-const LABEL: Record<InactiveKind, string> = { publishers: "Publishers", apps: "Apps" };
 
 /** The intro over each list; `since` is "since Aug 18, 2026" or "since the
  *  compared crawl". */
 function intro(kind: InactiveKind, since: string): string {
   return kind === "publishers"
-    ? `Publishers that carried your seat lines and went inactive ${since}, for example the domain is gone or the site stopped answering.`
-    : `Apps that carried your seat lines and that their store stopped listing ${since}, checked more than once.`;
+    ? `Publishers that went inactive ${since}.`
+    : `Apps no longer listed in stores ${since}.`;
 }
 
 const EMPTY: Record<InactiveKind, string> = {
@@ -72,7 +71,6 @@ export default function InactiveSection({
   caps,
   counts,
   kind,
-  setKind,
   legacy,
   since,
   cards,
@@ -83,11 +81,10 @@ export default function InactiveSection({
   lines: string[];
   /** The trial's caps, on a trial: the unlock card stands on every list. */
   caps: TrialCaps | null;
-  /** Whole counts for the two switches (the summary's). */
+  /** Whole counts for the two inventory views (the summary's). */
   counts: InactiveCounts;
-  /** Owned by the page, so the open list survives a view switch. */
+  /** Follows the main Matched publishers / Matched apps view. */
   kind: InactiveKind;
-  setKind: (kind: InactiveKind) => void;
   /** The summary's No longer live block: what an older API's report is
    *  built from when it has no /inactive route. */
   legacy: GoneInventory | null | undefined;
@@ -203,51 +200,21 @@ export default function InactiveSection({
   return (
     <div data-testid="inactive-section">
       <div className="mb-3 space-y-2">
-        <div role="tablist" aria-label="Inactive lists" className="flex flex-wrap items-center gap-2">
-          {INACTIVE_KINDS.map((k) => {
-            const on = k === kind;
-            return (
-              <button
-                key={k}
-                type="button"
-                role="tab"
-                aria-selected={on}
-                onClick={() => setKind(k)}
-                className={cn(
-                  "inline-flex h-8 items-center gap-1.5 rounded-full border px-3 text-xs font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-slate-400/40",
-                  on
-                    ? "border-slate-300 bg-slate-100 text-slate-900"
-                    : "border-border bg-white text-slate-600 hover:border-slate-300 hover:text-slate-900",
-                )}
-              >
-                {LABEL[k]}
-                <span className={cn("tabular-nums", on ? "text-slate-500" : "text-slate-400")}>
-                  {counts[k].toLocaleString()}
-                </span>
-              </button>
-            );
-          })}
-        </div>
         <p className="text-sm text-slate-500">
-          {intro(kind, since)} Not counted in your totals.
+          {intro(kind, since)} Excluded from matched totals.
           {lines.length > 0 &&
             (kind === "apps"
               ? " Showing only apps whose publisher carries the selected lines."
               : " Showing only those with the selected lines.")}
         </p>
-        <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:gap-3">
-        <div className="relative w-full">
-          <Search className="pointer-events-none absolute left-3.5 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
-          <input
-            value={query}
-            onChange={(e) => setQuery(e.target.value)}
-            placeholder={`Search ${noun}`}
-            aria-label={`Search ${noun}`}
-            className="h-10 w-full rounded-full border border-border bg-white pl-10 pr-4 text-sm text-slate-900 outline-none transition-colors placeholder:text-slate-400 focus:border-slate-400/50"
-          />
-        </div>
-        {/* EXPORT THIS LIST (David, 2026-10-27): every page of it. */}
-        {ready && !loading && rows.length > 0 && !locked && <ExportListButton run={exportList} />}
+        <div ref={paging.topRef}>
+          <FilterBar actions={ready && !loading && rows.length > 0 && !locked ? <ExportListButton run={exportList} noun={noun} /> : null}>
+            <FilterSearch value={query} onChange={setQuery} placeholder={`Search ${noun}`} />
+            {ready && !loading && rows.length > 0 && !locked && <>
+              <Pager placement="inline" className="list-toolbar-pager" page={page} pageSize={PAGE_SIZE}
+                total={data.total} onPage={paging.onPage} noun={noun} nounOne={nounOne} />
+            </>}
+          </FilterBar>
         </div>
       </div>
 
@@ -286,19 +253,7 @@ export default function InactiveSection({
         </div>
       )}
 
-      {ready && !loading && rows.length > 0 && !locked && (
-        <Pager
-          placement="top"
-          anchorRef={paging.topRef}
-          className="mb-3"
-          page={page}
-          pageSize={PAGE_SIZE}
-          total={data.total}
-          onPage={paging.onPage}
-          noun={noun}
-          nounOne={nounOne}
-        />
-      )}
+
 
       {ready && !loading && rows.length > 0 && (
         <div key={settled} className="animate-in fade-in space-y-3">

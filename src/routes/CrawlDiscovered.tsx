@@ -8,7 +8,7 @@ import TrialBanner from "@/components/TrialBanner";
 import { SkeletonInlineRows, SkeletonRows, SkeletonStatCards } from "@/components/Skeleton";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { BadgeCheck, ChevronDown, CircleAlert, Download, Radar, Search, Users, Wrench } from "lucide-react";
+import { Check, ChevronDown, CircleAlert, Download, Radar, Users, Wrench } from "lucide-react";
 
 import {
   ApiError,
@@ -22,9 +22,9 @@ import {
   type Summary,
 } from "../lib/api";
 import { lineMeasure, SORT_OPTIONS, type SortKey, sortDiscoveredLines } from "../lib/discoveredSort";
-import { FilterAction, FilterBar, FilterSearch, FilterSelect } from "@/components/FilterBar";
+import { FilterAction, FilterBar, FilterGroup, FilterSearch, FilterSelect } from "@/components/FilterBar";
 import { PageShell } from "@/components/PageShell";
-import { ActionableLine, PublisherDomainLink } from "@/components/PublisherLinks";
+import { ActionableLine, LineActionGroup, PublisherDomainLink } from "@/components/PublisherLinks";
 import { formatWeek, WeekLine } from "@/components/WeekLine";
 import { PAGE_SIZE } from "@/lib/paging";
 import { useReportScope } from "@/lib/reportScope";
@@ -281,7 +281,7 @@ export default function CrawlDiscovered() {
       {loading && !totals && <SkeletonStatCards />}
 
       {!noDiscovery && totals && (
-        <div className="rounded-2xl border border-border bg-white p-5 shadow-sm" data-tour="discovery-kpi">
+        <div className="report-panel rounded-2xl border border-border bg-white p-5" data-tour="discovery-kpi">
           <div className="mb-3 flex items-baseline justify-between gap-3">
             <div>
               <div className="font-display text-sm font-medium text-slate-700">
@@ -294,16 +294,17 @@ export default function CrawlDiscovered() {
               discovered this week (on a first report, all of them), the
               unique lines actually found with the domain, and the
               publishers holding them. */}
-          <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
+          <div className="report-kpi-discovery grid grid-cols-1 gap-3 sm:grid-cols-3">
             <SplitStat
               tone="info"
               prefix={newLines ? "+" : undefined}
               number={newLines ?? 0}
               label="New lines this week"
               caption={newLines != null ? "No publisher carried them last week" : "No prior week to compare"}
-              className="rounded-xl border border-border bg-white"
+              className="report-kpi-cell"
             />
             <SplitStat
+              tone="info"
               number={totals.lines}
               label="Lines found with your domain"
               caption={
@@ -321,7 +322,7 @@ export default function CrawlDiscovered() {
                     }`
                   : "Each line counted once"
               }
-              className="rounded-xl border border-border bg-white"
+              className="report-kpi-cell"
               delta={
                 baseline.totals && totals.previous_lines != null
                   ? computeDelta(totals.lines, totals.previous_lines)
@@ -330,6 +331,7 @@ export default function CrawlDiscovered() {
               note={baseline.totals ? undefined : "not compared"}
             />
             <SplitStat
+              tone="publisher"
               number={countsPublishers ? (totals.publishers ?? 0) : totals.placements}
               label={countsPublishers ? "Unique publishers carrying them" : "Publisher listings"}
               caption={
@@ -337,7 +339,7 @@ export default function CrawlDiscovered() {
                   ? "Several of these lines, still one publisher"
                   : "One per publisher file carrying a line"
               }
-              className="rounded-xl border border-border bg-white"
+              className="report-kpi-cell"
               delta={
                 baseline.totals &&
                 (countsPublishers ? totals.previous_publishers : totals.previous_placements) != null
@@ -368,8 +370,23 @@ export default function CrawlDiscovered() {
 
       {!noDiscovery && (
         <div className="space-y-2">
-          <FilterBar className="w-full min-w-0">
-            <FilterSearch value={q} onChange={setQ} placeholder="Search seller IDs, publishers or apps" />
+          <FilterBar className="discovery-list-tools" actions={
+            <FilterAction
+              icon={Download}
+              disabled={exporting || total === 0}
+              onClick={() => {
+                setExporting(true);
+                setExportError(null);
+                downloadCsv(token, filter, show).catch((e: unknown) => setExportError(e instanceof Error ? e.message : "Export failed. Please try again."))
+                  .finally(() => setExporting(false));
+              }}
+            >
+              {exporting ? "Preparing..." : "Export CSV"}
+            </FilterAction>
+          }>
+            <FilterSearch value={q} onChange={setQ} placeholder="Search seller IDs or publishers" />
+
+            <FilterGroup>
             <FilterSelect
               value={show}
               onChange={setShow}
@@ -384,18 +401,12 @@ export default function CrawlDiscovered() {
               leading="Sort"
               ariaLabel="Sort discovered lines"
             />
-            <FilterAction
-              icon={Download}
-              disabled={exporting || total === 0}
-              onClick={() => {
-                setExporting(true);
-                setExportError(null);
-                downloadCsv(token, filter, show).catch((e: unknown) => setExportError(e instanceof Error ? e.message : "Export failed. Please try again."))
-                  .finally(() => setExporting(false));
-              }}
-            >
-              {exporting ? "Preparing..." : "Export CSV"}
-            </FilterAction>
+            </FilterGroup>
+
+          {!loading && !error && !onTrial && total > 0 && (
+            <Pager placement="inline" anchorRef={paging.topRef} page={page} pageSize={PAGE_SIZE}
+              total={total} onPage={paging.onPage} noun="lines" className="list-toolbar-pager" />
+          )}
           </FilterBar>
           {exportError && <p role="alert" className="text-sm text-red-700">{exportError}</p>}
           {localOnly && (
@@ -415,20 +426,6 @@ export default function CrawlDiscovered() {
         <p className="rounded-2xl border border-dashed border-border bg-muted/20 px-6 py-10 text-center text-sm text-slate-500">
           No lines match this filter.
         </p>
-      )}
-
-      {/* No pager while a new list is on the way: its count would be the
-          old filter's under the new one (David, 2026-10-27). */}
-      {!loading && !error && !onTrial && total > 0 && (
-        <Pager
-          placement="top"
-          anchorRef={paging.topRef}
-          page={page}
-          pageSize={PAGE_SIZE}
-          total={total ?? 0}
-          onPage={paging.onPage}
-          noun="lines"
-        />
       )}
 
       {!loading && !error && sorted.length > 0 && (
@@ -588,7 +585,7 @@ function LineCard({
     <div
       data-discovered-line={lineKey(line)}
       className={cn(
-        "overflow-hidden rounded-3xl border shadow-sm transition-colors",
+        "report-row overflow-hidden rounded-xl border shadow-sm transition-colors",
         isNew ? "border-info-border bg-info-bg/60" : "border-border bg-white",
         open && "shadow-md",
       )}
@@ -616,9 +613,9 @@ function LineCard({
             {line.cert_id && <span className="font-normal text-slate-400">, {line.cert_id}</span>}
           </code>
 
-          <div className="mt-0.5 flex items-center gap-2.5 truncate text-xs text-slate-500">
-            <span className="sm:hidden">
-              <span className="font-mono tabular-nums text-slate-700">{count.toLocaleString()}</span>{" "}
+          <div className="discovery-line-meta mt-0.5 flex flex-wrap items-center gap-x-2.5 gap-y-0.5 text-xs text-slate-500 sm:flex-nowrap">
+            <span className="flex-shrink-0 sm:hidden">
+              <span className="font-sans tabular-nums text-slate-700">{count.toLocaleString()}</span>{" "}
               {byPublisher ? (count === 1 ? "publisher" : "publishers") : count === 1 ? "listing" : "listings"}
             </span>
             {/* THE BADGE. The Sellers.json page owns the story (to add, to
@@ -626,7 +623,7 @@ function LineCard({
                 seller ID is in, and opens that page when the report has
                 it. A click on it must not toggle the card. */}
             {mark && (
-              <span className="flex min-w-0 items-center gap-1.5" title={mark.detail || undefined}>
+              <span className="discovery-line-status order-2 flex min-w-0 basis-full flex-wrap items-center gap-1.5 sm:order-none sm:basis-auto sm:flex-nowrap" title={mark.detail || undefined}>
                 <span
                   role={sellersPage ? "link" : undefined}
                   tabIndex={sellersPage ? 0 : undefined}
@@ -650,21 +647,21 @@ function LineCard({
                       : undefined
                   }
                   className={cn(
-                    "inline-flex flex-shrink-0 items-center gap-1 rounded-full border px-2 py-0.5 text-[11px] font-semibold tracking-tight transition-colors",
+                    "inline-flex max-w-full flex-shrink-0 items-center gap-1.5 rounded-sm text-[12px] font-medium leading-5 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2",
                     MARK_STYLE[mark.kind].cls,
                     sellersPage && cn("cursor-pointer", MARK_STYLE[mark.kind].hover),
                   )}
                 >
                   {(() => {
                     const MarkIcon = MARK_STYLE[mark.kind].icon;
-                    return <MarkIcon aria-hidden className="h-3 w-3" strokeWidth={2.4} />;
+                    return <MarkIcon aria-hidden className="h-3.5 w-3.5" strokeWidth={1.75} />;
                   })()}
                   {mark.pill}
                 </span>
                 {mark.detail && <span className="truncate text-[11px] text-slate-500">{mark.detail}</span>}
               </span>
             )}
-            {isNew && <span className="flex-shrink-0 font-medium text-info">new this week</span>}
+            {isNew && <span className="order-1 flex-shrink-0 font-medium text-info sm:order-none">new this week</span>}
           </div>
         </div>
 
@@ -796,20 +793,27 @@ function Roster({
           <span className="text-[11px] text-slate-500">
             {line.publishers_count != null ? (
               <>
-                <span className="font-mono tabular-nums">{line.publishers_count.toLocaleString()}</span>{" "}
+                <span className="font-sans tabular-nums">{line.publishers_count.toLocaleString()}</span>{" "}
                 {line.publishers_count === 1 ? "publisher" : "publishers"},{" "}
-                <span className="font-mono tabular-nums">{line.placements_count.toLocaleString()}</span>{" "}
+                <span className="font-sans tabular-nums">{line.placements_count.toLocaleString()}</span>{" "}
                 {line.placements_count === 1 ? "file" : "files"}
               </>
             ) : (
               <>
-                <span className="font-mono tabular-nums">{(line.placements_count ?? 0).toLocaleString()}</span>{" "}
+                <span className="font-sans tabular-nums">{(line.placements_count ?? 0).toLocaleString()}</span>{" "}
                 {line.placements_count === 1 ? "listing" : "listings"}
               </>
             )}
           </span>
+
+        </span>
+      </div>
+      {exportError && <p role="alert" className="mb-3 text-sm text-red-700">{exportError}</p>}
+      {data !== "toolarge" && (
+        <FilterBar className="mb-3">
+          <FilterSearch value={q} onChange={setQ} placeholder="Search publishers" ariaLabel="Search publishers carrying this line" />
           {/* The page toolbar's Export, the same look, for this line alone. */}
-          {canExport && data !== "toolarge" && (
+          {canExport && (
             <button
               type="button"
               disabled={exporting || total === 0}
@@ -819,28 +823,16 @@ function Roster({
                 downloadLineCsv(token, line).catch((e: unknown) => setExportError(e instanceof Error ? e.message : "Export failed. Please try again."))
                   .finally(() => setExporting(false));
               }}
-              className="inline-flex items-center gap-1.5 text-xs font-medium text-slate-700 transition-colors hover:text-primary disabled:opacity-50"
-              aria-label="Export every publisher and app carrying this line as CSV"
+              className="list-toolbar-action inline-flex items-center gap-1.5 px-3 text-xs font-medium text-slate-700 transition-colors hover:text-primary disabled:opacity-50"
+              aria-label="Export every publisher source file carrying this line as CSV"
             >
               <Download className="h-3.5 w-3.5" />
               {exporting ? "Preparing..." : "Export CSV"}
             </button>
           )}
-        </span>
-      </div>
-      {exportError && <p role="alert" className="mb-3 text-sm text-red-700">{exportError}</p>}
-      {data !== "toolarge" && (
-        /* The Overview's search: round, the icon inside. */
-        <div className="relative mb-3 w-full">
-          <Search className="pointer-events-none absolute left-3.5 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
-          <input
-            value={q}
-            onChange={(e) => setQ(e.target.value)}
-            placeholder="Search publishers or apps"
-            aria-label="Search the publishers and apps carrying this line"
-            className="h-10 w-full rounded-full border border-border bg-white pl-10 pr-4 text-sm text-slate-900 outline-none transition-colors placeholder:text-slate-400 focus:border-primary/40"
-          />
-        </div>
+          {whole && typeof data === "object" && <Pager placement="inline" className="list-toolbar-pager" page={page}
+            pageSize={ROSTER_PAGE} total={total ?? 0} onPage={setPage} noun="source files" />}
+        </FilterBar>
       )}
       {/* A report frozen before 2026-10-14 kept only the first files of a
           wide line (200). Under a card that counts 10,801, the list says
@@ -862,26 +854,17 @@ function Roster({
         <p className="py-2 text-xs text-critical">Could not load the publishers for this line.</p>
       ) : data.rows.length === 0 ? (
         <p className="py-2 text-xs text-slate-500">
-          {needle ? "No publisher or app on this line matches." : "No publishers recorded."}
+          {needle ? "No publisher on this line matches." : "No publishers recorded."}
         </p>
       ) : (
         <div>
-          {whole && (
-            <Pager
-              placement="top"
-              className="mb-3"
-              page={page}
-              pageSize={ROSTER_PAGE}
-              total={total ?? 0}
-              onPage={setPage}
-              noun="publishers and apps"
-            />
-          )}
+          <LineActionGroup tone="added">
           <ul className="space-y-2">
             {rows.map((p, i) => (
               <PlacementCard key={`${p.developer_domain}|${p.bundle_id ?? ""}|${p.found_in}|${i}`} line={line} p={p} />
             ))}
           </ul>
+          </LineActionGroup>
           {hidden > 0 && (
             /* The trial card's look (LockedTail), small: how many more carry
                the line, and the one button that opens them. */
@@ -892,7 +875,7 @@ function Roster({
                 </span>
                 <div className="min-w-0 flex-1">
                   <p className="font-display text-[15px] font-semibold leading-snug tracking-tight text-slate-900">
-                    {hidden.toLocaleString()} more {hidden === 1 ? "publisher or app carries" : "publishers and apps carry"}{" "}
+                    {hidden.toLocaleString()} more {hidden === 1 ? "source file carries" : "source files carry"}{" "}
                     this line
                   </p>
                   <p className="mt-0.5 text-[12px] text-slate-600">
@@ -916,7 +899,7 @@ function Roster({
                 pageSize={ROSTER_PAGE}
                 total={total ?? 0}
                 onPage={setPage}
-                noun="publishers and apps"
+                noun="source files"
               />
             </div>
           )}
@@ -926,18 +909,20 @@ function Roster({
   );
 }
 
-/** One publisher or app carrying a line: the Overview's card look. The card
- *  opens the publisher's file at this line; the name opens their site. */
+/** A publisher carrying a line, with separate copy and source
+ *  actions. The publisher name remains a link to its website. */
 function PlacementCard({ line, p }: { line: DiscoveredLine; p: DiscoveredPlacement }) {
   const name = p.developer_name || p.developer_domain;
+  const sourceLabel = foundInLabel(p.found_in)?.replace(/^Found in /, "") ?? "File not recorded";
   const initial = (name.replace(/^www\./i, "").charAt(0) || "?").toUpperCase();
   return (
     <ActionableLine
       line={line}
+      selectionLabel={name}
       publisherDomain={p.file_host || p.developer_domain}
       foundIn={p.found_in}
       shown
-      className="flex items-center gap-3 rounded-2xl border border-border bg-white px-4 py-3 shadow-sm"
+      className="discovery-placement flex items-center gap-3 rounded-2xl border border-border bg-white px-4 py-3 shadow-sm"
     >
       <span
         aria-hidden
@@ -946,27 +931,17 @@ function PlacementCard({ line, p }: { line: DiscoveredLine; p: DiscoveredPlaceme
         {initial}
       </span>
       <span className="min-w-0 flex-1">
-        <span className="block truncate text-sm font-semibold tracking-tight text-slate-900">
+        <span className="discovery-placement-name block truncate text-sm font-semibold tracking-tight text-slate-900">
           <PublisherDomainLink domain={p.developer_domain} label={name} shown />
         </span>
-        <span className="mt-0.5 flex min-w-0 items-center gap-1.5 text-[11px] text-slate-500">
-          {p.app_name ? (
-            <>
-              <span className="truncate text-slate-700">{p.app_name}</span>
-              <span className="flex-shrink-0 rounded-full border border-app-border bg-app-bg px-1.5 py-px text-[10px] font-medium text-app">
-                {storeName(p)}
-              </span>
-              {p.bundle_id && (
-                <span className="truncate font-mono text-[10px] tabular-nums text-slate-400">{p.bundle_id}</span>
-              )}
-            </>
-          ) : name !== p.developer_domain ? (
-            <span className="truncate font-mono">{p.developer_domain}</span>
-          ) : null}
+        <span className="discovery-placement-meta mt-0.5 flex min-w-0 flex-wrap items-center gap-x-2 gap-y-0.5 text-[11px] text-slate-500">
+          {name !== p.developer_domain && <span className="break-all">{p.developer_domain}</span>}
+          {name !== p.developer_domain && <span aria-hidden className="text-slate-300">·</span>}
+          <span data-line-text className="discovery-placement-source" title={`Source file: ${sourceLabel}`}>
+            {sourceLabel}
+          </span>
+          {p.file_host && p.file_host !== p.developer_domain && <span className="break-all">on {p.file_host}</span>}
         </span>
-      </span>
-      <span data-line-text className="flex-shrink-0 text-[11px] text-slate-400">
-        {foundInLabel(p.found_in)}
       </span>
     </ActionableLine>
   );
@@ -991,12 +966,11 @@ function deltaOf(line: DiscoveredLine): Delta {
  *  or what a publisher should fix. Null on a report without the check. */
 type MarkKind = "fix" | "listed" | "unlisted";
 
-/** The badge per kind, in the system's tones (owner, 2026-10-15: "more
- *  premium"): an icon that says what it is, the tone's own ground. */
+/** Quiet status links: the words and a simple icon carry the meaning. */
 const MARK_STYLE: Record<MarkKind, { cls: string; hover: string; icon: typeof Wrench }> = {
-  listed: { cls: "border-ok-border bg-ok-bg text-ok", hover: "hover:border-ok", icon: BadgeCheck },
-  unlisted: { cls: "border-warn-border bg-warn-bg text-warn", hover: "hover:border-warn", icon: CircleAlert },
-  fix: { cls: "border-critical-border bg-critical-bg text-critical", hover: "hover:border-critical", icon: Wrench },
+  listed: { cls: "text-ok", hover: "hover:underline underline-offset-4", icon: Check },
+  unlisted: { cls: "text-warn", hover: "hover:underline underline-offset-4", icon: CircleAlert },
+  fix: { cls: "text-critical", hover: "hover:underline underline-offset-4", icon: Wrench },
 };
 
 function markOf(

@@ -1,3 +1,4 @@
+import { StoreBadge } from "@/components/StoreBadge";
 import * as Dialog from "@radix-ui/react-dialog";
 import { Check, ChevronDown, CircleAlert, Clock, Download, Globe, Landmark, Loader2, Lock, Play, RefreshCw, Search, Smartphone } from "lucide-react";
 import { useEffect, useMemo, useState, type ReactNode } from "react";
@@ -13,7 +14,7 @@ import { formatWeek, WeekLine } from "@/components/WeekLine";
 import { lineKey, lineLabel, sourceHint } from "@/lib/lineFilter";
 import { useReportScope } from "@/lib/reportScope";
 import { PAGE_SIZE } from "@/lib/paging";
-import { cn, foundInLabel, storeName } from "@/lib/utils";
+import { cn, foundInLabel } from "@/lib/utils";
 
 import {
   api,
@@ -220,7 +221,7 @@ export default function CrawlSchain() {
                 type="button"
                 disabled={!selection || showResult}
                 onClick={() => setRan(selection)}
-                className="inline-flex h-10 flex-shrink-0 items-center justify-center gap-2 rounded-full bg-gradient-to-br from-primary to-[hsl(150_58%_22%)] px-5 text-sm font-medium text-primary-foreground shadow-sm transition-all hover:-translate-y-px hover:shadow-md disabled:pointer-events-none disabled:opacity-40"
+                className="inline-flex h-10 flex-shrink-0 items-center justify-center gap-2 rounded-lg report-action bg-primary px-5 text-sm font-medium text-primary-foreground transition-colors disabled:pointer-events-none disabled:opacity-40"
               >
                 <Play className="h-3.5 w-3.5" />
                 Run report
@@ -269,7 +270,7 @@ function Kpis({ overview, trial }: { overview: SchainOverview; trial: boolean })
   // Three left is green, two amber, one or none red.
   const leftTone = left >= 3 ? ("ok" as const) : left === 2 ? ("warn" as const) : ("critical" as const);
   return (
-    <div className="rounded-2xl border border-border bg-white p-5 shadow-sm" data-tour="schain-kpi">
+    <div className="report-panel rounded-2xl border border-border bg-white p-5" data-tour="schain-kpi">
       <div className="mb-3">
         <div className="font-display text-sm font-medium text-slate-700">Your sellers.json</div>
         <div className="text-[11px] text-slate-500">
@@ -777,7 +778,7 @@ function ChainStep({
         {/* 3. Node 2: you. */}
         <HopCard filled={!!sdk && !!sid2}>
           <div className="flex items-center gap-3">
-            <span className="flex h-9 w-9 flex-shrink-0 items-center justify-center rounded-full bg-gradient-to-br from-primary to-[hsl(150_58%_22%)] text-[11px] font-semibold text-primary-foreground shadow-sm ring-1 ring-inset ring-white/30">
+            <span className="flex h-9 w-9 flex-shrink-0 items-center justify-center rounded-full bg-primary text-[11px] font-semibold text-primary-foreground">
               You
             </span>
             <div className="min-w-0 flex-1">
@@ -1050,14 +1051,14 @@ function Result({
       {/* All the KPIs first, in one card: what was run, the file, and the
           four checks. The publishers and apps that close the chain follow
           underneath (David, 2026-10-04: the stacked layout reads better). */}
-      <div className="rounded-2xl border border-border bg-white p-5 shadow-sm">
+      <div className="report-panel rounded-2xl border border-border bg-white p-5">
         <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
           <div className="min-w-0">
             <p className="font-display text-[17px] font-semibold leading-snug tracking-tight text-slate-900">
               {t.apps > 0 ? (
                 <>
-                  <span className="font-mono tabular-nums">{t.apps.toLocaleString()}</span> apps from{" "}
-                  <span className="font-mono tabular-nums">{t.publishers.toLocaleString()}</span> publishers close the
+                  <span className="font-sans tabular-nums">{t.apps.toLocaleString()}</span> apps from{" "}
+                  <span className="font-sans tabular-nums">{t.publishers.toLocaleString()}</span> publishers close the
                   chain
                 </>
               ) : (
@@ -1225,7 +1226,7 @@ function SchainPublisherCard({
   return (
     <div
       className={cn(
-        "overflow-hidden rounded-3xl border border-border bg-white shadow-sm transition-colors",
+        "report-row overflow-hidden rounded-xl border border-border bg-white shadow-sm transition-colors",
         open && "shadow-md",
       )}
     >
@@ -1286,7 +1287,7 @@ function SchainAppCard({ row, open, onToggle }: { row: SchainRow; open: boolean;
   return (
     <div
       className={cn(
-        "overflow-hidden rounded-3xl border shadow-sm transition-colors",
+        "report-row overflow-hidden rounded-xl border shadow-sm transition-colors",
         open ? "border-app-border bg-app-bg/40 shadow-md" : "border-border bg-white",
       )}
     >
@@ -1304,9 +1305,7 @@ function SchainAppCard({ row, open, onToggle }: { row: SchainRow; open: boolean;
             <span title={row.app_name} className="truncate text-base font-semibold tracking-tight text-slate-900">
               {row.app_name}
             </span>
-            <span className="flex-shrink-0 rounded-full border border-app-border bg-app-bg px-1.5 py-px text-[10px] font-medium text-app">
-              {storeName(row)}
-            </span>
+            <StoreBadge row={row} />
           </div>
           <div className="truncate text-xs text-slate-500">
             publisher: <span className="text-slate-600">{row.publisher_domain}</span>
@@ -1410,7 +1409,7 @@ function Download3({
         type="button"
         disabled={empty || out}
         onClick={() => setOpen(true)}
-        className="inline-flex h-10 items-center gap-2 rounded-full bg-gradient-to-br from-primary to-[hsl(150_58%_22%)] px-5 text-sm font-medium text-primary-foreground shadow-sm transition-all hover:-translate-y-px hover:shadow-md disabled:pointer-events-none disabled:opacity-40"
+        className="inline-flex h-10 items-center gap-2 rounded-lg report-action bg-primary px-5 text-sm font-medium text-primary-foreground transition-colors disabled:pointer-events-none disabled:opacity-40"
       >
         <Download className="h-4 w-4" />
         Export
@@ -1506,7 +1505,7 @@ function Download3({
                 type="button"
                 onClick={go}
                 disabled={busy || !agreed}
-                className="inline-flex h-10 items-center gap-2 rounded-full bg-gradient-to-br from-primary to-[hsl(150_58%_22%)] px-5 text-sm font-medium text-primary-foreground shadow-sm transition-all hover:-translate-y-px hover:shadow-md disabled:opacity-60"
+                className="inline-flex h-10 items-center gap-2 rounded-lg report-action bg-primary px-5 text-sm font-medium text-primary-foreground transition-colors disabled:opacity-60"
               >
                 {busy ? <Loader2 className="h-4 w-4 animate-spin" /> : <Download className="h-4 w-4" />}
                 {busy ? "Preparing" : "Download"}

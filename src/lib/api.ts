@@ -504,8 +504,8 @@ export const api = {
     foundIn: FoundInFilter = "all",
   ) => {
     if (MOCK) {
-      const { mockMatchedDevelopers } = await import("./mockData");
-      const r = mockMatchedDevelopers(page, q, lines ?? [], mockMatchType(matchType));
+      const { mockMatchedDevelopers, mockWatchView } = await import("./mockData");
+      const r = mockWatchView(p => mockMatchedDevelopers(p, q, lines ?? [], mockMatchType(matchType)), page, pageSize, change, lines);
       return trialMock()
         ? {
             ...r,
@@ -563,8 +563,8 @@ export const api = {
     platform: PlatformFilter = "all",
   ) => {
     if (MOCK) {
-      const { mockMatchedApps } = await import("./mockData");
-      const r = mockMatchedApps(page, q, lines ?? [], mockMatchType(matchType), change ?? null);
+      const { mockMatchedApps, mockWatchView } = await import("./mockData");
+      const r = mockWatchView(p => mockMatchedApps(p, q, lines ?? [], mockMatchType(matchType), change ?? null), page, pageSize, change, lines);
       return trialMock()
         ? { ...r, page: 1, ...cutRows(r.rows, TRIAL_CAPS_MOCK.apps, r.total) }
         : r;

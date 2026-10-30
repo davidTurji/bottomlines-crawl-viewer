@@ -659,7 +659,7 @@ export function TourOverlay({
                     className="absolute -left-[5px] top-1/2 -mt-[5px] h-2.5 w-2.5 rotate-45 border-b border-l border-slate-200/80 bg-white"
                   />
                 )}
-                <span className="flex h-7 w-7 items-center justify-center rounded-full bg-gradient-to-b from-[hsl(152_50%_32%)] to-primary text-white shadow-sm shadow-primary/30">
+                <span className="flex h-7 w-7 items-center justify-center rounded-full bg-primary text-white ">
                   <ArrowRight className="h-3.5 w-3.5" />
                 </span>
                 <span>
@@ -732,7 +732,7 @@ export function TourOverlay({
             <button
               type="button"
               onClick={() => (last ? onClose() : onIndexChange(index + 1))}
-              className="inline-flex h-8 items-center gap-1 rounded-full bg-gradient-to-b from-[hsl(152_50%_32%)] to-primary pl-4 pr-3 text-xs font-semibold text-primary-foreground shadow-md shadow-primary/25 transition-all duration-200 hover:brightness-110 active:scale-[0.97]"
+              className="inline-flex h-8 items-center gap-1 rounded-lg bg-primary pl-4 pr-3 text-xs font-semibold text-primary-foreground  transition-all duration-200 hover:bg-primary/90 "
             >
               {last ? doneLabel : "Next"}
               {last ? <span className="w-1" /> : <ChevronRight className="h-3.5 w-3.5" />}

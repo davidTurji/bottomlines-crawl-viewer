@@ -1,3 +1,4 @@
+import { chooseFilter } from "./filterChoice";
 /**
  * THE MATCHED APPS CHANGE TABS count the whole list, never one page.
  *
@@ -53,8 +54,6 @@ const count = (page: Page) => page.locator("[data-list-count] p");
 const cards = (page: Page) => page.locator('button[aria-label^="Show the seat lines of"]');
 const card = (page: Page, name: string) =>
   page.getByRole("button", { name: new RegExp(`^(Show|Hide) the seat lines of ${name}$`) });
-const pill = (page: Page, name: "All" | "Own" | "IPD") =>
-  page.getByTestId("match-type").getByRole("button", { name, exact: true });
 
 const moved = (a: MatchedApp, change: AppChange) =>
   (change === "added" ? a.lines_added : change === "removed" ? a.lines_removed : a.lines_cert_changed) ?? 0;
@@ -158,8 +157,8 @@ test.describe("the matched apps change tabs", () => {
     await expect(count(page)).toHaveText(serverCount(both("all").total));
 
     // IPD and Added: the Samsung TV Plus app, whose partner gained two lines.
-    await pill(page, "IPD").click();
-    await expect(pill(page, "IPD")).toHaveAttribute("aria-pressed", "true");
+    await chooseFilter(page, "match-type", "IPD");
+    await expect(page.getByTestId("match-type")).toContainText("IPD");
     await expect(count(page)).toHaveText(serverCount(both("ipd").total));
     await expect(card(page, MT_PLATFORM.name)).toHaveCount(1);
     await expect
@@ -172,7 +171,7 @@ test.describe("the matched apps change tabs", () => {
       .toBe(true);
 
     // Own and Added: never the IPD app.
-    await pill(page, "Own").click();
+    await chooseFilter(page, "match-type", "Own");
     await expect(count(page)).toHaveText(serverCount(both("own").total));
     await expect(card(page, MT_PLATFORM.name)).toHaveCount(0);
     await expect(tab(page, "Added")).toHaveAttribute("aria-selected", "true");

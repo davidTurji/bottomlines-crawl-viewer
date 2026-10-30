@@ -1,7 +1,10 @@
+import { requestReportDownload } from "@/lib/reportDownload";
+import { StoreBadge } from "@/components/StoreBadge";
+import { FilterBar, FilterGroup, FilterSearch, FilterSelect } from "@/components/FilterBar";
 import InactiveSection, { type InactiveCards } from "@/components/InactiveSection";
 import LockedTail from "@/components/LockedTail";
 import { MiniStat } from "@/components/MiniStat";
-import { Collapse, Settle, glideTo } from "@/components/Motion";
+import { Collapse, Settle, glideTo, toggleWithoutJump } from "@/components/Motion";
 import TrialBanner from "@/components/TrialBanner";
 import {
   OverviewSkeleton,
@@ -11,22 +14,20 @@ import {
   skeletonRowCount,
 } from "@/components/Skeleton";
 import { expectedRows, knownKey, type Landed } from "@/lib/expectedRows";
-import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { useEffect, useId, useMemo, useRef, useState, type ReactNode } from "react";
 import { BEAT_PAUSE_MS, CountUp, landsAfterMs, payoffStyle } from "@/components/CountUp";
 import { LineFilter } from "@/components/LineFilter";
-import { HoverHint } from "@/components/HoverHint";
 import {
   appSubject,
   IpdChip,
   IpdInconclusiveNote,
   IpdWhere,
-  MatchTypeControl,
 } from "@/components/MatchType";
 import { PAGE_SIZE } from "@/lib/paging";
 import { usePageCache } from "@/lib/pageCache";
 import { useLineFilter } from "@/lib/lineFilter";
 import { Link } from "react-router-dom";
-import { ChevronDown, Download, Globe, Search, Smartphone } from "lucide-react";
+import { ChevronDown, ChevronRight, Download, Globe, SlidersHorizontal, Smartphone } from "lucide-react";
 import {
   type TrialCaps, type TrialSlice,
   api,
@@ -71,7 +72,7 @@ import { Card } from "@/components/ui/card";
 import InlineAskAI from "@/components/InlineAskAI";
 import { PageShell } from "@/components/PageShell";
 import { formatWeek } from "@/components/WeekLine";
-import { appFileLine, cn, fileHostsLabel, foundInLabel, lineHostLabel, scopeReasonText, storeName } from "@/lib/utils";
+import { appFileLine, cn, fileHostsLabel, lineHostLabel, scopeReasonText, storeName } from "@/lib/utils";
 import {
   addedDates,
   certDates,
@@ -85,8 +86,10 @@ import {
 } from "@/lib/changeDates";
 import {
   ActionableLine,
-  CopyableLine,
-  FoundInLinks,
+  fileUrl,
+  filesOf,
+  linkable,
+  LineActionGroup,
   PartnerLinks,
   PublisherAvatarLink,
   PublisherDomainLink,
@@ -107,9 +110,9 @@ import {
   type ScopeTab,
 } from "@/lib/scopeRows";
 import { csvName, ExportListButton, type CsvCell, type CsvSink, type ExportDone } from "@/components/ExportList";
-import { FoundInControl, PlatformControl } from "@/components/PlatformControl";
 import { useReportScope } from "@/lib/reportScope";
 import { PopularBar, type PopularChoice } from "@/components/PopularBar";
+
 import {
   gutterDigits,
   LineNo,
@@ -144,6 +147,9 @@ const OVERVIEW_SUGGESTIONS = [
  * AskAIComposer.tsx so the visual reads identical to the console.
  */
 
+// Hidden for the current design review; keep the shortcuts available to revisit.
+const RECOMMENDATIONS_ENABLED = false;
+
 export default function CrawlReport() {
   const { token } = useReportScope();
   const [summary, setSummary] = useState<Summary | null>(null);
@@ -160,9 +166,6 @@ export default function CrawlReport() {
   // The list's tab lives here, not in the list, so the "Lines added" and
   // "Lines removed" cards can open it on Added or Removed.
   const [drillTab, setDrillTab] = useState<DrillTab>("all");
-  // Which Inactive list is open (Publishers or Apps). The page's, so it
-  // survives switching views; picking a view picks its own list.
-  const [inactiveKind, setInactiveKind] = useState<InactiveKind>("publishers");
   // Match type (All / Own / IPD, crawler #348). The page's, like the tab,
   // so it survives switching between publishers and apps. Never anything
   // but "all" on a report without match types: the pills that change it
@@ -178,7 +181,6 @@ export default function CrawlReport() {
   const showView = (view: ListView, tab?: DrillTab) => {
     if (tab) setDrillTab(tab);
     setMatchedView(view);
-    setInactiveKind(view);
   };
   const pickView = (view: ListView) => showView(view);
   // Bumped by those two cards: the list opens its first row once it has
@@ -193,7 +195,7 @@ export default function CrawlReport() {
   /** The quiet line's "See them": the Inactive tab, on a list that has rows. */
   const showInactive = (counts: InactiveCounts) => {
     setDrillTab("inactive");
-    setInactiveKind(counts[matchedView] > 0 ? matchedView : matchedView === "publishers" ? "apps" : "publishers");
+    if (!counts[matchedView]) setMatchedView(matchedView === "publishers" ? "apps" : "publishers");
     glideTo(listRef.current);
   };
   /* THE SEAT-LINE FILTER. In the URL, so it survives a refresh and follows
@@ -397,8 +399,7 @@ export default function CrawlReport() {
   const inactive = inactiveCounts && hasInactive
     ? {
         counts: inactiveCounts,
-        kind: inactiveKind,
-        setKind: setInactiveKind,
+        kind: matchedView,
         legacy: summary.gone,
         since: inactiveSince,
       }
@@ -463,7 +464,7 @@ export default function CrawlReport() {
             />
           )}
         </div>
-        <div className="flex flex-wrap items-center gap-2">
+        <div className="report-header-actions flex flex-wrap items-center gap-2">
           <LineFilter
             seats={summary.watchlist?.seats ?? []}
             selected={lines}
@@ -478,12 +479,15 @@ export default function CrawlReport() {
               info={exportInfo}
             />
           )}
+          {exportInfo.format === "none" && !summary.trial && !exportInfo.trial && (
+            <p role="status" className="max-w-xs text-xs text-slate-500">The report download is not ready yet. Please refresh shortly.</p>
+          )}
         </div>
       </div>
       {/* Reserved whether or not a filter is on, so toggling one never
           pushes the cards below down and back up. */}
       {summary.trial && <TrialBanner caps={summary.trial} summary={summary} />}
-      <p className="-mt-2 min-h-[18px] text-[12px] leading-[18px] text-slate-500">
+      <p className="report-filter-note -mt-2 min-h-[18px] text-[12px] leading-[18px] text-slate-500">
         {lines.length > 0 && (
           <>
             Showing only publishers and apps carrying{" "}
@@ -518,22 +522,20 @@ export default function CrawlReport() {
       {refreshing ? (
         <SkeletonStatCards count={2} />
       ) : (
+      <section className="overview-kpis space-y-2.5" aria-label="Weekly performance">
+      <p data-kpi-comparison className="text-xs text-slate-500">
+        {isFirstCrawl ? "First crawl · no prior week to compare" : "Compared with last week"}
+        {filtered && " · selected lines"}
+      </p>
       <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
         <div
-          className="rounded-2xl border border-border bg-white p-5 shadow-sm"
+          className="report-panel rounded-2xl border border-border bg-white p-5"
           data-tour="overview-changes"
         >
           <div className="mb-3 flex items-baseline justify-between gap-3">
             <div>
               <div className="font-display text-sm font-medium text-slate-700">
                 This week&apos;s changes
-              </div>
-              <div className="text-[11px] text-slate-500">
-                {isFirstCrawl
-                  ? "Your first crawl"
-                  : filtered
-                    ? "Under the selected lines"
-                    : "Relative to last week"}
               </div>
             </div>
             <span className="text-xs text-slate-500">
@@ -558,10 +560,9 @@ export default function CrawlReport() {
               </div>
             </div>
           ) : (
-          <div className="grid grid-cols-2 divide-x divide-border overflow-hidden rounded-xl border border-border">
+          <div className="report-kpi-pair grid grid-cols-2 gap-2">
             <SplitStat
               tone="ok"
-              prefix="+"
               number={added}
               label="Lines added"
               delta={prevAdded != null ? computeDelta(added, prevAdded) : null}
@@ -571,7 +572,6 @@ export default function CrawlReport() {
             />
             <SplitStat
               tone="critical"
-              prefix="-"
               number={removed}
               label="Lines removed"
               delta={
@@ -594,7 +594,7 @@ export default function CrawlReport() {
         </div>
 
         <div
-          className="rounded-2xl border border-border bg-white p-5 shadow-sm"
+          className="report-panel rounded-2xl border border-border bg-white p-5"
           data-tour="overview-matched"
         >
           <div className="mb-3 flex items-baseline justify-between gap-3">
@@ -602,16 +602,9 @@ export default function CrawlReport() {
               <div className="font-display text-sm font-medium text-slate-700">
                 Matched inventory
               </div>
-              <div className="text-[11px] text-slate-500">
-                {isFirstCrawl
-                  ? "First crawl, no prior week to compare against"
-                  : filtered
-                    ? "Under the selected lines"
-                    : "Relative to last week"}
-              </div>
             </div>
             <span className="text-xs text-slate-500">
-              {summary.counters.matched.lines.toLocaleString()} lines total
+              <span title="Matched line occurrences: your watched seat lines across publisher ads.txt and app-ads.txt files. A seat line can appear in many files; this is not a count of unique lines.">{summary.counters.matched.lines.toLocaleString()} line occurrences</span>
             </span>
           </div>
           {/* Two tiles that double as the selector for the list below:
@@ -621,7 +614,7 @@ export default function CrawlReport() {
               the same width to the pixel and the two hero panels line up.
               Click one to switch the list underneath; the selected tile
               carries its tint. */}
-          <div className="grid grid-cols-2 divide-x divide-border overflow-hidden rounded-xl border border-border">
+          <div className="report-kpi-pair grid grid-cols-2 gap-2">
             <MatchedTile
               tone="publisher"
               icon={Globe}
@@ -663,6 +656,7 @@ export default function CrawlReport() {
           )}
         </div>
       </div>
+      </section>
       )}
 
       {/* Ask AI, inline, between the KPIs and the drilldown. Same shape
@@ -686,12 +680,12 @@ export default function CrawlReport() {
           tinted expansion. Publishers are green, apps are pink. */}
       {/* POPULAR (David, 2026-10-27): one click sets the list below to a
           view readers ask for; only choices whose list has rows. */}
-      <PopularBar
+      {RECOMMENDATIONS_ENABLED && <PopularBar
         choices={popularChoices}
         active={popularActive}
         onPick={pickPopular}
         loading={popularCounts === undefined}
-      />
+      />}
 
       {/* The matched list. Which one shows is driven by the two cards above:
           publishers by default, apps when the pink card is selected. Both are
@@ -852,52 +846,26 @@ function WeeklyWin({
  * Two big numbers side by side inside a hero card, divided by a hairline.
  * Same visual weight both sides so the eye reads them as peers.
  */
-/** A delta chip: green ▲ or red ▼ with signed integer + percentage. */
-export type Delta = { abs: number; pct: number };
+/** The absolute and percentage change against the previous crawl. */
+export type Delta = { abs: number; pct: number | null };
 
 export function computeDelta(current: number, previous: number): Delta {
   const abs = current - previous;
-  const pct = previous === 0 ? 0 : (abs / previous) * 100;
+  const pct = previous === 0 ? (current === 0 ? 0 : null) : (abs / previous) * 100;
   return { abs, pct };
 }
 
-function DeltaChip({ delta }: { delta: Delta }) {
-  if (delta.abs === 0) {
-    return (
-      <span className="inline-flex items-center gap-1 text-[11px] text-slate-500">
-        no change vs last week
-      </span>
-    );
-  }
-  const tone = delta.abs > 0 ? "text-ok" : "text-critical";
-  const glyph = delta.abs > 0 ? "▲" : "▼";
-  const sign = delta.abs > 0 ? "+" : "";
-  const pctDisplay = Math.abs(delta.pct) >= 0.1
-    ? `${sign}${delta.pct.toFixed(1)}%`
-    : `${sign}${delta.pct.toFixed(2)}%`;
-  /* TWO UNBREAKABLE HALVES THAT WRAP AS WHOLES. On a phone a stat tile is
-     ~150px wide and the chip is wider than that. As one non-wrapping row
-     every piece shrank at once: the figures ran into each other and
-     "vs last week" broke over two lines on top of them. Now the figures
-     stay together on one line and "vs last week" drops beneath them. */
+function DeltaChip({ delta, tone, previous }: { delta: Delta; tone?: StatTone; previous?: number | null }) {
+  const comparison = delta.abs === 0 ? "No change" : moveText(delta);
+  const color = delta.abs === 0 ? "text-slate-600"
+    : tone === "critical" ? (delta.abs > 0 ? "text-critical" : "text-ok")
+    : tone === "ok" || tone === "publisher" || tone === "app"
+      ? (delta.abs > 0 ? "text-ok" : "text-critical")
+      : "text-slate-700";
   return (
-    <span
-      className={cn(
-        "inline-flex flex-wrap items-center gap-x-1 text-[11px] font-medium",
-        tone,
-      )}
-    >
-      <span className="inline-flex items-center gap-1 whitespace-nowrap">
-        <span className="text-[9px]">{glyph}</span>
-        <span className="font-mono tabular-nums">
-          {sign}
-          {delta.abs.toLocaleString()}
-        </span>
-        <span className="font-mono tabular-nums text-slate-500">
-          ({pctDisplay})
-        </span>
-      </span>
-      <span className="whitespace-nowrap text-slate-500">vs last week</span>
+    <span className="report-delta" title={`${comparison} vs ${previous != null ? `${previous.toLocaleString()} ` : ""}last week`}>
+      <span className={cn("font-medium tabular-nums", color)}>{comparison}</span>
+      <span className="report-delta-period">{delta.pct == null ? "vs 0 last week" : "vs last week"}</span>
     </span>
   );
 }
@@ -979,11 +947,12 @@ export function SplitStat({
   const numberCls = tone ? STAT_TONE_TEXT[tone] : "text-slate-900";
   const body = (
     <>
+      <div className="report-stat-label text-[12px] font-medium text-slate-600">{label}</div>
       <div className="flex items-baseline gap-1">
         {prefix && (
           <span
             className={cn(
-              "font-mono text-2xl font-semibold tabular-nums sm:text-3xl",
+              "report-figure text-2xl font-medium tabular-nums sm:text-3xl",
               numberCls,
             )}
           >
@@ -991,22 +960,21 @@ export function SplitStat({
           </span>
         )}
         <span
-          // Keyed on the value: a new figure counts up again.
+          // Keep the figure keyed to the selected report value.
           key={number}
           className={cn(
-            "font-mono text-3xl font-semibold leading-none tabular-nums tracking-tight sm:text-4xl",
+            "report-figure report-figure-value text-3xl font-medium leading-none tabular-nums tracking-tight sm:text-4xl",
             numberCls,
           )}
         >
           <CountUp value={number} delayMs={delayMs} />
         </span>
         {suffix && (
-          <span className="font-mono text-lg font-medium tabular-nums text-slate-400 sm:text-xl">{suffix}</span>
+          <span className="font-display text-lg font-medium tabular-nums text-slate-400 sm:text-xl">{suffix}</span>
         )}
       </div>
-      <div className="mt-2 text-[12px] font-medium text-slate-700">{label}</div>
       {caption && (
-        <div className="text-[11px] leading-[15px] text-slate-500">{caption}</div>
+        <div className="report-stat-caption text-[11px] leading-[15px] text-slate-500">{caption}</div>
       )}
       {/* ONE SLOT, ALWAYS THE SAME HEIGHT. A delta, a hint, a note, or
           nothing: the tile never grows or shrinks when the filter changes,
@@ -1014,11 +982,11 @@ export function SplitStat({
       <div
         key={number}
         className="min-h-[17px] text-[11px] leading-[17px]"
-        // The change line is the payoff: it rises in once the figure lands.
+        // Keep the shared timing interface; figures now appear immediately.
         style={payoffStyle(delayMs + landsAfterMs())}
       >
         {delta ? (
-          <DeltaChip delta={delta} />
+          <DeltaChip delta={delta} tone={tone} />
         ) : hint ? (
           <span className={hintClassName ?? "text-slate-500"}>{hint}</span>
         ) : note ? (
@@ -1038,8 +1006,9 @@ export function SplitStat({
         onClick={onClick}
         aria-pressed={active}
         className={cn(
-          "group block w-full px-5 py-4 text-left transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring",
+          "report-stat report-kpi-tile group block w-full px-5 py-4 text-left transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring",
           active ? activeGround : "hover:bg-muted/40",
+          className,
         )}
       >
         {body}
@@ -1050,31 +1019,17 @@ export function SplitStat({
     return (
       <Link
         to={linkTo}
-        className="block px-5 py-4 transition-colors hover:bg-muted/40"
+        className="report-stat block px-5 py-4 transition-colors hover:bg-muted/40"
       >
         {body}
       </Link>
     );
   }
-  return <div className={cn("px-5 py-4", className)}>{body}</div>;
+  return <div className={cn("report-stat px-5 py-4", className)}>{body}</div>;
 }
 
-/**
- * A matched-inventory tile that doubles as the selector for the list below.
- * Publishers wear the brand's racing green, apps the pink `app` tone.
- *
- * ONE RHYTHM WITH THE LINES TILES ON THE LEFT (David, 2026-10-25, "1000%
- * symmetric"): the same padding, corner radius and big-number row as
- * SplitStat, the label on the same second line, the same 17px quiet slot
- * under it, so all four tiles stand at one height. What this tile adds is
- * found and lost this week (the value found, never only the net;
- * kpis-show-value-found), in the tile's top-right corner: a tiny "This
- * week" caption over "▲ 380 found" and "▼ 29 lost", small muted type, the
- * figures softly tinted, shorter than the number and label beside it.
- * Last week's count is not printed, it is the number minus the move: it
- * lives in a hint above the move line. The selected tile carries its
- * tint, as the Lines tiles do.
- */
+/** A selector for the inventory below. Label, figure and comparison share
+ *  SplitStat's rhythm; Found/Lost adds the detail behind the net change. */
 export function MatchedTile({
   tone,
   icon: Icon,
@@ -1114,21 +1069,21 @@ export function MatchedTile({
   // Toned to the tile when its list is the one below, as SplitStat does.
   const activeGround = isApp ? "bg-app-bg/70" : "bg-ok-bg/60";
   const idleGround = "hover:bg-muted/40";
-  // The change lines are the payoff: they rise in once the figure lands.
+  // The change lines remain beside the corresponding figure.
   const payoff = payoffStyle(delayMs + landsAfterMs());
   const numberRow = (
     // The Lines tiles' number row to the pixel: the same baseline row, its
     // sign slot present but empty and zero wide, so the row stands at the
     // same height as "+127" over there.
     <span className="flex items-baseline">
-      <span aria-hidden className="invisible w-0 select-none font-mono text-2xl font-semibold tabular-nums sm:text-3xl">
+      <span aria-hidden className="invisible w-0 select-none report-figure text-2xl font-medium tabular-nums sm:text-3xl">
         +
       </span>
       <span
-        // Keyed on the value: a new figure counts up again.
+        // Keep the figure keyed to the selected report value.
         key={number}
         className={cn(
-          "font-mono text-3xl font-semibold leading-none tabular-nums tracking-tight sm:text-4xl",
+          "report-figure report-figure-value text-3xl font-medium leading-none tabular-nums tracking-tight sm:text-4xl",
           numberCls,
         )}
       >
@@ -1137,28 +1092,15 @@ export function MatchedTile({
     </span>
   );
   const labelRow = (
-    <span className="mt-2 flex items-center gap-1.5 text-[12px] font-medium text-slate-700">
+    <span className="flex items-start gap-1.5 text-[12px] font-medium text-slate-600">
       <Icon aria-hidden className={cn("h-3.5 w-3.5 flex-shrink-0", iconCls)} />
       {label}
     </span>
   );
   const moveLine = w ? (
-    // Last week's count rides in a hint anchored to this line (a native
-    // title floats wherever the pointer is, half a card away).
-    <HoverHint text={`${w.previous.toLocaleString()} last week`}>
-      <span className="text-slate-500">
-        {w.delta.abs === 0 ? (
-          "no change vs last week"
-        ) : (
-          <>
-            <span className="font-mono font-medium tabular-nums text-slate-600">{moveText(w.delta)}</span>{" "}
-            vs last week
-          </>
-        )}
-      </span>
-    </HoverHint>
+    <DeltaChip delta={w.delta} tone={tone} previous={w.previous} />
   ) : delta ? (
-    <DeltaChip delta={delta} />
+    <DeltaChip delta={delta} tone={tone} />
   ) : note ? (
     <span className="text-slate-400">{note}</span>
   ) : null;
@@ -1168,25 +1110,21 @@ export function MatchedTile({
       onClick={onClick}
       aria-pressed={active}
       className={cn(
-        "mtile group block w-full px-5 py-4 text-left transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring",
+        "mtile report-stat report-kpi-tile group block w-full px-5 py-4 text-left transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring",
         active ? activeGround : idleGround,
       )}
     >
-      {/* A small grid (index.css, .mtile-grid): the number and the label
-          in the first column, the corner in the second, a fixed gap
-          between, never overlapping. The corner is shorter than the two
-          rows beside it, so the tile keeps the Lines tiles' height. Too
-          narrow for the two columns (a phone), the corner moves under the
-          label. */}
+      {/* Labels and primary values share the same rhythm as SplitStat.
+          The weekly breakdown sits below the value at every width. */}
       <span className="mtile-grid">
         <span className="mtile-num">{numberRow}</span>
-        <span className="mtile-label">{labelRow}</span>
-        {w && move && <FoundLostCorner move={move} style={payoff} />}
+        <span className="mtile-label report-stat-label">{labelRow}</span>
       </span>
       {/* ONE SLOT, ALWAYS THE SAME HEIGHT, as on the Lines tiles. */}
-      <span key={number} className="block min-h-[17px] text-[11px] leading-[17px]" style={payoff}>
+      <span key={number} className="report-stat-comparison block min-h-[17px] text-[11px] leading-[17px]" style={payoff}>
         {moveLine}
       </span>
+      {w && move && <FoundLostCorner move={move} style={payoff} />}
     </button>
   );
 }
@@ -1194,34 +1132,21 @@ export function MatchedTile({
 /** The signed move and its percentage, "+351 (+4.4%)". */
 function moveText(delta: Delta): string {
   const sign = delta.abs > 0 ? "+" : delta.abs < 0 ? "-" : "";
-  return `${sign}${Math.abs(delta.abs).toLocaleString()} (${pctText(delta.pct)})`;
+  return `${sign}${Math.abs(delta.abs).toLocaleString()}${delta.pct == null ? "" : ` (${pctText(delta.pct)})`}`;
 }
 
-/** Soft tints for the quiet lines: easy on the eye, never saturated. */
-const SOFT_OK = "text-[hsl(152_38%_38%)]";
-const SOFT_CRITICAL = "text-[hsl(0_46%_54%)]";
-
-/**
- * The tile's corner: a tiny muted "This week" over "▲ 380 found" and
- * "▼ 29 lost", short right-aligned lines in small muted type, the figures
- * softly tinted. "This week" is a caption rather than on each line so the
- * corner stays narrow enough to sit beside the number on a 1,280px window.
- */
+/** Words carry direction; restrained green/red values reinforce it. */
 function FoundLostCorner({ move, style }: { move: MatchedMove; style?: React.CSSProperties }) {
-  const line = (glyph: string, n: number, word: string, tint: string) => (
-    <span className="whitespace-nowrap">
-      <span className={cn("text-[8px]", n > 0 ? tint : "text-slate-400")}>{glyph}</span>{" "}
-      <span className={cn("font-mono font-medium tabular-nums", n > 0 ? tint : "text-slate-400")}>
-        {n.toLocaleString()}
-      </span>{" "}
-      {word}
+  const row = (label: string, n: number) => (
+    <span className="inventory-move-row">
+      <span>{label}</span>{" "}
+      <span className={cn("font-medium tabular-nums", label === "Found" ? "text-ok" : "text-critical")}>{n.toLocaleString()}</span>
     </span>
   );
   return (
-    <span data-found-lost className="mtile-corner flex flex-col items-end text-right text-[10px] leading-[1.6] text-slate-500" style={style}>
-      <span className="text-[9px] leading-[1.4] text-slate-400">This week</span>
-      {line("▲", move.found, "found", SOFT_OK)}
-      {line("▼", move.lost, "lost", SOFT_CRITICAL)}
+    <span data-found-lost className="mtile-corner inventory-movement" style={style}>
+      {row("Found", move.found)}
+      {row("Lost", move.lost)}
     </span>
   );
 }
@@ -1328,45 +1253,74 @@ function ExportResultsButton({
       : info.format === "zip"
         ? zipExplanation(info)
         : undefined;
+  const [busy, setBusy] = useState(false);
+  const [downloadError, setDownloadError] = useState<string | null>(null);
+  const downloadFrame = useRef<(() => void) | null>(null);
+  const resetBusy = useRef<number>();
+  const starting = useRef(false);
+  useEffect(() => () => { downloadFrame.current?.(); window.clearTimeout(resetBusy.current); }, []);
   const onClick = async () => {
-    if (MOCK) {
-      const { buildXlsxBlob } = await import("../lib/xlsx");
-      const { MOCK_CUSTOMER_DOMAIN } = await import("../lib/mockData");
-      const url = URL.createObjectURL(buildXlsxBlob(sampleWorkbook(summary)));
-      const a = document.createElement("a");
-      a.href = url;
-      // Same name the crawler puts on the real file: the customer's
-      // domain and the report's date.
-      a.download = `${MOCK_CUSTOMER_DOMAIN}-${reportDate(summary)}.xlsx`;
-      document.body.appendChild(a);
-      a.click();
-      a.remove();
-      URL.revokeObjectURL(url);
-      return;
+    if (starting.current) return;
+    starting.current = true;
+    setBusy(true);
+    setDownloadError(null);
+    const idle = () => { starting.current = false; setBusy(false); };
+    window.clearTimeout(resetBusy.current);
+    try {
+      if (MOCK) {
+        const { buildXlsxBlob } = await import("../lib/xlsx");
+        const { MOCK_CUSTOMER_DOMAIN } = await import("../lib/mockData");
+        const url = URL.createObjectURL(buildXlsxBlob(sampleWorkbook(summary)));
+        const a = document.createElement("a");
+        a.href = url;
+        a.download = `${MOCK_CUSTOMER_DOMAIN}-${reportDate(summary)}.xlsx`;
+        document.body.appendChild(a);
+        a.click();
+        a.remove();
+        // Safari starts saving after the click returns.
+        window.setTimeout(() => URL.revokeObjectURL(url), 1500);
+        idle();
+        return;
+      }
+      downloadFrame.current?.();
+      downloadFrame.current = requestReportDownload(api.exportUrl(token, narrowed ? lines : []), message => {
+        setDownloadError(message);
+        idle();
+      });
+      // Attachments do not emit a document load. This only unlocks the
+      // button; it does not claim the file finished saving.
+      resetBusy.current = window.setTimeout(idle, 10_000);
+    } catch {
+      setDownloadError("The download could not start. Please try again.");
+      idle();
     }
-    window.location.href = api.exportUrl(token, narrowed ? lines : []);
   };
   /* THE ONE ACTION ON THE PAGE LOOKS LIKE ONE (David, 2026-10-02: "a green
      tempting button"). It was a white pill the same weight as the line
      filter beside it, so the thing a customer came to take away read as
      chrome. Solid brand green, white type, a lift on hover.
 
-     The label says what the file is. "Export complete report" whenever the
+     The label says what the file is. "Download full report" whenever the
      download is the whole report, which includes a filter this report
      cannot be cut by; only a download that really carries just the
      selected lines says so instead, because calling that file complete
      would be false. */
   return (
+    <div className="report-download flex max-w-full flex-col items-start gap-1.5">
     <button
       type="button"
       onClick={onClick}
+      disabled={busy}
+      aria-busy={busy}
       title={title}
       data-tour="export"
-      className="inline-flex h-9 flex-shrink-0 items-center gap-2 self-start rounded-full bg-gradient-to-b from-[hsl(152_50%_32%)] to-primary px-4 text-[13px] font-semibold text-primary-foreground shadow-md shadow-primary/25 ring-1 ring-inset ring-white/10 transition-all duration-150 hover:-translate-y-px hover:shadow-lg hover:shadow-primary/30 hover:brightness-110 active:translate-y-0 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
+      className="inline-flex h-9 flex-shrink-0 items-center gap-2 self-start rounded-lg report-action bg-primary px-4 text-[13px] font-semibold text-primary-foreground transition-colors duration-150 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
     >
       <Download aria-hidden className="h-4 w-4" />
-      {narrowed ? "Export selected lines" : "Export complete report"}
+      {busy ? "Preparing download…" : narrowed ? "Export selected lines" : "Download full report"}
     </button>
+    {downloadError && <p role="alert" className="max-w-sm text-xs leading-relaxed text-critical">{downloadError}</p>}
+    </div>
   );
 }
 
@@ -1398,7 +1352,6 @@ const SCOPE_NOTE: Record<ScopeTab, string> = {
 type InactiveTab = {
   counts: InactiveCounts;
   kind: InactiveKind;
-  setKind: (kind: InactiveKind) => void;
   legacy: Summary["gone"];
   /** "since Aug 18, 2026", or "since the compared crawl". */
   since: string;
@@ -1427,13 +1380,9 @@ function ListHead({
     >
       <div className="min-w-0">
         <h2 className="font-display text-base font-semibold tracking-tight text-slate-900">
-          {inactive ? "Inactive" : title}
+          {inactive ? title.replace("Matched", "Inactive") : title}
         </h2>
-        <p className="text-sm text-slate-500">
-          {inactive
-            ? "Publishers and apps that went inactive between these two crawls, with the date and the reason. Nothing is deleted."
-            : blurb}
-        </p>
+        {!inactive && <p className="text-sm text-slate-500">{blurb}</p>}
       </div>
       {right && <div className="flex-shrink-0">{right}</div>}
     </div>
@@ -1449,12 +1398,12 @@ const VIEW_TITLE: Record<ListView, { title: string; blurb: string }> = {
   publishers: {
     title: "Matched publishers",
     blurb:
-      "Every publisher whose ads.txt or app-ads.txt matched your seats, or whose inventory partner's ads.txt did. Click a row to see the exact seat lines it carried, and what moved this week.",
+      "Your seats, matched directly or via inventory partners.",
   },
   apps: {
     title: "Matched apps",
     blurb:
-      "Every app whose app-ads.txt matched your seats, or whose inventory partner's ads.txt did, with the publisher that owns it. Click a row to see the exact seat lines it carried, and what moved this week.",
+      "Your seats, matched directly or via inventory partners.",
   },
 };
 
@@ -1635,20 +1584,49 @@ function useOpenFirst<K>(
 }
 
 /** Whether a list offers a watch tab: its API counts the filter and the
- *  count is above zero, and it never answered the filter unfiltered. */
+ *  API supplies a numeric count, and it never answered the filter unfiltered. */
 function watchTabOn(counts: ChangeCounts | null, off: boolean, tab: ScopeTab): boolean {
-  return !off && (counts?.[WATCH_CHANGE[tab]] ?? 0) > 0;
+  return !off && typeof counts?.[WATCH_CHANGE[tab]] === "number";
 }
 
-/** The watch tabs a list offers: only those with rows this week. */
-function ScopeTriggers({ counts, off }: { counts: ChangeCounts | null; off: boolean }) {
-  return (
-    <>
-      {watchTabOn(counts, off, "started") && <TabsTrigger value="started">Started watching</TabsTrigger>}
-      {watchTabOn(counts, off, "stopped") && <TabsTrigger value="stopped">Stopped watching</TabsTrigger>}
-      {watchTabOn(counts, off, "unconfirmed") && <TabsTrigger value="unconfirmed">Unconfirmed</TabsTrigger>}
-    </>
-  );
+/** Keep supported watch statuses visible even when the current filter has no rows. */
+/** Desktop tabs and a native phone selector share exactly the same status state. */
+function StatusControls({ tab, setTab, counts, off, inactive }: {
+  tab: DrillTab; setTab: (tab: DrillTab) => void; counts: ChangeCounts | null; off: boolean; inactive: boolean;
+}) {
+  const [expanded, setExpanded] = useState(!["all", "added", "removed", "changed"].includes(tab));
+  const moreId = useId();
+  const primary: { value: DrillTab; label: string }[] = [
+    { value: "all", label: "All matched" }, { value: "added", label: "Added" },
+    { value: "removed", label: "Removed" }, { value: "changed", label: "Changed" },
+  ];
+  const extra: { value: DrillTab; label: string }[] = [
+    ...(["started", "stopped", "unconfirmed"] as ScopeTab[]).filter(value => watchTabOn(counts, off, value))
+      .map(value => ({ value, label: value === "started" ? "Started watching" : value === "stopped" ? "Stopped watching" : "Unconfirmed" })),
+    ...(inactive ? [{ value: "inactive" as const, label: "Inactive" }] : []),
+  ];
+  const selectedExtra = extra.find(option => option.value === tab);
+  useEffect(() => { if (!["all", "added", "removed", "changed"].includes(tab)) setExpanded(true); }, [tab]);
+  return <>
+    <label className="report-mobile-status"><span>Status</span>
+      <select aria-label="Matched status" value={tab} onChange={event => setTab(event.target.value as DrillTab)}>
+        {[...primary, ...extra].map(option => <option key={option.value} value={option.value}>{option.label}</option>)}
+      </select>
+    </label>
+    <Tabs value={tab} onValueChange={value => setTab(value as DrillTab)} className="report-desktop-status max-w-full">
+      <TabsList aria-label="Matched statuses" className="status-track h-auto max-w-full justify-start">
+        {primary.map(option => <TabsTrigger key={option.value} value={option.value}>{option.label}</TabsTrigger>)}
+        {extra.length > 0 && <button type="button" className={cn("status-more", selectedExtra && "status-more-active")} aria-label="More statuses"
+          title={expanded ? "Hide additional statuses" : selectedExtra ? `${selectedExtra.label} selected · More statuses` : "More statuses"}
+          aria-expanded={expanded} aria-controls={moreId} onClick={() => setExpanded(value => !value)}>
+          <ChevronRight aria-hidden className={cn("h-4 w-4 transition-transform", expanded && "rotate-180")} />
+        </button>}
+        {extra.length > 0 && <span id={moreId} hidden={!expanded} className="status-extra-inline">
+          {extra.map(option => <TabsTrigger key={option.value} value={option.value}>{option.label}</TabsTrigger>)}
+        </span>}
+      </TabsList>
+    </Tabs>
+  </>;
 }
 
 /** A list's split by a switch, only from an API that filtered the whole
@@ -1869,6 +1847,7 @@ function ScopeWindow({
         <span className={cn("text-xs font-medium", s.text)}>{s.title}</span>
         <span className={cn("font-mono text-[11px] font-semibold tabular-nums", s.text)}>{groups.length}</span>
       </div>
+      <LineActionGroup>
       <ul className="bl-lines-in divide-y divide-border">
         {groups.map(({ e, partners, own }, i) => {
           const reason =
@@ -1898,6 +1877,7 @@ function ScopeWindow({
           );
         })}
       </ul>
+      </LineActionGroup>
     </section>
   );
 }
@@ -2152,23 +2132,11 @@ function matchTypeFieldsOf(d: MatchTypeFields): MatchTypeFields {
   return out;
 }
 
-/* ── THE LIST'S CONTROLS, TWO ROWS AND NOTHING ELSE (David, 2026-10-25) ──
-   Row 1: the status tabs on the left; "Match type" and its pills on the
-   right, the tabs' height. Row 2: the search box on the left, held to a
-   sensible width; "1–25 of 262 publishers" and the pager on the right,
-   centred on the search box. The count lives on row 2 only (the pills
-   keep theirs in their tooltips), and the standalone count-and-pager line
-   that used to sit above the rows is gone; the pager under the list
-   stays. On a phone row 1 wraps the pills under the tabs and row 2 stacks
-   the search above the count and pager. Nothing in either row moves when
-   a tab or a pill changes: the tabs and pills have fixed widths, the
-   search box keeps its width whatever lands on its right, and the right
-   side is right-aligned so only its left edge grows. Without match types
-   (every report frozen before crawler #348) row 1's right side is empty. */
+/* Status tabs navigate the list; its search, filters and paging share one bar. */
 export function ListTabsRow({ left, right }: { left: ReactNode; right: ReactNode }) {
   return (
     <div className="flex flex-wrap items-center justify-between gap-x-4 gap-y-2">
-      <div className="flex min-w-0 max-w-full flex-wrap items-center gap-3">{left}</div>
+      <div className="list-tabs-left flex min-w-0 max-w-full flex-wrap items-center gap-3">{left}</div>
       {right}
     </div>
   );
@@ -2180,6 +2148,8 @@ export function ListSearchRow({
   placeholder,
   label,
   right,
+  filters,
+  actions,
 }: {
   query: string;
   setQuery: (next: string) => void;
@@ -2188,27 +2158,15 @@ export function ListSearchRow({
   /** The count and pager; null while nothing has landed (the row keeps its
    *  height: the search box is as tall as the pager). */
   right: ReactNode;
+  filters?: ReactNode;
+  actions?: ReactNode;
 }) {
   return (
-    <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between sm:gap-x-6">
-      {/* PREVIEW (2026-10-25): the search stretches to the count and pager,
-          a comfortable gap between, never narrower than 12rem. */}
-      <div className="relative w-full min-w-0 sm:min-w-[12rem] sm:flex-1">
-        <Search className="pointer-events-none absolute left-3.5 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
-        <input
-          value={query}
-          onChange={(e) => setQuery(e.target.value)}
-          placeholder={placeholder}
-          aria-label={label}
-          className="h-10 w-full rounded-full border border-border bg-white pl-10 pr-4 text-sm text-slate-900 outline-none transition-colors placeholder:text-slate-400 focus:border-primary/40"
-        />
-      </div>
-      {right && (
-        <div data-list-count className="flex min-h-10 items-center justify-end sm:ml-auto sm:flex-shrink-0">
-          {right}
-        </div>
-      )}
-    </div>
+    <FilterBar actions={actions}>
+      <FilterSearch value={query} onChange={setQuery} placeholder={placeholder} ariaLabel={label} />
+      {filters && <FilterGroup>{filters}</FilterGroup>}
+      {right && <div data-list-count className="list-toolbar-results">{right}</div>}
+    </FilterBar>
   );
 }
 
@@ -2279,6 +2237,17 @@ function DrilldownList({
   // filter unfiltered (an API without it: those tabs are not offered).
   const [changeCounts, setChangeCounts] = useState<ChangeCounts | null>(null);
   const [watchOff, setWatchOff] = useState(false);
+  // Inactive can be the first view mounted; read status capabilities without
+  // requiring a detour through All matched. Older reports still omit them.
+  useEffect(() => {
+    if (tab !== "inactive" || changeCounts !== null || watchOff) return;
+    let cancelled = false;
+    api.matchedDevelopers(token, 1, "", lines, matchType, 1)
+      .then(result => { if (!cancelled && result.change_counts) setChangeCounts(result.change_counts); })
+      .catch(() => {});
+    return () => { cancelled = true; };
+  }, [token, tab, lines, matchType, changeCounts, watchOff]);
+
   // The list's split and its inconclusive IPD matches (crawler #348).
   // Null on a report without match types: no pills, no note.
   const [typeCounts, setTypeCounts] = useState<MatchTypeCounts | null>(null);
@@ -2498,32 +2467,10 @@ function DrilldownList({
         <ListTabsRow
           left={
             <>
-          <Tabs value={tab} onValueChange={(v) => setTab(v as DrillTab)} className="max-w-full">
-            {/* EVERY TAB IN SIGHT (demo of #75): on a narrow screen the
-                tabs wrap onto a second row rather than scroll out of view
-                with nothing to say more are there. */}
-            <TabsList className="h-auto max-w-full flex-wrap justify-start">
-              <TabsTrigger value="all">All matched</TabsTrigger>
-              <TabsTrigger value="added">Added</TabsTrigger>
-              <TabsTrigger value="removed">Removed</TabsTrigger>
-              <TabsTrigger value="changed">Changed</TabsTrigger>
-              <ScopeTriggers counts={changeCounts} off={watchOff} />
-              {inactive && <TabsTrigger value="inactive">Inactive</TabsTrigger>}
-            </TabsList>
-          </Tabs>
+          <StatusControls tab={tab} setTab={setTab} counts={changeCounts} off={watchOff} inactive={!!inactive} />
             </>
           }
-          right={
-            // Not on Inactive: those lists are not split by these.
-            tab !== "inactive" && (typeCounts || foundInCounts) && (
-              // A phone stacks the switches, each label over its pills;
-              // wider, they sit right of the tabs, as before.
-              <span className="flex w-full min-w-0 flex-col items-start gap-2 sm:w-auto sm:flex-row sm:flex-wrap sm:items-center sm:justify-end sm:gap-x-4">
-                {foundInCounts && <FoundInControl value={foundIn} onChange={setFoundIn} counts={foundInCounts} />}
-                {typeCounts && <MatchTypeControl value={matchType} onChange={setMatchType} counts={typeCounts} />}
-              </span>
-            )
-          }
+          right={null}
         />
         {isScopeTab(tab) && <p data-scope-note className="text-[12px] leading-relaxed text-slate-500">{SCOPE_NOTE[tab]}</p>}
         {tab !== "inactive" && (
@@ -2532,6 +2479,16 @@ function DrilldownList({
             setQuery={setQuery}
             placeholder="Search publishers"
             label="Search matched publishers"
+            actions={!loading && settled > 0 && !error && rows.length > 0 && !trial && !caps ? <ExportListButton run={exportList} noun="publishers" /> : null}
+            filters={<>
+              {foundInCounts && <FilterSelect value={foundIn} onChange={setFoundIn} leading="Found in" ariaLabel="Found in" testId="found-in" options={[
+                { value: "all", label: "All files" }, { value: "ads_txt", label: "ads.txt" },
+                { value: "app_ads_txt", label: "app-ads.txt" }, { value: "both", label: "Both" },
+              ].filter(o => o.value === "all" || o.value === foundIn || (foundInCounts[o.value as keyof typeof foundInCounts] ?? 0) > 0).map(o => ({ ...o, count: foundInCounts[o.value as keyof typeof foundInCounts] })) as { value: typeof foundIn; label: string; count: number }[]} />}
+              {typeCounts && <FilterSelect value={matchType} onChange={setMatchType} leading="Match type" icon={SlidersHorizontal} menuLabel="Filter by match type" ariaLabel="Match type" testId="match-type" options={[
+                { value: "all", label: "All", description: "Publisher files and inventory partners", count: typeCounts.all }, { value: "own", label: "Own", description: "In the publisher’s own file", count: typeCounts.own }, { value: "ipd", label: "IPD", description: "Via a declared inventory partner", count: typeCounts.ipd },
+              ]} />}
+            </>}
             right={
               // While new rows are on the way the count waits with them (a
               // skeleton in its place: no number for the old filter under
@@ -2545,7 +2502,6 @@ function DrilldownList({
                   ? <CountLine count={total} noun={tabNoun(rowsTab, "publishers").many} />
                   : (
                     <span className="flex flex-wrap items-center justify-end gap-x-3 gap-y-2">
-                      <ExportListButton run={exportList} />
                       <Pager
                         placement="inline"
                         page={page}
@@ -2575,7 +2531,6 @@ function DrilldownList({
           caps={caps}
           counts={inactive.counts}
           kind={inactive.kind}
-          setKind={inactive.setKind}
           legacy={inactive.legacy}
           since={inactive.since}
           cards={INACTIVE_CARDS}
@@ -2754,8 +2709,8 @@ function PublisherCard({
   return (
     <div
       className={cn(
-        "overflow-hidden rounded-3xl border shadow-sm transition-colors",
-        inactive ? "border-slate-200 bg-slate-50" : "border-border bg-white",
+        "report-row overflow-hidden rounded-xl border shadow-sm transition-colors",
+        inactive ? "inactive-report-row border-border bg-white" : "border-border bg-white",
         open && "shadow-md",
       )}
     >
@@ -2766,11 +2721,15 @@ function PublisherCard({
       <div className="relative">
         <button
           type="button"
-          onClick={onToggle}
+          onClick={(e) => toggleWithoutJump(e.currentTarget, onToggle)}
           aria-expanded={open}
           aria-label={`${open ? "Hide" : "Show"} the seat lines of ${row.developer_name || row.developer_domain || "this publisher"}`}
-          className="absolute inset-0 z-0 rounded-t-3xl focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-primary/30"
-        />
+          className="absolute inset-0 z-0 rounded-t-xl focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-primary/30"
+        >
+          <span className="report-expand-control">
+            <ChevronDown aria-hidden className={cn("h-3.5 w-3.5 transition-transform", open && "rotate-180")} />
+          </span>
+        </button>
         {inactive && <InactiveStrip mark={inactive} />}
       <div className="pointer-events-none flex w-full items-center gap-4 px-4 py-4 text-left sm:px-5">
         {row.developer_domain ? (
@@ -2867,12 +2826,7 @@ function PublisherCard({
           />
         </div>
         )}
-        <ChevronDown
-          className={cn(
-            "h-4 w-4 flex-shrink-0 text-slate-400 transition-transform",
-            open && "rotate-180",
-          )}
-        />
+        <span aria-hidden className="report-expand-space flex-shrink-0" />
       </div>
       </div>
       <Collapse open={open}>
@@ -3015,9 +2969,9 @@ export function SeatLineRow({
   n: number;
   digits: number;
   muted?: boolean;
-  /** The line has left the publisher's file: a click copies it. */
+  /** The line has left the publisher's file; source links open the current file. */
   gone?: boolean;
-  /** Whose line this is: with it, the line opens their file at it. */
+  /** Whose source file the explicit Open control should use. */
   publisherDomain?: string | null;
   /** Set inside a change window: the row says WHEN, under the line. A
    *  removed line says when it was last seen and first not found, an added
@@ -3050,29 +3004,21 @@ export function SeatLineRow({
           ? addedDates(line)
           : change === "cert"
             ? certDates(line)
-            : null;
+            : addedDates(line);
   // Why it was removed, when the report says (2026-10-26).
   const removal = change === "removed" ? removalReasonText(line) : null;
   const unchecked = lastConfirmedNote(line.last_confirmed);
-  // ON A PHONE THE PARTNERS GO UNDER THE LINE (David, 2026-10-27): at
-  // the right margin they took the width and cut the line to "st...".
-  // Below the sm breakpoint they are a line of their own right under the
-  // seat line, at its left edge (before its dates and reasons); from sm up
-  // they sit at the right margin exactly as before. Two copies, one shown
-  // per width (display: none takes the other out of the accessibility
-  // tree, so a screen reader hears the partners once).
-  const viaAt = (where: "under" | "margin") =>
-    partners.length > 0 && (
-      <PartnerLinks
-        partners={partners}
-        line={line}
-        gone={gone}
-        className={cn(
-          "text-[10px] leading-4 text-slate-400",
-          where === "under" ? "block min-w-0 max-w-none whitespace-normal break-words text-left sm:hidden" : "hidden sm:inline",
-        )}
-      />
-    );
+  // Keep the match chain beside the line on every screen size.
+  const via = partners.length > 0 && <RowNote data-ipd-explanation>
+    <span className="line-ipd-badge" title="Inventory partner domain">IPD</span>{" "}
+    <PartnerLinks partners={partners} line={line} gone={gone}
+      className="inline whitespace-normal break-words text-left text-slate-600" />
+    <span className="text-slate-500"> · declared inventory partner</span>
+  </RowNote>;
+  const fileDomain = inOwn ? line.host || publisherDomain : partners[0];
+  const foundIn = inOwn ? line.found_in : "ads.txt";
+  const sourceKind = fileLabelOf(foundIn);
+  const sourceFiles = ["ads.txt", "app-ads.txt", "both"].includes(sourceKind) ? filesOf(sourceKind) : [];
   const text = (
     <div className="min-w-0 flex-1">
       {label ?? (
@@ -3081,7 +3027,7 @@ export function SeatLineRow({
           {line.cert_id && <span className="font-normal text-slate-400">, {line.cert_id}</span>}
         </RowText>
       )}
-      {viaAt("under")}
+      {via}
       {notes}
       {change === "cert" && typeof line.old_cert_id === "string" && (
         <RowNote data-cert-change>
@@ -3097,11 +3043,17 @@ export function SeatLineRow({
       {/* NOT RE-CHECKED (crawler #370): a line this crawl did not read
           again says when it was last confirmed. */}
       {unchecked && <RowNote data-line-unchecked>{unchecked}</RowNote>}
-      {dates && (
-        <RowNote data-line-dates title={dateTitle(line.date_source)}>
+      <RowNote data-line-dates title={dateTitle(line.date_source)}>
           {dates}
-        </RowNote>
-      )}
+          {sourceFiles.length > 0 && <span data-line-source>{dates ? ", found in " : "Found in "}{sourceFiles.map((file, index) => (
+            <span key={file}>{index > 0 && " + "}{linkable(fileDomain) ? (
+              <a href={fileUrl(fileDomain, file, gone ? null : line)} target="_blank" rel="noopener noreferrer"
+                onClick={event => event.stopPropagation()} onKeyDown={event => event.stopPropagation()}
+                className="line-source-reference" title={`Open ${fileDomain}/${file}`}>{file}</a>
+            ) : <span className="line-source-reference">{file}</span>}</span>
+          ))}</span>}
+          {sourceFiles.length === 0 && <span data-line-source>{dates ? ", source file not recorded" : "Source file not recorded"}</span>}
+      </RowNote>
     </div>
   );
   const gutter = <LineNo n={n} digits={digits} />;
@@ -3111,45 +3063,25 @@ export function SeatLineRow({
   // host that is the publisher's domain, says nothing extra. A line only
   // a partner carries opens that partner's ads.txt (2026-10-27: every line
   // used to open the row's first partner's file, whoever carried it).
-  const fileDomain = inOwn ? line.host || publisherDomain : partners[0];
-  const foundIn = inOwn ? line.found_in : "ads.txt";
   const hostLabel = inOwn ? lineHostLabel(line.host, publisherDomain) : null;
   const host = hostLabel && (
     <span data-line-host className={ROW_MARGIN}>
       {hostLabel}
     </span>
   );
-  const via = viaAt("margin");
   const rowClass = SEAT_ROW;
-  // A removed line copies on click (David, 2026-10-20): it is no longer in
-  // the file, so the file opens from its own link at the margin instead.
-  if (gone)
-    return (
-      <CopyableLine line={line} className={rowClass}>
-        {gutter}
-        {text}
-        {inOwn && <FoundInLinks publisherDomain={fileDomain} foundIn={foundIn} className={ROW_MARGIN} />}
-        {host}
-        {via}
-      </CopyableLine>
-    );
   return (
-    // THE FILE GOES TO THE RIGHT MARGIN (David, 2026-09-26). Trailing the
-    // line, it read as a fourth field of the ads.txt record, which it is
-    // not, and it moved with the length of the cert so no two rows agreed
-    // on where it sat. At the margin it forms a column the eye can run
-    // down. The cert stays inline, because that one IS part of the line.
     <ActionableLine
       line={line}
+      selectionLabel={`Line ${n}`}
       publisherDomain={fileDomain}
       foundIn={foundIn}
+      gone={gone}
       className={rowClass}
     >
       {gutter}
       {text}
-      {inOwn && foundInLabel(foundIn) && <span className={ROW_MARGIN}>{foundInLabel(foundIn)}</span>}
       {host}
-      {via}
     </ActionableLine>
   );
 }
@@ -3217,6 +3149,7 @@ function ChangeWindow({
           {WEEKLY_READ_NOTE}
         </p>
       )}
+      <LineActionGroup tone={kind}>
       <ul className="bl-lines-in divide-y divide-border">
         {shown.map((g, i) => (
           <SeatLineRow
@@ -3233,6 +3166,7 @@ function ChangeWindow({
           />
         ))}
       </ul>
+      </LineActionGroup>
       {extra > 0 && (
         <p className="border-t border-border px-3 py-1 text-[10px] text-slate-500">
           Plus {extra} more.
@@ -3269,7 +3203,7 @@ function ChangeExpansion({
   removed: MatchedSeatLine[];
   certChanged: MatchedSeatLine[];
   matched: MatchedSeatLine[];
-  /** Whose lines these are, so each copies and opens their file. */
+  /** Whose files the source controls should open. */
   publisherDomain?: string | null;
   /** An IPD row's partner, for lines from a report that does not say
    *  per line which partner carried them. */
@@ -3360,6 +3294,7 @@ function MatchedSeatLines({
   return (
     <div>
       <SeatLinesHead title={title} count={groups.length} />
+      <LineActionGroup>
       <SeatLinesFrame>
         {groups.map((g, i) => (
           <SeatLineRow
@@ -3373,6 +3308,7 @@ function MatchedSeatLines({
           />
         ))}
       </SeatLinesFrame>
+      </LineActionGroup>
     </div>
   );
 }
@@ -3463,6 +3399,8 @@ function lineEventToSeatLine(e: LineEvent): MatchedSeatLine {
     // And the file (re-review of #75): without it the same seat in the
     // ads.txt and the app-ads.txt folded into one row on this path.
     ...(typeof e.file_kind === "string" && e.file_kind ? { found_in: fileLabelOf(e.file_kind) } : {}),
+    first_seen_at: e.first_seen_at, last_absent_at: e.last_absent_at,
+    last_seen_at: e.last_seen_at, not_found_at: e.not_found_at, seen_at: e.seen_at, date_source: e.date_source,
     // Which partner carried it, when the event says (2026-10-27).
     ...(e.match_type ? { match_type: e.match_type } : {}),
     ...(e.ipd_partner ? { ipd_partner: e.ipd_partner } : {}),
@@ -3543,6 +3481,15 @@ function MatchedAppsList({
   // The watch tabs (crawler #361), as on the publishers list.
   const [changeCounts, setChangeCounts] = useState<ChangeCounts | null>(null);
   const [watchOff, setWatchOff] = useState(false);
+  useEffect(() => {
+    if (tab !== "inactive" || changeCounts !== null || watchOff) return;
+    let cancelled = false;
+    api.matchedApps(token, 1, "", lines, matchType, undefined, 1, platform)
+      .then(result => { if (!cancelled && result.change_counts) setChangeCounts(result.change_counts); })
+      .catch(() => {});
+    return () => { cancelled = true; };
+  }, [token, tab, lines, matchType, platform, changeCounts, watchOff]);
+
   // The list's split and its inconclusive IPD matches (crawler #348).
   const [typeCounts, setTypeCounts] = useState<MatchTypeCounts | null>(null);
   const [inconclusive, setInconclusive] = useState<IpdInconclusive | null>(null);
@@ -3750,38 +3697,10 @@ function MatchedAppsList({
         <ListTabsRow
           left={
             <>
-          <Tabs value={tab} onValueChange={(v) => setTab(v as DrillTab)} className="max-w-full">
-            {/* EVERY TAB IN SIGHT (demo of #75): on a narrow screen the
-                tabs wrap onto a second row rather than scroll out of view
-                with nothing to say more are there. */}
-            <TabsList className="h-auto max-w-full flex-wrap justify-start">
-              <TabsTrigger value="all">All matched</TabsTrigger>
-              <TabsTrigger value="added">Added</TabsTrigger>
-              <TabsTrigger value="removed">Removed</TabsTrigger>
-              <TabsTrigger value="changed">Changed</TabsTrigger>
-              <ScopeTriggers counts={changeCounts} off={watchOff} />
-              {inactive && <TabsTrigger value="inactive">Inactive</TabsTrigger>}
-            </TabsList>
-          </Tabs>
+          <StatusControls tab={tab} setTab={setTab} counts={changeCounts} off={watchOff} inactive={!!inactive} />
             </>
           }
-          right={
-            tab !== "inactive" && (typeCounts || platformCounts) && (
-              <span className="flex w-full min-w-0 flex-col items-start gap-2 sm:w-auto sm:flex-row sm:flex-wrap sm:items-center sm:justify-end sm:gap-x-4">
-                {platformCounts && <PlatformControl value={platform} onChange={setPlatform} counts={platformCounts} />}
-                {typeCounts && (
-                  <MatchTypeControl
-                    value={matchType}
-                    onChange={setMatchType}
-                    // The server's split is known to count All matched only:
-                    // no number in the change tabs' tooltips rather than a
-                    // wrong one.
-                    counts={tab === "all" || isScopeTab(tab) ? typeCounts : null}
-                  />
-                )}
-              </span>
-            )
-          }
+          right={null}
         />
         {isScopeTab(tab) && <p data-scope-note className="text-[12px] leading-relaxed text-slate-500">{SCOPE_NOTE[tab]}</p>}
         {tab !== "inactive" && (
@@ -3790,6 +3709,15 @@ function MatchedAppsList({
             setQuery={setQuery}
             placeholder="Search apps"
             label="Search matched apps"
+            actions={!loading && settled > 0 && !failed && rows.length > 0 && !trial && !caps && !pageFiltered ? <ExportListButton run={exportList} noun="apps" /> : null}
+            filters={<>
+              {platformCounts && <FilterSelect value={platform} onChange={setPlatform} leading="Platform" ariaLabel="Platform" testId="platform" options={[
+                { value: "all", label: "All" }, { value: "ctv", label: "CTV" }, { value: "mobile", label: "Mobile" }, { value: "web", label: "Web" },
+              ].filter(o => o.value === "all" || o.value === platform || (platformCounts[o.value as keyof typeof platformCounts] ?? 0) > 0).map(o => ({ ...o, count: platformCounts[o.value as keyof typeof platformCounts] })) as { value: typeof platform; label: string; count: number }[]} />}
+              {typeCounts && <FilterSelect value={matchType} onChange={setMatchType} leading="Match type" icon={SlidersHorizontal} menuLabel="Filter by match type" ariaLabel="Match type" testId="match-type" options={[
+                { value: "all", label: "All", description: "Publisher files and inventory partners" }, { value: "own", label: "Own", description: "In the publisher’s own file" }, { value: "ipd", label: "IPD", description: "Via a declared inventory partner" },
+              ].map(o => ({...o, value: o.value as typeof matchType, count: tab === "all" || isScopeTab(tab) ? typeCounts[o.value as keyof typeof typeCounts] : undefined}))} />}
+            </>}
             right={
               // The pager counts the SERVER's total: All matched, or a
               // change tab the server filtered. A change tab filtered in
@@ -3802,7 +3730,6 @@ function MatchedAppsList({
                   ? <CountLine count={pageFiltered ? rows.length : total} noun={pageFiltered ? "on this page" : noun} />
                   : (
                     <span className="flex flex-wrap items-center justify-end gap-x-3 gap-y-2">
-                      {!pageFiltered && <ExportListButton run={exportList} />}
                       {pageFiltered ? (
                         <CountLine count={rows.length} noun="on this page" />
                       ) : (
@@ -3830,7 +3757,6 @@ function MatchedAppsList({
           caps={caps}
           counts={inactive.counts}
           kind={inactive.kind}
-          setKind={inactive.setKind}
           legacy={inactive.legacy}
           since={inactive.since}
           cards={INACTIVE_CARDS}
@@ -3967,9 +3893,9 @@ function MatchedAppCard({
   return (
     <div
       className={cn(
-        "overflow-hidden rounded-3xl border shadow-sm transition-colors",
+        "report-row overflow-hidden rounded-xl border shadow-sm transition-colors",
         inactive
-          ? cn("border-slate-200 bg-slate-50", open && "shadow-md")
+          ? cn("inactive-report-row border-border bg-white", open && "shadow-md")
           : open
             ? "border-app-border bg-app-bg/40 shadow-md"
             : "border-border bg-white",
@@ -3980,11 +3906,15 @@ function MatchedAppCard({
       <div className="relative">
         <button
           type="button"
-          onClick={onToggle}
+          onClick={(e) => toggleWithoutJump(e.currentTarget, onToggle)}
           aria-expanded={open}
           aria-label={`${open ? "Hide" : "Show"} the seat lines of ${app.app_name}`}
-          className="absolute inset-0 z-0 rounded-t-3xl focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-app/30"
-        />
+          className="absolute inset-0 z-0 rounded-t-xl focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-app/30"
+        >
+          <span className="report-expand-control">
+            <ChevronDown aria-hidden className={cn("h-3.5 w-3.5 transition-transform", open && "rotate-180")} />
+          </span>
+        </button>
         {inactive && <InactiveStrip mark={inactive} />}
       <div className="pointer-events-none flex w-full items-center gap-4 px-4 py-4 text-left sm:px-5">
         <div
@@ -4003,18 +3933,11 @@ function MatchedAppCard({
           )}
         </div>
         <div className="min-w-0 flex-1">
-          <div className="flex min-w-0 items-center gap-2">
+          <div className="matched-app-title flex min-w-0 items-center gap-2">
             <span className="truncate text-base font-semibold tracking-tight text-slate-900">
               {app.app_name}
             </span>
-            <span
-              className={cn(
-                "flex-shrink-0 rounded-full border px-1.5 py-px text-[10px] font-medium",
-                inactive ? "border-slate-300 bg-white text-slate-500" : "border-app-border bg-app-bg text-app",
-              )}
-            >
-              {storeName(app)}
-            </span>
+            <StoreBadge row={app} inactive={Boolean(inactive)} />
             {!inactive && <IpdChip row={app} subject={appSubject(app)} others={otherPartners(app, app.matched_lines)} />}
             {inactive && <InactiveChip />}
           </div>
@@ -4029,7 +3952,7 @@ function MatchedAppCard({
                 <PublisherDomainLink domain={app.owner_domain} className="text-slate-600" arrow={false} />
               ) : null}
               {app.owner_name ? (
-                <span className="text-slate-400">, {app.owner_name}</span>
+                <span className="app-owner-name text-slate-400">, {app.owner_name}</span>
               ) : null}
               {inactive && inactive.publisherLive != null && (
                 <span className={inactive.publisherLive ? "text-slate-500" : "text-critical"}>
@@ -4061,13 +3984,7 @@ function MatchedAppCard({
           <ChangeCell added={added} removed={removed} certChanged={certChanged} />
         </div>
         )}
-        <ChevronDown
-          aria-hidden
-          className={cn(
-            "h-4 w-4 flex-shrink-0 text-slate-400 transition-transform",
-            open && "rotate-180",
-          )}
-        />
+        <span aria-hidden className="report-expand-space flex-shrink-0" />
       </div>
       </div>
       <Collapse open={open}>
@@ -4152,7 +4069,7 @@ function InactiveStrip({ mark }: { mark: InactiveMark }) {
   return (
     <div
       data-testid="inactive-strip"
-      className="pointer-events-none rounded-t-3xl border-b border-slate-200 bg-slate-100/80 px-4 py-2 sm:px-5"
+      className="inactive-record-note pointer-events-none border-b border-border bg-[#f7f9f6] px-4 py-2 sm:px-5"
     >
       <p className="text-xs font-medium text-slate-700">
         {day ? `Inactive since ${day}: ` : ""}
@@ -4165,7 +4082,7 @@ function InactiveStrip({ mark }: { mark: InactiveMark }) {
 
 function InactiveChip() {
   return (
-    <span className="flex-shrink-0 rounded-full border border-slate-300 bg-slate-100 px-1.5 py-px text-[10px] font-medium text-slate-600">
+    <span className="inactive-status-label flex-shrink-0 text-[10px] font-medium text-slate-500">
       Inactive
     </span>
   );

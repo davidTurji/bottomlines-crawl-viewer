@@ -203,6 +203,7 @@ async function crawl(page: Page, vp: string): Promise<Run> {
         return;
       }
       run.failures.push(`${vp} / ${name}: ${msg}`);
+      if (process.env.SMOKE_DEBUG) console.log(run.failures.at(-1));
       return;
     } finally {
       if (process.env.SMOKE_DEBUG && Date.now() - t > 1500) console.log(`${vp}: slow ${name} ${Date.now() - t} ms`);
@@ -280,45 +281,71 @@ async function crawl(page: Page, vp: string): Promise<Run> {
       await page.screenshot({ path: `test-results/smoke-${vp}-${label.replace(/\W+/g, "")}.png` });
   };
 
+  const selectStatus = async (label: string) => {
+    const mobile = page.getByRole("combobox", { name: "Matched status" });
+    if (await mobile.isVisible()) {
+      if (!(await mobile.locator("option").allTextContents()).includes(label)) throw new Absent(label);
+      await mobile.selectOption({ label });
+    } else {
+      const tab = page.getByRole("tab", { name: label, exact: true }).first();
+      if (!(await tab.isVisible()) && await page.getByRole("button", {name:"More statuses",exact:true}).isVisible()) {
+        const more = page.getByRole("button", {name:"More statuses",exact:true});
+        if (await more.getAttribute("aria-expanded") !== "true") await click(more);
+      }
+      if (!(await tab.count())) throw new Absent(label);
+      await click(tab);
+    }
+  };
+  const showFilters = async () => {
+    const trigger = page.getByRole("button", { name: "List filters", exact: true }).first();
+    if (await trigger.isVisible() && await trigger.getAttribute("aria-expanded") !== "true") await click(trigger);
+  };
   /* ── The Overview: both lists, every tab, every pill, every row. ── */
   for (const view of ["publishers", "apps"] as const) {
     await step(`view ${view}`, () => click(page.getByRole("button", { name: view === "apps" ? /Matched apps/ : /Matched publishers/ }).first()));
     for (const tab of ["All matched", "Added", "Removed", "Changed", "Started watching", "Stopped watching", "Unconfirmed", "Inactive"]) {
-      const t = page.getByRole("tab", { name: tab, exact: true }).first();
-      if (!(await t.count())) continue;
-      await step(`${view} / ${tab}`, () => click(t));
+      await step(`${view} / ${tab}`, () => selectStatus(tab));
       if (tab === "Inactive") {
-        for (const kind of await page.getByRole("tablist", { name: "Inactive lists" }).getByRole("tab").all()) {
-          await step(`${view} / Inactive / ${await kind.innerText()}`, () => click(kind));
-          await openAll(`inactive`, OVERVIEW_ROWS);
-          await fillIf(`${view} / Inactive / search`, page.getByPlaceholder(/^Search/), "a");
-          await fillIf(`${view} / Inactive / clear search`, page.getByPlaceholder(/^Search/), "");
-        }
+        await openAll("inactive", OVERVIEW_ROWS);
+        await fillIf(`${view} / Inactive / search`, page.getByPlaceholder(/^Search/), "a");
+        await fillIf(`${view} / Inactive / clear search`, page.getByPlaceholder(/^Search/), "");
         continue;
       }
       // Every row under All; the first few under Own and IPD (the same
       // rows, filtered), then back to All.
       await openAll(view, OVERVIEW_ROWS);
-      const pills = page.getByTestId("match-type").getByRole("button");
-      if (await pills.count()) {
-        for (const pill of ["Own", "IPD"]) {
-          await step(`${view} / ${tab} / ${pill}`, () => click(pills.getByText(pill, { exact: true })));
+      const match = page.getByTestId("match-type");
+      if (await match.count()) {
+        for (const word of ["Own", "IPD", "All"]) {
+          await step(`${view} / ${tab} / ${word}`, async () => {
+            await showFilters();
+            await click(match);
+            await click(page.getByRole("menuitem", { name: new RegExp(`^${word}(?:\\s|$)`) }));
+          });
           await openAll(view, OVERVIEW_ROWS, 3);
         }
-        await step(`${view} / ${tab} / All`, () => click(pills.getByText("All", { exact: true })));
       }
-      // Found in (publishers) and Platform (apps), when the list splits.
+      if (run.failures.length) return run;
       for (const id of ["found-in", "platform"]) {
-        const sw = page.getByTestId(id).getByRole("button");
-        const words = (await sw.allInnerTexts().catch(() => [] as string[])).map((l) => l.trim().split(/\s+/)[0]);
-        for (const word of words.slice(1)) {
-          await step(`${view} / ${tab} / ${id} ${word}`, () => click(sw.filter({ hasText: new RegExp(`^${word.replace(/[.]/g, "\\.")}`) })));
+        const sw = page.getByTestId(id);
+        if (!(await sw.count())) continue;
+        await showFilters();
+        await click(sw);
+        const words = (await page.getByRole("menuitem").allInnerTexts()).map(l => l.trim().split(/\s+/)[0]);
+        await page.getByRole("menu").press("Escape");
+        await expect(page.getByRole("menu")).toHaveCount(0);
+        for (const word of [...words.slice(1), words[0]]) {
+          await step(`${view} / ${tab} / ${id} ${word}`, async () => {
+            await showFilters();
+            await click(sw);
+            await click(page.getByRole("menuitem", { name: new RegExp(`^${word.replace(/[.]/g, "\\.")}(?:\\s|$)`) }));
+          });
+          if (run.failures.length) return run;
           await openAll(view, OVERVIEW_ROWS, 2);
         }
-        if (words.length) await tap(`${view} / ${tab} / ${id} All`, sw.filter({ hasText: /^All/ }));
       }
     }
-    await step(`${view} / All matched again`, () => click(page.getByRole("tab", { name: "All matched", exact: true }).first()));
+    await step(`${view} / All matched again`, () => selectStatus("All matched"));
     // The note's names, open and shut.
     await tap(`${view} / Show them`, page.getByRole("button", { name: "Show them", exact: true }));
     await tap(`${view} / Hide them`, page.getByRole("button", { name: "Hide them", exact: true }));
@@ -344,10 +371,13 @@ async function crawl(page: Page, vp: string): Promise<Run> {
     await step("lines filter apply again", () => click(page.getByRole("menuitem", { name: "Apply", exact: true })));
   }
 
-  const CARDS = "button[aria-expanded='false']:not([aria-haspopup])";
+
   // "Export this list" on the fake API only: on a live link it would read
   // every page of the list (it is never the metered export, but it is load).
-  if (!LIVE) await tap("export this list", page.getByRole("button", { name: "Export this list" }).first());
+  if (!LIVE) {
+    await tap("list actions", page.getByRole("button", { name: "Download", exact: true }).first());
+    await tap("download CSV", page.getByRole("menuitem", { name: /Download .+ \(CSV\)/ }));
+  }
 
   /* ── Popular: every choice, then the last one again (it clears). ── */
   const choices = await page.locator("[data-popular]").evaluateAll((els) => els.map((e) => e.getAttribute("data-popular") ?? ""));
@@ -365,18 +395,18 @@ async function crawl(page: Page, vp: string): Promise<Run> {
   /* ── Every other page in the menu. ── */
 
   await step("page Discovery", () => goTo("Discovery"));
-  await openAll("discovery", `main ${CARDS}`, API_CARDS);
+  await openAll("discovery", '[data-discovered-line] > button[aria-expanded="false"]', API_CARDS);
   await tap("Discovery / next page", page.getByRole("button", { name: "Next page", exact: true }).first());
 
   await step("page Declarations", () => goTo("Declarations"));
   // A customer's few declared domains open on arrival: each is shut and
   // opened again, so every card is clicked either way.
-  const TOGGLES = "main button[aria-expanded]:not([aria-haspopup])";
+  const TOGGLES = ".declaration-card > button[aria-expanded]";
   await openAll("declarations", TOGGLES, API_CARDS);
   await openAll("declarations", TOGGLES, API_CARDS);
 
   await step("page Sellers.json", () => goTo("Sellers.json"));
-  await openAll("sellers", `main ${CARDS}`, API_CARDS);
+  await openAll("sellers", 'main button[aria-label^="Seller "][aria-expanded="false"]', API_CARDS);
   await fillIf("Sellers.json / roles search", page.getByLabel("Search seller roles"), "tv");
   await fillIf("Sellers.json / roles clear", page.getByLabel("Search seller roles"), "");
 

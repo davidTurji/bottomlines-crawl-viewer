@@ -1,3 +1,4 @@
+import { LineSelectionProvider } from "@/components/PublisherLinks";
 import { useReportScope } from "@/lib/reportScope";
 import { useLocation } from "react-router-dom";
 import { AppSidebar } from "./AppSidebar";
@@ -142,7 +143,7 @@ export default function Layout({ children, email }: LayoutProps) {
             <div className="flex items-center gap-1.5 sm:gap-2">
               <SidebarTrigger
                 data-tour="nav-trigger"
-                className="text-slate-500 hover:bg-slate-100 lg:hidden h-8 w-8 p-0"
+                className="text-slate-500 hover:bg-slate-100 md:hidden h-8 w-8 p-0"
               />
             </div>
 
@@ -192,7 +193,7 @@ export default function Layout({ children, email }: LayoutProps) {
               data-report-main
               className="flex-1 overflow-auto overscroll-contain safe-area-bottom scroll-y"
             >
-              {children}
+              <LineSelectionProvider key={location.pathname}>{children}</LineSelectionProvider>
             </main>
 
             {/* Floating back-to-top, same styling as the console. */}

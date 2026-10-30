@@ -1,6 +1,6 @@
 import { useEffect, useState, type CSSProperties, type ReactNode } from "react";
 
-import { cn } from "@/lib/utils";
+import { flushSync } from "react-dom";
 
 /**
  * QUIET MOTION for the report's lists (David, 2026-10-05: subtle, premium).
@@ -8,7 +8,6 @@ import { cn } from "@/lib/utils";
  * reader who asked the OS for less motion gets none of it.
  */
 
-const COLLAPSE_MS = 280;
 
 /** The one easing the list swap, its height and the Match type thumb share:
  *  a quick start and a long, soft landing. */
@@ -42,56 +41,24 @@ export function useLingering(on: boolean, ms: number): boolean {
   return on && shown;
 }
 
-/**
- * An expanded row's body that eases open and shut in height instead of
- * snapping. Animates grid rows 0fr to 1fr, so it needs no measuring and
- * follows whatever the body grows to. The body mounts on open and unmounts
- * once the close has played, so a closed row still costs nothing, and a
- * row that is open when it first renders simply shows (no animation on
- * arrival).
- */
-export function Collapse({
-  open,
-  children,
-}: {
-  open: boolean;
-  children: ReactNode;
-}) {
-  const [mounted, setMounted] = useState(open);
-  const [shown, setShown] = useState(open);
-
-  useEffect(() => {
-    if (open) {
-      setMounted(true);
-      // Two frames: the first paints the body at 0fr, the second lets the
-      // transition run from there rather than from nothing.
-      let inner = 0;
-      const outer = requestAnimationFrame(() => {
-        inner = requestAnimationFrame(() => setShown(true));
-      });
-      return () => {
-        cancelAnimationFrame(outer);
-        cancelAnimationFrame(inner);
-      };
-    }
-    setShown(false);
-    const t = window.setTimeout(() => setMounted(false), COLLAPSE_MS);
-    return () => window.clearTimeout(t);
-  }, [open]);
-
-  if (!mounted) return null;
-  return (
-    <div
-      className={cn(
-        "grid transition-[grid-template-rows,opacity] ease-out motion-reduce:transition-none",
-        shown ? "grid-rows-[1fr] opacity-100" : "grid-rows-[0fr] opacity-0",
-      )}
-      style={{ transitionDuration: `${COLLAPSE_MS}ms` }}
-    >
-      <div className="min-h-0 overflow-hidden">{children}</div>
-    </div>
-  );
+/** Expansions mount at their final height. Fading content avoids moving
+ *  rows under the pointer while a tall panel is opening or closing. */
+export function Collapse({ open, children }: { open: boolean; children: ReactNode }) {
+  return open ? <div className="report-expansion"><div>{children}</div></div> : null;
 }
+
+/** Keep the clicked header in place when another open panel above it closes. */
+export function toggleWithoutJump(button: HTMLElement, change: () => void) {
+  const scroller = button.closest<HTMLElement>("[data-report-main]");
+  const before = button.getBoundingClientRect().top;
+  flushSync(change);
+  if (scroller && button.isConnected) {
+    const shift = button.getBoundingClientRect().top - before;
+    if (Math.abs(shift) > 0.5) scroller.scrollTop += shift;
+  }
+}
+
+let cancelGlide: (() => void) | undefined;
 
 /**
  * Scroll an element to the top of whatever scrolls it, easing in and out
@@ -99,7 +66,8 @@ export function Collapse({
  * scroll, which starts abruptly and varies by browser. Lands `offset` px
  * above the element. Less motion asked for: jumps straight there.
  */
-export function glideTo(el: HTMLElement | null, offset = 24, durationMs = 900) {
+export function glideTo(el: HTMLElement | null, offset = 24, durationMs = 320) {
+  cancelGlide?.();
   if (!el) return;
   let scroller: HTMLElement | null = el.parentElement;
   while (scroller) {
@@ -121,15 +89,24 @@ export function glideTo(el: HTMLElement | null, offset = 24, durationMs = 900) {
     box.scrollTop = to;
     return;
   }
+  let frame = 0;
+  const stop = () => {
+    cancelAnimationFrame(frame);
+    for (const event of ["wheel", "touchstart", "pointerdown", "keydown"]) window.removeEventListener(event, stop);
+    if (cancelGlide === stop) cancelGlide = undefined;
+  };
+  cancelGlide = stop;
+  for (const event of ["wheel", "touchstart", "pointerdown", "keydown"]) window.addEventListener(event, stop, { passive: true });
   const start = performance.now();
   const step = (now: number) => {
     const t = Math.min(1, (now - start) / durationMs);
     // Ease-in-out cubic.
     const eased = t < 0.5 ? 4 * t * t * t : 1 - Math.pow(-2 * t + 2, 3) / 2;
     box.scrollTop = from + (to - from) * eased;
-    if (t < 1) requestAnimationFrame(step);
+    if (t < 1) frame = requestAnimationFrame(step);
+    else stop();
   };
-  requestAnimationFrame(step);
+  frame = requestAnimationFrame(step);
 }
 
 /**

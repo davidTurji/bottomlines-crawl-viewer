@@ -18,7 +18,7 @@ import { EntryDiff, JsonDiff } from "@/components/JsonDiff";
 import { Collapse, Settle, glideTo } from "@/components/Motion";
 import { PageShell } from "@/components/PageShell";
 import SellerRoles from "@/components/SellerRoles";
-import { ActionableLine, fileUrl, filesOf, linkable, PublisherDomainLink, ShownLink, siteUrl } from "@/components/PublisherLinks";
+import { ActionableLine, LineActionGroup, fileUrl, filesOf, linkable, PublisherDomainLink, ShownLink, siteUrl } from "@/components/PublisherLinks";
 import { SkeletonRows, SkeletonStatCards } from "@/components/Skeleton";
 import { formatWeek, WeekLine } from "@/components/WeekLine";
 import { useReportScope } from "@/lib/reportScope";
@@ -98,7 +98,7 @@ const day = (iso: string | null | undefined) =>
 
 /** How many cards a group shows before "Show all". */
 const PEEK = 3;
-const SECTION_CARD = "rounded-2xl border border-border bg-white p-5 shadow-sm";
+const SECTION_CARD = "report-panel rounded-2xl border border-border bg-white p-5";
 const SECTION_TITLE = "flex items-center gap-2 font-display text-sm font-medium text-slate-700";
 
 type Header = { contact_email: string; contact_address: string; tag_id: string };
@@ -390,7 +390,7 @@ export default function CrawlSellers() {
 
       {data && exportFile && (
         <>
-          <div className="rounded-2xl border border-border bg-white p-5 shadow-sm">
+          <div className="report-panel rounded-2xl border border-border bg-white p-5">
             <div className="mb-3 flex items-baseline justify-between gap-3">
               <div>
                 {creating ? (
@@ -585,7 +585,7 @@ export default function CrawlSellers() {
           {/* THE FILE, after the panels that change it: live against the
               export, as GitHub shows a diff. Rebuilt on every tick and every
               fill-in above. */}
-          <div className="rounded-2xl border border-border bg-white p-5 shadow-sm">
+          <div className="report-panel rounded-2xl border border-border bg-white p-5">
             {/* WHAT YOU ARE EXPORTING, in one plain line (David, 2026-10-06:
                 the chips and the verdict were clutter). Copy and Download
                 sit at the top of the page; Reset puts every pick back. */}
@@ -918,7 +918,7 @@ function SuggestionCard({
                 {row.seller_id || "no seller_id"}
               </code>
             )}
-            <span className={cn("min-w-0 truncate text-[12px] text-slate-600", row.kind === "remove" && on && "line-through")}>
+            <span className={cn("seller-header-summary min-w-0 truncate text-[12px] text-slate-600", row.kind === "remove" && on && "line-through")}>
               {row.kind === "fix" ? summaryOf(row) : <SellerWho seller={row.kind === "remove" ? row.current : row.suggested} fromFile={row.kind !== "add"} />}
             </span>
             {missing.length > 0 && (
@@ -1238,12 +1238,14 @@ function ListingWindow({
           )}
         </div>
       ) : (
+        <LineActionGroup>
         <ul className="divide-y divide-border">
           {/* Each line opens the publisher's file at it, and the publisher's
               name opens their site, the way every other page's lines do. */}
           {shown.map((l, i) => (
             <ActionableLine
               key={`${l.publisher}:${l.relationship}:${i}`}
+              selectionLabel={`Line ${i + 1}`}
               line={{ ssp_domain: domain, publisher_id: row.listedAs ?? row.seller_id, relationship: l.relationship }}
               publisherDomain={l.publisher}
               foundIn={l.found_in}
@@ -1261,6 +1263,7 @@ function ListingWindow({
             </ActionableLine>
           ))}
         </ul>
+        </LineActionGroup>
       )}
       {extra > 0 && <p className="border-t border-border px-3 py-1 text-[10px] text-slate-500">Plus {extra.toLocaleString()} more.</p>}
     </section>
@@ -1359,7 +1362,7 @@ function ExportButton({ onClick, label, disabled = false }: { onClick: () => voi
       type="button"
       onClick={onClick}
       disabled={disabled}
-      className="disabled:pointer-events-none disabled:opacity-40 inline-flex h-9 flex-shrink-0 items-center gap-2 self-start rounded-full bg-gradient-to-b from-[hsl(152_50%_32%)] to-primary px-4 text-[13px] font-semibold text-primary-foreground shadow-md shadow-primary/25 ring-1 ring-inset ring-white/10 transition-all duration-150 hover:-translate-y-px hover:shadow-lg hover:shadow-primary/30 hover:brightness-110 active:translate-y-0 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
+      className="disabled:pointer-events-none disabled:opacity-40 inline-flex h-9 flex-shrink-0 items-center gap-2 self-start rounded-lg report-action bg-primary px-4 text-[13px] font-semibold text-primary-foreground transition-colors duration-150 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
     >
       <Download aria-hidden className="h-4 w-4" />
       {label}
@@ -1403,7 +1406,7 @@ function HeaderForm({ header, onChange }: { header: Header; onChange: (h: Header
   const set = (k: keyof Header) => (e: React.ChangeEvent<HTMLInputElement>) =>
     onChange({ ...header, [k]: e.target.value });
   return (
-    <div className="rounded-2xl border border-border bg-white p-5 shadow-sm">
+    <div className="report-panel rounded-2xl border border-border bg-white p-5">
       <div className="font-display text-sm font-medium text-slate-700">Your details</div>
       <div className="mb-3 text-[11px] text-slate-500">
         The top of the file. Version is set to 1.0 for you.
