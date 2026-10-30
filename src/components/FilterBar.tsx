@@ -1,9 +1,11 @@
-import { Children, Fragment, isValidElement, type ReactNode, createContext, useContext, useEffect, useRef, useState } from "react";
+import { Children, Fragment, isValidElement, type ReactNode, createContext, useContext, useEffect, useRef, useState, useId } from "react";
 import { Check, ChevronDown, Search, SlidersHorizontal, type LucideIcon } from "lucide-react";
 
 import {
   DropdownMenu,
   DropdownMenuContent,
+  DropdownMenuGroup,
+  DropdownMenuSeparator,
   DropdownMenuItem,
   DropdownMenuLabel,
   DropdownMenuTrigger,
@@ -151,6 +153,7 @@ export interface FilterOption<T extends string> {
   label: string;
   count?: number;
   description?: string;
+  group?: string;
 }
 
 /**
@@ -187,6 +190,12 @@ export function FilterSelect<T extends string>({
   const [open, setOpen] = useState(false);
   const closePanel = useContext(FilterPanelClose);
   const selected = options.find((o) => o.value === value);
+  const descriptionId = useId();
+  const groups = new Map<string, FilterOption<T>[]>();
+  for (const option of options) {
+    const group = option.group ?? menuLabel ?? leading ?? "Options";
+    groups.set(group, [...(groups.get(group) ?? []), option]);
+  }
   return (
     <>
       <div className="list-toolbar-divider" />
@@ -216,26 +225,26 @@ export function FilterSelect<T extends string>({
         </DropdownMenuTrigger>
         <DropdownMenuContent
           align="end"
-          className="w-[240px] border-border bg-white p-1"
+          collisionPadding={16}
+          className="filter-select-menu border-border bg-white p-1.5"
         >
-          {menuLabel && <DropdownMenuLabel className="pb-2 text-xs font-normal text-slate-500">{menuLabel}</DropdownMenuLabel>}
-          {options.map((o) => (
-            <DropdownMenuItem
-              key={o.value}
-              onSelect={() => { onChange(o.value); closePanel?.(); }}
-              className="cursor-pointer text-sm"
-            >
-              <Check
-                aria-hidden
-                className={cn(
-                  "mr-2 h-3.5 w-3.5 flex-shrink-0",
-                  value === o.value ? "opacity-100" : "opacity-0",
-                )}
-              />
-              <span className="min-w-0 flex-1"><span>{o.label}</span>{o.description && <span className="mt-0.5 block text-[11px] font-normal leading-snug text-slate-500">{o.description}</span>}</span>
-              {o.count != null && <span className="ml-auto pl-4 text-xs tabular-nums text-slate-400">{o.count.toLocaleString()}</span>}
-            </DropdownMenuItem>
-          ))}
+          {[...groups].map(([group, choices], index) => <DropdownMenuGroup key={group} aria-label={group}>
+            {index > 0 && <DropdownMenuSeparator className="my-1.5" />}
+            <DropdownMenuLabel className="filter-option-heading">
+              <span aria-hidden>{index + 1}</span>{group}
+            </DropdownMenuLabel>
+            {choices.map(o => <DropdownMenuItem key={o.value} aria-label={o.label}
+              aria-describedby={o.description ? `${descriptionId}-${encodeURIComponent(o.value)}` : undefined}
+              textValue={o.label} onSelect={() => { onChange(o.value); closePanel?.(); }}
+              className="filter-option cursor-pointer">
+              <Check aria-hidden className={cn("filter-option-check h-3.5 w-3.5 flex-shrink-0", value === o.value ? "opacity-100" : "opacity-0")} />
+              <span className="min-w-0 flex-1">
+                <span className="filter-option-label">{o.label}</span>
+                {o.description && <span id={`${descriptionId}-${encodeURIComponent(o.value)}`} className="filter-option-description">{o.description}</span>}
+              </span>
+              {o.count != null && <span className="filter-option-count">{o.count.toLocaleString()}</span>}
+            </DropdownMenuItem>)}
+          </DropdownMenuGroup>)}
         </DropdownMenuContent>
       </DropdownMenu>
     </>

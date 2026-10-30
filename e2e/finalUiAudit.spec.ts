@@ -60,7 +60,7 @@ for(const width of [1440,390]){
     await page.setViewportSize({width,height:900});await page.addInitScript(quietTour);
     const calls=await installFakeApi(page,{discovery:true});await page.goto(`${BASE}/discovery`);
     const intro=page.locator('[data-tour="discovery-header"] .report-description');
-    const more=intro.getByRole('button',{name:'Read more about Discovery'});await expect(more).toHaveAttribute('aria-expanded','false');
+    const more=intro.getByRole('button',{name:'Show more about Discovery'});await expect(more).toHaveAttribute('aria-expanded','false');
     await more.click();await expect(intro.getByText('madeupmedia.com,',{exact:false}).first()).toBeVisible();
     await intro.getByRole('button',{name:'Show less about Discovery'}).click();await expect(more).toHaveAttribute('aria-expanded','false');
     const top=page.getByRole('button',{name:'Export CSV',exact:true});await green(top);

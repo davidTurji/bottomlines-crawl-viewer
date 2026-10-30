@@ -327,9 +327,10 @@ export function LineFilter({
               of chrome above a list that explains itself: every row
               already says where it came from and when. The count earns
               its place because the list scrolls. */}
-          <span>Show only these lines</span>
+          <span className="filter-option-heading !p-0"><span aria-hidden>1</span>Seat lines</span>
           <span className="font-normal tabular-nums text-slate-400">{terms.length ? `${visibleSeats.length} of ${seats.length}` : seats.length}</span>
         </DropdownMenuLabel>
+        <p className="px-2 pb-2 text-[11px] text-slate-500">Choose one or more lines, then Apply.</p>
         <div className="mx-1 mb-2 flex h-9 flex-shrink-0 items-center gap-2 rounded-md border border-border bg-white px-2.5 focus-within:border-primary/40 focus-within:ring-2 focus-within:ring-primary/5">
           <Search aria-hidden className="h-3.5 w-3.5 flex-none text-slate-400" />
           <input ref={searchRef} type="text" aria-label="Search seat lines" placeholder="Search domain, seller ID or relationship"

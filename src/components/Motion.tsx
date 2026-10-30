@@ -1,4 +1,4 @@
-import { useEffect, useState, type CSSProperties, type ReactNode } from "react";
+import { useEffect, useLayoutEffect, useRef, useState, type CSSProperties, type ReactNode } from "react";
 
 import { flushSync } from "react-dom";
 
@@ -41,21 +41,69 @@ export function useLingering(on: boolean, ms: number): boolean {
   return on && shown;
 }
 
-/** Expansions mount at their final height. Fading content avoids moving
- *  rows under the pointer while a tall panel is opening or closing. */
+/** Shared accordion motion. Keep the outgoing body for its short close
+ *  transition, then unmount it so closed rows do no background work. */
 export function Collapse({ open, children }: { open: boolean; children: ReactNode }) {
-  return open ? <div className="report-expansion"><div>{children}</div></div> : null;
+  const [mounted, setMounted] = useState(open);
+  const [expanded, setExpanded] = useState(open);
+  const body = useRef<HTMLDivElement | null>(null);
+  const lastContent = useRef(children);
+  if (open) lastContent.current = children;
+  useLayoutEffect(() => {
+    if (prefersReducedMotion()) {
+      setMounted(open); setExpanded(open);
+      return;
+    }
+    let frame = 0;
+    let timer = 0;
+    if (open) {
+      setMounted(true);
+      // Commit the collapsed height before asking the browser to expand.
+      body.current?.getBoundingClientRect();
+      frame = requestAnimationFrame(() => setExpanded(true));
+    } else {
+      setExpanded(false);
+      timer = window.setTimeout(() => setMounted(false), 220);
+    }
+    return () => { cancelAnimationFrame(frame); window.clearTimeout(timer); };
+  }, [open]);
+  return <div ref={node => { body.current = node; if (node) node.inert = !open; }}
+    aria-hidden={!open} data-expanded={expanded} className="report-expansion">
+    <div>{(open || mounted) ? (open ? children : lastContent.current) : null}</div>
+  </div>;
 }
+
+let cancelExpansionAnchor: (() => void) | undefined;
 
 /** Keep the clicked header in place when another open panel above it closes. */
 export function toggleWithoutJump(button: HTMLElement, change: () => void) {
+  cancelExpansionAnchor?.();
   const scroller = button.closest<HTMLElement>("[data-report-main]");
   const before = button.getBoundingClientRect().top;
   flushSync(change);
-  if (scroller && button.isConnected) {
+  if (!scroller || !button.isConnected) return;
+  const align = () => {
     const shift = button.getBoundingClientRect().top - before;
     if (Math.abs(shift) > 0.5) scroller.scrollTop += shift;
-  }
+  };
+  align();
+  if (prefersReducedMotion()) return;
+  let frame = 0;
+  const start = performance.now();
+  const stop = () => {
+    cancelAnimationFrame(frame);
+    for (const event of ["wheel", "touchstart", "pointerdown", "keydown"]) window.removeEventListener(event, stop);
+    if (cancelExpansionAnchor === stop) cancelExpansionAnchor = undefined;
+  };
+  cancelExpansionAnchor = stop;
+  for (const event of ["wheel", "touchstart", "pointerdown", "keydown"]) window.addEventListener(event, stop, { passive: true });
+  const settle = () => {
+    if (!button.isConnected) { stop(); return; }
+    align();
+    if (performance.now() - start < 260) frame = requestAnimationFrame(settle);
+    else stop();
+  };
+  frame = requestAnimationFrame(settle);
 }
 
 let cancelGlide: (() => void) | undefined;

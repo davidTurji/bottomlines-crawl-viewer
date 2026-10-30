@@ -20,7 +20,7 @@ for (const width of [1440,390,320]) {
     if(width>640) {
       await expect(page.getByRole('tab',{name:'All matched',exact:true})).toBeVisible();
       await expect(page.getByRole('tab',{name:'Inactive',exact:true})).not.toBeVisible();
-      await expect(page.getByRole('button',{name:'More statuses',exact:true})).toHaveText('+4 statuses');
+      await expect(page.getByTestId('status-toggle')).toHaveText('+4 statuses');
       await revealStatuses(page);
       await expect(page.getByRole('tab',{name:'Started watching',exact:true})).toBeVisible();
     }
@@ -177,7 +177,7 @@ for(const width of [1440,960]){
   test(`${width}px: the status arrow reveals choices sideways in a single scrollable track`,async({page})=>{
     await page.setViewportSize({width,height:900});await page.addInitScript(quietTour);
     await installFakeApi(page,{watchTabs:true,appChange:true,inactive:'ok'});await page.goto(BASE);
-    const arrow=page.getByRole('button',{name:'More statuses',exact:true});
+    const arrow=page.getByTestId('status-toggle');
     await expect(arrow).toHaveText('+4 statuses');await expect(arrow).toHaveAttribute('aria-expanded','false');
     await revealStatuses(page);await expect(page.getByRole('tab',{name:'Started watching',exact:true})).toBeVisible();
     const tops=await page.getByRole('tab').evaluateAll(nodes=>nodes.filter(n=>n.getClientRects().length).map(n=>n.getBoundingClientRect().top));

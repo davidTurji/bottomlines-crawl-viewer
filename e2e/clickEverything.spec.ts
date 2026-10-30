@@ -288,8 +288,8 @@ async function crawl(page: Page, vp: string): Promise<Run> {
       await mobile.selectOption({ label });
     } else {
       const tab = page.getByRole("tab", { name: label, exact: true }).first();
-      if (!(await tab.isVisible()) && await page.getByRole("button", {name:"More statuses",exact:true}).isVisible()) {
-        const more = page.getByRole("button", {name:"More statuses",exact:true});
+      if (!(await tab.isVisible()) && await page.getByTestId('status-toggle').isVisible()) {
+        const more = page.getByTestId('status-toggle');
         if (await more.getAttribute("aria-expanded") !== "true") await click(more);
       }
       if (!(await tab.count())) throw new Absent(label);

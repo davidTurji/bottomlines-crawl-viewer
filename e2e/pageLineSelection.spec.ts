@@ -57,6 +57,8 @@ test('Discovery: newly opened groups preselect their first record without leavin
   await expect(cards.nth(1).locator('.line-entry-selected')).toHaveCount(1);
   await expect(cards.first().locator('.line-entry-selected')).toHaveCount(0);
   await expect(page.locator('[data-line-actions]')).toHaveCount(1);
+  await expect(cards.first().locator(':scope > button')).toHaveAttribute('aria-expanded', 'false');
+  await cards.first().locator(':scope > button').click();
   await cards.first().locator('.line-entry [data-line-text]').last().click();
   await expect(cards.first().locator('.line-entry-selected')).toHaveCount(1);
   await expect(cards.nth(1).locator('.line-entry-selected')).toHaveCount(0);

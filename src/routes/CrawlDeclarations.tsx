@@ -60,16 +60,16 @@ import { MiniStat, SplitStat, reportDate, type StatTone } from "./CrawlReport";
 type KindFilter = "all" | DeclarationKind;
 type SortKey = "files" | "name";
 
-const KIND_OPTIONS: { value: KindFilter; label: string }[] = [
-  { value: "all", label: "All kinds" },
-  { value: "inventory partner", label: "Inventory partners" },
-  { value: "owner domain", label: "Owner domains" },
-  { value: "manager domain", label: "Manager domains" },
+const KIND_OPTIONS: { value: KindFilter; label: string; description: string; group: string }[] = [
+  { value: "all", label: "All kinds", description: "Show every declaration type captured in this report.", group: "Declaration type" },
+  { value: "inventory partner", label: "Inventory partners", description: "Publishers naming a domain as their inventory partner.", group: "Declaration type" },
+  { value: "owner domain", label: "Owner domains", description: "Publishers naming a domain as the owner of their inventory.", group: "Declaration type" },
+  { value: "manager domain", label: "Manager domains", description: "Publishers naming a domain as their sales manager.", group: "Declaration type" },
 ];
 
-const SORT_OPTIONS: { value: SortKey; label: string }[] = [
-  { value: "files", label: "Most files first" },
-  { value: "name", label: "A to Z" },
+const SORT_OPTIONS: { value: SortKey; label: string; description: string; group: string }[] = [
+  { value: "files", label: "Most files first", description: "Domains with the most publishers naming them, first.", group: "Sort domains" },
+  { value: "name", label: "A to Z", description: "Sort the declared domains alphabetically.", group: "Sort domains" },
 ];
 
 /** The yellow each kind wears: foreground, tint, hairline, solid disc. */

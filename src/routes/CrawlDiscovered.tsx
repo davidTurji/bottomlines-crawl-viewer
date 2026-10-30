@@ -3,7 +3,7 @@ import { ReportButton } from "@/components/ReportButton";
 import { ReportDescription } from "@/components/ReportDescription";
 import { eachPage } from "@/lib/completePages";
 import { Pager, usePaging } from "@/components/ListControls";
-import { Collapse, Settle } from "@/components/Motion";
+import { Collapse, Settle, toggleWithoutJump } from "@/components/Motion";
 import { usePageCache } from "@/lib/pageCache";
 import LockedTail from "@/components/LockedTail";
 import { MiniStat } from "@/components/MiniStat";
@@ -98,7 +98,7 @@ export default function CrawlDiscovered() {
   const [error, setError] = useState<string | null>(null);
   const [exporting, setExporting] = useState(false);
   const [exportError, setExportError] = useState<string | null>(null);
-  const [open, setOpen] = useState<Set<string>>(new Set());
+  const [open, setOpen] = useState<string | null>(null);
   // Whether this crawl has any discovered lines at all, independent of the
   // filter, so an over-narrow filter never renders the "did not look"
   // card, which would be a lie about the report rather than a fact about
@@ -158,7 +158,7 @@ export default function CrawlDiscovered() {
       setTrial(r.trial ?? null);
       // A different set of cards: an expansion held open from the previous
       // set would vanish or, worse, appear to belong to another line.
-      setOpen(new Set());
+      setOpen(null);
       // An unfiltered answer settles the question for the whole report.
       if (!filtered) setAnyDiscovered(r.total > 0);
       else if (r.total > 0) setAnyDiscovered(true);
@@ -187,12 +187,7 @@ export default function CrawlDiscovered() {
   }, [token, page, filter, show, filtered, cache]);
 
   const toggle = useCallback((key: string) => {
-    setOpen((prev) => {
-      const next = new Set(prev);
-      if (next.has(key)) next.delete(key);
-      else next.add(key);
-      return next;
-    });
+    setOpen(prev => prev === key ? null : key);
   }, []);
 
   const weekLabel = summary?.finished_at ? formatWeek(new Date(summary.finished_at)) : null;
@@ -221,16 +216,16 @@ export default function CrawlDiscovered() {
   const hasSellersJson = Boolean(totals?.sellers_json);
   const checkedLines = totals?.needs_fixing != null;
   const showOptions = useMemo(() => {
-    const o: { value: ShowFilter; label: string }[] = [
-      { value: "all", label: "All lines" },
-      { value: "direct", label: "DIRECT lines" },
-      { value: "reseller", label: "RESELLER lines" },
+    const o: { value: ShowFilter; label: string; description: string; group: string }[] = [
+      { value: "all", label: "All lines", description: "Every discovered line using your domains.", group: "Line types" },
+      { value: "direct", label: "DIRECT lines", description: "The file names the seller account as DIRECT.", group: "Line types" },
+      { value: "reseller", label: "RESELLER lines", description: "The file names the seller account as RESELLER.", group: "Line types" },
     ];
-    if (baseline.lines) o.push({ value: "new", label: "New this week" });
-    if (checkedLines) o.push({ value: "fixing", label: "Needs fixing" });
+    if (baseline.lines) o.push({ value: "new", label: "New this week", description: "Lines that no publisher carried in the compared crawl.", group: "Weekly changes" });
+    if (checkedLines) o.push({ value: "fixing", label: "Needs fixing", description: "Lines with a seller ID or relationship issue to review.", group: "Sellers.json" });
     if (hasSellersJson) {
-      o.push({ value: "listed", label: "In your sellers.json" });
-      o.push({ value: "unlisted", label: "Not in your sellers.json" });
+      o.push({ value: "listed", label: "In your sellers.json", description: "The seller ID is present in your sellers.json.", group: "Sellers.json" });
+      o.push({ value: "unlisted", label: "Not in your sellers.json", description: "The seller ID is absent from your sellers.json.", group: "Sellers.json" });
     }
     return o;
   }, [baseline.lines, checkedLines, hasSellersJson]);
@@ -445,7 +440,7 @@ export default function CrawlDiscovered() {
                   search={filter}
                   canExport={!onTrial}
                   sellersPage={sellersPage}
-                  open={open.has(key)}
+                  open={open === key}
                   onToggle={() => toggle(key)}
                 />
               </Settle>
@@ -595,7 +590,7 @@ function LineCard({
     >
       <button
         type="button"
-        onClick={onToggle}
+        onClick={event => toggleWithoutJump(event.currentTarget, onToggle)}
         aria-expanded={open}
         className="flex w-full items-center gap-4 px-4 py-4 text-left sm:px-5"
       >
@@ -720,7 +715,7 @@ function LineCard({
               ))}
             </ul>
           )}
-          {open && <Roster token={token} line={line} initialQ={search} canExport={canExport} />}
+          <Roster token={token} line={line} initialQ={search} canExport={canExport} />
         </div>
       </Collapse>
     </div>

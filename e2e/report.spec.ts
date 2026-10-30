@@ -623,7 +623,7 @@ test.describe("discovery checks each line against your sellers.json", () => {
     const calls = await open(page, { discovery: true, sellers: "page" }, "/discovery");
     await noTour(page);
     // The subtitle names the domains the report looked for, from the summary.
-    await page.getByRole("button", { name: "Read more about Discovery" }).click();
+    await page.getByRole("button", { name: "Show more about Discovery" }).click();
     await expect(page.locator(".report-description")).toContainText("madeupmedia.com, madeupmedia.la");
     // The three stats; the sellers.json coverage is the Lines caption and nothing else.
     const kpi = page.locator('[data-tour="discovery-kpi"]');

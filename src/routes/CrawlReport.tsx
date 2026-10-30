@@ -662,9 +662,9 @@ export default function CrawlReport() {
       {/* Ask AI, inline, between the KPIs and the drilldown. Same shape
           bottomlines-app uses on the "Your Bottom Line" page: pill input
           with a sparkle glyph + horizontal suggestion rail; answers grow
-          in a thread below the composer. Gated off by default: the MVP
-          backend has no chat endpoint. Set VITE_ENABLE_CHAT=true (e.g.
-          alongside VITE_MOCK=true) to bring it back. */}
+          in a thread below the composer. The backend has no chat endpoint,
+          so this is available only when both VITE_MOCK=true and
+          VITE_ENABLE_CHAT=true are set for a local demo. */}
       {ENABLE_CHAT && (
         <InlineAskAI
           token={token}
@@ -1616,14 +1616,17 @@ function StatusControls({ tab, setTab, counts, off, inactive }: {
     <Tabs value={tab} onValueChange={value => setTab(value as DrillTab)} className="report-desktop-status max-w-full">
       <TabsList aria-label="Matched statuses" className="status-track h-auto max-w-full justify-start">
         {primary.map(option => <TabsTrigger key={option.value} value={option.value}>{option.label}</TabsTrigger>)}
-        {extra.length > 0 && <button type="button" className={cn("status-more", selectedExtra && "status-more-active")} aria-label="More statuses"
-          title={expanded ? "Hide additional statuses" : selectedExtra ? `${selectedExtra.label} selected · More statuses` : "More statuses"}
-          aria-expanded={expanded} aria-controls={moreId} onClick={() => setExpanded(value => !value)}>
-          <span>+{extra.length} statuses</span><ChevronRight aria-hidden className={cn("h-4 w-4 transition-transform", expanded && "rotate-180")} />
-        </button>}
         {extra.length > 0 && <span id={moreId} hidden={!expanded} className="status-extra-inline">
           {extra.map(option => <TabsTrigger key={option.value} value={option.value}>{option.label}</TabsTrigger>)}
         </span>}
+        {extra.length > 0 && <button type="button" data-testid="status-toggle"
+          className={cn("status-more", selectedExtra && "status-more-active")}
+          aria-label={expanded ? "Hide additional statuses" : "Show additional statuses"}
+          title={expanded ? "Hide additional statuses" : selectedExtra ? `${selectedExtra.label} selected · Show additional statuses` : "Show additional statuses"}
+          aria-expanded={expanded} aria-controls={moreId} onClick={() => setExpanded(value => !value)}>
+          <ChevronRight aria-hidden className={cn("h-4 w-4 transition-transform", expanded && "rotate-180")} />
+          <span>{expanded ? "Fewer" : `+${extra.length} ${extra.length === 1 ? "status" : "statuses"}`}</span>
+        </button>}
       </TabsList>
     </Tabs>
   </>;
@@ -2482,8 +2485,8 @@ function DrilldownList({
             actions={!loading && settled > 0 && !error && rows.length > 0 && !trial && !caps ? <ExportListButton run={exportList} noun="publishers" /> : null}
             filters={<>
               {foundInCounts && <FilterSelect value={foundIn} onChange={setFoundIn} leading="Found in" ariaLabel="Found in" testId="found-in" options={[
-                { value: "all", label: "All files" }, { value: "ads_txt", label: "ads.txt" },
-                { value: "app_ads_txt", label: "app-ads.txt" }, { value: "both", label: "Both" },
+                { value: "all", label: "All files", description: "Publishers matched in either source file." }, { value: "ads_txt", label: "ads.txt", description: "Publishers with matching lines in ads.txt." },
+                { value: "app_ads_txt", label: "app-ads.txt", description: "Publishers with matching lines in app-ads.txt." }, { value: "both", label: "Both", description: "Publishers with matching lines in both files." },
               ].filter(o => o.value === "all" || o.value === foundIn || (foundInCounts[o.value as keyof typeof foundInCounts] ?? 0) > 0).map(o => ({ ...o, count: foundInCounts[o.value as keyof typeof foundInCounts] })) as { value: typeof foundIn; label: string; count: number }[]} />}
               {typeCounts && <FilterSelect value={matchType} onChange={setMatchType} leading="Match type" icon={SlidersHorizontal} menuLabel="Filter by match type" ariaLabel="Match type" testId="match-type" options={[
                 { value: "all", label: "All", description: "Publisher files and inventory partners", count: typeCounts.all }, { value: "own", label: "Own", description: "In the publisher’s own file", count: typeCounts.own }, { value: "ipd", label: "IPD", description: "Via a declared inventory partner", count: typeCounts.ipd },
@@ -3712,7 +3715,7 @@ function MatchedAppsList({
             actions={!loading && settled > 0 && !failed && rows.length > 0 && !trial && !caps && !pageFiltered ? <ExportListButton run={exportList} noun="apps" /> : null}
             filters={<>
               {platformCounts && <FilterSelect value={platform} onChange={setPlatform} leading="Platform" ariaLabel="Platform" testId="platform" options={[
-                { value: "all", label: "All" }, { value: "ctv", label: "CTV" }, { value: "mobile", label: "Mobile" }, { value: "web", label: "Web" },
+                { value: "all", label: "All", description: "Every app platform in this report." }, { value: "ctv", label: "CTV", description: "Connected TV apps and channels." }, { value: "mobile", label: "Mobile", description: "Mobile apps, including iOS and Android." }, { value: "web", label: "Web", description: "Apps classified as web by this report." },
               ].filter(o => o.value === "all" || o.value === platform || (platformCounts[o.value as keyof typeof platformCounts] ?? 0) > 0).map(o => ({ ...o, count: platformCounts[o.value as keyof typeof platformCounts] })) as { value: typeof platform; label: string; count: number }[]} />}
               {typeCounts && <FilterSelect value={matchType} onChange={setMatchType} leading="Match type" icon={SlidersHorizontal} menuLabel="Filter by match type" ariaLabel="Match type" testId="match-type" options={[
                 { value: "all", label: "All", description: "Publisher files and inventory partners" }, { value: "own", label: "Own", description: "In the publisher’s own file" }, { value: "ipd", label: "IPD", description: "Via a declared inventory partner" },

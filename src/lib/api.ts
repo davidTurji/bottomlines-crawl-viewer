@@ -62,9 +62,9 @@ function mockInactiveVariant(s: Summary): Summary {
 
 // ── AI chat flag ─────────────────────────────────────────────────
 // The MVP backend ships no chat endpoint, so the Ask AI surface is
-// hidden unless explicitly enabled (VITE_ENABLE_CHAT=true), e.g. for
-// mock-mode demos. Default off.
-export const ENABLE_CHAT =
+// available only in mock-mode demos. A production build cannot expose
+// a control whose backend endpoint has not shipped.
+export const ENABLE_CHAT = MOCK &&
   (import.meta.env.VITE_ENABLE_CHAT as string | undefined) === "true";
 
 export class ApiError extends Error {
