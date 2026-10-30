@@ -65,10 +65,14 @@ for(const width of [1440,390])for(const reduced of [false,true]){
     await installFakeApi(page,{sellers:'page'});await page.goto(BASE+'/sellers');
     const row=page.locator('#seller-500301');
     await row.getByRole('button',{name:'Open',exact:true}).click();
-    if(width<640){
-      const help=row.getByRole('button',{name:'About account roles',exact:true});
-      await exercise(page,help,await panelFor(page,help),reduced);
-    }
+    await row.getByRole('textbox',{name:'Seller name for seller 500301',exact:true}).fill('Sample seller');
+    await row.getByRole('button',{name:'Next',exact:true}).click();
+    await row.getByRole('checkbox',{name:'No website for seller 500301',exact:true}).check();
+    await row.getByRole('button',{name:'Next',exact:true}).click();
+    const help=row.getByRole('button',{name:'About account roles',exact:true});
+    await exercise(page,help,await panelFor(page,help),reduced);
+    await row.getByRole('button',{name:'Back',exact:true}).click();
+    await row.getByRole('button',{name:'Back',exact:true}).click();
     for(const section of ['seller-source-evidence','seller-file-preview']){
       const button=row.getByTestId(section).locator(':scope > button');
       await exercise(page,button,await panelFor(page,button),reduced);

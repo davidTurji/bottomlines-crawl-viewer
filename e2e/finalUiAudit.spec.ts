@@ -3,7 +3,7 @@ import { readFile } from 'node:fs/promises';
 import { expectReportCentered } from './modalGeometry';
 import { installFakeApi, TOKEN } from './fakeApi';
 import { mockDeclarationRows } from '../src/lib/mockData';
-import { normalizeDeclarations, subjectCsv } from '../src/lib/declarations';
+import { normalizeDeclarations, declarationsCsv } from '../src/lib/declarations';
 const BASE = `/crawl-report/${TOKEN}`;
 const quietTour = () => localStorage.setItem('pf_report_walkthrough_v1',JSON.stringify({status:'completed',stepId:null,open:false}));
 const green = async (button:Locator) => {
@@ -20,6 +20,10 @@ for(const width of [1440,390,320]) {
     const data=normalizeDeclarations(mockDeclarationRows);
     for(const section of data.sections){
       const root=page.locator(`[data-declaration-section="${section.kind}"]`);
+      const button=root.locator('[data-list-toolbar]').getByRole('button',{name:'Export CSV',exact:true});await green(button);
+      const ready=page.waitForEvent('download');await button.click();const download=await ready;
+      expect(download.suggestedFilename()).toContain(section.kind.replace(/ /g,'-'));
+      expect(await readFile((await download.path())!,'utf8')).toBe('\uFEFF'+declarationsCsv(section.subjects));
       for(const subject of section.subjects){
         const card=root.locator('.declaration-card').filter({has:page.locator('code').filter({hasText:subject.domain})}).first();
         const toggle=card.locator(':scope > button');
@@ -27,10 +31,6 @@ for(const width of [1440,390,320]) {
         const rows=card.locator('.declaration-publisher');await expect(rows).toHaveCount(subject.declarers.length);
         await expect(rows.first().locator('.declaration-match-number')).toHaveText('1');
         await expect(rows.locator('.line-control-source')).toHaveCount(subject.declarers.length);
-        const button=card.getByRole('button',{name:'Export CSV',exact:true});await green(button);
-        const ready=page.waitForEvent('download');await button.click();const download=await ready;
-        expect(download.suggestedFilename()).toContain(subject.kind.replace(/ /g,'-'));
-        expect(await readFile((await download.path())!,'utf8')).toBe('\uFEFF'+subjectCsv(subject));
         const bothIndex=subject.declarers.findIndex(row=>row.files.length>1);
         if(bothIndex>=0){
           const first=rows.nth(bothIndex).locator('.line-control-source');await first.click();

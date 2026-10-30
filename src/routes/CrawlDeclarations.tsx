@@ -16,7 +16,7 @@ import {
   countryName,
   downloadCsv,
   normalizeDeclarations,
-  subjectCsv,
+  declarationsCsv,
   type DeclarationKind,
   type DeclarationSection,
   type DeclarationSubject,
@@ -500,6 +500,11 @@ function KindSection({
       <div ref={paging.topRef} className="mb-3">
         <FilterBar>
           {controls}
+          <ReportButton size="sm" className="report-download-action" disabled={total === 0}
+            title={capped ? "Download captured publisher records for all matching domains in this section" : "Download all publisher records for matching domains in this section, across every page"}
+            onClick={() => downloadCsv(`${section.kind.replace(/ /g, "-")}s-${fileDate}.csv`, declarationsCsv(section.subjects))}>
+            <Download className="h-3 w-3" />Export CSV
+          </ReportButton>
           <Pager placement="inline" className="list-toolbar-pager" page={page} pageSize={PAGE_SIZE}
             total={total} onPage={paging.onPage} noun="domains" nounOne="domain" />
         </FilterBar>
@@ -517,7 +522,6 @@ function KindSection({
             <Settle key={`${s.kind}|${s.domain}`} index={i}>
               <SubjectCard
                 subject={s}
-                fileDate={fileDate}
                 capped={capped}
                 open={open.has(`${s.kind}|${s.domain}`)}
                 onToggle={() => onToggle(`${s.kind}|${s.domain}`)}
@@ -551,13 +555,11 @@ function KindSection({
  */
 function SubjectCard({
   subject,
-  fileDate,
   capped,
   open,
   onToggle,
 }: {
   subject: DeclarationSubject;
-  fileDate: string;
   /** Legacy payloads cap the roster at 50; the count stays honest. */
   capped: boolean;
   open: boolean;
@@ -661,28 +663,6 @@ function SubjectCard({
               </span>{" "}
               {subject.total === 1 ? "publisher" : "publishers"}
             </span>
-            {/* Every publisher that named this domain, which file, and the
-                country: the workbook's Declarations sheet, for this one
-                domain and kind. Built from the frozen payload in the
-                browser, so it costs no request and works while the
-                crawler sleeps. */}
-            <ReportButton
-              size="sm"
-              title={notShown > 0 ? `Download the ${subject.declarers.length} publishers captured in this older report` : "Download every publisher that names this domain"}
-              onClick={(e) => {
-                e.stopPropagation();
-                // Named like the workbook: the customer's domain, the
-                // kind, and the report's date.
-                downloadCsv(
-                  `${subject.domain.replace(/^www\./i, "")}-${subject.kind.replace(/ /g, "-")}s-${fileDate}.csv`,
-                  subjectCsv(subject),
-                );
-              }}
-              className="report-download-action"
-            >
-              <Download className="h-3 w-3" />
-              Export CSV
-            </ReportButton>
           </div>
           {/* Three rows tall, the rest by scrolling inside the card (David,
               2026-09-15), so a domain named by forty files does not push

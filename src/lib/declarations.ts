@@ -351,8 +351,13 @@ export function countryName(code: string): string {
 
 /** One declared domain's roster as a CSV in the Excel sheet's columns. */
 export function subjectCsv(subject: DeclarationSubject): string {
+  return declarationsCsv([subject]);
+}
+
+/** Export the filtered section across every displayed page, with one header. */
+export function declarationsCsv(subjects: DeclarationSubject[]): string {
   const lines = [csvLine(["Declaration", "Domain declared", "Declared by", "Country", "Found in"])];
-  for (const d of subject.declarers) {
+  for (const subject of subjects) for (const d of subject.declarers) {
     lines.push(
       csvLine([subject.kind, subject.domain, d.domain, d.country, d.files.join(" + ")]),
     );

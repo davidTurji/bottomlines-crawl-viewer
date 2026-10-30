@@ -1,3 +1,4 @@
+import { SellerSetup } from "@/components/SellerSetup";
 import { ReportKpiGrid } from "@/components/ReportKpiGrid";
 import {
   Check,
@@ -528,7 +529,6 @@ export default function CrawlSellers() {
                 onOpen={(id) => { focusRequest.current += 1; setOpenCards((prev) => flip(prev, id)); }}
                 onSet={setOn}
                 onRequestAdd={requestAdd}
-                onReview={(id) => goTo(id, undefined, true)}
                 onEdit={edit}
                 onNoWebsite={setNoWebsite}
                 edits={edits}
@@ -669,8 +669,8 @@ export default function CrawlSellers() {
 }
 
 /**
- * One group of suggestions: its sign and count, a way to take or skip the
- * lot, three cards, and the rest behind "Show all".
+ * One group of individual suggestions, three cards and the rest behind
+ * "Show all".
  */
 function SuggestionGroup({
   group,
@@ -682,7 +682,6 @@ function SuggestionGroup({
   onOpen,
   onSet,
   onRequestAdd,
-  onReview,
   onEdit,
   onNoWebsite,
   checks,
@@ -703,7 +702,6 @@ function SuggestionGroup({
   checks: Record<string, ReturnType<typeof checkSellerDraft>>;
   isConfirmed: (id: string) => boolean;
   onRequestAdd: (id: string) => void;
-  onReview: (id: string) => void;
   onNoWebsite: (id: string, value: boolean) => void;
   rows: SellerRow[];
   ticked: Set<string>;
@@ -715,14 +713,11 @@ function SuggestionGroup({
   onEdit: (id: string, field: FillField, value: string) => void;
   flagged: Set<string>;
 }) {
-  const [reviewIds, setReviewIds] = useState<string[]>([]);
-  const pending = reviewIds.filter(id => !isConfirmed(id));
   const g = GROUP[group];
   const Icon = g.icon;
   const taken = rows.filter((r) => ticked.has(r.seller_id)).length + (headerFix?.on ? 1 : 0);
   const total = rows.length + (headerFix ? 1 : 0);
   const shown = rows.slice(0, PEEK);
-  const ids = rows.map((r) => r.seller_id);
   const setOnComplete = (id: string) => { onSet([id], true); };
   const renderRows = (items: SellerRow[], offset = 0) => items.map((r, i) => (
     <Settle key={r.seller_id} index={offset + i}>
@@ -764,37 +759,7 @@ function SuggestionGroup({
             {group === "remove" ? `${taken} of ${total} taken out of your file` : `${taken} of ${total} going into your file`}
           </div>
         </div>
-        <div className="flex items-center gap-2 text-xs text-slate-500">
-          <ReportButton
-            variant="outline"
-            size="sm"
-            onClick={() => {
-              setReviewIds(onSet(ids, true));
-              headerFix?.onSet(true);
-            }}
-          >
-            Add all
-          </ReportButton>
-          <ReportButton
-            variant="outline"
-            size="sm"
-            onClick={() => {
-              onSet(ids, false);
-              setReviewIds([]);
-              headerFix?.onSet(false);
-            }}
-          >
-            Skip all
-          </ReportButton>
-
-        </div>
       </div>
-      {pending.length > 0 && (
-        <div role="status" aria-label="Bulk selection" className="mb-3 flex flex-wrap items-center justify-between gap-2 text-xs text-slate-600">
-          <span>{taken} added · {pending.length} {pending.length === 1 ? "needs" : "need"} details</span>
-          <ReportButton variant="outline" size="sm" onClick={() => onReview(pending[0])}>Review</ReportButton>
-        </div>
-      )}
       <div className="overflow-hidden rounded-xl border border-border">
         <div className="divide-y divide-border">
           {headerFix && <VersionCard on={headerFix.on} onSet={headerFix.onSet} />}
@@ -888,6 +853,13 @@ function SuggestionCard({
   onEdit: (field: FillField, value: string) => void;
 }) {
   const formId = useId();
+  const [setupStep, setSetupStep] = useState(0);
+  const disclosureButton = useRef<HTMLButtonElement>(null);
+  const finishSetup = (apply: () => void) => {
+    apply();
+    onOpen();
+    requestAnimationFrame(() => disclosureButton.current?.focus({ preventScroll: true }));
+  };
   const [roleHelpOpen, setRoleHelpOpen] = useState(false);
   const [attempted, setAttempted] = useState(false);
   const g = GROUP[group];
@@ -962,9 +934,11 @@ function SuggestionCard({
         {!(open && fields.length > 0) && (
           <div className="order-last flex basis-full items-center gap-2 pl-10 sm:order-none sm:basis-auto sm:pl-0">
             <Decision on={on} onSet={onSet} id={row.seller_id} group={group} />
+            {group === "add" && on && fields.length > 0 && <ReportButton variant="outline" size="sm" onClick={() => { setSetupStep(0); onOpen(); }}>Edit</ReportButton>}
           </div>
         )}
         <ReportButton
+          ref={disclosureButton}
           variant="outline"
           size="sm"
           onClick={onOpen}
@@ -977,8 +951,13 @@ function SuggestionCard({
       </div>
       <Collapse open={open}>
         <div className="border-t border-border bg-slate-50/50 px-3 py-3 text-xs text-slate-600 sm:px-4 sm:py-4">
-          <p className="mb-4 hidden leading-relaxed sm:block">{row.reason}</p>
-          {fields.length > 0 && (
+          {group !== "add" && <p className="mb-4 hidden leading-relaxed sm:block">{row.reason}</p>}
+          {fields.length > 0 && group === "add" && open && <SellerSetup
+            row={row} draft={typed} check={check} step={setupStep} onStep={setSetupStep} onEdit={onEdit} onNoWebsite={onNoWebsite}
+            onSave={() => finishSetup(onConfirm)} onSkip={() => finishSetup(() => onSet(false))}
+            inputClassName={INPUT} roleGuide={SELLER_ROLE_GUIDE}
+          />}
+          {fields.length > 0 && group !== "add" && (
             <form
               noValidate
               onSubmit={event => {
@@ -1108,7 +1087,7 @@ function SuggestionCard({
               testId="seller-source-evidence"
             >
               <div className="space-y-3 pb-3">
-                <p className="leading-relaxed sm:hidden">{row.reason}</p>
+                <p className={cn("leading-relaxed", group !== "add" && "sm:hidden")}>{row.reason}</p>
                 <CheckLinks row={row} domain={domain} fileHref={fileHref} />
                 <ListingWindow row={row} domain={domain} group={group} sellerDomain={sellerDomainOf(row)} />
               </div>
