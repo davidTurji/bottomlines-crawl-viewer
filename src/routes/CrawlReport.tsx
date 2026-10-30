@@ -1,4 +1,5 @@
 import { requestReportDownload } from "@/lib/reportDownload";
+import { ReportButton } from "@/components/ReportButton";
 import { StoreBadge } from "@/components/StoreBadge";
 import { FilterBar, FilterGroup, FilterSearch, FilterSelect } from "@/components/FilterBar";
 import InactiveSection, { type InactiveCards } from "@/components/InactiveSection";
@@ -14,7 +15,7 @@ import {
   skeletonRowCount,
 } from "@/components/Skeleton";
 import { expectedRows, knownKey, type Landed } from "@/lib/expectedRows";
-import { useCallback, useEffect, useId, useMemo, useRef, useState, type ReactNode } from "react";
+import { useCallback, useEffect, useId, useRef, useState, type ReactNode } from "react";
 import { BEAT_PAUSE_MS, CountUp, landsAfterMs, payoffStyle } from "@/components/CountUp";
 import { LineFilter } from "@/components/LineFilter";
 import {
@@ -3410,14 +3411,6 @@ function appChangeOf(tab: DrillTab): AppChange | undefined {
   if (isScopeTab(tab)) return WATCH_CHANGE[tab];
   return tab === "added" || tab === "removed" || tab === "changed" ? tab : undefined;
 }
-/** The same filter in the browser, for an API that ignores ``?change=``. */
-function appMoved(a: MatchedApp, change: AppChange): boolean {
-  if (change === "added") return (a.lines_added ?? 0) > 0;
-  if (change === "removed") return (a.lines_removed ?? 0) > 0;
-  if (change === "changed") return (a.lines_cert_changed ?? 0) > 0;
-  // A watch filter is the server's only: never applied to a page here.
-  return true;
-}
 
 /**
  * The matched APPS list, shown when the pink "Matched apps" card is selected.
@@ -3428,10 +3421,9 @@ function appMoved(a: MatchedApp, change: AppChange): boolean {
  *
  * The change tabs ask the server for the WHOLE list filtered by the change
  * (``?change=``), paged and counted like All matched. An API from before
- * that filter ignores the parameter (it echoes no ``change``): the tab then
- * filters the page it got, and its count says it covers that page only,
- * never the whole list (Select Media, 2026-10-26: "0 with changes" on a
- * report with 82 apps lost).
+ * that filter ignores the parameter (it echoes no ``change``): explain
+ * that this view is unavailable and offer All matched. Never manufacture
+ * a status list from the page already loaded.
  */
 /** An app row; on a watch tab it carries its publisher's lines of that
  *  kind. */
@@ -3570,7 +3562,7 @@ function MatchedAppsList({
     // Same read-ahead as the publishers list, and the same pause while a
     // search is being typed.
     const readAhead = (r: Loaded) => {
-      if (!query && page * PAGE_SIZE < (r.total ?? 0)) {
+      if ((!change || r.change === change) && !query && page * PAGE_SIZE < (r.total ?? 0)) {
         appCache.prefetch(keyFor(page + 1), () => load(page + 1));
       }
     };
@@ -3624,16 +3616,11 @@ function MatchedAppsList({
   // A card held open from one tab must not appear under another.
   useEffect(() => setExpanded(null), [tab]);
 
-  // The server's rows are the answer when it filtered them; otherwise (an
-  // API that ignores ?change=) the change tab filters the page it got.
+  // A change list is valid only when the backend confirms its scope.
+  // Older APIs may ignore ?change; never filter their first page locally.
   const rowsChange = appChangeOf(rowsTab);
-  // Only Added, Removed and Changed ever fall back to the page; a watch
-  // tab without the server's filter is not offered at all.
-  const pageFiltered = !!rowsChange && !serverFiltered && !isScopeTab(rowsTab);
-  const rows = useMemo(
-    () => (pageFiltered && rowsChange ? allRows.filter((a) => appMoved(a, rowsChange)) : allRows),
-    [allRows, pageFiltered, rowsChange],
-  );
+  const unsupportedChange = !!rowsChange && !serverFiltered && !isScopeTab(rowsTab);
+  const rows = unsupportedChange ? [] : allRows;
   // What the count and the pager call the rows they count.
   const noun = tabNoun(rowsTab, "apps").many;
 
@@ -3646,7 +3633,7 @@ function MatchedAppsList({
 
   // EXPORT THIS LIST: every page of what the tab, filters and search show,
   // each page into the file as it arrives. Offered only where the server
-  // filtered the list (never on a page-filtered change tab).
+  // filtered the list (never when the API ignored its change filter).
   const exportList = async (sink: CsvSink, progress: Progress, signal: AbortSignal): Promise<ExportDone> => {
     const t = rowsTab;
     const mt = rowsMatchType;
@@ -3707,7 +3694,7 @@ function MatchedAppsList({
             setQuery={setQuery}
             placeholder="Search apps"
             label="Search matched apps"
-            actions={!loading && settled > 0 && !failed && rows.length > 0 && !trial && !caps && !pageFiltered ? <ExportListButton run={exportList} noun="apps" status={rowsTab} query={query} filtered={lines.length > 0 || rowsMatchType !== "all" || platform !== "all"} /> : null}
+            actions={!loading && settled > 0 && !failed && rows.length > 0 && !trial && !caps && !unsupportedChange ? <ExportListButton run={exportList} noun="apps" status={rowsTab} query={query} filtered={lines.length > 0 || rowsMatchType !== "all" || platform !== "all"} /> : null}
             filters={<>
               {platformCounts && <FilterSelect value={platform} onChange={setPlatform} leading="Platform" ariaLabel="Platform" testId="platform" options={[
                 { value: "all", label: "All", description: "Every app platform in this report." }, { value: "ctv", label: "CTV", description: "Connected TV apps and channels." }, { value: "mobile", label: "Mobile", description: "Mobile apps, including iOS and Android." }, { value: "web", label: "Web", description: "Apps classified as web by this report." },
@@ -3718,19 +3705,15 @@ function MatchedAppsList({
             </>}
             right={
               // The pager counts the SERVER's total: All matched, or a
-              // change tab the server filtered. A change tab filtered in
-              // the browser counts the page it got, says so, and pages
-              // nothing: paging it would be a claim the data cannot support.
+              // change tab the server filtered. An unsupported scope has
+              // no count, rows, pager or download.
               loading
                 ? <CountSkeleton />
                 : settled > 0 && !failed && rows.length > 0
                 ? trial || caps
-                  ? <CountLine count={pageFiltered ? rows.length : total} noun={pageFiltered ? "on this page" : noun} />
+                  ? <CountLine count={total} noun={noun} />
                   : (
                     <span className="flex flex-wrap items-center justify-end gap-x-3 gap-y-2">
-                      {pageFiltered ? (
-                        <CountLine count={rows.length} noun="on this page" />
-                      ) : (
                         <Pager
                           placement="inline"
                           page={page}
@@ -3740,7 +3723,6 @@ function MatchedAppsList({
                           noun={noun}
                           nounOne={tabNoun(rowsTab, "apps").one}
                         />
-                      )}
                     </span>
                   )
                 : null
@@ -3783,8 +3765,11 @@ function MatchedAppsList({
               <p className="rounded-lg border border-dashed border-border bg-muted/20 p-6 text-center text-sm text-slate-500">
                 No matched apps to show yet.
               </p>
-            ) : pageFiltered ? (
-              <EmptyResult query={query} noun="apps with changes" onPage />
+            ) : unsupportedChange ? (
+              <div data-unsupported-app-change className="rounded-lg border border-border bg-white p-6 text-center text-sm text-slate-500">
+                <p>This report cannot filter apps by this status.</p>
+                <ReportButton variant="outline" className="mt-3" onClick={() => setTab("all")}>View all matched apps</ReportButton>
+              </div>
             ) : (
               <EmptyResult query={query} noun="apps" quiet={EMPTY_TAB.apps[rowsTab]} />
             )
@@ -3815,7 +3800,7 @@ function MatchedAppsList({
           )}
           {/* The pager under the list, only when there are pages to turn (the
               search row carries the count). */}
-          {!failed && !pageFiltered && rows.length > 0 && !trial && !caps && (
+          {!failed && !unsupportedChange && rows.length > 0 && !trial && !caps && (
             <div className="mt-4">
               {total > PAGE_SIZE && (
                 <Pager
