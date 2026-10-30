@@ -137,8 +137,18 @@ for (const width of [1440, 390]) {
     await expect(last).toHaveClass(/line-entry-selected/);
     await expect(rows.first()).not.toHaveClass(/line-entry-selected/);
     const toolbar = group.getByRole('toolbar');
-    const before = await page.locator('[data-report-main]').evaluate(el => el.scrollTop);
-    await toolbar.getByRole('button', { name: /^Copy / }).click();
+    const copy = toolbar.getByRole('button', { name: /^Copy / });
+    // The new toolbar may be below the viewport on Linux. Measure from
+    // pointer-down, after Playwright's own scroll-to-click, so the check
+    // catches focus/copy jumps rather than the test bringing it into view.
+    await copy.evaluate(el => el.addEventListener('pointerdown', () => {
+      el.setAttribute('data-copy-scroll', String(el.closest('[data-report-main]')?.scrollTop));
+    }, { capture: true, once: true }));
+    await copy.click();
+    const recordedScroll = await copy.getAttribute('data-copy-scroll');
+    expect(recordedScroll).not.toBeNull();
+    const before = Number(recordedScroll);
+    expect(Number.isFinite(before)).toBe(true);
     await expect(toolbar.getByText('Copied', { exact: true })).toBeVisible();
     expect(await page.evaluate(() => navigator.clipboard.readText())).toBe((await text.innerText()).trim());
     const after = await page.locator('[data-report-main]').evaluate(el => el.scrollTop);
