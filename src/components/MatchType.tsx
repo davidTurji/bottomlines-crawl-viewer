@@ -210,7 +210,7 @@ export function IpdChip({
     <span
       data-ipd-chip
       title={ipdTitle(row, subject, others)}
-      className="inline-flex flex-shrink-0 items-center rounded-full border border-info-border bg-info-bg px-1.5 py-px text-[10px] font-semibold text-info"
+      className="ipd-badge"
     >
       IPD
     </span>
