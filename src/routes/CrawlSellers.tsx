@@ -916,7 +916,7 @@ function SuggestionCard({
               behind it, side by side. */}
           <div className="grid grid-cols-1 gap-3 lg:grid-cols-2">
             <div className="min-w-0 space-y-1.5">
-              <div className="text-[11px] font-medium text-slate-500">In your sellers.json</div>
+              <div className="text-[11px] font-medium text-slate-500">{row.kind === "add" ? "Suggested entry" : "File change"}</div>
               <EntryOrRaw before={row.current} after={row.kind === "remove" ? null : row.suggested} />
               {/* A duplicate's other copies, which the change takes out. */}
               {row.dropped && row.dropped.length > 0 && (
@@ -931,7 +931,7 @@ function SuggestionCard({
               )}
             </div>
             <div className="min-w-0">
-              <div className="mb-1 text-[11px] font-medium text-slate-500">In publishers' files</div>
+              <div className="mb-1 text-[11px] font-medium text-slate-500">Publisher evidence</div>
               <ListingWindow row={row} domain={domain} group={group} sellerDomain={sellerDomainOf(row)} />
             </div>
           </div>
@@ -940,7 +940,7 @@ function SuggestionCard({
           {fields.length > 0 && (
             <div className={cn("grid grid-cols-1 gap-2", fields.length > 1 && "sm:grid-cols-2")}>
               {fields.includes("seller_type") && (
-                <p className="sm:col-span-2">PUBLISHER sells owned inventory and is paid directly; INTERMEDIARY sells others' inventory or is not paid directly; BOTH transacts both kinds through this account. DIRECT/RESELLER declarations alone do not establish the role.</p>
+                <p className="sm:col-span-2">PUBLISHER: owns inventory, paid directly. INTERMEDIARY: others’ inventory or indirect payment. BOTH: both roles. DIRECT/RESELLER does not determine the role.</p>
               )}
               {fields.map((f) =>
                 f === "seller_type" ? (
@@ -1167,7 +1167,7 @@ function ListingWindow({
       <div className={cn("flex items-baseline justify-between gap-2 border-b px-3 py-1.5", w.border, w.head)}>
         <span className={cn("flex items-baseline gap-1.5 text-xs font-medium", w.text)}>
           <span className="font-mono">{w.glyph}</span>
-          {total ? "Lines naming this seller" : "No line names this seller"}
+          {total ? "Source lines" : "No source lines"}
         </span>
         <span className={cn("font-mono text-[11px] font-semibold tabular-nums", w.text)}>{total.toLocaleString()}</span>
       </div>

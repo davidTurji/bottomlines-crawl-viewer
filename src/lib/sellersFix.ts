@@ -438,14 +438,13 @@ export function suggest(file: SellersFile, sightings: Sighting[], ownDomain: str
     const rN = Math.max(e.rN, reseller.length);
 
     const oneDirect = dN === 1 && direct.length === 1 ? direct[0] : null;
-    const onRecord = oneDirect ? e.names.get(oneDirect) : undefined;
     // Never named for them (David, 2026-10-06): the customer confirms the
     // account is theirs, names the paid entity and chooses its role.
     const reason = oneDirect
-      ? `Listed as DIRECT by ${oneDirect}${onRecord ? ` (on record as ${onRecord})` : ""}, but missing from your file. Confirm the seller's name, business domain and account role to add it.`
+      ? `Listed DIRECT by ${oneDirect}; missing from your file. Enter the seller's name, domain and role.`
       : dN > 1
-        ? `Listed as DIRECT by ${plural(dN, "publisher", "publishers")} (${names(direct, dN)}), but missing from your file. Type who it is to add it.`
-        : `Listed as RESELLER by ${plural(rN, "publisher", "publishers")}, but missing from your file. Type who the reseller is to add it.`;
+        ? `Listed DIRECT by ${plural(dN, "publisher", "publishers")} (${names(direct, dN)}); missing from your file. Enter the seller's name, domain and role.`
+        : `Listed RESELLER by ${plural(rN, "publisher", "publishers")}; missing from your file. Enter the seller's name, domain and role.`;
     rows.push({
       seller_id: id,
       kind: "add",
