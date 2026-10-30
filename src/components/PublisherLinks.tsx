@@ -269,7 +269,7 @@ function LineCopyButton({ text }: { text: string }) {
 }
 
 type LineRecord = Pick<MatchedSeatLine, "ssp_domain" | "publisher_id" | "relationship" | "cert_id">;
-type LineTarget = { key: string; line: LineRecord; domain: string | null; foundIn: string | null | undefined; gone: boolean; label: string };
+type LineTarget = { key: string; line: LineRecord; domain: string | null; sourceDomains?: string[]; foundIn: string | null | undefined; gone: boolean; label: string };
 const LineSelection = createContext<{
   selected: LineTarget | null;
   select: (line: LineTarget | null) => void;
@@ -331,19 +331,23 @@ export function LineActionGroup({ children, className, tone = "neutral" }: {
 function SelectedLineActions({ target }: { target: LineTarget }) {
   return <>
     <LineCopyButton key={target.key} text={lineText(target.line)} />
-    <SourceFileButton domain={target.domain} foundIn={target.foundIn} line={target.line} gone={target.gone} />
+    <SourceFileButton domain={target.domain} sourceDomains={target.sourceDomains} foundIn={target.foundIn} line={target.line} gone={target.gone} />
   </>;
 }
 
 /** Shared source action for matched lines, Discovery and declaration rosters. */
-export function SourceFileButton({ domain, foundIn, line, gone = false }: {
+export function SourceFileButton({ domain, sourceDomains = [], foundIn, line, gone = false }: {
   domain: string | null;
+  sourceDomains?: string[];
   foundIn?: string | null;
   line?: LineRecord;
   gone?: boolean;
 }) {
   const text = line ? lineText(line) : "declaration";
   const files = filesOf(foundIn);
+  const domains = [...new Set([domain, ...sourceDomains].filter(linkable))];
+  const targets = domains.flatMap(domain => files.map(file => ({ domain, file })));
+  const multipleHosts = domains.length > 1;
   const at = gone ? null : line;
   const stop = (e: MouseEvent | KeyboardEvent | PointerEvent) => e.stopPropagation();
   const label = (f: PublisherFile) => gone
@@ -351,7 +355,7 @@ export function SourceFileButton({ domain, foundIn, line, gone = false }: {
     : `Open ${text} in ${host(domain!)}/${f}`;
   return (
     <>
-      {domain && (files.length === 1 ? (
+      {domain && (targets.length === 1 ? (
         <a href={fileUrl(domain, files[0], at)} target="_blank" rel="noopener noreferrer"
           aria-label={label(files[0])} title={`${gone ? "Current file" : "Source"}: ${host(domain)}/${files[0]}`}
           onClick={stop} onKeyDown={stop} className="line-control line-control-source">
@@ -361,24 +365,24 @@ export function SourceFileButton({ domain, foundIn, line, gone = false }: {
         <Dialog.Root>
           <Dialog.Trigger asChild>
             <button type="button" className="line-control line-control-source"
-              aria-label={`Open ${text}: choose ads.txt or app-ads.txt on ${host(domain)}`} onClick={stop}>
+              aria-label={multipleHosts ? `Open ${text}: choose a source file` : `Open ${text}: choose ads.txt or app-ads.txt on ${host(domain)}`} onClick={stop}>
               Open file <ChevronDown aria-hidden className="h-3.5 w-3.5" />
             </button>
           </Dialog.Trigger>
           <Dialog.Portal>
             <Dialog.Overlay className="fixed inset-0 z-50 bg-black/25" />
-            <Dialog.Content onClick={stop} className="source-file-dialog fixed left-1/2 top-1/2 z-50 w-[calc(100%-32px)] max-w-sm -translate-x-1/2 -translate-y-1/2 rounded-xl border border-border bg-white p-5 shadow-xl">
+            <Dialog.Content onClick={stop} className="source-file-dialog fixed left-1/2 top-1/2 z-50 max-h-[calc(100dvh-32px)] w-[calc(100%-32px)] max-w-sm -translate-x-1/2 -translate-y-1/2 overflow-y-auto rounded-xl border border-border bg-white p-5 shadow-xl">
               <Dialog.Title className="text-base font-semibold text-slate-900">Open source file</Dialog.Title>
               <Dialog.Description className="mt-1 break-words text-xs leading-relaxed text-slate-500">
-                {host(domain)}{foundIn === "both" ? " · Found in both files" : " · Choose a file; the report did not record which one"}
+                {multipleHosts ? `This line appears in ${targets.length} inventory partner files. Choose a source.` : <>{host(domain)}{foundIn === "both" ? " · Found in both files" : " · Choose a file; the report did not record which one"}</>}
               </Dialog.Description>
               <div className="mt-4 grid gap-2">
-                {files.map(file => <a key={file} href={fileUrl(domain, file, at)} target="_blank" rel="noopener noreferrer"
-                  className="line-control line-file-link px-3 py-3 text-sm">{file}<ArrowUpRight aria-hidden className="h-4 w-4" /></a>)}
-                <button type="button" className="line-control line-file-both min-h-11"
-                  onClick={() => { for (const file of files) window.open(fileUrl(domain, file, at), "_blank", "noopener,noreferrer"); }}>
+                {targets.map(({domain, file}) => <a key={`${domain}/${file}`} href={fileUrl(domain, file, at)} target="_blank" rel="noopener noreferrer"
+                  className="line-control line-file-link px-3 py-3 text-sm"><span className="min-w-0 break-all">{multipleHosts ? `${host(domain)}/${file}` : file}</span><ArrowUpRight aria-hidden className="h-4 w-4 flex-none" /></a>)}
+                {targets.length <= 2 && <button type="button" className="line-control line-file-both min-h-11"
+                  onClick={() => { for (const {domain, file} of targets) window.open(fileUrl(domain, file, at), "_blank", "noopener,noreferrer"); }}>
                   Open both files <ArrowUpRight aria-hidden className="h-4 w-4" />
-                </button>
+                </button>}
               </div>
               <Dialog.Close className="mt-4 min-h-10 w-full rounded-md text-xs font-medium text-slate-600 hover:bg-muted">Cancel</Dialog.Close>
             </Dialog.Content>
@@ -390,9 +394,10 @@ export function SourceFileButton({ domain, foundIn, line, gone = false }: {
 }
 
 /** Clicking a record reveals its own actions; text selection and nested links keep their normal behavior. */
-export function ActionableLine({ line, publisherDomain, foundIn, gone = false, selectionLabel, className, children }: {
+export function ActionableLine({ line, publisherDomain, sourceDomains, foundIn, gone = false, selectionLabel, className, children }: {
   line: LineRecord;
   publisherDomain: string | null | undefined;
+  sourceDomains?: string[];
   foundIn: string | null | undefined;
   gone?: boolean;
   shown?: boolean;
@@ -405,8 +410,8 @@ export function ActionableLine({ line, publisherDomain, foundIn, gone = false, s
   const instance = useId();
   const domain = linkable(publisherDomain) ? publisherDomain : null;
   const text = lineText(line);
-  const key = `${instance}|${text}|${domain}|${foundIn}|${gone}|${selectionLabel ?? ""}`;
-  const target = useMemo<LineTarget>(() => ({ key, line, domain, foundIn, gone, label: selectionLabel ?? text }), [key, selectionLabel]);
+  const key = `${instance}|${text}|${domain}|${sourceDomains?.join(",") ?? ""}|${foundIn}|${gone}|${selectionLabel ?? ""}`;
+  const target = useMemo<LineTarget>(() => ({ key, line, domain, sourceDomains, foundIn, gone, label: selectionLabel ?? text }), [key, selectionLabel]);
   const register = group?.register;
   useLayoutEffect(() => register?.(target, owner), [register, target, owner]);
   const on = group?.selected?.key === key;
