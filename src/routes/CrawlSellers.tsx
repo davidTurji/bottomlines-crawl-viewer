@@ -8,7 +8,6 @@ import {
   Info,
   Plus,
   RefreshCw,
-  RotateCcw,
   ShieldCheck,
   X,
 } from "lucide-react";
@@ -16,6 +15,7 @@ import { useEffect, useMemo, useState } from "react";
 
 import { EntryDiff, JsonDiff } from "@/components/JsonDiff";
 import { Collapse, Settle, glideTo, toggleWithoutJump } from "@/components/Motion";
+import { ReportButton } from "@/components/ReportButton";
 import { ReportDisclosure } from "@/components/ReportDisclosure";
 import { PageShell } from "@/components/PageShell";
 import SellerRoles from "@/components/SellerRoles";
@@ -65,7 +65,7 @@ import { SplitStat } from "./CrawlReport";
  * was mocked and taken out; it is not something the platform does.
  *
  * EVERYTHING STARTS OFF (David, 2026-10-06): every suggestion opens as
- * "Don't" and the reader switches on what they want.
+ * "Skip" and the reader switches on what they want.
  */
 
 type GroupKey = "add" | "fix" | "remove";
@@ -176,30 +176,6 @@ export default function CrawlSellers() {
   useEffect(() => {
     setTicked(new Set());
   }, [plain]);
-
-  /** Whether the reader has touched a suggestion: switched it on, or typed
-   *  into it. */
-  const changed = (id: string) => ticked.has(id) || Boolean(edits[id]);
-  /** Back to off, for these sellers (David, 2026-10-06: a reset everywhere a
-   *  choice is made). */
-  const reset = (ids: string[]) => {
-    setTicked((prev) => {
-      const next = new Set(prev);
-      for (const id of ids) next.delete(id);
-      return next;
-    });
-    setEdits((prev) => {
-      const next = { ...prev };
-      for (const id of ids) delete next[id];
-      return next;
-    });
-  };
-  const allIds = plain.map((r) => r.seller_id);
-  const anyChanged = allIds.some(changed) || Boolean(headerPatch.version);
-  const resetAll = () => {
-    reset(allIds);
-    setHeaderPatch({});
-  };
 
   const groupOf = (r: SellerRow): GroupKey | null => (r.kind === "keep" ? null : r.kind);
 
@@ -370,8 +346,8 @@ export default function CrawlSellers() {
         </div>
         {data && (
           <div className="flex flex-wrap items-center gap-2 self-start">
-            <CopyButton text={exportText} label={creating ? "Copy new file" : "Copy fixed file"} disabled={blocked} />
-            <ExportButton onClick={download} label={creating ? "Download new file" : "Download fixed file"} disabled={blocked} />
+            <CopyButton text={exportText} label="Copy file" disabled={blocked} />
+            <ExportButton onClick={download} label="Download file" disabled={blocked} />
           </div>
         )}
       </div>
@@ -428,14 +404,14 @@ export default function CrawlSellers() {
                 <SplitStat
                   className="bg-white"
                   number={taken.add}
-                  label="In your new file"
+                  label="Selected"
                   caption="The ones you added"
                 />
                 <SplitStat
                   className="bg-white"
                   tone="warn"
                   number={counts.unnamed}
-                  label="Need a name"
+                  label="Missing names"
                   caption="Only you can say who they are"
                 />
               </div>
@@ -444,7 +420,7 @@ export default function CrawlSellers() {
                 <SplitStat
                   className="bg-white"
                   number={data.file?.sellers.length ?? 0}
-                  label="Sellers in your file"
+                  label="In your file"
                   caption={readOn ? `As read on ${readOn}` : "As read for this report"}
                 />
                 <SplitStat
@@ -452,21 +428,21 @@ export default function CrawlSellers() {
                   tone="ok"
                   prefix="+"
                   number={counts.add}
-                  label="To add"
+                  label="Missing sellers"
                   caption="Publishers list them, your file doesn't"
                 />
                 <SplitStat
                   className="bg-white"
                   tone="warn"
                   number={counts.fix}
-                  label="To fix"
+                  label="Needs fixes"
                   caption="Written wrong, duplicated or disputed"
                 />
                 <SplitStat
                   className="bg-white"
                   tone={counts.remove ? "warn" : undefined}
                   number={counts.remove}
-                  label="Not seen in checked files"
+                  label="Not seen"
                   caption="Review before removing"
                 />
               </div>
@@ -527,8 +503,6 @@ export default function CrawlSellers() {
                 onSet={setOn}
                 onEdit={edit}
                 edits={edits}
-                changed={changed}
-                onReset={reset}
                 flagged={new Set(issues.map((x) => x.sellerId).filter(Boolean) as string[])}
                 domain={data.domain}
                 fileHref={creating ? null : fileHref}
@@ -584,7 +558,7 @@ export default function CrawlSellers() {
           <div className="report-panel rounded-2xl border border-border bg-white p-5">
             {/* WHAT YOU ARE EXPORTING, in one plain line (David, 2026-10-06:
                 the chips and the verdict were clutter). Copy and Download
-                sit at the top of the page; Reset puts every pick back. */}
+                sit at the top of the page; Add / Skip controls the downloaded file. */}
             <div className="mb-4 flex flex-wrap items-start justify-between gap-3">
               <div className="min-w-0">
                 <div className="font-display text-base font-semibold tracking-tight text-slate-900">
@@ -604,7 +578,6 @@ export default function CrawlSellers() {
                   })()}
                 </div>
               </div>
-              <ResetButton disabled={!anyChanged} onClick={resetAll} label="Reset all" />
             </div>
             {/* One comparison, read only (David, 2026-10-06): the live file on
                 the left, the file with the changes taken above on the right.
@@ -649,8 +622,8 @@ export default function CrawlSellers() {
                   : ""}
               </p>
               <div className="flex flex-wrap items-center gap-2">
-                <CopyButton text={exportText} label={creating ? "Copy new file" : "Copy fixed file"} disabled={blocked} />
-                <ExportButton onClick={download} label={creating ? "Download new file" : "Download fixed file"} disabled={blocked} />
+                <CopyButton text={exportText} label="Copy file" disabled={blocked} />
+                <ExportButton onClick={download} label="Download file" disabled={blocked} />
               </div>
             </div>
           </div>
@@ -679,8 +652,6 @@ function SuggestionGroup({
   onSet,
   onEdit,
   edits,
-  changed,
-  onReset,
   flagged,
   domain,
   fileHref,
@@ -701,8 +672,6 @@ function SuggestionGroup({
   onOpen: (id: string) => void;
   onSet: (ids: string[], on: boolean) => void;
   onEdit: (id: string, field: FillField, value: string) => void;
-  changed: (id: string) => boolean;
-  onReset: (ids: string[]) => void;
   flagged: Set<string>;
 }) {
   const g = GROUP[group];
@@ -723,8 +692,6 @@ function SuggestionGroup({
         onSet={(on) => onSet([r.seller_id], on)}
         onEdit={(field, value) => onEdit(r.seller_id, field, value)}
         typed={edits[r.seller_id]}
-        changed={changed(r.seller_id)}
-        onReset={() => onReset([r.seller_id])}
         domain={domain}
         fileHref={fileHref}
       />
@@ -749,36 +716,28 @@ function SuggestionGroup({
             {group === "remove" ? `${taken} of ${total} taken out of your file` : `${taken} of ${total} going into your file`}
           </div>
         </div>
-        <div className="flex items-center gap-3 text-xs text-slate-500">
-          <button
-            type="button"
+        <div className="flex items-center gap-2 text-xs text-slate-500">
+          <ReportButton
+            variant="outline"
+            size="sm"
             onClick={() => {
               onSet(ids, true);
               headerFix?.onSet(true);
             }}
-            className="font-medium text-slate-700 hover:text-primary"
           >
-            Take all
-          </button>
-          <button
-            type="button"
+            Add all
+          </ReportButton>
+          <ReportButton
+            variant="outline"
+            size="sm"
             onClick={() => {
               onSet(ids, false);
               headerFix?.onSet(false);
             }}
-            className="font-medium text-slate-700 hover:text-primary"
           >
             Skip all
-          </button>
-          <ResetButton
-            disabled={!ids.some(changed) && !headerFix?.on}
-            onClick={() => {
-              onReset(ids);
-              headerFix?.onSet(false);
-            }}
-            label="Reset"
-            quiet
-          />
+          </ReportButton>
+
         </div>
       </div>
       <div className="overflow-hidden rounded-xl border border-border">
@@ -791,15 +750,16 @@ function SuggestionGroup({
         </Collapse>}
       </div>
       {rows.length > PEEK && (
-        <button
-          type="button"
+        <ReportButton
+          variant="outline"
+          size="sm"
           onClick={event => showAll ? toggleWithoutJump(event.currentTarget, onShowAll) : onShowAll()}
           aria-expanded={showAll}
-          className="mt-3 inline-flex items-center gap-1 text-xs font-medium text-slate-600 hover:text-primary"
+          className="mt-3"
         >
           {showAll ? "Show fewer" : `Show all ${rows.length}`}
           <ChevronDown aria-hidden className={cn("h-3.5 w-3.5 transition-transform", showAll && "rotate-180")} />
-        </button>
+        </ReportButton>
       )}
     </section>
   );
@@ -847,8 +807,6 @@ function SuggestionCard({
   onSet,
   onEdit,
   typed,
-  changed,
-  onReset,
   domain,
   fileHref,
 }: {
@@ -865,8 +823,6 @@ function SuggestionCard({
   onOpen: () => void;
   onSet: (on: boolean) => void;
   onEdit: (field: FillField, value: string) => void;
-  changed: boolean;
-  onReset: () => void;
 }) {
   const g = GROUP[group];
   const Icon = g.icon;
@@ -939,17 +895,18 @@ function SuggestionCard({
         {/* On a phone the worded choice takes its own row under the seller,
             so neither squeezes the other. */}
         <div className="order-last flex basis-full items-center gap-2 pl-10 sm:order-none sm:basis-auto sm:pl-0">
-          {changed && <ResetButton onClick={onReset} label="Reset" quiet />}
           <Decision on={on} onSet={onSet} id={row.seller_id} group={group} />
         </div>
-        <button
-          type="button"
+        <ReportButton
+          variant="outline"
+          size="sm"
           onClick={onOpen}
+          aria-expanded={open}
           aria-label={open ? "Close" : "Open"}
-          className="flex-shrink-0 rounded-full p-1 text-slate-400 transition-colors hover:bg-muted hover:text-slate-600"
+          className="w-8 flex-shrink-0 px-0 max-sm:w-11"
         >
           <ChevronDown aria-hidden className={cn("h-4 w-4 transition-transform", open && "rotate-180")} />
-        </button>
+        </ReportButton>
       </div>
       <Collapse open={open}>
         <div className="space-y-3 border-t border-border bg-muted/20 px-4 py-3 text-[12px] text-slate-600">
@@ -1273,52 +1230,13 @@ function ListingWindow({
   );
 }
 
-/**
- * TAKE IT OR NOT, IN WORDS (David, 2026-10-05: a bare tick and cross did
- * not say which was chosen). Each side names what it does to the file for
- * this kind of suggestion; the chosen side is filled, in the kind's ink
- * when it goes into the file and in slate when it stays out.
- */
-// The tick always means "do what we suggest" and the cross "don't", so
-// every label is the suggestion or its negation (David, 2026-10-05: a
-// tick beside "Remove" and a cross beside "Keep" read backwards).
-const DECISION: Record<GroupKey, { take: string; skip: string; solid: string }> = {
-  add: { take: "Add to file", skip: "Don't add", solid: "bg-ok text-white" },
-  fix: { take: "Apply fix", skip: "Don't fix", solid: "bg-warn text-white" },
-  remove: { take: "Remove from file", skip: "Don't remove", solid: "bg-warn text-white" },
+/** Add / Skip always selects or excludes the displayed suggestion,
+ * including a removal. Keep its meaning in the title and its group color. */
+const DECISION: Record<GroupKey, { action: string; solid: string }> = {
+  add: { action: "addition", solid: "border-ok bg-ok text-white hover:bg-ok/90" },
+  fix: { action: "fix", solid: "border-warn bg-warn text-white hover:bg-warn/90" },
+  remove: { action: "removal", solid: "border-warn bg-warn text-white hover:bg-warn/90" },
 };
-
-/** Puts picks back where the suggestions started. Quiet in a group or a
- *  card; a pill for the whole file. */
-function ResetButton({
-  onClick,
-  label,
-  disabled = false,
-  quiet = false,
-}: {
-  onClick: () => void;
-  label: string;
-  disabled?: boolean;
-  quiet?: boolean;
-}) {
-  return (
-    <button
-      type="button"
-      onClick={onClick}
-      disabled={disabled}
-      title="Back to the suggested choices"
-      className={cn(
-        "inline-flex items-center gap-1 font-medium transition-colors disabled:pointer-events-none disabled:opacity-40",
-        quiet
-          ? "text-[12px] text-slate-500 hover:text-primary"
-          : "h-9 rounded-full border border-border bg-white px-3.5 text-[12.5px] text-slate-700 hover:bg-slate-50",
-      )}
-    >
-      <RotateCcw aria-hidden className="h-3.5 w-3.5" />
-      {label}
-    </button>
-  );
-}
 
 function Decision({
   on,
@@ -1332,49 +1250,44 @@ function Decision({
   group: GroupKey;
 }) {
   const d = DECISION[group];
-  const side = "inline-flex h-7 items-center gap-1 rounded-full px-2.5 text-[12px] font-semibold transition-colors";
   return (
-    <div role="group" aria-label={`Seller ${id}`} className="inline-flex flex-shrink-0 rounded-full border border-border bg-white p-0.5">
-      <button
-        type="button"
+    <div role="group" aria-label={`Seller ${id}`} className="inline-flex flex-shrink-0 gap-1.5">
+      <ReportButton
+        variant="outline"
+        size="sm"
         onClick={() => onSet(true)}
         aria-pressed={on}
-        className={cn(side, on ? d.solid : "text-slate-500 hover:bg-muted hover:text-slate-700")}
+        title={`Include this ${d.action} suggestion in your downloaded file`}
+        className={on ? d.solid : undefined}
       >
         <Check aria-hidden className="h-3.5 w-3.5" strokeWidth={2.5} />
-        {d.take}
-      </button>
-      <button
-        type="button"
+        Add
+      </ReportButton>
+      <ReportButton
+        variant="outline"
+        size="sm"
         onClick={() => onSet(false)}
         aria-pressed={!on}
-        // Off is where every card starts (2026-10-06): a quiet fill, so the
-        // ones switched on are what stand out.
-        className={cn(side, !on ? "bg-slate-200 text-slate-800" : "text-slate-500 hover:bg-muted hover:text-slate-700")}
+        title={`Leave this ${d.action} suggestion out of your downloaded file`}
+        className={!on ? "border-slate-300 bg-slate-100 text-slate-800" : undefined}
       >
         <X aria-hidden className="h-3.5 w-3.5" strokeWidth={2.5} />
-        {d.skip}
-      </button>
+        Skip
+      </ReportButton>
     </div>
   );
 }
 
 function ExportButton({ onClick, label, disabled = false }: { onClick: () => void; label: string; disabled?: boolean }) {
   return (
-    <button
-      type="button"
-      onClick={onClick}
-      disabled={disabled}
-      className="disabled:pointer-events-none disabled:opacity-40 inline-flex h-9 flex-shrink-0 items-center gap-2 self-start rounded-lg report-action bg-primary px-4 text-[13px] font-semibold text-primary-foreground transition-colors duration-150 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
-    >
+    <ReportButton size="sm" onClick={onClick} disabled={disabled}>
       <Download aria-hidden className="h-4 w-4" />
       {label}
-    </button>
+    </ReportButton>
   );
 }
 
-/** Copies the file with the reader's picks, for pasting straight into
- *  wherever they publish it. Says so for a moment, then settles back. */
+/** Copy the exact same selected file as Download. */
 function CopyButton({ text, label, disabled = false }: { text: string; label: string; disabled?: boolean }) {
   const [copied, setCopied] = useState(false);
   useEffect(() => {
@@ -1383,8 +1296,9 @@ function CopyButton({ text, label, disabled = false }: { text: string; label: st
     return () => window.clearTimeout(t);
   }, [copied]);
   return (
-    <button
-      type="button"
+    <ReportButton
+      variant="outline"
+      size="sm"
       onClick={() => {
         navigator.clipboard
           ?.writeText(text)
@@ -1392,11 +1306,10 @@ function CopyButton({ text, label, disabled = false }: { text: string; label: st
           .catch(() => {});
       }}
       disabled={disabled}
-      className="disabled:pointer-events-none disabled:opacity-40 inline-flex h-9 flex-shrink-0 items-center gap-2 rounded-full border border-border bg-white px-4 text-[13px] font-semibold text-slate-700 shadow-sm transition-colors hover:border-primary/30"
     >
       {copied ? <Check aria-hidden className="h-4 w-4 text-ok" /> : <Copy aria-hidden className="h-4 w-4" />}
       {copied ? "Copied" : label}
-    </button>
+    </ReportButton>
   );
 }
 
@@ -1452,7 +1365,6 @@ function VersionCard({ on, onSet }: { on: boolean; onSet: (on: boolean) => void 
           </span>
         </div>
         <div className="order-last flex basis-full items-center gap-2 pl-10 sm:order-none sm:basis-auto sm:pl-0">
-          {on && <ResetButton onClick={() => onSet(false)} label="Reset" quiet />}
           <Decision on={on} onSet={onSet} id="version" group="fix" />
         </div>
         {/* Nothing to open: the space of the other cards' arrow, so the
@@ -1493,7 +1405,7 @@ function ProblemsLine({
       <span className="min-w-0 flex-1 text-[13px] font-medium text-slate-800">
         {issues.length} {issues.length === 1 ? "thing is" : "things are"} still wrong in the file you download
       </span>
-      <span className="inline-flex flex-shrink-0 items-center gap-1 rounded-full border border-border bg-white px-3 py-1 text-[11.5px] font-medium text-slate-700 shadow-sm">
+      <span className="inline-flex flex-shrink-0 items-center gap-1 rounded-lg border border-border bg-white px-3 py-1.5 text-xs font-semibold text-slate-700">
         {open ? "Hide" : "Show them"}
         <ChevronDown aria-hidden className={cn("h-3.5 w-3.5 transition-transform", open && "rotate-180")} />
       </span>
@@ -1525,8 +1437,6 @@ function ProblemsList({
   onGo: (sellerId?: string, field?: string, fill?: boolean) => void;
 }) {
   const byId = new Map(rows.map((r) => [r.seller_id, r]));
-  const pill =
-    "flex-shrink-0 rounded-full border px-3 py-1 text-[11px] font-medium transition-colors";
   return (
     <ul className="divide-y divide-border border-t border-warn-border bg-white">
       {issues.map((x) => {
@@ -1540,44 +1450,43 @@ function ProblemsList({
             <span className="flex flex-shrink-0 items-center gap-2">
               {x.field === "version" ? (
                 !versionOn && (
-                  <button type="button" onClick={onAddVersion} className={cn(pill, "border-warn bg-warn text-white hover:brightness-110")}>
+                  <ReportButton variant="outline" size="sm" onClick={onAddVersion} className="border-warn bg-warn text-white hover:bg-warn/90">
                     Add version 1.0
-                  </button>
+                  </ReportButton>
                 )
               ) : x.field === "contact_email" ? (
-                <button type="button" onClick={() => onGo(undefined, x.field)} className={cn(pill, "border-border bg-white text-slate-700 hover:border-primary/30")}>
+                <ReportButton variant="outline" size="sm" onClick={() => onGo(undefined, x.field)} className="flex-shrink-0">
                   Fill in
-                </button>
+                </ReportButton>
               ) : row && needsInput ? (
-                <button
-                  type="button"
+                <ReportButton
+                  variant="outline"
+                  size="sm"
                   onClick={() => onGo(x.sellerId, undefined, true)}
-                  className={cn(pill, "border-border bg-white text-slate-700 hover:border-primary/30")}
+                  className="flex-shrink-0"
                 >
                   Fill in
-                </button>
+                </ReportButton>
               ) : row && row.kind !== "keep" && !ticked.has(row.seller_id) ? (
-                <button
-                  type="button"
+                <ReportButton
+                  variant="outline"
+                  size="sm"
                   title={what}
                   onClick={() => onApply(row.seller_id)}
-                  className={cn(
-                    pill,
-                    "border-warn bg-warn text-white hover:brightness-110",
-                  )}
+                  className="border-warn bg-warn text-white hover:bg-warn/90"
                 >
-                  {row.kind === "remove" ? "Remove" : "Apply fix"}
-                </button>
+                  Add
+                </ReportButton>
               ) : null}
               {x.sellerId !== undefined && row && (
-                <button type="button" onClick={() => onGo(x.sellerId)} className="text-[11px] font-medium text-slate-500 hover:text-primary">
+                <ReportButton variant="outline" size="sm" onClick={() => onGo(x.sellerId)}>
                   Show me
-                </button>
+                </ReportButton>
               )}
               {x.field === "version" && (
-                <button type="button" onClick={() => onGo(undefined, "version")} className="text-[11px] font-medium text-slate-500 hover:text-primary">
+                <ReportButton variant="outline" size="sm" onClick={() => onGo(undefined, "version")}>
                   Show me
-                </button>
+                </ReportButton>
               )}
             </span>
           </li>
