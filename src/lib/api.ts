@@ -7,6 +7,8 @@ const BASE = (import.meta.env.VITE_API_BASE as string) ?? "/api";
 // The mock adapter lives in src/lib/mockData.ts.
 import { LINES_PARAM, linesQuery, serializeLines } from "./lineFilter";
 import { PAGE_SIZE } from "./paging";
+import { downloadBlob } from "./fileDownload";
+import { pageFromGone } from "./inactive";
 
 export const MOCK = (import.meta.env.VITE_MOCK as string | undefined) === "true";
 
@@ -48,17 +50,31 @@ const trialMock = () => {
   }
   return params.has("trial") && params.get("trial") !== "0";
 };
-const TRIAL_CAPS_MOCK = { publishers: 3, apps: 3, declarations: 3, discovered_lines: 3 };
+const TRIAL_CAPS_MOCK = { publishers: 3, apps: 3, declarations: 3, discovered_lines: 3, inactive: 3 };
 function cutRows<T>(rows: T[], cap: number, total: number) {
   const shown = Math.min(cap, rows.length, total);
   return { rows: rows.slice(0, cap), trial: { cap, shown, full_total: total } };
 }
 
+/** In MOCK mode, ``?inactive=legacy`` is a link frozen before the Inactive
+ *  section (only its No longer live block) and ``?inactive=none`` one with
+ *  neither. Read per call, like ``?bigapps=1``. */
+const mockInactiveMode = (): "full" | "legacy" | "none" => {
+  const v = new URLSearchParams(window.location.search).get("inactive");
+  return v === "legacy" || v === "none" ? v : "full";
+};
+function mockInactiveVariant(s: Summary): Summary {
+  const mode = mockInactiveMode();
+  if (mode === "full") return s;
+  const { inactive_counts: _drop, ...rest } = s;
+  return mode === "legacy" ? rest : { ...rest, gone: undefined };
+}
+
 // ── AI chat flag ─────────────────────────────────────────────────
 // The MVP backend ships no chat endpoint, so the Ask AI surface is
-// hidden unless explicitly enabled (VITE_ENABLE_CHAT=true), e.g. for
-// mock-mode demos. Default off.
-export const ENABLE_CHAT =
+// available only in mock-mode demos. A production build cannot expose
+// a control whose backend endpoint has not shipped.
+export const ENABLE_CHAT = MOCK &&
   (import.meta.env.VITE_ENABLE_CHAT as string | undefined) === "true";
 
 export class ApiError extends Error {
@@ -100,6 +116,33 @@ export function onLinkRefused(handler: (() => void) | null) {
   linkRefusedHandler = handler;
 }
 
+// ── Held until signed in (demo of #75, 2026-10-27) ─────────────────
+// Before the email link's sign-in landed, the page fired ~23 data
+// requests that all came back 401. While the sign-in form is up (the
+// link's own, or after a 401), every data request waits here and goes
+// once the session exists; the sign-in and resolve calls never wait.
+let held: { until: Promise<void>; release: () => void } | null = null;
+
+/** Hold every data request until `releaseDataRequests` (sign-in). */
+export function holdDataRequests(): void {
+  if (held) return;
+  let release!: () => void;
+  const until = new Promise<void>((r) => (release = r));
+  held = { until, release };
+}
+
+/** The session exists: every held request goes. */
+export function releaseDataRequests(): void {
+  const h = held;
+  held = null;
+  h?.release();
+}
+
+/** Waits while data requests are held (a no-op otherwise). */
+async function whenSignedIn(): Promise<void> {
+  while (held) await held.until;
+}
+
 // ── Auth epoch ───────────────────────────────────────────────────
 // Guards against a stale-401 re-lock race: a data request fired
 // before sign-in can come back 401 *after* the login succeeded, and
@@ -109,18 +152,27 @@ export function onLinkRefused(handler: (() => void) | null) {
 // epoch and stays silent (the page still gets its ApiError).
 let authEpoch = 0;
 
+/** Bumped by every successful sign-in. A cache of answers given to a
+ *  reader keys on it, so a "no" told before sign-in never outlives it. */
+export function currentAuthEpoch(): number {
+  return authEpoch;
+}
+
 async function req<T>(
   method: string,
   path: string,
   body?: unknown,
   signal?: AbortSignal,
 ): Promise<T> {
-  const epochAtStart = authEpoch;
   // Path without its query string, so the two exemptions below compare
   // whole endpoints. A prefix test would misfire on a share token that
   // happens to start with "resolve" (/v1/viewer/resolveXYZ/summary) and
   // silently switch the sign-in gate off for that reader.
   const endpoint = path.split("?")[0];
+  // A data request waits for the sign-in; the sign-in and the resolve,
+  // which run before any session exists, never do.
+  if (!endpoint.endsWith("/viewer/auth") && endpoint !== "/v1/viewer/resolve") await whenSignedIn();
+  const epochAtStart = authEpoch;
   const res = await fetch(`${BASE}${path}`, {
     method,
     credentials: "include",
@@ -180,7 +232,8 @@ export const api = {
    * the JSON body only confirms who signed in.
    */
   auth: async (token: string, username: string, password: string) => {
-    if (MOCK) return { ok: true, email: "you@publisherstudios.com", customer_id: 42 };
+    if (MOCK)
+      return { ok: true, email: "you@publisherstudios.com", customer_id: 42 };
     const out = await req<{ ok: boolean; email: string; customer_id: number }>(
       "POST",
       `/v1/viewer/auth`,
@@ -203,10 +256,16 @@ export const api = {
    */
   exportInfo: async (token: string): Promise<ExportInfo> => {
     if (MOCK) {
-      if (trialMock()) return { format: "none", line_export: false, trial: true };
+      if (trialMock())
+        return { format: "none", line_export: false, trial: true };
       const big = new URLSearchParams(window.location.search).has("bigapps");
       return big
-        ? { format: "zip", line_export: true, excel_row_limit: 1_048_576, apps_rows: 3_682_524 }
+        ? {
+            format: "zip",
+            line_export: true,
+            excel_row_limit: 1_048_576,
+            apps_rows: 3_682_524,
+          }
         : { format: "xlsx", line_export: true, excel_row_limit: 1_048_576 };
     }
     const fallback: ExportInfo = { format: "xlsx", line_export: false };
@@ -214,6 +273,7 @@ export const api = {
     // 404, and whatever goes wrong here falls back to the defaults. Nothing
     // here may touch the sign-in gate; the summary's own calls do that.
     try {
+      await whenSignedIn();
       const res = await fetch(`${BASE}/v1/viewer/${token}/export-info`, {
         credentials: "include",
       });
@@ -249,12 +309,15 @@ export const api = {
     if (MOCK) {
       await mockPause();
       const { mockSummaryFor } = await import("./mockData");
-      const s = mockSummaryFor(lines ?? []);
+      const s = mockInactiveVariant(mockSummaryFor(lines ?? []));
       return trialMock() ? { ...s, trial: TRIAL_CAPS_MOCK } : s;
     }
     const q = linesQuery(lines);
     try {
-      return await req<Summary>("GET", `/v1/viewer/${token}/summary${q ? `?${q.slice(1)}` : ""}`);
+      return await req<Summary>(
+        "GET",
+        `/v1/viewer/${token}/summary${q ? `?${q.slice(1)}` : ""}`,
+      );
     } catch (e) {
       // A signed-in reader whose link expired or was revoked: the API
       // refuses the link itself with 403 (see "Dead links" above).
@@ -301,22 +364,96 @@ export const api = {
   },
   developerEvents: async (
     token: string,
-    event: "added" | "removed" | "changed",
+    event: "added" | "removed" | "changed" | "unconfirmed",
     page = 1,
     q = "",
     lines?: string[],
+    matchType: MatchTypeFilter = "all",
+    /** Rows per page; the lists ask for PAGE_SIZE, an export for more. */
+    pageSize: number = PAGE_SIZE,
+    /** The Found in switch (an API without it ignores it). */
+    foundIn: FoundInFilter = "all",
   ) => {
     if (MOCK) {
       await mockPause();
       const { mockDeveloperEvents } = await import("./mockData");
-      const r = mockDeveloperEvents(event, page, lines ?? []);
+      const r = mockDeveloperEvents(event, page, lines ?? [], mockMatchType(matchType));
       return trialMock()
-        ? { ...r, page: 1, ...cutRows(r.rows, TRIAL_CAPS_MOCK.publishers, r.total) }
+        ? {
+            ...r,
+            page: 1,
+            ...cutRows(r.rows, TRIAL_CAPS_MOCK.publishers, r.total),
+          }
         : r;
     }
     return req<DeveloperEventsPage>(
       "GET",
-      `/v1/viewer/${token}/developer-events?event=${event}&page=${page}&page_size=${PAGE_SIZE}${q ? `&q=${encodeURIComponent(q)}` : ""}${linesQuery(lines)}`,
+      `/v1/viewer/${token}/developer-events?event=${event}&page=${page}&page_size=${pageSize}${q ? `&q=${encodeURIComponent(q)}` : ""}${linesQuery(lines)}${matchTypeQuery(matchType)}${foundIn !== "all" ? `&found_in=${foundIn}` : ""}`,
+    );
+  },
+  changeGroups: async (
+    token: string,
+    filters: ChangeFilters = {},
+    signal?: AbortSignal,
+  ): Promise<ChangeGroupsPage> => {
+    if (MOCK) {
+      const { mockLineEvents } = await import("./mockData");
+      const { pageChangeGroups } = await import("./changeGroups");
+      const raw = mockLineEvents({
+        ...filters,
+        event: undefined,
+        page: 1,
+        page_size: 1_000_000,
+      });
+      const rows = trialMock() ? raw.rows.slice(0, 12) : raw.rows;
+      return pageChangeGroups(
+        rows,
+        filters,
+        trialMock()
+          ? { cap: 12, shown: rows.length, full_total: raw.total }
+          : null,
+      );
+    }
+    return req<ChangeGroupsPage>(
+      "GET",
+      `/v1/viewer/${token}/change-groups?${changeQuery(filters)}`,
+      undefined,
+      signal,
+    );
+  },
+  changePublishers: async (
+    token: string,
+    key: string,
+    filters: ChangeFilters = {},
+    signal?: AbortSignal,
+  ): Promise<LineEventsPage> => {
+    if (MOCK) {
+      const { mockLineEvents } = await import("./mockData");
+      const { groupByLine } = await import("./changeGroups");
+      const raw = mockLineEvents({
+        ...filters,
+        event: undefined,
+        page: 1,
+        page_size: 1_000_000,
+      });
+      const rows =
+        groupByLine(trialMock() ? raw.rows.slice(0, 12) : raw.rows).find(
+          (g) => g.key === key,
+        )?.publishers ?? [];
+      const page = filters.page ?? 1,
+        size = filters.page_size ?? 50;
+      return {
+        page,
+        page_size: size,
+        total: rows.length,
+        rows: rows.slice((page - 1) * size, page * size),
+      };
+    }
+    return req<LineEventsPage>(
+      "GET",
+      `/v1/viewer/${token}/change-groups/${encodeURIComponent(key)}/publishers?${changeQuery(filters)}`,
+      undefined,
+      signal,
     );
   },
   lineEvents: async (
@@ -330,6 +467,8 @@ export const api = {
       page_size?: number;
       /** Seat-line keys (see lib/lineFilter); empty means every line. */
       lines?: string[];
+      /** All / own / IPD (crawler #348); "all" is never sent. */
+      match_type?: MatchTypeFilter;
     } = {},
   ) => {
     if (MOCK) {
@@ -338,15 +477,14 @@ export const api = {
       const r = mockLineEvents(filters);
       // The server keeps the events of the visible publishers only; the
       // mock keeps a dozen and says how many there are in full.
-      return trialMock()
-        ? { ...r, ...cutRows(r.rows, 12, r.total) }
-        : r;
+      return trialMock() ? { ...r, ...cutRows(r.rows, 12, r.total) } : r;
     }
-    const { lines, ...rest } = filters;
+    const { lines, match_type, ...rest } = filters;
     const q = new URLSearchParams();
     for (const [k, v] of Object.entries(rest)) {
       if (v !== undefined && v !== null && v !== "") q.set(k, String(v));
     }
+    if (match_type && match_type !== "all") q.set("match_type", match_type);
     if (lines && lines.length) q.set(LINES_PARAM, serializeLines(lines));
     return req<LineEventsPage>(
       "GET",
@@ -366,18 +504,34 @@ export const api = {
    * `total` on the response is the FILTERED total, so the pager below the
    * list counts what the search found rather than what the section holds.
    */
-  matchedDevelopers: async (token: string, page = 1, q = "", lines?: string[]) => {
+  matchedDevelopers: async (
+    token: string,
+    page = 1,
+    q = "",
+    lines?: string[],
+    matchType: MatchTypeFilter = "all",
+    pageSize: number = PAGE_SIZE,
+    /** A watch tab's filter (crawler #361); an API without it ignores it
+     *  and echoes nothing, and the tab is then not offered. */
+    change?: WatchChange,
+    /** The Found in switch (an API without it ignores it). */
+    foundIn: FoundInFilter = "all",
+  ) => {
     if (MOCK) {
       await mockPause();
-      const { mockMatchedDevelopers } = await import("./mockData");
-      const r = mockMatchedDevelopers(page, q, lines ?? []);
+      const { mockMatchedDevelopers, mockWatchView } = await import("./mockData");
+      const r = mockWatchView(p => mockMatchedDevelopers(p, q, lines ?? [], mockMatchType(matchType)), page, pageSize, change, lines);
       return trialMock()
-        ? { ...r, page: 1, ...cutRows(r.rows, TRIAL_CAPS_MOCK.publishers, r.total) }
+        ? {
+            ...r,
+            page: 1,
+            ...cutRows(r.rows, TRIAL_CAPS_MOCK.publishers, r.total),
+          }
         : r;
     }
     return req<MatchedDevelopersPage>(
       "GET",
-      `/v1/viewer/${token}/matched-developers?page=${page}&page_size=${PAGE_SIZE}${q ? `&q=${encodeURIComponent(q)}` : ""}${linesQuery(lines)}`,
+      `/v1/viewer/${token}/matched-developers?page=${page}&page_size=${pageSize}${q ? `&q=${encodeURIComponent(q)}` : ""}${linesQuery(lines)}${matchTypeQuery(matchType)}${change ? `&change=${change}` : ""}${foundIn !== "all" ? `&found_in=${foundIn}` : ""}`,
     );
   },
   matchedBundles: async (token: string, page = 1, q = "") => {
@@ -404,18 +558,103 @@ export const api = {
    * the APP and it carries the app's owner and its matched seat lines. Could
    * instead be embedded under matched-developers; a standalone endpoint is
    * cleaner because the app is the row here, not the publisher.
+   *
+   * `change` (the Added / Removed / Changed tabs) asks the server to filter
+   * the WHOLE list before paging: apps with lines_added, lines_removed or
+   * lines_cert_changed above 0, combined with `q`, `lines` and
+   * `match_type`, and `total` is the filtered count. A crawler that knows
+   * the filter echoes it as `change` on the response; an older one ignores
+   * the parameter and answers the unfiltered list (see MatchedAppsPage).
    */
-  matchedApps: async (token: string, page = 1, q = "", lines?: string[]) => {
+  matchedApps: async (
+    token: string,
+    page = 1,
+    q = "",
+    lines?: string[],
+    matchType: MatchTypeFilter = "all",
+    change?: AppChange,
+    pageSize: number = PAGE_SIZE,
+    /** The Platform switch (an API without it ignores it). */
+    platform: PlatformFilter = "all",
+  ) => {
     if (MOCK) {
       await mockPause();
-      const { mockMatchedApps } = await import("./mockData");
-      const r = mockMatchedApps(page, q, lines ?? []);
-      return trialMock() ? { ...r, page: 1, ...cutRows(r.rows, TRIAL_CAPS_MOCK.apps, r.total) } : r;
+      const { mockMatchedApps, mockWatchView } = await import("./mockData");
+      const r = mockWatchView(p => mockMatchedApps(p, q, lines ?? [], mockMatchType(matchType), change ?? null), page, pageSize, change, lines);
+      return trialMock()
+        ? { ...r, page: 1, ...cutRows(r.rows, TRIAL_CAPS_MOCK.apps, r.total) }
+        : r;
     }
     return req<MatchedAppsPage>(
       "GET",
-      `/v1/viewer/${token}/matched-apps?page=${page}&page_size=${PAGE_SIZE}${q ? `&q=${encodeURIComponent(q)}` : ""}${linesQuery(lines)}`,
+      `/v1/viewer/${token}/matched-apps?page=${page}&page_size=${pageSize}${q ? `&q=${encodeURIComponent(q)}` : ""}${linesQuery(lines)}${matchTypeQuery(matchType)}${change ? `&change=${change}` : ""}${platform !== "all" ? `&platform=${platform}` : ""}`,
     );
+  },
+  /**
+   * One page of one Inactive list (publishers or apps): what carried the
+   * reader's lines and went inactive between the two compared crawls, with
+   * the date, the reason and the evidence. Frozen with the report, searched and paged server-side
+   * like the matched lists; a trial answers its first rows with `trial`.
+   *
+   * BACKWARDS COMPATIBLE. An API from before this route answers 404, which
+   * here means only "this API is older" (never a dead link, see above): the
+   * page is then built from the summary's No longer live block, passed in as
+   * `legacy`, the way the crawler itself serves an old link.
+   *
+   * In MOCK mode `?inactive=legacy` shows an older link (from the gone
+   * block) and `?inactive=none` a report without the section.
+   */
+  inactive: async (
+    token: string,
+    kind: InactiveKind,
+    opts: { page?: number; q?: string; lines?: string[]; pageSize?: number } = {},
+    legacy?: GoneInventory | null,
+  ): Promise<InactivePage> => {
+    const page = opts.page ?? 1;
+    if (MOCK) {
+      const variant = mockInactiveMode();
+      if (variant !== "full") {
+        // An older link: the crawler answers from its gone block (or has
+        // nothing), exactly what the 404 fallback below builds.
+        const { mockGone } = await import("./mockData");
+        return pageFromGone(variant === "legacy" ? mockGone : null, kind, {
+          page,
+          pageSize: PAGE_SIZE,
+          q: opts.q,
+          lines: opts.lines,
+        });
+      }
+      const { mockInactive } = await import("./mockData");
+      return mockInactive(
+        kind,
+        { page, q: opts.q, lines: opts.lines },
+        trialMock(),
+      );
+    }
+    const q = new URLSearchParams({
+      kind,
+      page: String(page),
+      page_size: String(opts.pageSize ?? PAGE_SIZE),
+    });
+    if (opts.q) q.set("q", opts.q);
+    // Appended raw, as every list does: the keys are encoded once by
+    // serializeLines, and the API splits them without decoding again.
+    try {
+      return await req<InactivePage>(
+        "GET",
+        `/v1/viewer/${token}/inactive?${q.toString()}${linesQuery(opts.lines)}`,
+      );
+    } catch (e) {
+      if (e instanceof ApiError && e.status === 404) {
+        return pageFromGone(legacy, kind, {
+          page,
+          pageSize: PAGE_SIZE,
+          q: opts.q,
+          lines: opts.lines,
+        });
+      }
+      throw e;
+    }
   },
   /**
    * Line events scoped to a single developer, used by the nested-row
@@ -463,7 +702,7 @@ export const api = {
    * verbatim: one row per (developer x SSP x publisher id x file). That is
    * the right shape for a spreadsheet and the wrong shape for the screen,
    * because the reader's unit is THE LINE. The same
-   * "carambola.com, 1042318, RESELLER" appears on four hundred publishers
+   * "madeupmedia.com, 1042318, RESELLER" appears on four hundred publishers
    * and produced four hundred rows, which buried the one fact the weekly
    * crawl exists to deliver: is this line on more publishers than it was
    * last week, or fewer.
@@ -493,7 +732,7 @@ export const api = {
    *     },
    *     "rows": [
    *       {
-   *         "ssp_domain": "carambola.com",
+   *         "ssp_domain": "madeupmedia.com",
    *         "publisher_id": "1042318",
    *         "relationship": "RESELLER",
    *         "cert_id": "4a7be0c1d9f23b58",   // "" when the file omits it
@@ -562,7 +801,7 @@ export const api = {
    * ── 2. One line's placements ──────────────────────────────────────
    *
    *   GET /v1/viewer/{token}/discovered-lines/placements
-   *       ?ssp_domain=carambola.com    (all four required, EXACT match)
+   *       ?ssp_domain=madeupmedia.com    (all four required, EXACT match)
    *       &publisher_id=1042318
    *       &relationship=RESELLER
    *       &cert_id=                    (empty string is a valid value)
@@ -602,34 +841,59 @@ export const api = {
    */
   discoveredLines: async (
     token: string,
-    opts: { page?: number; page_size?: number; ssp_domain?: string } = {},
+    opts: {
+      page?: number;
+      page_size?: number;
+      ssp_domain?: string;
+      origin?: "given" | "found";
+      /** Which lines to list (reports from 2026-10-14): by relationship,
+       *  new this week, needing a fix, or by the customer's sellers.json.
+       *  Absent lists every line. */
+      show?: DiscoveredShow;
+      /** Case-insensitive substring: a line matches on its publisher_id,
+       *  ssp_domain or cert_id, or when any publisher in its roster
+       *  matches on developer_domain or developer_name. */
+      q?: string;
+    } = {},
   ) => {
     if (MOCK) {
       await mockPause();
       const { mockDiscoveredLines } = await import("./mockData");
       const r = mockDiscoveredLines(opts);
       return trialMock()
-        ? { ...r, page: 1, ...cutRows(r.rows, TRIAL_CAPS_MOCK.discovered_lines, r.total) }
+        ? {
+            ...r,
+            page: 1,
+            ...cutRows(r.rows, TRIAL_CAPS_MOCK.discovered_lines, r.total),
+          }
         : r;
     }
     const q = new URLSearchParams();
     q.set("page", String(opts.page ?? 1));
     q.set("page_size", String(opts.page_size ?? 50));
     if (opts.ssp_domain) q.set("ssp_domain", opts.ssp_domain);
+    if (opts.origin) q.set("origin", opts.origin);
+    if (opts.show) q.set("show", opts.show);
+    if (opts.q) q.set("q", opts.q);
     return req<DiscoveredLinesPage>(
       "GET",
       `/v1/viewer/${token}/discovered-lines?${q.toString()}`,
     );
   },
   /**
-   * Every publisher carrying one discovered line, for the card expansion.
-   * Only called when the list response did not embed `placements`, i.e. for
-   * the wide lines, which are the ones worth a round trip.
+   * Every publisher carrying one discovered line, for the card's roster:
+   * whole, paged, searchable. The page always reads the roster here, never
+   * from a row's embedded `placements` (older reports still carry one,
+   * capped at 200; the API serves it from this route too).
+   *
+   * `q` is a substring on developer_domain / developer_name, and on
+   * app_name / bundle_id when present. 503 with "too large" in the detail
+   * when the report did not keep that line's roster.
    */
   discoveredLinePlacements: async (
     token: string,
     key: DiscoveredLineKey,
-    opts: { page?: number; page_size?: number } = {},
+    opts: { page?: number; page_size?: number; q?: string } = {},
   ) => {
     if (MOCK) {
       const { mockDiscoveredLinePlacements } = await import("./mockData");
@@ -642,6 +906,7 @@ export const api = {
     q.set("cert_id", key.cert_id);
     q.set("page", String(opts.page ?? 1));
     q.set("page_size", String(opts.page_size ?? 100));
+    if (opts.q) q.set("q", opts.q);
     return req<DiscoveredPlacementsPage>(
       "GET",
       `/v1/viewer/${token}/discovered-lines/placements?${q.toString()}`,
@@ -662,9 +927,15 @@ export const api = {
       await mockPause();
       // `?legacy=1` exercises the grouped shape older links answer with.
       const legacy = new URLSearchParams(window.location.search).has("legacy");
-      const { mockDeclarations, mockDeclarationRows } = await import("./mockData");
+      const { mockDeclarations, mockDeclarationRows } = await import(
+        "./mockData"
+      );
       if (trialMock() && !legacy) {
-        const cut = cutRows(mockDeclarationRows.rows, TRIAL_CAPS_MOCK.declarations, mockDeclarationRows.total);
+        const cut = cutRows(
+          mockDeclarationRows.rows,
+          TRIAL_CAPS_MOCK.declarations,
+          mockDeclarationRows.total,
+        );
         return { ...mockDeclarationRows, ...cut };
       }
       return legacy ? mockDeclarations : mockDeclarationRows;
@@ -689,7 +960,13 @@ export const api = {
       // notes about a live file that is not strict JSON, or that holds a
       // null and a number too long for a browser.
       const q = new URLSearchParams(window.location.search);
-      let file = q.has("nofile") ? null : q.has("broken") ? m.brokenFile(m.mockSellersFile) : m.mockSellersFile;
+      if(q.has("sega")) return m.segaReport(q.get("sega") !== "blocked");
+      if(token === "verification-demo" || q.get("verification") === "all") return m.verificationReport();
+      let file = q.has("nofile")
+        ? null
+        : q.has("broken")
+          ? m.brokenFile(m.mockSellersFile)
+          : m.mockSellersFile;
       // `?noversion=1`: a file whose header has no version.
       if (file && q.has("noversion")) {
         const { version: _drop, ...rest } = file;
@@ -699,6 +976,7 @@ export const api = {
         domain: m.MOCK_SELLERS_DOMAIN,
         file,
         sightings: m.mockSellerSightings,
+        file_checks: m.mockCompletedChecks,
         checked_at: m.MOCK_CHECKED_AT,
         file_url: `https://${m.MOCK_SELLERS_DOMAIN}/sellers.json`,
         file_warnings: q.has("warnings") ? m.MOCK_FILE_WARNINGS : [],
@@ -708,11 +986,17 @@ export const api = {
     // means exactly that, so it is answered here as null. Before 2026-10-06
     // req() read a 404 as a dead link, which took every report without the
     // page down.
-    const res = await fetch(`${BASE}/v1/viewer/${token}/sellers-fix`, { credentials: "include" });
+    await whenSignedIn();
+    const res = await fetch(`${BASE}/v1/viewer/${token}/sellers-fix`, {
+      credentials: "include",
+    });
     if (res.status === 404) return null;
     if (!res.ok) {
       const detail = await res.text().catch(() => "");
-      throw new ApiError(res.status, detail || `GET sellers-fix → ${res.status}`);
+      throw new ApiError(
+        res.status,
+        detail || `GET sellers-fix → ${res.status}`,
+      );
     }
     return (await res.json()) as SellersFixPayload;
   },
@@ -751,29 +1035,40 @@ export const api = {
       const { mockSchainReadSdk } = await import("./mockSchain");
       return mockSchainReadSdk(sdk, !!opts.refresh);
     }
-    return req<SchainSdkRead>(
-      "POST",
-      `/v1/viewer/${token}/schain/sdk`,
-      { sdk, refresh: !!opts.refresh },
-    );
+    return req<SchainSdkRead>("POST", `/v1/viewer/${token}/schain/sdk`, {
+      sdk,
+      refresh: !!opts.refresh,
+    });
   },
   /** Per seat line, how many publishers and apps close a chain through
    *  this SDK. Read after the SDK's file, so a line with none is greyed. */
-  schainSeatCounts: async (token: string, sdk: string, live = false): Promise<SchainSeatCount[]> => {
+  schainSeatCounts: async (
+    token: string,
+    sdk: string,
+    live = false,
+  ): Promise<SchainSeatCount[]> => {
     if (MOCK) {
       const { mockSchainSeatCounts } = await import("./mockSchain");
       return mockSchainSeatCounts(sdk);
     }
     const q = new URLSearchParams({ sdk });
     if (live) q.set("live", "true");
-    return req<SchainSeatCount[]>("GET", `/v1/viewer/${token}/schain/seat-counts?${q.toString()}`);
+    return req<SchainSeatCount[]>(
+      "GET",
+      `/v1/viewer/${token}/schain/seat-counts?${q.toString()}`,
+    );
   },
   /** The funnel, the totals and one page of the Apps rows for one
    *  selection: SDK, seat line and reseller line. */
   schainPreview: async (
     token: string,
     sel: SchainSelection,
-    opts: { page: number; page_size: number; q?: string; view?: "apps" | "publishers" },
+    opts: {
+      page: number;
+      page_size: number;
+      q?: string;
+      view?: "apps" | "publishers";
+    },
   ): Promise<SchainPreview> => {
     if (MOCK) {
       const { mockSchainPreview } = await import("./mockSchain");
@@ -789,7 +1084,10 @@ export const api = {
     if (sel.live) q.set("live", "true");
     if (opts.q) q.set("q", opts.q);
     if (opts.view) q.set("view", opts.view);
-    return req<SchainPreview>("GET", `/v1/viewer/${token}/schain/preview?${q.toString()}`);
+    return req<SchainPreview>(
+      "GET",
+      `/v1/viewer/${token}/schain/preview?${q.toString()}`,
+    );
   },
   /**
    * Download the schain file for a selection. Counts against the link's 3
@@ -808,12 +1106,20 @@ export const api = {
       const { mockSchainExport } = await import("./mockSchain");
       return mockSchainExport(sel, format);
     }
-    const q = new URLSearchParams({ sdk: sel.sdk, seat: sel.seat, sid2: sel.sid2 });
-    if (sel.live) q.set("live", "true");
-    const res = await fetch(`${BASE}/v1/viewer/${token}/schain/export.${format}?${q.toString()}`, {
-      credentials: "include",
-      redirect: "follow",
+    const q = new URLSearchParams({
+      sdk: sel.sdk,
+      seat: sel.seat,
+      sid2: sel.sid2,
     });
+    if (sel.live) q.set("live", "true");
+    await whenSignedIn();
+    const res = await fetch(
+      `${BASE}/v1/viewer/${token}/schain/export.${format}?${q.toString()}`,
+      {
+        credentials: "include",
+        redirect: "follow",
+      },
+    );
     if (!res.ok) {
       let detail = "";
       try {
@@ -827,16 +1133,10 @@ export const api = {
     const limit = Number(res.headers.get("X-Schain-Downloads-Limit") ?? 3);
     const blob = await res.blob();
     const name =
-      /filename="?([^";]+)"?/.exec(res.headers.get("Content-Disposition") ?? "")?.[1] ??
-      `schain.${format}`;
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement("a");
-    a.href = url;
-    a.download = name;
-    document.body.appendChild(a);
-    a.click();
-    document.body.removeChild(a);
-    URL.revokeObjectURL(url);
+      /filename="?([^";]+)"?/.exec(
+        res.headers.get("Content-Disposition") ?? "",
+      )?.[1] ?? `schain.${format}`;
+    downloadBlob(blob, name);
     return { used, limit };
   },
   chat: async function* (
@@ -848,6 +1148,7 @@ export const api = {
       for await (const frame of mockChatStream(prompt)) yield frame;
       return;
     }
+    await whenSignedIn();
     const res = await fetch(`${BASE}/v1/viewer/${token}/chat`, {
       method: "POST",
       credentials: "include",
@@ -890,6 +1191,8 @@ export type TrialCaps = {
   apps: number;
   declarations: number;
   discovered_lines: number;
+  /** Rows of each Inactive list; present when the report carries the section. */
+  inactive?: number;
 };
 
 /** How a capped list was cut on a trial report: the cap, how many rows are
@@ -911,8 +1214,177 @@ export type ExportInfo = {
 export type MatchedMove = { found: number; lost: number };
 export type MatchedMoves = { developers: MatchedMove; apps: MatchedMove | null };
 
+/** A publisher that carried the reader's lines and is gone (dead domain,
+ *  site down for many crawls). Listed apart, never counted. */
+export type GonePublisher = {
+  domain: string;
+  name: string;
+  reason: string;
+  since: string | null;
+  lines: string[];
+  apps: number;
+};
+
+/** An app of a matched publisher that its store has twice said is gone. */
+export type GoneApp = {
+  name: string;
+  store: string;
+  bundle: string;
+  publisher: string;
+  reason: string;
+  since: string | null;
+};
+
+/** No longer live (FelixAds QA, 2026-10-06): frozen with the report, the
+ *  first rows of each list with the full totals. Absent on older links. */
+export type GoneInventory = {
+  publishers: GonePublisher[];
+  apps: GoneApp[];
+  totals: { publishers: number; apps: number };
+};
+
+// ---- Inactive (2026-10-08, crawler docs/INACTIVE.md) ----
+// A report is the difference between two crawls, and so is this section:
+// the publishers and apps that went inactive BETWEEN the compared crawl and
+// this one (inactive_since after the compared crawl, up to this crawl),
+// each with its date, its reason and the evidence. Listed apart from the
+// active lists and never counted in the headline numbers. Two lists only,
+// publishers and apps (David, 2026-10-08); Removed is unchanged.
+
+export type InactiveKind = "publishers" | "apps";
+
+/** How many of each went inactive between the two compared crawls: whole,
+ *  never cut by a trial or a filter. Older APIs also send ``lines``; it is
+ *  ignored. */
+export type InactiveCounts = { publishers: number; apps: number };
+
+/** One of the seat lines an inactive publisher carried. Links frozen before
+ *  the section carry only the line's identity (derived from ``gone``). */
+export type InactivePublisherLine = {
+  ssp_domain: string;
+  publisher_id: string;
+  relationship: string;
+  file?: string | null;
+  first_seen?: string | null;
+  last_seen?: string | null;
+  ended_at?: string | null;
+  reason_code?: string | null;
+  /** The declared host whose app-ads.txt holds the line (IAB app-ads.txt
+   *  spec, 2026-10-21); null or absent: the publisher's own domain file. */
+  host?: string | null;
+};
+
+export type InactivePublisher = {
+  developer_id?: number | null;
+  domain: string;
+  name: string | null;
+  inactive_since: string | null;
+  /** domain_gone, certificate_broken, site_refuses, site_silent, no_file,
+   *  retired_by_operator, inactive; null on a link derived from ``gone``. */
+  reason_code: string | null;
+  reason: string | null;
+  evidence_summary?: string | null;
+  lines: InactivePublisherLine[];
+  apps: number | null;
+};
+
+export type InactiveApp = {
+  app_id?: number | null;
+  store: string;
+  bundle: string;
+  name: string | null;
+  store_url?: string | null;
+  developer_id?: number | null;
+  /** The publisher's domain; "" on a trial (withheld). */
+  publisher: string;
+  publisher_name?: string | null;
+  publisher_inactive?: boolean;
+  inactive_since: string | null;
+  /** unlisted_from_store (an operator's retirement is never listed to a
+   *  customer); null when derived from ``gone``. */
+  reason_code: string | null;
+  reason: string | null;
+  evidence?: {
+    http_status?: number | null;
+    storefronts_checked?: string[] | null;
+    qa_outcome?: string | null;
+  } | null;
+  evidence_summary?: string | null;
+  /** Always true on a list frozen since 2026-10-08: only a death confirmed
+   *  in the window is listed. */
+  confirmed?: boolean;
+  /** The reader's seat lines its publisher carries (all of them, even none),
+   *  so the card needs no other call. Absent only on a row frozen before
+   *  them: the card then reads them by ``developer_id``, as a matched app
+   *  card does. A trial keeps them and withholds the publisher's name. */
+  lines?: InactivePublisherLine[];
+  /** The host whose app-ads.txt authorized this app (see MatchedApp).
+   *  Absent on a row frozen before 2026-10-21. */
+  file_host?: string | null;
+  file_source?: FileSource;
+};
+
+export type InactiveRow = InactivePublisher | InactiveApp;
+
+/** GET /v1/viewer/{token}/inactive: one page of one Inactive list. */
+export type InactivePage<R = InactiveRow> = {
+  kind: InactiveKind;
+  page: number;
+  page_size: number;
+  /** Rows matching the search and the line filter (what the pager counts). */
+  total: number;
+  rows: R[];
+  /** False: the report was frozen without the section (and without ``gone``). */
+  available: boolean;
+  counts: InactiveCounts;
+  /** The bake kept only the newest rows of this list. */
+  truncated: boolean;
+  /** Present on a trial report: this list was cut (see ``TrialSlice``). */
+  trial?: TrialSlice | null;
+  /** "gone": an older link, served from its No longer live block. */
+  derived_from?: string | null;
+};
+
+/** The sellers.json read summary on a report's summary (crawler #364):
+ *  the build's re-read tallies and the exchanges of each outcome; from
+ *  crawler #370 also `sentence`, the Excel Summary's "Sellers.json read"
+ *  line, frozen. Every field optional: read safely. */
+export type SellersJsonReads = {
+  sentence?: string;
+  wanted?: number;
+  fresh?: number;
+  read?: number;
+  failed?: number;
+  over_budget?: number;
+  read_domains?: string[];
+  failed_domains?: string[];
+  over_budget_domains?: string[];
+  budget_s?: number;
+};
+
 export type Summary = {
+  /** A crawl that did not finish says so in one line (crawler #370, the
+   *  Excel's "Crawl status"). Absent on a finished crawl and before. */
+  partial_line?: string | null;
   crawl_id: number;
+  /** What carried the reader's lines and is gone; never in the counts. */
+  gone?: GoneInventory | null;
+  /** Publishers and apps that went inactive between the two compared
+   *  crawls: NOT in ``counters.matched``, which counts active only. Absent
+   *  on links frozen before the section. */
+  inactive_counts?: InactiveCounts | null;
+  /** What the report build's read of the seats' sellers.json files did
+   *  (crawler #364, "Sellers.json read" on the workbook's Summary). Only a
+   *  report that carries it has seller roles worth showing: before #364 a
+   *  seller ID that IS in sellers.json could read "not in sellers.json".
+   *  Absent on every report frozen before it. */
+  sellers_json_reads?: SellersJsonReads | null;
+  /** When this crawl and the crawl it is compared with ran: the window the
+   *  report covers (the Inactive section's, among others). Optional: until
+   *  the backend sends them, this crawl's ``finished_at`` and the previous
+   *  summary's ``finished_at`` stand in. */
+  crawl_at?: string | null;
+  compared_crawl_at?: string | null;
   /** Set on a trial report (see ``TrialCaps``); null or absent on a full one. */
   trial?: TrialCaps | null;
   /** The watchlist this report was built from: what the seat-line filter
@@ -964,7 +1436,99 @@ export type Summary = {
   };
 };
 
-export type DeveloperEvent = {
+/* ── MATCH TYPE (crawler PR #348, inventory sharing) ──────────────────
+   A match is "own" when the seat line sits in the publisher's own file,
+   and "ipd" when it sits in an inventory partner's ads.txt that the
+   publisher's app-ads.txt names (INVENTORYPARTNERDOMAIN: a FAST channel
+   inside a CTV platform). IPD matches stay inside the one Matched count;
+   the Match type filter only splits the list. An IPD match whose
+   partner's ads.txt this crawl could not read is inconclusive: never a
+   row, never counted, only a quiet note.
+
+   Every field below is OPTIONAL and absent on every report frozen before
+   the crawler sent it (or with its report switches off). Absent means
+   the page looks exactly as it did: no Match type control, no chips. */
+
+/** How a row matched: its own file, or an inventory partner's ads.txt. */
+export type MatchType = "own" | "ipd";
+/** The list filter (query param ``match_type``); "all" is never sent. */
+export type MatchTypeFilter = "all" | MatchType;
+
+/** The per-row fields of the contract. */
+export type MatchTypeFields = {
+  /** The Excel's "IPD partner" cell, word for word (crawler #370): "Via
+   *  failarmy.tv, inventory partner of Samsung TV Plus". Absent before. */
+  ipd_partner_label?: string | null;
+  match_type?: MatchType;
+  /** IPD rows: the partner whose ads.txt carries the line. */
+  ipd_partner?: string | null;
+  /** IPD rows: the platform whose app-ads.txt names that partner. */
+  ipd_platform?: string | null;
+  /** IPD rows: the file that declares the partner, in words. */
+  declared_in?: string | null;
+  /** The seat's role per its sellers.json entry: owner, manager,
+   *  reseller, not in sellers.json, confidential. */
+  seller_role?: string | null;
+  /** "X (GB)": the manager that counts for this seller. */
+  managed_by?: string | null;
+  /** One sentence each when the roles disagree with the file, e.g.
+   *  "Listed as DIRECT, but sellers.json names X, not Y: treated as a
+   *  reseller." Empty or absent: nothing to say. */
+  verdict_alerts?: string[] | string | null;
+  /** Not part of the fixed contract: the CTV platforms whose app-ads.txt
+   *  names this publisher as their inventory partner. Shown only if the
+   *  crawler ever sends it. */
+  partner_inventory_on?: string[] | string | null;
+};
+
+/** List meta: the split under the current search and lines. */
+export type MatchTypeCounts = { all: number; own: number; ipd: number };
+
+/** List meta: IPD matches this crawl could not confirm. */
+export type IpdInconclusive = {
+  count: number;
+  examples: { partner: string; platform: string }[];
+};
+
+/** The list meta of every list that takes ``match_type``. */
+export type MatchTypeMeta = {
+  match_type_counts?: MatchTypeCounts | null;
+  ipd_inconclusive?: IpdInconclusive | null;
+  /** THE WATCH TABS (crawler #361, 2026-10-27): how many rows each change
+   *  filter of this list holds (``started_watching``, ``stopped_watching``,
+   *  ``unconfirmed`` ...). Absent on an API from before it: then those tabs
+   *  are not offered at all. */
+  change_counts?: Partial<Record<ListChange, number>> | null;
+  /** FOUND IN (crawler PR, 2026-10-27): on the publishers' lists, the
+   *  ``found_in`` filter the server applied to the whole list, echoed, and
+   *  the split counted before it. Absent on an API from before it: then no
+   *  Found in switch, and nothing filtered here. */
+  found_in?: FoundInFilter | null;
+  found_in_counts?: FoundInCounts | null;
+};
+
+/** The watch filters of crawler #361, on matched-developers and
+ *  matched-apps: rows with a line that started being watched, stopped
+ *  being watched, or could not be verified this crawl. */
+export type WatchChange = "started_watching" | "stopped_watching" | "unconfirmed";
+
+/** Every ``change`` filter a matched list may take. */
+export type ListChange = "added" | "removed" | "changed" | WatchChange;
+
+function matchTypeQuery(matchType: MatchTypeFilter | undefined): string {
+  return matchType && matchType !== "all" ? `&match_type=${matchType}` : "";
+}
+
+/** Mock mode only: ``?matchtype=off`` previews a report frozen before
+ *  match types (no fields, no control). Never reached in production. */
+function mockMatchType(matchType: MatchTypeFilter): MatchTypeFilter | null {
+  const off =
+    typeof window !== "undefined" &&
+    new URLSearchParams(window.location.search).get("matchtype") === "off";
+  return off ? null : matchType;
+}
+
+export type DeveloperEvent = MatchTypeFields & {
   developer_id: number;
   developer_name: string | null;
   developer_domain: string | null;
@@ -976,6 +1540,9 @@ export type DeveloperEvent = {
   lines_cert_changed: number;
   lines_newly_monitored: number;
   lines_monitoring_stopped: number;
+  /** Lines the crawler could not verify this crawl (see ``unconfirmed`` on
+   *  LineEventKind). Optional: absent on reports frozen before it. */
+  lines_unconfirmed?: number;
   top_ssps: { ssp_domain: string; count: number }[];
   occurred_at: string | null;
   /**
@@ -991,7 +1558,7 @@ export type DeveloperEvent = {
   matched_lines?: MatchedSeatLine[];
 };
 
-export type DeveloperEventsPage = {
+export type DeveloperEventsPage = MatchTypeMeta & {
   /** Present on a trial report: this list was cut (see ``TrialSlice``). */
   trial?: TrialSlice | null;
   event: string;
@@ -1019,12 +1586,39 @@ export type LineEventKind =
    *  seats. New to the REPORT, which is all we can honestly claim: we were
    *  not looking at them last week, so we cannot say the line is new to
    *  the world. */
-  | "first_appearance";
+  | "first_appearance"
+  /** The crawler could not verify this line this crawl (the file did not
+   *  read, or read too short to trust). Never counted as added or removed:
+   *  the line stays matched until a later read settles it. Each row says
+   *  why, and when it was last seen, read and verified. Reports frozen
+   *  before 2026-10-20 never carry it. */
+  | "unconfirmed";
 
-/** Counts keyed by every event kind, as the API sends them. */
-export type LineEventCounts = Record<LineEventKind, number>;
+/** Counts keyed by every event kind, as the API sends them. ``unconfirmed``
+ *  is optional: a report frozen before the kind existed omits it, and a
+ *  missing key reads as 0. */
+export type LineEventCounts = Record<Exclude<LineEventKind, "unconfirmed">, number> & {
+  unconfirmed?: number;
+};
 
-export type LineEvent = {
+/** How a line's dates were taken: from the file read itself, or from the
+ *  crawl's time when the exact read time was not stored. */
+export type LineDateSource = "fetch" | "crawl";
+
+/**
+ * WHY A LINE WAS REMOVED (crawler, 2026-10-26), on a removed line: the file
+ * was read and the line is no longer in it, or the file itself was not
+ * served. Absent on every report frozen before it: the line then says
+ * nothing about why. Either way it is counted as removed.
+ */
+export type RemovalReason = "line_not_in_file" | "file_not_served";
+export type RemovalFields = {
+  removal_reason?: RemovalReason | null;
+  /** Optional evidence in a few words, e.g. "404 on 3 reads". */
+  removal_detail?: string | null;
+};
+
+export type LineEvent = RemovalFields & {
   developer_id: number;
   developer_name: string | null;
   developer_domain: string | null;
@@ -1035,12 +1629,52 @@ export type LineEvent = {
   event: string;
   old_cert_id: string | null;
   new_cert_id: string | null;
+  /** The line's cert (crawler #370, page parity): this crawl's, or the
+   *  compared crawl's for a line no longer here. Absent before. */
+  cert_id?: string | null;
+  /** The Excel's "IPD partner" cell, word for word (crawler #370). */
+  ipd_partner_label?: string | null;
   matched_seat: boolean;
   occurred_at: string | null;
   /** When this line was FIRST seen in the wild, from the watchlist-
-   *  independent book. Set only on `newly_monitored` rows, and only when
-   *  the book knows: null means "we cannot say", never "it is new". */
+   *  independent book. On `newly_monitored` rows, only when the book
+   *  knows: null means "we cannot say", never "it is new". On an `added`
+   *  row, when this crawl first read it (the honest date of the addition).
+   *  Absent means unknown. */
   first_seen_at?: string | null;
+  /* THE DATES BEHIND A CHANGE (David, 2026-10-20: a change is shown only
+     when verified, and every one carries dates). All ISO UTC; every field
+     is optional because a report frozen before it was written has none,
+     and a missing field means unknown, never a guess. */
+  /** Removed: when we last read the line in the file. */
+  last_seen_at?: string | null;
+  /** Removed: the read that first did not find it. */
+  not_found_at?: string | null;
+  /** Added: the last read that did not have it. Null (not absent) when the
+   *  compared crawl did not read this file at all. */
+  last_absent_at?: string | null;
+  /** Cert changed: the read that saw the new cert. */
+  seen_at?: string | null;
+  /** Whether the dates above are exact file read times ("fetch") or the
+   *  crawl's time standing in for them ("crawl"). Absent means unknown. */
+  date_source?: LineDateSource;
+  /** Unconfirmed: why the crawler could not verify the line, in a sentence.
+   *  Newly monitored / monitoring stopped: "host first read" (the file at
+   *  this host was read for the first time this crawl, so its lines are
+   *  newly monitored, not added) or "host not read" (the file at this host
+   *  was not read this crawl, so its lines are no longer monitored, not
+   *  removed); null is a watchlist change, as before. */
+  reason?: string | null;
+  /** The host whose file holds this line (IAB app-ads.txt spec,
+   *  2026-10-21): a declared sub-domain host, or the publisher's own domain
+   *  for its own file. Absent on reports frozen before it. */
+  host?: string | null;
+  /** Unconfirmed: when the file was read this crawl, and when the line was
+   *  last verified (null: not verified). */
+  read_at?: string | null;
+  verified_at?: string | null;
+  /** Unconfirmed: how many reads were attempted. */
+  tries?: number | null;
   /** How this row was tied to the developer: found in their own file
    *  ("file"), through an inventorypartnerdomain declaration ("ipd"), or in
    *  a subdomain's file ("subdomain"). Absent on old data means "file". */
@@ -1049,9 +1683,9 @@ export type LineEvent = {
    *  partner. Can be non-empty even when matched_via is "file": a developer
    *  can be both crawled directly and vouched for. Capped at 25. */
   ipd_declared_by?: string[];
-};
+} & MatchTypeFields;
 
-export type LineEventsPage = {
+export type LineEventsPage = MatchTypeMeta & {
   /** Present on a trial report: this list was cut (see ``TrialSlice``). */
   trial?: TrialSlice | null;
   page: number;
@@ -1066,7 +1700,12 @@ export type LineEventsPage = {
  * optional cert id. This is the answer to "which of my seats did this
  * publisher carry", which is a different fact from how many moved this week.
  */
-export type MatchedSeatLine = {
+export type MatchedSeatLine = RemovalFields & {
+  /** The seat's roles (crawler #348, REPORT_SELLER_ROLES), as on the row
+   *  that carries the line; read for the type's sake, the row says them. */
+  seller_role?: string | null;
+  managed_by?: string | null;
+  verdict_alerts?: string[] | string | null;
   ssp_domain: string;
   publisher_id: string;
   relationship: string;
@@ -1089,9 +1728,66 @@ export type MatchedSeatLine = {
    * Absent on artifacts frozen before 2026-09-10.
    */
   found_in?: string;
+  /**
+   * The dates behind the change, when this line sits in a change window
+   * (added, removed or cert changed): the same fields a LineEvent carries,
+   * so the Overview's windows print what the Changes page prints. Absent
+   * on a standing matched line and on artifacts frozen before 2026-10-20,
+   * where the window says the date is not available rather than guessing.
+   */
+  first_seen_at?: string | null;
+  last_absent_at?: string | null;
+  last_seen_at?: string | null;
+  not_found_at?: string | null;
+  seen_at?: string | null;
+  date_source?: LineDateSource;
+  /**
+   * The host whose app-ads.txt holds this line, when it is a declared
+   * sub-domain host (IAB app-ads.txt spec, 2026-10-21: an app is credited
+   * from the file at the host its store listing declares, e.g.
+   * "ftmj.fortunemo.com"). Null or absent: the publisher's own domain file.
+   */
+  host?: string | null;
+  /** Per line (crawler #348): "own" when the line sits in the publisher's
+   *  own file, "ipd" when in an inventory partner's ads.txt, named by
+   *  ``ipd_partner``. One row's lines can come through several partners,
+   *  each line once per partner (2026-10-27). Absent on older reports:
+   *  the row's own match type then speaks for its lines. */
+  match_type?: MatchType;
+  ipd_partner?: string | null;
+  /** A cert change's previous cert, from the line events ("" when the line
+   *  had none); set by the Changed tab so a row says old to new. */
+  old_cert_id?: string;
+  /** A line this crawl did not re-check (crawler #370, page parity): the
+   *  Excel's Line status, word for word, and the day it was last confirmed
+   *  ("YYYY-MM-DD"). Absent on a line re-checked, and before #370. */
+  line_status?: string | null;
+  last_confirmed?: string | null;
+  /** The Excel's "IPD partner" cell, word for word (crawler #370). */
+  ipd_partner_label?: string | null;
 };
 
-export type MatchedDeveloper = {
+/**
+ * Which file an app was credited from (2026-10-21). own_domain: the
+ * publisher's own app-ads.txt. host: the app-ads.txt at the host its store
+ * listing declares. parent_no_file: the publisher's file, because the host
+ * has no file. parent_host_unread: the publisher's file, because the host
+ * was not read yet. other_site: the store listing names another site, so
+ * the publisher's file is not this app's. no_website: the store listing names no
+ * website, so no file applies and the app is credited with nothing.
+ */
+export type FileSource =
+  | "own_domain"
+  | "host"
+  | "parent_no_file"
+  | "parent_host_unread"
+  | "other_site"
+  | "no_website"
+  /** An IPD app (crawler #348): credited from its inventory partner's
+   *  ads.txt, the partner under ``file_host``. */
+  | "inventory_partner";
+
+export type MatchedDeveloper = MatchTypeFields & {
   developer_id: number;
   name: string | null;
   domain: string | null;
@@ -1117,11 +1813,17 @@ export type MatchedDeveloper = {
   added_lines?: MatchedSeatLine[];
   removed_lines?: MatchedSeatLine[];
   cert_changed_lines?: MatchedSeatLine[];
+  /** The declared hosts among this publisher's lines (may be empty).
+   *  Absent on reports frozen before 2026-10-21. */
+  file_hosts?: string[];
 };
 
-export type MatchedDevelopersPage = {
+export type MatchedDevelopersPage = MatchTypeMeta & {
   /** Present on a trial report: this list was cut (see ``TrialSlice``). */
   trial?: TrialSlice | null;
+  /** The watch filter the server applied (crawler #361), echoed; absent
+   *  on an API from before it. */
+  change?: WatchChange | null;
   page: number;
   page_size: number;
   total: number;
@@ -1148,6 +1850,10 @@ export type MatchedBundle = {
   developer_name: string | null;
   developer_domain: string | null;
   line_count: number;
+  /** The host whose app-ads.txt authorized this app (see MatchedApp).
+   *  Absent on reports frozen before 2026-10-21. */
+  file_host?: string | null;
+  file_source?: FileSource;
 };
 
 export type MatchedBundlesPage = {
@@ -1179,7 +1885,11 @@ export type MatchedBundlesPage = {
  * in the expanded row; it is capped for display, and `line_count` is the
  * honest total.
  */
-export type MatchedApp = {
+export type MatchedApp = MatchTypeFields & {
+  /** The store's name as the Excel prints it (crawler #370). */
+  store_label?: string | null;
+  /** Which file credited the app, in the Excel's words (crawler #370). */
+  file_used?: string | null;
   store: string;
   bundle_id: string;
   app_name: string;
@@ -1203,6 +1913,7 @@ export type MatchedApp = {
   lines_added?: number;
   lines_removed?: number;
   lines_cert_changed?: number;
+  /** Since 2026-10-21 the lines of THIS app's file only (see file_host). */
   matched_lines?: MatchedSeatLine[];
   /**
    * The exact seat lines behind the change counts above, so the expanded row
@@ -1213,11 +1924,45 @@ export type MatchedApp = {
   added_lines?: MatchedSeatLine[];
   removed_lines?: MatchedSeatLine[];
   cert_changed_lines?: MatchedSeatLine[];
+  /**
+   * The host whose app-ads.txt authorizes this app (2026-10-21): the
+   * publisher's own domain when it is the publisher's file, a declared host
+   * otherwise, null when the app is credited with nothing. Absent on
+   * reports frozen before it.
+   */
+  file_host?: string | null;
+  /** Which file that is, in one word (see FileSource). */
+  file_source?: FileSource;
 };
 
-export type MatchedAppsPage = {
+/** The change filter of the matched apps list (query param ``change``). */
+export type AppChange = "added" | "removed" | "changed" | WatchChange;
+
+/** All / CTV / Mobile / Web: the matched APPS list's Platform switch (an
+ *  app's platform comes from its store). */
+export type PlatformFilter = "all" | "ctv" | "mobile" | "web";
+export type PlatformCounts = { all: number; ctv: number; mobile: number; web: number; unknown?: number };
+
+/** All / ads.txt / app-ads.txt / Both: the matched PUBLISHERS list's
+ *  "Found in" switch (which file of theirs carries the seat lines). */
+export type FoundInFilter = "all" | "ads_txt" | "app_ads_txt" | "both";
+export type FoundInCounts = { all: number; ads_txt: number; app_ads_txt: number; both: number };
+
+export type MatchedAppsPage = MatchTypeMeta & {
   /** Present on a trial report: this list was cut (see ``TrialSlice``). */
   trial?: TrialSlice | null;
+  /**
+   * The ``change`` filter the server applied to the whole list, echoed.
+   * Absent on an API from before the filter: it ignored the parameter, so
+   * the rows and ``total`` are the unfiltered list's.
+   */
+  change?: AppChange | null;
+  /** PLATFORM (crawler PR, 2026-10-27): the ``platform`` filter the server
+   *  applied to the whole list, echoed, and the list's split by platform
+   *  counted before it. Both absent on an API from before it: then no
+   *  Platform switch, and nothing filtered here. */
+  platform?: PlatformFilter | null;
+  platform_counts?: PlatformCounts | null;
   page: number;
   page_size: number;
   total: number;
@@ -1242,6 +1987,8 @@ export type MatchedAppsPage = {
  * NULL, so they are plain strings here.
  */
 export type DiscoveredPlacement = {
+  /** The actual host that served this file; older reports may omit it. */
+  file_host?: string;
   developer_domain: string;
   developer_name: string;
   platform: string;
@@ -1263,12 +2010,38 @@ export type DiscoveredPlacement = {
 };
 
 /**
+ * What the customer's OWN sellers.json says about a line's seller ID
+ * (reports from 2026-10-14). The discovery domain is the customer's domain,
+ * so every line's seller ID should be one of theirs: either the file lists
+ * it, with the seller's name and type, or it does not.
+ */
+export type SellerCheck =
+  | { status: "listed"; name: string; seller_type: string }
+  | { status: "unlisted" };
+
+/** Something in the line itself a publisher should fix: a placeholder or
+ *  malformed seller ID, a corrupted cert id, a seller carried with the
+ *  relationship the sellers.json does not give it, or the same seller ID
+ *  both as DIRECT and RESELLER. `text` is the sentence the page shows. */
+export type LineIssue = {
+  kind: "bad_id" | "bad_cert" | "relationship_mismatch" | "both_relationships";
+  text: string;
+};
+
+/**
+ * The `show` filter of api.discoveredLines. "new" is previous_placements_count
+ * null while the report compares (totals.baseline "compared"); "fixing" is
+ * issues non-empty; "listed" / "unlisted" is seller.status.
+ */
+export type DiscoveredShow = "direct" | "reseller" | "new" | "fixing" | "listed" | "unlisted";
+
+/**
  * One discovered ads.txt line, which is the unit this page is built on.
  *
  * The first four fields ARE the line as it appears in the file, in file
  * order, and together they are its identity:
  *
- *   carambola.com, 1042318, RESELLER, 4a7be0c1d9f23b58
+ *   madeupmedia.com, 1042318, RESELLER, 4a7be0c1d9f23b58
  *   ssp_domain     publisher_id  relationship  cert_id
  *
  * cert_id is "" (never null) when the publisher's file omits the fourth
@@ -1288,11 +2061,30 @@ export type DiscoveredLine = {
    */
   previous_placements_count: number | null;
   /**
-   * Embedded placements, present only for narrow lines (see the contract
-   * note on api.discoveredLines). Absent means "ask the placements
-   * endpoint", it never means "this line has no placements".
+   * Embedded placements, which reports frozen before 2026-10-14 carry for
+   * narrow lines (capped at 200). The page ignores it: the roster always
+   * comes from api.discoveredLinePlacements, which serves the embedded one
+   * for those older reports. Absent never means "no placements".
    */
   placements?: DiscoveredPlacement[];
+  /** Different publishers carrying the line, each once whichever of its
+   *  two files holds it (reports from 2026-10-11). Absent before, where
+   *  placements_count counted files. */
+  publishers_count?: number;
+  previous_publishers_count?: number | null;
+  /** Who brought the line (2026-10-11), see lib/discoveredOrigin.ts.
+   *  Absent from an API that predates it, or a report with no watchlist. */
+  origin?: "given" | "found_listed" | "found";
+  origin_source?: string | null;
+  origin_added_at?: string | null;
+  given_as?: string;
+  /** false: last week's report did not watch this line's domain, so the
+   *  line is neither new nor moved (reports from 2026-10-11). */
+  previous_watched?: boolean;
+  /** The seller ID against the customer's own sellers.json, and what a
+   *  publisher should fix (reports from 2026-10-14; absent before). */
+  seller?: SellerCheck;
+  issues?: LineIssue[];
 };
 
 /** The four fields that identify a line, for the placements endpoint. */
@@ -1318,11 +2110,51 @@ export type DiscoveredTotals = {
    *  over the whole filtered set. OPTIONAL: seeded in mock today; absent on
    *  live until the crawler sends it, and the page then leaves it out. */
   new_lines?: number | null;
+  /** Different publishers carrying any line, each once (2026-10-11).
+   *  Null under an SSP filter; absent on older reports. */
+  publishers?: number | null;
+  previous_publishers?: number | null;
+  /** Lines the customer gave us, and the rest (2026-10-11). Absent when
+   *  the report cannot say, or the list was cut. */
+  given_lines?: number;
+  found_lines?: number;
+  /** Set when the totals count more lines than the list holds. */
+  listed_lines?: number;
+  /** Discovery domains last week's report did not watch (2026-10-11). */
+  unwatched_domains?: string[];
+  /** The discovery domains changed since last week (added or dropped):
+   *  the totals are not compared. */
+  scope_changed?: boolean;
+  /** The customer's sellers.json the lines were checked against (reports
+   *  from 2026-10-14). Null when the report has no file to check with. */
+  sellers_json?: {
+    url: string;
+    sellers: number;
+    read_at: string;
+    listed_ids: number;
+    unlisted_ids: number;
+  } | null;
+  /** Lines whose seller ID is, and is not, in that file; absent with no
+   *  file. The Lines stat's caption, and nowhere else. */
+  in_file_lines?: number;
+  not_in_file_lines?: number;
+  /** Lines with at least one issue. */
+  needs_fixing?: number;
+  /** Why last week is, or is not, compared (reports from 2026-10-14):
+   *  "cut" when last week's list was cut short when that report was made,
+   *  "none" on a first report. Absent before: the page reads
+   *  previous_lines and the summary's previous_job_id instead. The
+   *  discovery domains themselves come from the summary's
+   *  watchlist.discover, not from here. */
+  baseline?: "compared" | "cut" | "none";
 };
 
 export type DiscoveredLinesPage = {
   /** Present on a trial report: this list was cut (see ``TrialSlice``). */
   trial?: TrialSlice | null;
+  /** The bake cut this list short (before 2026-10-11): the numbers count
+   *  only what was kept. */
+  cut?: boolean;
   page: number;
   page_size: number;
   total: number;
@@ -1562,6 +2394,7 @@ export type SchainPreview = {
 /** GET /v1/viewer/{token}/sellers-fix: frozen with the report when the
  *  customer's plan has the Sellers.json validator (never on a trial). */
 export type SellersFixPayload = {
+  file_checks?: import("./sellersFix").FileCheck[];
   /** The customer domain the sellers.json is published on. */
   domain: string;
   /** The file exactly as published; null when the domain serves none. */
@@ -1574,4 +2407,47 @@ export type SellersFixPayload = {
   file_url?: string | null;
   /** What is wrong with the live file beyond its entries, in sentences. */
   file_warnings?: string[];
+};
+
+
+export type ChangeFilters = {
+  event?: LineEventKind;
+  ssp_domain?: string;
+  lines?: string[];
+  page?: number;
+  page_size?: number;
+  /** All / own / IPD (crawler #348); "all" is never sent. */
+  match_type?: MatchTypeFilter;
+};
+function changeQuery({ lines, match_type, ...filters }: ChangeFilters): string {
+  const q = new URLSearchParams();
+  for (const [key, value] of Object.entries(filters))
+    if (value !== undefined && value !== "") q.set(key, String(value));
+  if (match_type && match_type !== "all") q.set("match_type", match_type);
+  if (lines?.length) q.set(LINES_PARAM, serializeLines(lines));
+  return q.toString();
+}
+export type ChangeGroup = Omit<
+  import("./changeGroups").LocalChangeGroup,
+  "publishers"
+> & {
+  publisher_count: number;
+  /** Own or IPD (crawler #348); absent on reports frozen before it. */
+  match_type?: MatchType;
+};
+export type ChangeKpi = {
+  lines: number;
+  placements: number;
+  byEvent: LineEventCounts;
+  publishers: number;
+  apps: number;
+};
+export type ChangeGroupsPage = MatchTypeMeta & {
+  page: number;
+  page_size: number;
+  total: number;
+  rows: ChangeGroup[];
+  counts: LineEventCounts;
+  kpi: ChangeKpi;
+  trial?: TrialSlice | null;
 };

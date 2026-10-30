@@ -1,6 +1,7 @@
 import * as Dialog from "@radix-ui/react-dialog";
 import { ArrowRight, ChevronDown, CircleHelp, X } from "lucide-react";
-import { useState, type ReactNode } from "react";
+import { useId, useState, type ReactNode } from "react";
+import { Collapse, toggleWithoutJump } from "@/components/Motion";
 
 import { cn } from "@/lib/utils";
 
@@ -241,12 +242,14 @@ function Node({ label, value }: { label: string; value: string }) {
 
 function Faq({ q, children }: { q: string; children: ReactNode }) {
   const [open, setOpen] = useState(false);
+  const id = useId();
   return (
     <div>
       <button
         type="button"
-        onClick={() => setOpen((o) => !o)}
+        onClick={event => toggleWithoutJump(event.currentTarget, () => setOpen(value => !value))}
         aria-expanded={open}
+        aria-controls={id}
         className="flex w-full items-center justify-between gap-3 px-4 py-3 text-left text-[13px] font-medium text-slate-800 transition-colors hover:text-primary"
       >
         {q}
@@ -255,9 +258,9 @@ function Faq({ q, children }: { q: string; children: ReactNode }) {
           className={cn("h-4 w-4 flex-shrink-0 text-slate-400 transition-transform", open && "rotate-180")}
         />
       </button>
-      {open && (
+      <Collapse open={open} id={id}>
         <p className="px-4 pb-4 text-[13px] leading-relaxed text-slate-600">{children}</p>
-      )}
+      </Collapse>
     </div>
   );
 }

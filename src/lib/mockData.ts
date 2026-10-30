@@ -24,22 +24,37 @@ import type {
   DiscoveredLinesPage,
   DiscoveredPlacement,
   DiscoveredPlacementsPage,
+  DiscoveredShow,
   DiscoveredTotals,
+  LineIssue,
+  SellerCheck,
   LineEventsPage,
   LineEvent,
   LineEventKind,
+  MatchedDeveloper,
   MatchedDevelopersPage,
   MatchedSeatLine,
+  MatchTypeFilter,
+  MatchTypeFields,
+  MatchTypeCounts,
   MatchedBundlesPage,
   MatchedApp,
   MatchedAppsPage,
+  AppChange,
   ChatFrame,
   DeclarationRow,
   DeclarationRowsPayload,
+  InactiveApp,
+  InactiveKind,
+  InactivePage,
+  InactivePublisher,
+  InactiveRow,
 } from "./api";
+import { inactiveDay, inWindow, pageRows } from "./inactive";
 // The discovered-lines ORDER BY, shared with the page's sort control so the
 // mock endpoint and the client's "default" option cannot disagree.
 import { compareDefault } from "./discoveredSort";
+import { originsFrom } from "./discoveredOrigin";
 import { PAGE_SIZE } from "./paging";
 
 /*
@@ -97,7 +112,7 @@ function carries(lines: MatchedSeatLine[] | undefined, selected: string[]): bool
  * Computed once at module load, not per call: a report whose dates drifted
  * between two fetches on the same page would contradict itself.
  */
-function crawlDay(now: Date): Date {
+function demoCrawlDay(now: Date): Date {
   // Midnight UTC on the day the reader is looking at this. The run's own
   // clock times are layered on top by `stamp`.
   return new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate()));
@@ -111,7 +126,7 @@ function crawlDay(now: Date): Date {
  * small wrongness a prospect notices without being able to say why. The
  * crawl ran today, every day, and last week's ran a week before that.
  */
-const THIS_RUN = crawlDay(new Date());
+const THIS_RUN = demoCrawlDay(new Date());
 const PREV_RUN = new Date(THIS_RUN.getTime() - 7 * 86_400_000);
 
 /** A timestamp on `run`'s calendar day, UTC, in the fixture's own format. */
@@ -191,6 +206,7 @@ export const WEEK_TOTALS = {
     newly_monitored: 386,
     monitoring_stopped: 74,
     first_appearance: 142,
+    unconfirmed: 2,
   },
   /* The subset landing on one of the customer's OWN six seat lines. A
    * newly monitored or stopped line is by definition one of theirs, so
@@ -299,7 +315,242 @@ export const mockPreviousSummary: Summary = {
 
 export const mockPreviousWeekOf = weekLabel(PREV_RUN);
 
+/** No longer live, invented rows on madeupmedia-style names (never real
+ *  companies). Dates derive from today so the demo never looks stale. */
+const goneDay = (daysAgo: number) =>
+  new Date(Date.now() - daysAgo * 86_400_000).toISOString().slice(0, 10);
+export const mockGone: NonNullable<Summary["gone"]> = {
+  publishers: [
+    { domain: "quokkaplay-legacy.com", name: "Quokkaplay Legacy", reason: "The domain no longer exists", since: goneDay(15), lines: ["madeupmedia.com, 100231, DIRECT"], apps: 4 },
+    { domain: "brambleloop-old.net", name: "", reason: "The website stopped answering", since: goneDay(8), lines: ["madeupmedia.com, 200118, RESELLER", "madeupmedia.com, 100262, DIRECT"], apps: 2 },
+    { domain: "lanternbay-apps.com", name: "", reason: "The domain no longer exists", since: goneDay(22), lines: ["madeupmedia.com, 200126, RESELLER"], apps: 7 },
+  ],
+  apps: [
+    { name: "Hex World War", store: "android", bundle: "com.madeup.war.hex.world", publisher: "silvergull-media.tv", reason: "No longer on Google Play", since: goneDay(10) },
+    { name: "Fighter Jam", store: "android", bundle: "io.madeup.fighterjam", publisher: "orchardtide-ads.com", reason: "No longer on Google Play", since: goneDay(4) },
+    { name: "Lantern Bay Solitaire", store: "ios", bundle: "com.madeup.lanternbay.solitaire", publisher: "copperwren-hiphop.com", reason: "No longer on the App Store", since: goneDay(7) },
+    { name: "Harbor News Live", store: "roku", bundle: "614512", publisher: "harborview7news.com", reason: "No longer on the Roku Channel Store", since: goneDay(12) },
+    { name: "Puzzle Wool Sort", store: "android", bundle: "puzzle.madeup.wool.sort", publisher: "cobaltriver15.com", reason: "No longer on Google Play", since: goneDay(3) },
+  ],
+  totals: { publishers: 3, apps: 5 },
+};
+
+/*
+ * INACTIVE (2026-10-08): every reason the crawler can give, on invented
+ * madeupmedia-style names checked to belong to nobody (dig NXDOMAIN, store
+ * lookups empty). Newest first, as the bake keeps them. The seller ids are
+ * the watchlist's own madeupmedia.com lines, so the seat-line filter has
+ * something true to narrow the publishers by.
+ *
+ * A report covers the window between its two crawls (David, 2026-10-08),
+ * so the fixtures are dated around this mock report's crawls and cut to
+ * that window the way the crawler must cut its own block. A few fall
+ * outside on purpose: one found dead BY the compared crawl (its day, the
+ * report before) and older ones; none of them may show.
+ */
+export const MOCK_CRAWL_AT = stamp(THIS_RUN, 9, 18, 47);
+export const MOCK_COMPARED_CRAWL_AT = stamp(PREV_RUN, 9, 19, 22);
+/** A day, `before` days ahead of this mock report's crawl. */
+const crawlDay = (before: number) =>
+  new Date(Date.parse(MOCK_CRAWL_AT) - before * 86_400_000).toISOString().slice(0, 10);
+const MOCK_WINDOW = { from: MOCK_COMPARED_CRAWL_AT, to: MOCK_CRAWL_AT };
+/** "from 4 Aug to 25 Aug", for the evidence sentences. */
+const span = (from: number, to: number) => `from ${inactiveDay(crawlDay(from))} to ${inactiveDay(crawlDay(to))}`;
+
+const seat = (i: number) => CUSTOMER_SEATS[i % CUSTOMER_SEATS.length];
+const pubLine = (i: number, ended: number, file = "app-ads.txt") => {
+  const l = seat(i);
+  return {
+    ssp_domain: l.ssp_domain,
+    publisher_id: l.publisher_id,
+    relationship: l.relationship,
+    file,
+    first_seen: crawlDay(ended + 70),
+    last_seen: crawlDay(ended + 7),
+    ended_at: crawlDay(ended),
+    reason_code: "publisher_inactive",
+  };
+};
+
+const INACTIVE_PUBLISHERS_ALL: InactivePublisher[] = [
+  {
+    developer_id: 880_101, domain: "brambleloop-old.net", name: null,
+    inactive_since: crawlDay(0), reason_code: "site_silent", reason: "The website stopped answering",
+    evidence_summary: `Failed in 4 crawls in a row, ${span(21, 0)}`,
+    lines: [pubLine(1, 0), pubLine(2, 0, "ads.txt")], apps: 2,
+  },
+  {
+    developer_id: 880_102, domain: "quokkaplay-legacy.com", name: "Quokkaplay Legacy",
+    inactive_since: crawlDay(0), reason_code: "domain_gone", reason: "The domain no longer exists",
+    evidence_summary: `Failed in 3 crawls in a row, ${span(14, 0)}`,
+    lines: [pubLine(3, 0)], apps: 4,
+  },
+  {
+    developer_id: 880_103, domain: "tinplover-studio.net", name: "Tinplover Studio",
+    inactive_since: crawlDay(0), reason_code: "no_file",
+    reason: "The website no longer serves an ads.txt or app-ads.txt file",
+    evidence_summary: `Failed in 3 crawls in a row, ${span(14, 0)}`,
+    lines: [pubLine(4, 0), pubLine(5, 0)], apps: 3,
+  },
+  {
+    developer_id: 880_106, domain: "pebblemarsh-tv.com", name: "Pebblemarsh TV",
+    inactive_since: crawlDay(3), reason_code: "retired_by_operator", reason: "Retired by our team",
+    evidence_summary: "Retired by our team after review",
+    lines: [pubLine(7, 3, "ads.txt"), pubLine(8, 3, "ads.txt")], apps: 0,
+  },
+  // Outside the window: found dead by the compared crawl, and older.
+  {
+    developer_id: 880_104, domain: "lanternbay-apps.com", name: null,
+    inactive_since: crawlDay(7), reason_code: "certificate_broken",
+    reason: "The website's security certificate is broken",
+    evidence_summary: `Failed in 3 crawls in a row, ${span(21, 7)}`,
+    lines: [pubLine(0, 7)], apps: 7,
+  },
+  {
+    developer_id: 880_105, domain: "driftquill-media.com", name: "Driftquill Media",
+    inactive_since: crawlDay(28), reason_code: "site_refuses", reason: "The website refuses connections",
+    evidence_summary: `Failed in 5 crawls in a row, ${span(56, 28)}`,
+    lines: [pubLine(6, 28)], apps: 1,
+  },
+];
+
+/** The reader's lines a live publisher of an inactive app still carries. */
+const appLines = (...idx: number[]) =>
+  idx.map((i) => {
+    const l = seat(i);
+    return { ssp_domain: l.ssp_domain, publisher_id: l.publisher_id, relationship: l.relationship, file: "app-ads.txt" };
+  });
+
+const INACTIVE_APPS_ALL: InactiveApp[] = [
+  {
+    app_id: 990_206, store: "ios", bundle: "com.madeup.glintfox.runner", name: "Glintfox Runner",
+    developer_id: 880_102, publisher: "quokkaplay-legacy.com", publisher_name: "Quokkaplay Legacy",
+    publisher_inactive: true,
+    inactive_since: crawlDay(0), reason_code: "unlisted_from_store", reason: "No longer on the App Store",
+    evidence: { http_status: 404, storefronts_checked: ["US", "CA"], qa_outcome: "cloud_gone" },
+    evidence_summary: "Checked in US, CA, the store answered 404",
+    confirmed: true,
+    lines: [pubLine(3, 0)],
+  },
+  {
+    app_id: 990_201, store: "android", bundle: "puzzle.madeup.wool.sort", name: "Puzzle Wool Sort",
+    developer_id: 77_301, publisher: "cobaltriver15.com", publisher_name: "Cobalt River",
+    inactive_since: crawlDay(1), reason_code: "unlisted_from_store", reason: "No longer on Google Play",
+    evidence: { http_status: 404, storefronts_checked: ["US", "GB"], qa_outcome: "cloud_gone" },
+    evidence_summary: "Checked in US, GB, the store answered 404",
+    confirmed: true,
+    publisher_inactive: false, lines: appLines(11, 12),
+  },
+  {
+    app_id: 990_202, store: "android", bundle: "io.madeup.fighterjam", name: "Fighter Jam",
+    developer_id: 77_302, publisher: "orchardtide-ads.com", publisher_name: "Orchardtide",
+    inactive_since: crawlDay(2), reason_code: "unlisted_from_store", reason: "No longer on Google Play",
+    evidence: { http_status: 404, storefronts_checked: ["US", "GB", "JP"], qa_outcome: "cloud_gone" },
+    evidence_summary: "Checked in US, GB, JP, the store answered 404",
+    confirmed: true,
+    publisher_inactive: false, lines: appLines(13),
+  },
+  {
+    app_id: 990_203, store: "ios", bundle: "com.madeup.lanternbay.solitaire", name: "Lantern Bay Solitaire",
+    developer_id: 77_303, publisher: "copperwren-hiphop.com", publisher_name: null,
+    inactive_since: crawlDay(3), reason_code: "unlisted_from_store", reason: "No longer on the App Store",
+    evidence: { http_status: 404, storefronts_checked: ["US", "GB", "DE", "JP"], qa_outcome: "cloud_gone" },
+    evidence_summary: "Checked in US, GB, DE, JP, the store answered 404",
+    confirmed: true,
+    publisher_inactive: false, lines: appLines(14, 15, 16),
+  },
+  {
+    app_id: 990_204, store: "android", bundle: "com.madeup.war.hex.world", name: "Hex World War",
+    developer_id: 77_304, publisher: "silvergull-media.tv", publisher_name: "Silvergull Media",
+    inactive_since: crawlDay(5), reason_code: "unlisted_from_store", reason: "No longer on Google Play",
+    evidence: { http_status: 404, storefronts_checked: ["US"], qa_outcome: "cloud_gone" },
+    evidence_summary: "Checked in US, the store answered 404",
+    confirmed: true,
+    publisher_inactive: false, lines: appLines(17),
+  },
+  {
+    app_id: 990_205, store: "roku", bundle: "614512", name: "Harbor News Live",
+    developer_id: 77_305, publisher: "harborview7news.com", publisher_name: "Harborview 7 News",
+    inactive_since: crawlDay(6), reason_code: "unlisted_from_store", reason: "No longer on the Roku Channel Store",
+    evidence: { http_status: 404, qa_outcome: "cloud_gone" },
+    evidence_summary: "The store answered 404",
+    confirmed: true,
+    publisher_inactive: false, lines: appLines(18, 19),
+  },
+  // Outside the window: retired before the compared crawl.
+  {
+    app_id: 990_207, store: "android", bundle: "com.madeup.mossgate.pinball", name: "Mossgate Pinball",
+    developer_id: 77_307, publisher: "mossgate-arcade.com", publisher_name: "Mossgate Arcade",
+    inactive_since: crawlDay(13), reason_code: "unlisted_from_store", reason: "No longer on Google Play",
+    evidence: { http_status: 404, storefronts_checked: ["US"], qa_outcome: "cloud_gone" },
+    evidence_summary: "Checked in US, the store answered 404",
+    confirmed: true,
+    publisher_inactive: false, lines: appLines(20),
+  },
+];
+
+const INACTIVE_PUBLISHERS = INACTIVE_PUBLISHERS_ALL.filter((p) => inWindow(p.inactive_since, MOCK_WINDOW));
+const INACTIVE_APPS = INACTIVE_APPS_ALL.filter((a) => inWindow(a.inactive_since, MOCK_WINDOW));
+
+/** The report's block: only what went inactive between its two crawls. */
+export const mockInactiveBlock = {
+  publishers: INACTIVE_PUBLISHERS,
+  apps: INACTIVE_APPS,
+  counts: {
+    publishers: INACTIVE_PUBLISHERS.length,
+    apps: INACTIVE_APPS.length,
+  },
+  /** Kept for the tests: rows that must never show on this report. */
+  outside: {
+    publishers: INACTIVE_PUBLISHERS_ALL.filter((p) => !INACTIVE_PUBLISHERS.includes(p)),
+    apps: INACTIVE_APPS_ALL.filter((a) => !INACTIVE_APPS.includes(a)),
+  },
+};
+
+/**
+ * One page of an Inactive list, the way viewer_frozen.inactive serves it.
+ * A trial keeps the first rows of each list (the counts stay whole) and
+ * withholds the publisher of apps (its domain, name and id; the row keeps
+ * its lines and publisher_inactive), BEFORE search and filter, as the
+ * crawler's trial view does (viewer_frozen._unnamed). There is no lines
+ * list: the crawler answers kind=lines with 410.
+ */
+export function mockInactive(
+  kind: InactiveKind,
+  opts: { page: number; q?: string; lines?: string[] },
+  trial = false,
+): InactivePage {
+  const block = mockInactiveBlock;
+  let rows: InactiveRow[] = block[kind];
+  if (trial) {
+    rows = rows.slice(0, 3);
+    if (kind === "apps") {
+      rows = (rows as InactiveApp[]).map((r) => ({
+        ...r, publisher: "", publisher_name: "", developer_id: null,
+      }));
+    }
+  }
+  const cut = pageRows(kind, rows, { page: opts.page, pageSize: PAGE_SIZE, q: opts.q, lines: opts.lines });
+  return {
+    kind,
+    page: opts.page,
+    page_size: PAGE_SIZE,
+    total: cut.total,
+    rows: cut.rows,
+    available: true,
+    counts: { ...block.counts },
+    truncated: false,
+    ...(trial
+      ? { trial: { cap: 3, shown: Math.min(3, block[kind].length), full_total: block.counts[kind] } }
+      : {}),
+  };
+}
+
 export const mockSummary: Summary = {
+  gone: mockGone,
+  inactive_counts: { ...mockInactiveBlock.counts },
+  crawl_at: MOCK_CRAWL_AT,
+  compared_crawl_at: MOCK_COMPARED_CRAWL_AT,
   crawl_id: 47281,
   source: "weekly",
   status: "completed",
@@ -902,9 +1153,10 @@ const DEV_TABLES: Record<string, DeveloperEvent[]> = {
 };
 
 export function mockDeveloperEvents(
-  event: "added" | "removed" | "changed",
+  event: "added" | "removed" | "changed" | "unconfirmed",
   page: number,
   lines: string[] = [],
+  matchType: MatchTypeFilter | null = null,
 ): DeveloperEventsPage {
   // Attach the seat lines behind each row's counts, so its expanded card can
   // show WHAT moved. Seeded off the developer id (see changeArrays), so a
@@ -915,6 +1167,7 @@ export function mockDeveloperEvents(
       ...changeArrays(d.developer_id, d.lines_added, d.lines_removed, d.lines_cert_changed),
     }))
     .filter((d) => carries(d.matched_lines ?? matchedLinesFor(d.developer_id, 6), lines));
+  if (matchType !== null) return matchTypeEvents(event, rows, page, lines, matchType);
   // Actually paged. It used to return every row whatever the page, which
   // was invisible while the tables held six rows and would now hand the
   // browser eleven hundred publishers per request. Same page size as live.
@@ -1109,6 +1362,7 @@ function seededLines(
             : null,
         matched_via: matchedVia,
         ipd_declared_by: declaredBy,
+        ...changeDatesFor(event, line, j),
       });
     }
     line += 1;
@@ -1150,6 +1404,105 @@ function seededLines(
   return rows;
 }
 
+/**
+ * A file read time, offset from one of the two crawls' times, so every row
+ * carries its own minute rather than the crawl's: a weekly crawl reads
+ * files over hours, and the dates on a line are the read's, not the job's.
+ */
+function readAt(crawl: string, offsetSeconds: number): string {
+  return new Date(new Date(crawl).getTime() + offsetSeconds * 1000).toISOString();
+}
+
+/**
+ * THE DATES BEHIND A CHANGE (2026-10-20), stamped per row so a preview
+ * shows every state the live report can be in:
+ *
+ *   - most rows carry exact read times from the two crawls ("fetch");
+ *   - some carry the crawl's own time, the read time not stored ("crawl"),
+ *     which the row hints on hover and otherwise prints the same;
+ *   - one added line in five was not read in the compared crawl at all
+ *     (last_absent_at null), and says so instead of a date;
+ *   - one row in four carries no dates, which is what every row on a
+ *     report frozen before the dates existed looks like. It must print
+ *     "date not available", never a guess.
+ */
+function changeDatesFor(
+  event: LineEventKind,
+  line: number,
+  j: number,
+): Pick<LineEvent, "first_seen_at" | "last_absent_at" | "last_seen_at" | "not_found_at" | "seen_at" | "date_source"> {
+  if (line % 4 === 3) return {};
+  const fromCrawl = line % 6 === 1;
+  const offset = fromCrawl ? 0 : (line * 97 + j * 41) % 5400;
+  const thisRead = readAt(MOCK_CRAWL_AT, offset);
+  const lastRead = readAt(MOCK_COMPARED_CRAWL_AT, offset);
+  const date_source: LineEvent["date_source"] = fromCrawl ? "crawl" : "fetch";
+  if (event === "removed")
+    return { last_seen_at: lastRead, not_found_at: thisRead, date_source };
+  if (event === "added")
+    return {
+      first_seen_at: thisRead,
+      last_absent_at: line % 5 === 2 ? null : lastRead,
+      date_source,
+    };
+  if (event === "cert_changed") return { seen_at: thisRead, date_source };
+  return {};
+}
+
+/**
+ * Lines the crawler could not verify this week. Two, by hand: one whose
+ * file never read (so nothing was verified), one whose file read too short
+ * to trust (verified on an earlier try, then unreadable). Both sit on the
+ * customer's own madeupmedia.com seats and publishers the roster already
+ * knows, so the tab reads like the rest of the report.
+ */
+const UNCONFIRMED_LINES: LineEvent[] = [
+  {
+    developer_id: 4_411,
+    developer_name: "Riverstone Publishers",
+    developer_domain: "riverstone.com",
+    file_kind: "ads_txt",
+    ssp_domain: "madeupmedia.com",
+    publisher_id: "2020000103",
+    relationship: "DIRECT",
+    event: "unconfirmed",
+    old_cert_id: null,
+    new_cert_id: certId(4_411),
+    matched_seat: true,
+    occurred_at: "2026-08-25T09:18:30Z",
+    matched_via: "file",
+    ipd_declared_by: [],
+    reason: "The file did not answer in three tries, so the line could not be checked.",
+    last_seen_at: readAt(MOCK_COMPARED_CRAWL_AT, 1_260),
+    read_at: readAt(MOCK_CRAWL_AT, 2_140),
+    verified_at: null,
+    tries: 3,
+    date_source: "fetch",
+  },
+  {
+    developer_id: 60_118,
+    developer_name: "Harbor Point Media",
+    developer_domain: "harborpoint.com",
+    file_kind: "app_ads_txt",
+    ssp_domain: "madeupmedia.com",
+    publisher_id: "2020000121",
+    relationship: "RESELLER",
+    event: "unconfirmed",
+    old_cert_id: null,
+    new_cert_id: null,
+    matched_seat: true,
+    occurred_at: "2026-08-25T09:18:30Z",
+    matched_via: "file",
+    ipd_declared_by: [],
+    reason: "The file read far shorter than last week, so its lines were not trusted.",
+    last_seen_at: readAt(MOCK_COMPARED_CRAWL_AT, 3_005),
+    read_at: readAt(MOCK_CRAWL_AT, 3_311),
+    verified_at: readAt(MOCK_CRAWL_AT, 3_349),
+    tries: 2,
+    date_source: "fetch",
+  },
+];
+
 const LINE_EVENTS_BY_EVENT: Record<string, LineEvent[]> = {
   added: seededLines(SSPS_ADDED, "added", WEEK_TOTALS.lines.added),
   removed: seededLines(SSPS_REMOVED, "removed", WEEK_TOTALS.lines.removed),
@@ -1159,6 +1512,7 @@ const LINE_EVENTS_BY_EVENT: Record<string, LineEvent[]> = {
   // a happy-path mock would hide.
   newly_monitored: seededLines(SSPS_ADDED, "newly_monitored", WEEK_TOTALS.lines.newly_monitored),
   monitoring_stopped: seededLines(SSPS_REMOVED, "monitoring_stopped", WEEK_TOTALS.lines.monitoring_stopped),
+  unconfirmed: UNCONFIRMED_LINES,
 };
 
 /*
@@ -1329,7 +1683,7 @@ const CHANGE_LINE_SSPS = [
 function changeLinesFor(
   seed: number,
   count: number,
-  alwaysCert = false,
+  kind: "added" | "removed" | "cert_changed",
 ): MatchedSeatLine[] {
   const out: MatchedSeatLine[] = [];
   for (let i = 0; i < count; i += 1) {
@@ -1339,7 +1693,7 @@ function changeLinesFor(
       1000 + ((seed * 7 + i * 131) % 8999)
     }`;
     const line: MatchedSeatLine = { ssp_domain: ssp, publisher_id, relationship };
-    if (alwaysCert || (seed + i) % 4 === 0) {
+    if (kind === "cert_changed" || (seed + i) % 4 === 0) {
       line.cert_id = certId(seed * 13 + i * 7 + 3);
     }
     // WHERE IT MOVED. The crawler started writing this onto the change
@@ -1347,6 +1701,9 @@ function changeLinesFor(
     // all behind those counts, and this mock invented them WITHOUT the
     // file, which is exactly how the gap stayed invisible in preview.
     line.found_in = (seed + i) % 5 === 0 ? "both" : (seed + i) % 2 === 0 ? "ads.txt" : "app-ads.txt";
+    // WHEN IT MOVED (2026-10-20): the same dates the Changes page prints,
+    // in the same mix of states (see changeDatesFor).
+    Object.assign(line, changeDatesFor(kind, seed + i, i));
     out.push(line);
   }
   return out;
@@ -1366,9 +1723,9 @@ function changeArrays(
   cert_changed_lines: MatchedSeatLine[];
 } {
   return {
-    added_lines: changeLinesFor(id * 2 + 1, added),
-    removed_lines: changeLinesFor(id * 2 + 501, removed),
-    cert_changed_lines: changeLinesFor(id * 2 + 907, cert, true),
+    added_lines: changeLinesFor(id * 2 + 1, added, "added"),
+    removed_lines: changeLinesFor(id * 2 + 501, removed, "removed"),
+    cert_changed_lines: changeLinesFor(id * 2 + 907, cert, "cert_changed"),
   };
 }
 
@@ -1550,13 +1907,56 @@ function mockPage<T extends Record<string, unknown>>(
   };
 }
 
+/** Local preview only: expose watch statuses from the fixture's existing
+ * line events, with the same counts/filter echo as the snapshot API. */
+export function mockWatchView<P extends { rows: { developer_id?: number | null }[]; total: number; page: number; page_size: number }>(
+  read: (page: number) => P,
+  page: number,
+  pageSize: number,
+  change: AppChange | undefined,
+  selectedLines: string[] = [],
+): P {
+  const first = read(1);
+  const all = [...first.rows];
+  for (let next = 2; all.length < first.total; next++) {
+    const part = read(next).rows;
+    if (!part.length) break;
+    all.push(...part);
+  }
+  const kinds = { started_watching: "newly_monitored", stopped_watching: "monitoring_stopped", unconfirmed: "unconfirmed" } as const;
+  const events = Object.fromEntries(Object.entries(kinds).map(([status, event]) => {
+    const byPublisher = new Map<number, LineEvent[]>();
+    for (const line of mockLineEvents({ event, page_size: 500, lines: selectedLines }).rows) {
+      const rows = byPublisher.get(line.developer_id) ?? [];
+      rows.push(line);
+      byPublisher.set(line.developer_id, rows);
+    }
+    return [status, byPublisher];
+  })) as Record<keyof typeof kinds, Map<number, LineEvent[]>>;
+  const counts = Object.fromEntries(Object.keys(kinds).map(status => [status, all.filter(row => events[status as keyof typeof kinds].has(row.developer_id ?? -1)).length]));
+  const watch = change && change in kinds ? change as keyof typeof kinds : null;
+  const kept = watch ? all.filter(row => events[watch].has(row.developer_id ?? -1)) : all;
+  const rows = kept.slice((page - 1) * pageSize, page * pageSize).map(row => ({
+    ...row,
+    ...Object.fromEntries(Object.keys(kinds).map(status => [`${status}_lines`, (events[status as keyof typeof kinds].get(row.developer_id ?? -1) ?? []).map(event => ({
+      ...event,
+      cert_id: event.new_cert_id || event.old_cert_id || undefined,
+      found_in: event.file_kind === "app_ads_txt" ? "app-ads.txt" : event.file_kind === "ads_txt" ? "ads.txt" : undefined,
+    }))])),
+  }));
+  return { ...first, page, page_size: pageSize, total: kept.length, change_counts: counts, ...(watch ? { change: watch } : {}), rows } as P;
+}
+
 const MATCHED_DEVS = buildMatchedDevs();
 
 export function mockMatchedDevelopers(
   page: number,
   q = "",
   lines: string[] = [],
+  /** null: a report frozen before match types (today's exact answer). */
+  matchType: MatchTypeFilter | null = null,
 ): MatchedDevelopersPage {
+  if (matchType !== null) return matchTypePublishers(page, q, lines, matchType);
   const pool = MATCHED_DEVS.filter((d) => carries(d.matched_lines, lines));
   return mockPage(pool, page, q, ["name", "domain"], PAGE_SIZE) as MatchedDevelopersPage;
 }
@@ -1742,6 +2142,282 @@ function buildMatchedApps(): MatchedApp[] {
 
 const MATCHED_APPS = buildMatchedApps();
 
+/** The crawler's ``?change=`` filter on one app: it moved that way. */
+export function appMoved(a: MatchedApp, change: AppChange | null): boolean {
+  if (change === "added") return (a.lines_added ?? 0) > 0;
+  if (change === "removed") return (a.lines_removed ?? 0) > 0;
+  if (change === "changed") return (a.lines_cert_changed ?? 0) > 0;
+  return true;
+}
+
+export function mockMatchedApps(
+  page: number,
+  q = "",
+  lines: string[] = [],
+  /** null: a report frozen before match types (today's exact answer). */
+  matchType: MatchTypeFilter | null = null,
+  /** The change tabs: the whole list filtered before paging, echoed as
+   *  ``change``. null: no filter, and no echo (today's exact answer). */
+  change: AppChange | null = null,
+): MatchedAppsPage {
+  if (matchType !== null) return matchTypeApps(page, q, lines, matchType, change);
+  const pool = MATCHED_APPS.filter((a) => carries(a.matched_lines, lines) && appMoved(a, change));
+  const r = mockPage(pool, page, q, ["app_name", "bundle_id", "owner_domain"], PAGE_SIZE) as MatchedAppsPage;
+  return change ? { ...r, change } : r;
+}
+
+// ─────────────────────────────────────────────────────────────────
+// Match type: own or IPD (crawler PR #348, inventory sharing)
+// ─────────────────────────────────────────────────────────────────
+//
+// Only on a report that carries match types (mock mode by default,
+// ``?matchtype=off`` for one frozen before them; the e2e fake API's
+// ``matchType`` scenario). Off, every function above answers exactly
+// what it always did.
+//
+// THE OWNER'S GOLDEN SCENARIO, real-world-correct (mock-data rule,
+// 2026-10-07: no real platform is ever shown naming a partner it does not
+// name). Checked live on 2026-10-25:
+//   * samsungtvplus.com/app-ads.txt (served from tvplus.adgrx.com) carries
+//     ``inventorypartnerdomain=failarmy.tv`` (line 348 that day);
+//   * failarmy.tv/ads.txt answers 200 (www.failarmy.tv, Trusted Media
+//     Brands), so this crawl "read" it;
+//   * com.samsung.android.tvplus is the Samsung TV Plus app on Google Play.
+// The customer's seat lines in that ads.txt are the invented
+// madeupmedia.com lines, as everywhere in this mock. So the Samsung TV Plus
+// app, and its publisher, match through failarmy.tv: IPD rows, counted in
+// the one Matched number, listed under All and IPD, never under Own.
+//
+// Everything else here is invented and belongs to nobody (NXDOMAIN, no NS,
+// 404 on Google Play, 2026-10-25): Northfold TV (northfold-tv.com,
+// tv.northfold.app) matches on its own app-ads.txt and carries the roles
+// sample; Tidewick TV (tidewick-tv.com) names northfold-tv.com as its
+// inventory partner, but this crawl did not read northfold-tv.com's
+// ads.txt, so those IPD matches are inconclusive: never a row, never
+// counted, one quiet note. copperline-media.tv is the invented manager.
+
+export const MT_PARTNER = "failarmy.tv";
+export const MT_PLATFORM = {
+  developer_id: 990_301,
+  name: "Samsung TV Plus",
+  domain: "samsungtvplus.com",
+  bundle: "com.samsung.android.tvplus",
+};
+const MT_SEATS = CUSTOMER_SEATS.slice(0, 6);
+export const MT_INCONCLUSIVE = [{ partner: "northfold-tv.com", platform: "Tidewick TV" }];
+const mtLines = (found_in: string): MatchedSeatLine[] => MT_SEATS.map((l) => ({ ...l, found_in }));
+const MT_NO_CHANGE = {
+  lines_added: 0,
+  lines_removed: 0,
+  lines_cert_changed: 0,
+  added_lines: [] as MatchedSeatLine[],
+  removed_lines: [] as MatchedSeatLine[],
+  cert_changed_lines: [] as MatchedSeatLine[],
+};
+const MT_OWN: MatchTypeFields = { match_type: "own" };
+const MT_IPD: MatchTypeFields = {
+  match_type: "ipd",
+  ipd_partner: MT_PARTNER,
+  ipd_platform: MT_PLATFORM.name,
+  // The crawler sends the declaring file by its display name.
+  declared_in: `${MT_PLATFORM.name}'s app-ads.txt`,
+  seller_role: "reseller",
+  // What every real row without an alert carries: empty strings, not nulls
+  // or arrays (opening such a row crashed the section on 2026-10-27).
+  managed_by: "",
+  verdict_alerts: "",
+};
+/** The partner's ads.txt gained two of the customer's lines this week, so
+ *  the platform's IPD rows (publisher, app, and the Added event) move. */
+const MT_ADDED = {
+  ...MT_NO_CHANGE,
+  lines_added: 2,
+  added_lines: MT_SEATS.slice(0, 2).map((l) => ({ ...l, found_in: "ads.txt" })),
+};
+const NORTHFOLD_LINES = (): MatchedSeatLine[] =>
+  CUSTOMER_SEATS.slice(3, 6).map((l) => ({ ...l, found_in: "app-ads.txt" }));
+const NORTHFOLD_ROLES: MatchTypeFields = {
+  seller_role: "reseller",
+  managed_by: "copperline-media.tv (GB)",
+  // The crawler's real shape (2026-10-27): ONE string, alerts joined by " | ".
+  verdict_alerts:
+    "Listed as DIRECT, but sellers.json names copperline-media.tv, not northfold-tv.com: treated as a reseller. | Two managers for one country (GB): neither counts there.",
+  partner_inventory_on: ["Tidewick TV"],
+};
+
+const MT_PUBLISHERS: MatchedDeveloper[] = [
+  {
+    developer_id: MT_PLATFORM.developer_id,
+    name: MT_PLATFORM.name,
+    domain: MT_PLATFORM.domain,
+    platform: "Samsung",
+    line_count: MT_SEATS.length,
+    matched_lines: mtLines("ads.txt"),
+    ...MT_ADDED,
+    file_hosts: [],
+    ...MT_IPD,
+  },
+  {
+    developer_id: 990_310,
+    name: "Northfold TV",
+    domain: "northfold-tv.com",
+    platform: "CTV",
+    line_count: 3,
+    matched_lines: NORTHFOLD_LINES(),
+    ...MT_NO_CHANGE,
+    file_hosts: [],
+    ...MT_OWN,
+    ...NORTHFOLD_ROLES,
+  },
+];
+
+const MT_APPS: MatchedApp[] = [
+  {
+    store: "android",
+    bundle_id: MT_PLATFORM.bundle,
+    app_name: MT_PLATFORM.name,
+    owner_domain: MT_PLATFORM.domain,
+    owner_name: MT_PLATFORM.name,
+    developer_id: MT_PLATFORM.developer_id,
+    line_count: MT_SEATS.length,
+    matched_lines: mtLines("ads.txt"),
+    ...MT_ADDED,
+    // Credited from the partner's ads.txt (file_source of crawler #348).
+    file_host: MT_PARTNER,
+    file_source: "inventory_partner",
+    ...MT_IPD,
+  },
+  {
+    store: "android",
+    bundle_id: "tv.northfold.app",
+    app_name: "Northfold TV",
+    owner_domain: "northfold-tv.com",
+    owner_name: "Northfold TV",
+    developer_id: 990_310,
+    line_count: 3,
+    matched_lines: NORTHFOLD_LINES(),
+    ...MT_NO_CHANGE,
+    file_host: "northfold-tv.com",
+    file_source: "own_domain",
+    ...MT_OWN,
+    ...NORTHFOLD_ROLES,
+  },
+];
+
+function mtSplit<T extends MatchTypeFields>(
+  rows: T[],
+  matchType: MatchTypeFilter,
+): { rows: T[]; counts: MatchTypeCounts } {
+  const ipd = rows.filter((r) => r.match_type === "ipd").length;
+  return {
+    rows: matchType === "all" ? rows : rows.filter((r) => (r.match_type ?? "own") === matchType),
+    counts: { all: rows.length, own: rows.length - ipd, ipd },
+  };
+}
+function mtSearch<T>(rows: T[], q: string, text: (r: T) => (string | null | undefined)[]): T[] {
+  const needle = (q || "").trim().toLowerCase();
+  return needle ? rows.filter((r) => text(r).some((v) => (v ?? "").toLowerCase().includes(needle))) : rows;
+}
+/** The note's IPD matches ride on Northfold TV's lines: they leave with a
+ *  line filter that drops those. */
+function mtInconclusive(lines: string[], count: number) {
+  return carries(CUSTOMER_SEATS.slice(3, 6), lines) ? { count, examples: MT_INCONCLUSIVE } : null;
+}
+
+function matchTypePublishers(
+  page: number,
+  q: string,
+  lines: string[],
+  matchType: MatchTypeFilter,
+): MatchedDevelopersPage {
+  const all: MatchedDeveloper[] = [
+    ...MATCHED_DEVS.map((d): MatchedDeveloper => ({ ...d, ...MT_OWN })),
+    ...MT_PUBLISHERS,
+  ].sort((a, b) => b.line_count - a.line_count);
+  const pool = mtSearch(
+    all.filter((d) => carries(d.matched_lines, lines)),
+    q,
+    (d) => [d.name, d.domain, d.ipd_partner, d.ipd_platform],
+  );
+  const split = mtSplit(pool, matchType);
+  return {
+    ...(mockPage(split.rows, page, "", [], PAGE_SIZE) as MatchedDevelopersPage),
+    match_type_counts: split.counts,
+    ipd_inconclusive: mtInconclusive(lines, 1),
+  };
+}
+
+function matchTypeApps(
+  page: number,
+  q: string,
+  lines: string[],
+  matchType: MatchTypeFilter,
+  change: AppChange | null,
+): MatchedAppsPage {
+  const all: MatchedApp[] = [...MATCHED_APPS.map((a): MatchedApp => ({ ...a, ...MT_OWN })), ...MT_APPS].sort(
+    (a, b) => b.line_count - a.line_count,
+  );
+  const pool = mtSearch(
+    all.filter((a) => carries(a.matched_lines, lines) && appMoved(a, change)),
+    q,
+    (a) => [a.app_name, a.bundle_id, a.owner_domain, a.ipd_partner, a.ipd_platform],
+  );
+  const split = mtSplit(pool, matchType);
+  const start = (page - 1) * PAGE_SIZE;
+  return {
+    page,
+    page_size: PAGE_SIZE,
+    total: split.rows.length,
+    truncated: false,
+    rows: split.rows.slice(start, start + PAGE_SIZE),
+    match_type_counts: split.counts,
+    // Tidewick TV's two apps, through northfold-tv.com: not read, not counted.
+    ipd_inconclusive: mtInconclusive(lines, 2),
+    ...(change ? { change } : {}),
+  };
+}
+
+/** The IPD event of the week: the partner's two new lines, on the platform. */
+const MT_ADDED_EVENT: DeveloperEvent = {
+  developer_id: MT_PLATFORM.developer_id,
+  developer_name: MT_PLATFORM.name,
+  developer_domain: MT_PLATFORM.domain,
+  developer_platform: "Samsung",
+  matched_lines_prev: MT_SEATS.length - MT_ADDED.lines_added,
+  matched_lines_current: MT_SEATS.length,
+  lines_newly_monitored: 0,
+  lines_monitoring_stopped: 0,
+  top_ssps: [{ ssp_domain: "madeupmedia.com", count: MT_ADDED.lines_added }],
+  occurred_at: "2026-08-25T09:18:40Z",
+  ...MT_ADDED,
+  matched_lines: mtLines("ads.txt"),
+  ...MT_IPD,
+};
+
+function matchTypeEvents(
+  event: string,
+  rows: DeveloperEvent[],
+  page: number,
+  lines: string[],
+  matchType: MatchTypeFilter,
+): DeveloperEventsPage {
+  const all: DeveloperEvent[] = [
+    ...rows.map((d): DeveloperEvent => ({ ...d, ...MT_OWN })),
+    // An IPD row under Added, with its partner, platform and file: the
+    // developer-events rows carry them too (crawler #348).
+    ...(event === "added" && carries(MT_ADDED_EVENT.matched_lines, lines) ? [MT_ADDED_EVENT] : []),
+  ];
+  const split = mtSplit(all, matchType);
+  return {
+    event,
+    page,
+    page_size: PAGE_SIZE,
+    total: split.rows.length,
+    rows: split.rows.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE),
+    match_type_counts: split.counts,
+  };
+}
+
 /*
  * THE HEADLINE COUNTERS, READ OFF THE LISTS THEY HEAD.
  *
@@ -1756,28 +2432,29 @@ const MATCHED_APPS = buildMatchedApps();
  * Runs at module load, after every list exists.
  */
 (() => {
-  const developers = MATCHED_DEVS.length;
-  const apps = MATCHED_APPS.length;
+  const developers = MATCHED_DEVS.length + MT_PUBLISHERS.length;
+  const apps = MATCHED_APPS.length + MT_APPS.length;
   // Matched LINES is the sum of what each publisher carries, not a count of
   // rows: one publisher matching 58 of your lines is 58, not 1.
-  const lines = MATCHED_DEVS.reduce((n, d) => n + d.line_count, 0);
+  const lines = MATCHED_DEVS.reduce((n, d) => n + d.line_count, 0) + MT_PUBLISHERS.reduce((n, d) => n + d.line_count, 0);
   mockSummary.counters.matched = { developers, apps, lines };
   mockPreviousSummary.counters.matched = {
-    developers: lastWeek(developers, 0.958),
-    apps: lastWeek(apps, 0.934),
+    developers: developers - 380 + 29,
+    apps: apps - 1_702 + 61,
     lines: lastWeek(lines, 0.971),
   };
 })();
 
-export function mockMatchedApps(page: number, q = "", lines: string[] = []): MatchedAppsPage {
-  const pool = MATCHED_APPS.filter((a) => carries(a.matched_lines, lines));
-  return mockPage(pool, page, q, ["app_name", "bundle_id", "owner_domain"], PAGE_SIZE) as MatchedAppsPage;
-}
-
 /** The summary under a seat-line filter: the matched counters re-counted
  *  over what carries the selected lines. Everything else stays crawl-wide. */
 export function mockSummaryFor(lines: string[]): Summary {
-  const base: Summary = { ...mockSummary, watchlist: { seats: CUSTOMER_SEATS, discover: [] } };
+  // The discovery domains, as the API serves them; none with the
+  // ``?discovery=none`` escape hatch, where the report looked for none.
+  const discover =
+    typeof window !== "undefined" && new URLSearchParams(window.location.search).get("discovery") === "none"
+      ? []
+      : DISCOVERY_SSPS.map((s) => s.domain);
+  const base: Summary = { ...mockSummary, watchlist: { seats: CUSTOMER_SEATS, discover } };
   if (lines.length === 0) return base;
   const want = new Set(lines);
   const devs = MATCHED_DEVS.filter((d) => carries(d.matched_lines, lines));
@@ -1805,6 +2482,7 @@ export function mockSummaryFor(lines: string[]): Summary {
         added: count("added"),
         removed: count("removed"),
         cert_changed: count("cert_changed"),
+        unconfirmed: count("unconfirmed"),
       },
     },
   };
@@ -2055,6 +2733,44 @@ const DISCOVERED_HEAD: MockLineSpec[] = [
     placements_count: 143,
     previous_placements_count: 158, // down 15
   },
+  // LINES THAT NEED FIXING (2026-10-14), each the shape seen on a real
+  // own-domain report: a seller ID with letters where the SSP's are digits,
+  // a placeholder ID with a cert id cut short, a cert id with pasted HTML,
+  // and the same seller ID as RESELLER where its DIRECT line is the wide
+  // one. The seller the file lists as PUBLISHER but publishers carry as
+  // RESELLER is cm41288 above (see SELLER_TYPE_PIN).
+  {
+    ssp_domain: "madeupmedia.com",
+    publisher_id: "l0p9531e427dc0a8",
+    relationship: "RESELLER",
+    cert_id: "4a7be0c1d9f23b58",
+    placements_count: 112,
+    previous_placements_count: 104,
+  },
+  {
+    ssp_domain: "madeupmedia.com",
+    publisher_id: "XXXXXXXXXXX",
+    relationship: "DIRECT",
+    cert_id: "4a7be0c1d9f23b5",
+    placements_count: 58,
+    previous_placements_count: 61,
+  },
+  {
+    ssp_domain: "madeupmedia.com",
+    publisher_id: "1042318",
+    relationship: "RESELLER",
+    cert_id: "4a7be0c1d9f23b58<br />",
+    placements_count: 23,
+    previous_placements_count: 19,
+  },
+  {
+    ssp_domain: "madeupmedia.com",
+    publisher_id: "2884190",
+    relationship: "RESELLER",
+    cert_id: "b1f4c72e5a08d9c3",
+    placements_count: 37,
+    previous_placements_count: 35,
+  },
 ];
 
 /*
@@ -2179,6 +2895,108 @@ function buildDiscoveredLines(): DiscoveredLine[] {
 
 const DISCOVERED_LINES = buildDiscoveredLines();
 
+/*
+ * OWN-DOMAIN DISCOVERY MARKS (2026-10-14). The customer's own sellers.json
+ * is the reference for a line that starts with their domain: its seller ID
+ * is either in that file (with the seller's name and type) or it is not.
+ * Deterministic by ID; the head's IDs are pinned so the first screen shows
+ * both states. Names come from the roster's invented pool, which was
+ * checked to belong to nobody.
+ */
+const ID_SHAPE: Record<string, RegExp> = {
+  "madeupmedia.com": /^\d{7}$/,
+  "madeupmedia.la": /^\d{6}$/,
+  "madeupmedia-ads.com": /^cm\d{5}$/,
+  "madeupmedia-video.com": /^sb-\d{5}$/,
+};
+
+function hashId(s: string): number {
+  let h = 2_166_136_261;
+  for (const c of s) {
+    h ^= c.charCodeAt(0);
+    h = Math.imul(h, 16_777_619) >>> 0;
+  }
+  return h;
+}
+
+const SELLER_LISTED = new Set(["1042318", "618402", "3390514", "cm41288"]);
+const SELLER_UNLISTED = new Set(["2884190", "774061", "XXXXXXXXXXX", "l0p9531e427dc0a8"]);
+/** The type the file gives a pinned seller. cm41288 is the mismatch on the
+ *  first screen: a PUBLISHER in the file, carried as RESELLER. */
+const SELLER_TYPE_PIN: Record<string, string> = {
+  "1042318": "INTERMEDIARY",
+  "618402": "INTERMEDIARY",
+  "3390514": "BOTH",
+  cm41288: "PUBLISHER",
+};
+
+function sellerCheckOf(id: string, relationship: string): SellerCheck {
+  const listed = SELLER_LISTED.has(id)
+    ? true
+    : SELLER_UNLISTED.has(id)
+      ? false
+      : hashId(id) % 100 < 58;
+  if (!listed) return { status: "unlisted" };
+  const h = hashId(`name:${id}`);
+  const name = `${DISCOVERED_PREFIX[h % DISCOVERED_PREFIX.length]} ${
+    DISCOVERED_SUFFIX[(h >>> 8) % DISCOVERED_SUFFIX.length]
+  }`;
+  // The file mostly agrees with the line (PUBLISHER sells DIRECT, an
+  // INTERMEDIARY resells); one seller in thirteen is typed the other way.
+  const agrees = relationship === "DIRECT" ? "PUBLISHER" : "INTERMEDIARY";
+  const disagrees = relationship === "DIRECT" ? "INTERMEDIARY" : "PUBLISHER";
+  const seller_type = SELLER_TYPE_PIN[id] ?? ((h >>> 16) % 13 === 0 ? disagrees : agrees);
+  return { status: "listed", name, seller_type };
+}
+
+/** The relationship a seller of this type should be carried with; null for
+ *  BOTH, which may be either. */
+function relationshipFor(sellerType: string): string | null {
+  const t = sellerType.toUpperCase();
+  return t === "PUBLISHER" ? "DIRECT" : t === "INTERMEDIARY" ? "RESELLER" : null;
+}
+
+function issuesOf(l: DiscoveredLine, all: DiscoveredLine[]): LineIssue[] {
+  const out: LineIssue[] = [];
+  const shape = ID_SHAPE[l.ssp_domain];
+  if (shape && !shape.test(l.publisher_id)) {
+    out.push({
+      kind: "bad_id",
+      text: /^X+$/.test(l.publisher_id)
+        ? "The seller ID is a placeholder, not one of yours"
+        : "The seller ID does not look like one of yours",
+    });
+  }
+  if (l.cert_id && !/^[0-9a-f]{16}$/.test(l.cert_id)) {
+    out.push({ kind: "bad_cert", text: `The cert id is corrupted: ${l.cert_id}` });
+  }
+  if (l.seller?.status === "listed") {
+    const wanted = relationshipFor(l.seller.seller_type);
+    if (wanted && wanted !== l.relationship) {
+      out.push({
+        kind: "relationship_mismatch",
+        // Word for word the crawler's sentence (customer_snapshot._line_issues).
+        text: `Your sellers.json lists this seller as ${l.seller.seller_type.toUpperCase()}, the line says ${l.relationship}`,
+      });
+    }
+  }
+  const other = all.find(
+    (o) =>
+      o !== l &&
+      o.ssp_domain === l.ssp_domain &&
+      o.publisher_id === l.publisher_id &&
+      o.relationship !== l.relationship &&
+      (o.publishers_count ?? o.placements_count) >= (l.publishers_count ?? l.placements_count),
+  );
+  if (other) {
+    out.push({
+      kind: "both_relationships",
+      text: `Also listed as ${other.relationship} on ${(publishersOf(other.placements_count) ?? 0).toLocaleString()} publishers`,
+    });
+  }
+  return out;
+}
+
 /**
  * Lines that were in last week's crawl and are gone from this one, by
  * discovery domain. They exist only so the summary row's previous-week
@@ -2194,8 +3012,6 @@ const DISCOVERY_VANISHED: Record<string, { lines: number; placements: number }> 
   "sonobi.com": { lines: 0, placements: 0 },
 };
 
-/** Embed threshold, mirroring the rule stated in the api.ts contract. */
-const DISCOVERED_EMBED_MAX = 20;
 
 function discoveredTotals(pool: DiscoveredLine[]): DiscoveredTotals {
   let placements = 0;
@@ -2242,47 +3058,150 @@ function lineKeyOf(k: DiscoveredLineKey): string {
  * second fixture set. Never reached in a production build, where MOCK is
  * false and this module is tree-shaken out.
  */
+/*
+ * WHO BROUGHT EACH LINE (2026-10-11), as the API marks it from the report's
+ * watchlist: a few of the head's lines are in the customer's list (from
+ * their sellers.json, by hand, one found earlier), and one seller ID they
+ * gave as RESELLER turns up DIRECT, so a preview shows every mark.
+ */
+const DISCOVERY_SEATS: MatchedSeatLine[] = [
+  { ssp_domain: "madeupmedia.com", publisher_id: "1042318", relationship: "RESELLER", source: "sellers_json", added_at: "2026-08-30" },
+  { ssp_domain: "madeupmedia.com", publisher_id: "2884190", relationship: "RESELLER", source: "sellers_json", added_at: "2026-08-30" },
+  { ssp_domain: "madeupmedia.com", publisher_id: "3390514", relationship: "RESELLER", source: "manual", added_at: "2026-09-04" },
+  { ssp_domain: "madeupmedia.la", publisher_id: "618402", relationship: "RESELLER", source: "discovered", added_at: "2026-09-16" },
+];
+const mockOrigin = originsFrom([...CUSTOMER_SEATS, ...DISCOVERY_SEATS])!;
+
+/** Publishers once each, in the shape a report from 2026-10-11 carries:
+ *  most publishers hold the line in one file, some in both. */
+const publishersOf = (listings: number | null) => (listings == null ? null : Math.max(1, Math.round(listings * 0.62)));
+
+/** Mock-only: ``?baseline=cut`` is a report whose baseline's list was cut
+ *  short (no comparison, and the page says why); ``?baseline=none`` is a
+ *  first report. Read from the page URL; the e2e fake passes it instead. */
+function mockBaselineParam(): DiscoveredTotals["baseline"] {
+  if (typeof window === "undefined") return "compared";
+  const v = new URLSearchParams(window.location.search).get("baseline");
+  return v === "cut" || v === "none" ? v : "compared";
+}
+
 export function mockDiscoveredLines(opts: {
   page?: number;
   page_size?: number;
   ssp_domain?: string;
+  origin?: "given" | "found";
+  show?: DiscoveredShow;
+  q?: string;
+  /** The e2e fake's way to pick the baseline state without a page URL. */
+  baseline?: DiscoveredTotals["baseline"];
 }): DiscoveredLinesPage {
   const page = opts.page ?? 1;
   const pageSize = opts.page_size ?? 50;
   const emptied =
     typeof window !== "undefined" &&
     new URLSearchParams(window.location.search).get("discovery") === "none";
+  const baseline = opts.baseline ?? mockBaselineParam();
   let pool = emptied ? [] : DISCOVERED_LINES;
   if (opts.ssp_domain) {
     const needle = opts.ssp_domain.trim().toLowerCase();
     pool = pool.filter((r) => r.ssp_domain.toLowerCase().includes(needle));
   }
+  pool = pool.map((r) => ({
+    ...r,
+    ...mockOrigin(r),
+    publishers_count: publishersOf(r.placements_count)!,
+    previous_publishers_count: publishersOf(r.previous_placements_count),
+  }));
+  // The seller check first, since one of the issues reads it.
+  pool = pool.map((r) => ({ ...r, seller: sellerCheckOf(r.publisher_id, r.relationship) }));
+  pool = pool.map((r) => ({ ...r, issues: issuesOf(r, pool) }));
+  if (baseline !== "compared") {
+    pool = pool.map((r) => ({ ...r, previous_placements_count: null, previous_publishers_count: null }));
+  }
+  // The totals are the REPORT's numbers, counted before the search and the
+  // Show filter, exactly as viewer_frozen.discovered_lines counts them: the
+  // list's own count line says how many lines the filter keeps. (Only the
+  // SSP-domain filter rescopes them, and this page no longer offers it.)
+  const whole = pool;
+  if (opts.q) {
+    // The contract's search: the line itself, or any publisher in its
+    // roster by domain or name.
+    const needle = opts.q.trim().toLowerCase();
+    const has = (s: string | undefined) => (s ?? "").toLowerCase().includes(needle);
+    pool = pool.filter(
+      (r) =>
+        has(r.publisher_id) ||
+        has(r.ssp_domain) ||
+        has(r.cert_id) ||
+        (r.placements ?? []).some((p) => has(p.developer_domain) || has(p.developer_name)),
+    );
+  }
+  if (opts.origin) pool = pool.filter((r) => (r.origin === "given") === (opts.origin === "given"));
+  if (opts.show === "direct") pool = pool.filter((r) => r.relationship === "DIRECT");
+  if (opts.show === "reseller") pool = pool.filter((r) => r.relationship === "RESELLER");
+  if (opts.show === "new") pool = pool.filter((r) => r.previous_placements_count == null && baseline === "compared");
+  if (opts.show === "fixing") pool = pool.filter((r) => (r.issues ?? []).length > 0);
+  if (opts.show === "listed") pool = pool.filter((r) => r.seller?.status === "listed");
+  if (opts.show === "unlisted") pool = pool.filter((r) => r.seller?.status === "unlisted");
+  const given = whole.filter((r) => r.origin === "given").length;
+  const listedIds = new Set(whole.filter((r) => r.seller?.status === "listed").map((r) => r.publisher_id));
+  const unlistedIds = new Set(whole.filter((r) => r.seller?.status === "unlisted").map((r) => r.publisher_id));
+  const base = discoveredTotals(whole);
+  const compared = baseline === "compared";
   const start = (page - 1) * pageSize;
   return {
     page,
     page_size: pageSize,
     total: pool.length,
-    totals: discoveredTotals(pool),
-    // Strip the embedded placements above the threshold, exactly as the
-    // proposed endpoint would, so the card's fetch-on-expand path is what
-    // a mock review actually exercises on the wide lines.
-    rows: pool.slice(start, start + pageSize).map((l) =>
-      l.placements && l.placements.length <= DISCOVERED_EMBED_MAX
-        ? l
-        : { ...l, placements: undefined },
-    ),
+    totals: {
+      ...base,
+      previous_lines: compared ? base.previous_lines : null,
+      previous_placements: compared ? base.previous_placements : null,
+      new_lines: compared ? base.new_lines : null,
+      given_lines: given,
+      found_lines: whole.length - given,
+      publishers: opts.ssp_domain ? null : Math.round(whole.reduce((n, r) => n + (r.publishers_count ?? 0), 0) * 0.7),
+      previous_publishers:
+        !compared || opts.ssp_domain || base.previous_placements == null
+          ? null
+          : Math.round((publishersOf(base.previous_placements) ?? 0) * 0.7),
+      sellers_json: {
+        url: "madeupmedia.com/sellers.json",
+        sellers: listedIds.size + 24,
+        read_at: MOCK_CRAWL_AT,
+        listed_ids: listedIds.size,
+        unlisted_ids: unlistedIds.size,
+      },
+      in_file_lines: whole.filter((r) => r.seller?.status === "listed").length,
+      not_in_file_lines: whole.filter((r) => r.seller?.status === "unlisted").length,
+      needs_fixing: whole.filter((r) => (r.issues ?? []).length > 0).length,
+      baseline,
+    },
+    // The roster is never embedded: the page reads it whole, paged, from
+    // the placements endpoint.
+    rows: pool.slice(start, start + pageSize).map((l) => ({ ...l, placements: undefined })),
   };
 }
 
 export function mockDiscoveredLinePlacements(
   key: DiscoveredLineKey,
-  opts: { page?: number; page_size?: number },
+  opts: { page?: number; page_size?: number; q?: string },
 ): DiscoveredPlacementsPage {
   const page = opts.page ?? 1;
   const pageSize = opts.page_size ?? 100;
   const wanted = lineKeyOf(key);
   const line = DISCOVERED_LINES.find((l) => lineKeyOf(l) === wanted);
-  const rows = line?.placements ?? [];
+  let rows = line?.placements ?? [];
+  if (opts.q) {
+    const needle = opts.q.trim().toLowerCase();
+    rows = rows.filter(
+      (r) =>
+        r.developer_domain.toLowerCase().includes(needle) ||
+        (r.developer_name ?? "").toLowerCase().includes(needle) ||
+        (r.app_name ?? "").toLowerCase().includes(needle) ||
+        (r.bundle_id ?? "").toLowerCase().includes(needle),
+    );
+  }
   const start = (page - 1) * pageSize;
   return {
     page,

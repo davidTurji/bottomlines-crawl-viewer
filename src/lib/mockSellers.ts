@@ -8,9 +8,9 @@
  *
  *   - 22 entries publishers agree with;
  *   - 3 PUBLISHER entries only ever listed as RESELLER, 1 INTERMEDIARY also
- *     listed as DIRECT (seller_type fixes);
+ *     listed as DIRECT (valid roles are preserved);
  *   - 2 entries whose domain is not the publisher listing them DIRECT, and
- *     3 whose domain is written wrong (a URL, a trailing dot, "N/A");
+ *     4 whose domain is written wrong (a URL, a trailing dot, "N/A");
  *   - 2 duplicated IDs: one copied twice exactly, one listed twice with
  *     different details;
  *   - a seller_type in lowercase, a seller_id written as a number, an
@@ -18,7 +18,7 @@
  *   - 1 confidential entry that still carries its name and domain;
  *   - an ID written in capitals where publishers write it in lowercase, and
  *     an entry with no seller_type that nobody lists;
- *   - 4 entries no crawled file lists (suggested removals);
+ *   - 4 entries no crawled file lists (check first);
  *   - 5 IDs publishers list that the file lacks (adds: three clear, one
  *     listed DIRECT by two publishers, one RESELLER only).
  */
@@ -81,13 +81,13 @@ export const mockSellersFile: SellersFile = {
       domain,
       seller_type: "INTERMEDIARY",
     })),
-    // seller_type wrong: marked PUBLISHER, only ever listed as RESELLER.
-    { seller_id: "300210", name: "Emberquay Media", domain: "emberquay-news.com", seller_type: "PUBLISHER" },
+    // A malformed domain is fixable; RESELLER sightings do not establish type.
+    { seller_id: "300210", name: "Emberquay Media", domain: "https://emberquay-news.com/", seller_type: "PUBLISHER" },
     { seller_id: "300224", name: "Thistlecove Partners", domain: "thistlecove-apps.com", seller_type: "PUBLISHER" },
     { seller_id: "300237", name: "Glimmerdale Sales", domain: "glimmerdale-tv.com", seller_type: "PUBLISHER" },
-    // Marked INTERMEDIARY, but also listed DIRECT: BOTH.
+    // Mixed declarations do not justify changing INTERMEDIARY to BOTH.
     { seller_id: "300249", name: "Rookhaven Sports", domain: "rookhaven-sports.com", seller_type: "INTERMEDIARY" },
-    // Domain wrong: the publisher listing it DIRECT is someone else.
+    // A different DIRECT publisher does not establish a wrong business domain.
     { seller_id: "300256", name: "Wrenmoor Media", domain: "oldsite-quokka.com", seller_type: "PUBLISHER" },
     { seller_id: "300263", name: "Quillbrook Games", domain: "tidepool-legacy.net", seller_type: "PUBLISHER" },
     // Confidential, yet its name and domain are still in the file.
@@ -112,6 +112,12 @@ export const mockSellersFile: SellersFile = {
     { seller_id: "400112", name: "Bramblemist TV", domain: "bramblemist-tv.tv", seller_type: "PUBLISHER" },
     { seller_id: "400118", name: "Pebblecrest Apps", domain: "pebblecrest-apps.com", seller_type: "PUBLISHER" },
     { seller_id: "400126", name: "Cinderloft Games", domain: "cinderloft-games.com", seller_type: "PUBLISHER" },
+    // Seen only in their OWN ads.txt (read at bake time, 2026-10-11): seen,
+    // but no type or domain is read off it. The first is an ad network
+    // writing DIRECT on its own site and must never be told "maybe
+    // PUBLISHER"; the second has a name with spaces, so it shows as a fix.
+    { seller_id: "400150", name: "Larchwick Network", domain: "larchwick-net.com", seller_type: "INTERMEDIARY" },
+    { seller_id: "400160", name: " Hazelburn Media ", domain: "hazelburn-media.com", seller_type: "INTERMEDIARY" },
   ],
 };
 
@@ -141,6 +147,8 @@ export const mockSellerSightings: Sighting[] = [
   { seller_id: "300324", relationship: "RESELLER", publishers: pubs(["quokkaplay-games.com", "tidepoolarcade.com"]) },
   { seller_id: "300324", relationship: "DIRECT", publishers: pubs(["duskhollow-media.com", "duskhollow-kids.com"]) },
   { seller_id: "abc778", relationship: "DIRECT", publishers: pubs(["hollowcrest-apps.com"]) },
+  { seller_id: "400150", relationship: "DIRECT", publishers: [{ domain: "larchwick-net.com", name: null, found_in: "ads.txt", own_file: true }] },
+  { seller_id: "400160", relationship: "DIRECT", publishers: [{ domain: "hazelburn-media.com", name: null, found_in: "ads.txt", own_file: true }] },
   // In publishers' files, missing from the sellers.json.
   { seller_id: "500301", relationship: "DIRECT", publishers: [{ domain: "saltmarsh-radio9.com", name: "Saltmarsh Radio 9", found_in: "ads.txt" }] },
   { seller_id: "500318", relationship: "DIRECT", publishers: [{ domain: "kettlebrook-games.com", name: "Kettlebrook Games", found_in: "app-ads.txt" }] },
@@ -167,4 +175,72 @@ export function brokenFile(file: SellersFile): SellersFile {
       { seller_id: 12345678901234567891, name: "Longid Media", domain: "longid-media.com", seller_type: "PUBLISHER" },
     ],
   };
+}
+
+/** Local SEGA regression demo: no real account or network requests. */
+export const segaReport = (recovered: boolean) => ({
+  domain: "kinetix.tv",
+  file: {version: "1.0", sellers: [
+    {seller_id:"10360",name:"Sega",domain:"sega.com",seller_type:"PUBLISHER"},
+    {seller_id:"10391",name:"CAS.AI",domain:"cas.ai",seller_type:"BOTH"},
+  ]},
+  checked_at: "2026-10-19T11:11:18Z",
+  file_url: "https://kinetix.tv/Sellers.json",
+  sightings: recovered ? [{seller_id:"10360",relationship:"DIRECT" as const,publishers_total:1,publishers:[{domain:"sega.com",found_in:"app-ads.txt",own_file:true}]}] : [],
+  file_checks: [
+    {url:"https://sega.com/ads.txt",seller_ids:["10360"],status:"absent" as const,via:"direct",http_status:404},
+    {url:"https://sega.com/app-ads.txt",seller_ids:["10360"],status: recovered ? "checked" as const : "unverified" as const,via:"proxy",proxy_country:recovered?"gb":null,http_status:recovered?200:429},
+    {url:"https://cas.ai/ads.txt",seller_ids:["10391"],status:"unverified" as const,via:"proxy",http_status:429},
+    {url:"https://cas.ai/app-ads.txt",seller_ids:["10391"],status:"unverified" as const,via:"proxy",http_status:429},
+  ],
+});
+
+export const mockCompletedChecks = mockSellersFile.sellers.flatMap(s => {
+  if(!s?.domain) return [];
+  try {
+    const host=new URL(`https://${String(s.domain).replace(/^https?:\/\//, "")}`).hostname.replace(/^www\./, "");
+    return ["ads.txt","app-ads.txt"].map(path=>({url:`https://${host}/${path}`,seller_ids:[String(s.seller_id).trim().toLowerCase()],status:"checked" as const,via:"direct"}));
+  } catch { return []; }
+});
+
+/** Full viewer fixture: every read outcome, with no live fetches. */
+export function verificationReport() {
+  const paths = ["ads.txt", "app-ads.txt"];
+  const examples = [
+    {id:"400105", host:"fogharbor-news7.com", status:"unverified", http:429, reason:"http_429", via:"proxy"},
+    {id:"400112", host:"bramblemist-tv.tv", status:"unverified", http:null, reason:"report_deadline", via:"direct"},
+    {id:"400118", host:"pebblecrest-apps.com", status:"checked", http:200, reason:null, via:"browser"},
+    {id:"400126", host:"cinderloft-games.com", status:"checked", http:200, reason:null, via:"proxy", country:"gb"},
+    {id:"400133", host:"quietfern.tv", status:"absent", http:404, reason:null, via:"direct"},
+    {id:"400180", host:"cloudwillow.example", status:"unverified", http:200, reason:"no_valid_file", via:"direct"},
+    {id:"400181", host:"ferncloud.example", status:"unverified", http:null, reason:"network_error", via:"direct"},
+  ] as const;
+  const ids = new Set<string>(examples.map(e=>e.id));
+  const file = {...mockSellersFile, sellers:[...mockSellersFile.sellers,
+    {seller_id:"400180", name:"Cloudwillow Media", domain:"cloudwillow.example", seller_type:"PUBLISHER"},
+    {seller_id:"400181", name:"Ferncloud Audio", domain:"ferncloud.example", seller_type:"PUBLISHER"},
+  ]};
+  const sightings:Sighting[] = [...mockSellerSightings,
+    ...examples.filter(e=>e.status === "checked").map(e=>({seller_id:e.id, relationship:"DIRECT" as const,
+      publishers:[{domain:e.host, found_in:"app-ads.txt", own_file:true}]})),
+  ];
+  const file_checks:import('./sellersFix').FileCheck[] = [
+    ...examples.flatMap(e=>paths.map(path=>({url:`https://${e.host}/${path}`,seller_ids:[e.id],
+      status:e.status, http_status:e.id === "400105" && path === "ads.txt" ? 403 : e.id === "400133" && path === "app-ads.txt" ? 410 : e.http, reason:e.reason, via:e.via,
+      proxy_country:'country' in e ? e.country : null,
+    }))),
+    ...mockCompletedChecks.filter(c=>!c.seller_ids.some(id=>ids.has(id))).map(c=>({...c,http_status:200})),
+  ];
+  const uniqueChecks = new Map<string, import('./sellersFix').FileCheck>();
+  for(const check of file_checks) {
+    const url = new URL(check.url);
+    url.hostname = url.hostname.replace(/\.$/, "");
+    if(!url.hostname.includes('.')) continue;
+    const normalized = url.toString();
+    const prior = uniqueChecks.get(normalized);
+    if(prior) prior.seller_ids = [...new Set([...prior.seller_ids, ...check.seller_ids])];
+    else uniqueChecks.set(normalized, {...check, url:normalized});
+  }
+  return {domain:MOCK_SELLERS_DOMAIN, file, sightings, file_checks:[...uniqueChecks.values()],
+    checked_at:MOCK_CHECKED_AT, file_url:`https://${MOCK_SELLERS_DOMAIN}/sellers.json`,file_warnings:[]};
 }

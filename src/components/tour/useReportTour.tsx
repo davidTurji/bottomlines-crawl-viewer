@@ -124,10 +124,19 @@ export function ReportTourProvider({ children }: { children: React.ReactNode }) 
     if (progress.open) return;
     let attempts = 0;
     let delay = 0;
+    let deferrals = 0;
+    const offer = () => {
+      // A delayed welcome must never compete with a modal or filter menu.
+      if (document.querySelector('[data-radix-popper-content-wrapper], [role="dialog"]:not([data-state="closed"]), .list-toolbar-filters[data-open="true"]')) {
+        if (++deferrals < 120) delay = window.setTimeout(offer, 250);
+        return;
+      }
+      setPrompting("offer");
+    };
     const timer = window.setInterval(() => {
       if (document.querySelector(READY_ANCHOR)) {
         window.clearInterval(timer);
-        delay = window.setTimeout(() => setPrompting("offer"), PROMPT_DELAY_MS);
+        delay = window.setTimeout(offer, PROMPT_DELAY_MS);
       } else if (++attempts >= READY_ATTEMPTS) {
         window.clearInterval(timer);
       }

@@ -1,7 +1,15 @@
 import { FormEvent, useEffect, useState } from "react";
 import { Eye, EyeOff, Lock } from "lucide-react";
 import AuthHero3D from "@/components/AuthHero3D";
-import { api, ApiError, MOCK, onLinkRefused, onUnauthorized } from "@/lib/api";
+import {
+  api,
+  ApiError,
+  holdDataRequests,
+  MOCK,
+  onLinkRefused,
+  onUnauthorized,
+  releaseDataRequests,
+} from "@/lib/api";
 import { useReportScope } from "@/lib/reportScope";
 import {
   EXPIRED_LINK_MESSAGE,
@@ -50,9 +58,6 @@ function rememberUser(token: string, username: string) {
  */
 export default function LoginGate({ children }: { children: React.ReactNode }) {
   const { token } = useReportScope();
-  const [locked, setLocked] = useState(false);
-  const [dead, setDead] = useState(false);
-  const [epoch, setEpoch] = useState(0);
   /* The weekly email's button carries the reader's sign-in (David,
      2026-10-05): the sign-in form opens already FILLED IN, password shown,
      so they see their username and password and sign in with one press,
@@ -61,18 +66,36 @@ export default function LoginGate({ children }: { children: React.ReactNode }) {
     const creds = MOCK ? null : peekLinkSignin();
     return creds ? { ...creds, error: "" } : null;
   });
-  useEffect(() => {
-    if (prefill) setLocked(true);
-  }, [prefill]);
+  // LOCKED FROM THE FIRST RENDER on the link's sign-in (demo of #75): the
+  // form, not the report, so no page mounts and asks for data it cannot
+  // have yet; and every data request waits for the sign-in (api.ts).
+  const [locked, setLocked] = useState(() => {
+    if (!prefill) return false;
+    holdDataRequests();
+    return true;
+  });
+  const [dead, setDead] = useState(false);
+  const [epoch, setEpoch] = useState(0);
 
   useEffect(() => {
-    onUnauthorized(() => setLocked(true));
+    onUnauthorized(() => {
+      // The first 401 holds every request after it until the sign-in.
+      holdDataRequests();
+      setLocked(true);
+    });
     onLinkRefused(() => setDead(true));
     return () => {
       onUnauthorized(null);
       onLinkRefused(null);
+      // Never a request left waiting for a sign-in that cannot come.
+      releaseDataRequests();
     };
   }, []);
+  // A dead link is the end of it: nothing is held for it (re-review of
+  // #75: requests must never wait forever).
+  useEffect(() => {
+    if (dead) releaseDataRequests();
+  }, [dead]);
 
   if (dead && !MOCK) {
     return <ReportNoticeCard message={EXPIRED_LINK_MESSAGE} />;
@@ -84,6 +107,7 @@ export default function LoginGate({ children }: { children: React.ReactNode }) {
         token={token}
         prefill={prefill}
         onAuthed={() => {
+          releaseDataRequests();
           setLocked(false);
           setEpoch((e) => e + 1);
         }}

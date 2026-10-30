@@ -214,7 +214,21 @@ function ResolvingScreen() {
  * inside a link that is perfectly valid, so telling the reader it has
  * expired is a lie. Send them to the report's overview instead.
  */
-export function ReportSubpathRedirect() {
+export function ReportSubpathRedirect({ page = "" }: { page?: string }) {
   const { basePath } = useReportScope();
-  return <Navigate to={basePath || "/"} replace />;
+  const { search, hash } = useLocation();
+  const pathname = page ? `${basePath}/${page}` : basePath || "/";
+  return <Navigate to={{ pathname, search, hash }} replace />;
+}
+
+/**
+ * /changes, and anything under it: the Changes page is gone, its statuses
+ * are tabs of the Overview's lists (David, 2026-10-27). The link's query
+ * (the line filter, the only filter the page kept in its address) and its
+ * fragment (a sign-in) ride along.
+ */
+export function ChangesRedirect() {
+  const { basePath } = useReportScope();
+  const { search, hash } = useLocation();
+  return <Navigate to={{ pathname: basePath || "/", search, hash }} replace />;
 }

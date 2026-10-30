@@ -24,8 +24,38 @@ import type { DiscoveredLine } from "./api";
  * and ranking it against a number would be inventing data.
  */
 export function deltaValue(l: DiscoveredLine): number | null {
-  if (l.previous_placements_count == null) return null;
-  return l.placements_count - l.previous_placements_count;
+  // Last week did not watch this line's domain: not new, no move.
+  if (l.previous_watched === false) return 0;
+  const m = lineMeasure(l);
+  if (m.before === null) return null;
+  // Last week counted something else: there, but no move to rank.
+  return m.before === undefined ? 0 : m.now - m.before;
+}
+
+/**
+ * WHAT A LINE'S NUMBERS COUNT, one rule for the card and the sorts
+ * (review, 2026-10-11). Publishers once each when this week counts them and
+ * last week either counted them too or did not have the line; otherwise
+ * listings (one per publisher file) on both sides, so a week that counted
+ * files is never set against one that counted publishers.
+ */
+export function lineMeasure(l: DiscoveredLine): {
+  unit: "publishers" | "listings";
+  now: number;
+  /** null: the line is new. undefined: it was there last week, but last
+   *  week counted listings, so there is no number to set against this one. */
+  before: number | null | undefined;
+} {
+  // One unit per report: every line of a report from 2026-10-11 carries
+  // publishers_count, so a page never mixes publishers and listings.
+  if (l.publishers_count != null) {
+    return {
+      unit: "publishers",
+      now: l.publishers_count,
+      before: l.previous_placements_count == null ? null : (l.previous_publishers_count ?? undefined),
+    };
+  }
+  return { unit: "listings", now: l.placements_count ?? 0, before: l.previous_placements_count };
 }
 
 /**
@@ -47,7 +77,8 @@ function byIdentity(a: DiscoveredLine, b: DiscoveredLine): number {
 
 /** Widest line first. The old default, still what "Most publishers" means. */
 function byCount(a: DiscoveredLine, b: DiscoveredLine): number {
-  return b.placements_count - a.placements_count;
+  // Publishers once each where the report counts them (2026-10-11).
+  return lineMeasure(b).now - lineMeasure(a).now;
 }
 
 /**
@@ -86,12 +117,12 @@ export type SortKey =
   | "biggest_decrease"
   | "ssp_az";
 
-export const SORT_OPTIONS: { value: SortKey; label: string }[] = [
-  { value: "default", label: "New and biggest gains" },
-  { value: "most_publishers", label: "Most publishers" },
-  { value: "biggest_increase", label: "Biggest increase" },
-  { value: "biggest_decrease", label: "Biggest decrease" },
-  { value: "ssp_az", label: "SSP domain (A-Z)" },
+export const SORT_OPTIONS: { value: SortKey; label: string; description: string; group: string }[] = [
+  { value: "default", label: "New and biggest gains", description: "New lines first, then the largest increases across the full list.", group: "Recommended" },
+  { value: "most_publishers", label: "Most publishers", description: "Rank the current page by reach, largest first.", group: "Current page" },
+  { value: "biggest_increase", label: "Biggest increase", description: "Rank the current page by growth since the compared crawl.", group: "Current page" },
+  { value: "biggest_decrease", label: "Biggest decrease", description: "Rank the current page by losses since the compared crawl.", group: "Current page" },
+  { value: "ssp_az", label: "SSP domain (A-Z)", description: "Sort the current page alphabetically by exchange domain.", group: "Current page" },
 ];
 
 /**

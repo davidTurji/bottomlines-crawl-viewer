@@ -68,7 +68,7 @@ export function SearchBox({
             onChange("");
           }}
           aria-label="Clear search"
-          className="absolute right-2 top-1/2 flex h-5 w-5 -translate-y-1/2 items-center justify-center rounded-full text-slate-400 transition-colors hover:bg-muted hover:text-slate-600"
+          className="absolute right-2 top-1/2 flex h-5 w-5 -translate-y-1/2 items-center justify-center rounded-md text-slate-400 transition-colors hover:bg-muted hover:text-slate-600"
         >
           <X className="h-3 w-3" />
         </button>
@@ -77,9 +77,9 @@ export function SearchBox({
   );
 }
 
-/** The arrows: quiet round buttons inside the bar, faded out at the ends. */
+/** The arrows: quiet buttons inside the bar, faded out at the ends. */
 const ARROW =
-  "flex h-8 w-8 items-center justify-center rounded-full text-slate-500 transition-all duration-200 hover:bg-slate-100 hover:text-slate-900 active:scale-95 disabled:pointer-events-none disabled:opacity-30";
+  "flex h-8 w-8 items-center justify-center rounded-md text-slate-500 transition-colors duration-200 hover:bg-slate-100 hover:text-slate-900 disabled:pointer-events-none disabled:opacity-30";
 
 /**
  * Which page numbers the bar shows. Seven slots once there are more than
@@ -130,6 +130,7 @@ export function Pager({
   total,
   onPage,
   noun,
+  nounOne,
   placement = "bottom",
   anchorRef,
   className,
@@ -140,9 +141,15 @@ export function Pager({
   onPage: (next: number) => void;
   /** Plural noun for the count line, e.g. "publishers". */
   noun: string;
+  /** Singular noun for a count of one, e.g. "publisher". Without it the
+   *  plural stands for every count. */
+  nounOne?: string;
   /** The copy above the rows says nothing on a single page: the one below
-   *  already carries the count, and saying it twice is noise. */
-  placement?: "top" | "bottom";
+   *  already carries the count, and saying it twice is noise. "inline" is
+   *  the pager on the list's controls row (2026-10-25), at the right of the
+   *  search box: it always carries the count, and the page numbers only
+   *  when there is more than one page. */
+  placement?: "top" | "bottom" | "inline";
   /** `usePaging`'s topRef, on the top pager: where a turn from the bottom
    *  scrolls back to. */
   anchorRef?: React.Ref<HTMLDivElement>;
@@ -154,12 +161,14 @@ export function Pager({
   /** Which "…" is open as a type-a-page box, if either. */
   const [jumping, setJumping] = useState<"gap-l" | "gap-r" | null>(null);
   const [draft, setDraft] = useState("");
+  const [compactJump, setCompactJump] = useState(false);
 
-  useEffect(() => setJumping(null), [page]);
+  useEffect(() => { setJumping(null); setCompactJump(false); }, [page]);
 
   const go = () => {
     const n = Number.parseInt(draft, 10);
     setJumping(null);
+    setCompactJump(false);
     // Out of range snaps to the nearest real page rather than refusing.
     // Typing 9999 clearly means "the end", and an error message there would
     // be pedantry about a number the reader does not know the bound of.
@@ -173,8 +182,8 @@ export function Pager({
   if (pages <= 1) {
     if (placement === "top") return null;
     return (
-      <p className="px-1 text-xs text-slate-500">
-        {total.toLocaleString()} {noun}
+      <p className={cn("text-xs tabular-nums text-slate-500", placement === "inline" ? "whitespace-nowrap" : "px-1", className)}>
+        {total.toLocaleString()} {total === 1 && nounOne ? nounOne : noun}
       </p>
     );
   }
@@ -182,12 +191,17 @@ export function Pager({
   return (
     <div
       ref={anchorRef}
+      data-list-pager
+      data-pager-placement={placement}
       className={cn(
-        "flex flex-wrap items-center justify-between gap-x-4 gap-y-2 px-1",
+        "report-pager",
+        placement === "inline"
+          ? "flex flex-wrap items-center justify-end gap-x-3 gap-y-2"
+          : "flex flex-wrap items-center justify-between gap-x-4 gap-y-2 px-1",
         className,
       )}
     >
-      <p className="text-xs text-slate-500">
+      <p className="whitespace-nowrap text-xs text-slate-500">
         <span className="font-semibold tabular-nums text-slate-800">
           {first.toLocaleString()}&ndash;{last.toLocaleString()}
         </span>{" "}
@@ -195,7 +209,11 @@ export function Pager({
       </p>
       <nav
         aria-label="Pages"
-        className="inline-flex items-center gap-0.5 rounded-full border border-slate-200 bg-white p-1 shadow-sm"
+        data-pages={pages}
+        className={cn(
+          "inline-flex items-center gap-0.5 rounded-md border border-slate-200 bg-white",
+          "report-pager-nav p-[3px]",
+        )}
       >
         <button
           type="button"
@@ -206,18 +224,31 @@ export function Pager({
         >
           <ChevronLeft className="h-4 w-4" />
         </button>
+        {compactJump ? (
+          <input className="list-toolbar-page-position h-8 w-14 rounded-md border border-primary/40 bg-white text-center text-xs tabular-nums outline-none"
+            autoFocus inputMode="numeric" aria-label={`Go to page, 1 to ${pages.toLocaleString()}`} value={draft}
+            onChange={e => setDraft(e.target.value.replace(/[^0-9]/g, ""))} onBlur={go}
+            onKeyDown={e => { if(e.key === "Enter") e.currentTarget.blur(); if(e.key === "Escape") setCompactJump(false); }} />
+        ) : (
+          <button type="button" className="list-toolbar-page-position h-8 whitespace-nowrap rounded-md px-2 text-xs tabular-nums text-slate-600 hover:bg-slate-100"
+            aria-label={`Page ${page} of ${pages}, enter a page`} title="Go to a page"
+            onClick={() => { setDraft(String(page)); setCompactJump(true); }}>
+            <span className="font-semibold text-slate-900">{page.toLocaleString()}</span><span className="px-1 text-slate-400">/</span>{pages.toLocaleString()}
+          </button>
+        )}
         {pageSlots(page, pages).map((slot) =>
           typeof slot === "number" ? (
             <button
               key={slot}
               type="button"
               onClick={() => slot !== page && onPage(slot)}
+              data-page-number
               aria-label={`Page ${slot}`}
               aria-current={slot === page ? "page" : undefined}
               className={cn(
-                "h-8 min-w-8 rounded-full px-2 text-xs font-semibold tabular-nums transition-all duration-200 active:scale-95",
+                "h-8 min-w-8 rounded-md px-2 text-xs font-semibold tabular-nums transition-colors duration-200",
                 slot === page
-                  ? "bg-gradient-to-b from-[hsl(152_50%_32%)] to-primary text-white shadow-sm shadow-primary/30"
+                  ? "bg-primary text-white"
                   : "text-slate-600 hover:bg-slate-100 hover:text-slate-900",
               )}
             >
@@ -240,8 +271,9 @@ export function Pager({
                   setJumping(null);
                 }
               }}
+              data-page-gap
               aria-label={`Go to page, 1 to ${pages.toLocaleString()}`}
-              className="h-8 w-12 rounded-full border border-primary/40 bg-white text-center text-xs font-semibold tabular-nums text-slate-900 outline-none ring-2 ring-primary/15 animate-in fade-in zoom-in-95 duration-150 placeholder:text-slate-300"
+              className="h-8 w-12 rounded-md border border-primary/40 bg-white text-center text-xs font-semibold tabular-nums text-slate-900 outline-none ring-2 ring-primary/15 animate-in fade-in zoom-in-95 duration-150 placeholder:text-slate-300"
             />
           ) : (
             <button
@@ -251,9 +283,10 @@ export function Pager({
                 setDraft("");
                 setJumping(slot);
               }}
+              data-page-gap
               aria-label="Go to a page"
               title="Go to a page"
-              className="h-8 w-8 rounded-full text-xs font-semibold text-slate-400 transition-all duration-200 hover:bg-slate-100 hover:text-slate-700"
+              className="h-8 w-8 rounded-md text-xs font-semibold text-slate-400 transition-colors duration-200 hover:bg-slate-100 hover:text-slate-700"
             >
               &hellip;
             </button>
@@ -343,27 +376,46 @@ function scrollParentOf(el: Element): Element {
 export function TruncatedNotice({
   shown,
   noun,
+  nounOne,
 }: {
   shown: number;
   noun: string;
+  /** Singular noun for one row; the plural stands without it. */
+  nounOne?: string;
 }) {
   return (
     <p className="mt-3 rounded-lg border border-dashed border-border px-4 py-3 text-xs leading-relaxed text-slate-500">
       This report was frozen with an earlier row limit, so it carries the
-      first {shown.toLocaleString()} {noun} rather than all of them. Ask for
+      first {shown.toLocaleString()} {shown === 1 && nounOne ? nounOne : noun} rather than all of them. Ask for
       the report to be regenerated to get the full list.
     </p>
   );
 }
 
 /** What an empty result should say, which depends on WHY it is empty. */
-export function EmptyResult({ query, noun }: { query: string; noun: string }) {
+export function EmptyResult({
+  query,
+  noun,
+  onPage = false,
+  quiet,
+}: {
+  query: string;
+  noun: string;
+  /** The list was filtered on the loaded page only: say so, never "on
+   *  this report". */
+  onPage?: boolean;
+  /** What a tab that is merely quiet this week says ("No publishers lost
+   *  a line this week."), in place of "on this report". */
+  quiet?: string;
+}) {
   return (
-    <div className="rounded-lg border border-dashed border-border px-4 py-8 text-center">
+    <div data-empty-list className="rounded-lg border border-dashed border-border px-4 py-8 text-center">
       <p className="text-sm text-slate-600">
         {query
-          ? `No ${noun} match "${query}".`
-          : `No ${noun} on this report.`}
+          ? `No ${noun} match "${query}"${onPage ? " on this page" : ""}.`
+          : !onPage && quiet
+            ? quiet
+            : `No ${noun} on this ${onPage ? "page" : "report"}.`}
       </p>
       {query && (
         <p className="mt-1 text-xs text-slate-500">

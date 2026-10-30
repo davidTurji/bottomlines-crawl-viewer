@@ -1,7 +1,6 @@
-import { useEffect, useState, type ReactNode } from "react";
+import { useEffect, useLayoutEffect, useRef, useState, type CSSProperties, type ReactNode } from "react";
 
-import { introMotion } from "@/lib/introMotion";
-import { cn } from "@/lib/utils";
+import { flushSync } from "react-dom";
 
 /**
  * QUIET MOTION for the report's lists (David, 2026-10-05: subtle, premium).
@@ -9,58 +8,139 @@ import { cn } from "@/lib/utils";
  * reader who asked the OS for less motion gets none of it.
  */
 
-const COLLAPSE_MS = 280;
+
+/** The one easing the list swap, its height and the Match type thumb share:
+ *  a quick start and a long, soft landing. */
+export const CALM_EASE = "cubic-bezier(0.2, 0.8, 0.2, 1)";
+
+/** Whether the reader asked the OS for less motion, read at the moment of
+ *  use (the setting can change while the page is open). */
+export function prefersReducedMotion(): boolean {
+  try {
+    return window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+  } catch {
+    return false;
+  }
+}
 
 /**
- * An expanded row's body that eases open and shut in height instead of
- * snapping. Animates grid rows 0fr to 1fr, so it needs no measuring and
- * follows whatever the body grows to. The body mounts on open and unmounts
- * once the close has played, so a closed row still costs nothing, and a
- * row that is open when it first renders simply shows (no animation on
- * arrival).
+ * True once `on` has held for `ms`, false the moment it drops. For a
+ * "still loading" sign that should never flash on an answer that comes
+ * back at once.
  */
-export function Collapse({
-  open,
-  children,
-}: {
-  open: boolean;
-  children: ReactNode;
-}) {
-  const [mounted, setMounted] = useState(open);
-  const [shown, setShown] = useState(open);
-
+export function useLingering(on: boolean, ms: number): boolean {
+  const [shown, setShown] = useState(false);
   useEffect(() => {
+    if (!on) {
+      setShown(false);
+      return;
+    }
+    const t = window.setTimeout(() => setShown(true), ms);
+    return () => window.clearTimeout(t);
+  }, [on, ms]);
+  return on && shown;
+}
+
+/** Shared accordion motion. Keep the outgoing body for its short close
+ *  transition, then unmount it so closed rows do no background work. */
+export function Collapse({ open, children, id }: { open: boolean; children: ReactNode; id?: string }) {
+  const [mounted, setMounted] = useState(open);
+  const [expanded, setExpanded] = useState(open);
+  const body = useRef<HTMLDivElement | null>(null);
+  const lastContent = useRef(children);
+  if (open) lastContent.current = children;
+  useLayoutEffect(() => {
+    if (prefersReducedMotion()) {
+      setMounted(open); setExpanded(open);
+      return;
+    }
+    let frame = 0;
+    let timer = 0;
     if (open) {
       setMounted(true);
-      // Two frames: the first paints the body at 0fr, the second lets the
-      // transition run from there rather than from nothing.
-      let inner = 0;
-      const outer = requestAnimationFrame(() => {
-        inner = requestAnimationFrame(() => setShown(true));
-      });
-      return () => {
-        cancelAnimationFrame(outer);
-        cancelAnimationFrame(inner);
-      };
+      // Commit the collapsed height before asking the browser to expand.
+      body.current?.getBoundingClientRect();
+      frame = requestAnimationFrame(() => setExpanded(true));
+    } else {
+      setExpanded(false);
+      timer = window.setTimeout(() => setMounted(false), 220);
     }
-    setShown(false);
-    const t = window.setTimeout(() => setMounted(false), COLLAPSE_MS);
-    return () => window.clearTimeout(t);
+    return () => { cancelAnimationFrame(frame); window.clearTimeout(timer); };
   }, [open]);
-
-  if (!mounted) return null;
-  return (
-    <div
-      className={cn(
-        "grid transition-[grid-template-rows,opacity] ease-out motion-reduce:transition-none",
-        shown ? "grid-rows-[1fr] opacity-100" : "grid-rows-[0fr] opacity-0",
-      )}
-      style={{ transitionDuration: `${COLLAPSE_MS}ms` }}
-    >
-      <div className="min-h-0 overflow-hidden">{children}</div>
-    </div>
-  );
+  return <div id={id} ref={node => { body.current = node; if (node) node.inert = !open; }}
+    aria-hidden={!open} data-expanded={expanded} className="report-expansion">
+    <div>{(open || mounted) ? (open ? children : lastContent.current) : null}</div>
+  </div>;
 }
+
+let cancelExpansionAnchor: (() => void) | undefined;
+
+/** Keep the current scroll range while a shorter list or panel replaces it.
+ * Without this floor, the browser clamps scrollTop before the close motion
+ * finishes, moving the KPIs even though the reader never asked to scroll.
+ * The floor shrinks as the reader scrolls up; a page change unmounts it. */
+function reserveViewport(anchor: HTMLElement) {
+  const scroller = anchor.closest<HTMLElement>("[data-report-main]");
+  const content = scroller?.querySelector<HTMLElement>("[data-report-content]");
+  if (!scroller || !content) return scroller;
+  const floor = Math.ceil(scroller.scrollTop + scroller.clientHeight);
+  content.style.minHeight = `${Math.max(floor, parseFloat(content.style.minHeight) || 0)}px`;
+  const existing = viewportFloors.get(scroller);
+  if (existing?.content !== content) {
+    if (existing) scroller.removeEventListener("scroll", existing.release);
+    const release = () => {
+      if (!content.isConnected) { scroller.removeEventListener("scroll", release); viewportFloors.delete(scroller); return; }
+      const next = Math.ceil(scroller.scrollTop + scroller.clientHeight);
+      if (next < (parseFloat(content.style.minHeight) || 0)) content.style.minHeight = `${next}px`;
+    };
+    scroller.addEventListener("scroll", release, { passive: true });
+    viewportFloors.set(scroller, { content, release });
+  }
+  return scroller;
+}
+const viewportFloors = new WeakMap<HTMLElement, { content: HTMLElement; release: () => void }>();
+
+/** Swap inventory/status without navigating away from the current viewport. */
+export function preserveReportViewport(anchor: HTMLElement | null, change: () => void) {
+  if (!anchor) { change(); return; }
+  const scroller = reserveViewport(anchor);
+  const top = scroller?.scrollTop;
+  flushSync(change);
+  if (scroller && top != null) scroller.scrollTop = top;
+}
+
+/** Keep the clicked header in place when another open panel above it closes. */
+export function toggleWithoutJump(button: HTMLElement, change: () => void) {
+  cancelExpansionAnchor?.();
+  const scroller = reserveViewport(button);
+  const before = button.getBoundingClientRect().top;
+  flushSync(change);
+  if (!scroller || !button.isConnected) return;
+  const align = () => {
+    const shift = button.getBoundingClientRect().top - before;
+    if (Math.abs(shift) > 0.5) scroller.scrollTop += shift;
+  };
+  align();
+  if (prefersReducedMotion()) return;
+  let frame = 0;
+  const start = performance.now();
+  const stop = () => {
+    cancelAnimationFrame(frame);
+    for (const event of ["wheel", "touchstart", "pointerdown", "keydown"]) window.removeEventListener(event, stop);
+    if (cancelExpansionAnchor === stop) cancelExpansionAnchor = undefined;
+  };
+  cancelExpansionAnchor = stop;
+  for (const event of ["wheel", "touchstart", "pointerdown", "keydown"]) window.addEventListener(event, stop, { passive: true });
+  const settle = () => {
+    if (!button.isConnected) { stop(); return; }
+    align();
+    if (performance.now() - start < 260) frame = requestAnimationFrame(settle);
+    else stop();
+  };
+  frame = requestAnimationFrame(settle);
+}
+
+let cancelGlide: (() => void) | undefined;
 
 /**
  * Scroll an element to the top of whatever scrolls it, easing in and out
@@ -68,7 +148,8 @@ export function Collapse({
  * scroll, which starts abruptly and varies by browser. Lands `offset` px
  * above the element. Less motion asked for: jumps straight there.
  */
-export function glideTo(el: HTMLElement | null, offset = 24, durationMs = 900) {
+export function glideTo(el: HTMLElement | null, offset = 24, durationMs = 320) {
+  cancelGlide?.();
   if (!el) return;
   let scroller: HTMLElement | null = el.parentElement;
   while (scroller) {
@@ -90,21 +171,36 @@ export function glideTo(el: HTMLElement | null, offset = 24, durationMs = 900) {
     box.scrollTop = to;
     return;
   }
+  let frame = 0;
+  const stop = () => {
+    cancelAnimationFrame(frame);
+    for (const event of ["wheel", "touchstart", "pointerdown", "keydown"]) window.removeEventListener(event, stop);
+    if (cancelGlide === stop) cancelGlide = undefined;
+  };
+  cancelGlide = stop;
+  for (const event of ["wheel", "touchstart", "pointerdown", "keydown"]) window.addEventListener(event, stop, { passive: true });
   const start = performance.now();
   const step = (now: number) => {
     const t = Math.min(1, (now - start) / durationMs);
     // Ease-in-out cubic.
     const eased = t < 0.5 ? 4 * t * t * t : 1 - Math.pow(-2 * t + 2, 3) / 2;
     box.scrollTop = from + (to - from) * eased;
-    if (t < 1) requestAnimationFrame(step);
+    if (t < 1) frame = requestAnimationFrame(step);
+    else stop();
   };
-  requestAnimationFrame(step);
+  frame = requestAnimationFrame(step);
 }
 
 /**
- * A list row that settles into place: up a few pixels and in from clear,
- * one row after another. The stagger stops growing after the first eight
- * rows, so a long page lands in well under a second.
+ * THE ROWS ROLL IN (David, 2026-10-27): every time a list lands, the first
+ * view and every switch after it (tab, match type, Popular, search, line
+ * filter, page, the publishers / apps tiles, Inactive), each row fades in
+ * and slides down 7px with a soft ease-out, 35ms after the row above it.
+ * The stagger stops at the seventh row, so a 25-row page is in within
+ * about 430ms, the rest arriving with the last batch: no long cascade.
+ * Transform and opacity only, so it stays on the compositor (no layout
+ * work, smooth on a phone); the row holds its space from the first frame,
+ * so nothing below it jumps. Less motion asked for: none (index.css).
  */
 export function Settle({
   index,
@@ -113,14 +209,8 @@ export function Settle({
   index: number;
   children: ReactNode;
 }) {
-  // Only on the first page opened (lib/introMotion), like the count-ups.
-  const [play] = useState(introMotion);
-  if (!play) return <div>{children}</div>;
   return (
-    <div
-      className="animate-in fade-in slide-in-from-bottom-1 fill-mode-both duration-500 ease-out motion-reduce:animate-none"
-      style={{ animationDelay: `${Math.min(index, 8) * 35}ms` }}
-    >
+    <div data-row-in className="bl-row-in" style={{ "--bl-row-delay": `${Math.min(index, 6) * 35}ms` } as CSSProperties}>
       {children}
     </div>
   );
