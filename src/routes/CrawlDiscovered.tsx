@@ -3,7 +3,7 @@ import { ReportButton } from "@/components/ReportButton";
 import { ReportDescription } from "@/components/ReportDescription";
 import { eachPage } from "@/lib/completePages";
 import { Pager, usePaging } from "@/components/ListControls";
-import { Collapse, Settle, toggleWithoutJump } from "@/components/Motion";
+import { Collapse, Settle, glideTo, preserveReportViewport, toggleWithoutJump } from "@/components/Motion";
 import { usePageCache } from "@/lib/pageCache";
 import LockedTail from "@/components/LockedTail";
 import { MiniStat } from "@/components/MiniStat";
@@ -746,9 +746,10 @@ function Roster({
   const [data, setData] = useState<RosterData>("loading");
   const [exporting, setExporting] = useState(false);
   const [exportError, setExportError] = useState<string | null>(null);
-  // Liveness, not per-run cancellation: setData("loading") re-renders, and
-  // a `let cancelled` closure would then discard the very response it
-  // waited for.
+  const rosterRef = useRef<HTMLDivElement>(null);
+  const latestRequest = useRef(0);
+  // Only the latest page/search response may land. A slower old response
+  // must never overwrite the current query's source files or count.
   const alive = useRef(true);
   useEffect(() => {
     alive.current = true;
@@ -760,14 +761,15 @@ function Roster({
   useEffect(() => setPage(1), [needle]);
   const key = lineKey(line);
   useEffect(() => {
-    setData((prev) => (typeof prev === "object" ? prev : "loading"));
+    const request = ++latestRequest.current;
+    setData("loading");
     const [ssp_domain, publisher_id, relationship, cert_id] = key.split("|");
     const lineId: DiscoveredLineKey = { ssp_domain, publisher_id, relationship, cert_id };
     api
       .discoveredLinePlacements(token, lineId, { page, page_size: ROSTER_PAGE, q: needle || undefined })
-      .then((r) => alive.current && setData({ rows: r.rows, total: r.total }))
+      .then((r) => alive.current && request === latestRequest.current && setData({ rows: r.rows, total: r.total }))
       .catch((e: unknown) => {
-        if (!alive.current) return;
+        if (!alive.current || request !== latestRequest.current) return;
         // 503 with the bake's own words: the report did not keep this
         // line's roster, which a retry cannot change. Any other failure,
         // a passing storage hiccup included, is an error.
@@ -781,8 +783,15 @@ function Roster({
   const rows = typeof data === "object" ? (whole ? data.rows : data.rows.slice(0, ROSTER_FIRST)) : [];
   const hidden = !whole && total != null ? Math.max(0, total - rows.length) : 0;
 
+  const showFewer = () => {
+    const root = rosterRef.current;
+    preserveReportViewport(root, () => { setPaged(false); setPage(1); setQ(""); });
+    const scroller = root?.closest<HTMLElement>("[data-report-main]");
+    if (root && scroller && root.getBoundingClientRect().top < scroller.getBoundingClientRect().top) glideTo(root, 16);
+  };
+
   return (
-    <>
+    <div ref={rosterRef} data-discovery-roster>
       <div className="mb-2 flex flex-wrap items-center justify-between gap-x-3 gap-y-1">
         <span className="text-xs font-medium text-slate-700">Where it was found</span>
         <span className="flex items-center gap-4">
@@ -890,7 +899,8 @@ function Roster({
             </div>
           )}
           {whole && (
-            <div className="mt-3">
+            <div className="mt-3 flex flex-wrap items-center justify-between gap-3">
+              <ReportButton variant="outline" onClick={showFewer} title="Return to the first three source files and clear the search">Show fewer</ReportButton>
               <Pager
                 page={page}
                 pageSize={ROSTER_PAGE}
@@ -902,7 +912,7 @@ function Roster({
           )}
         </div>
       )}
-    </>
+    </div>
   );
 }
 

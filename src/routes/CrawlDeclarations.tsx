@@ -361,7 +361,7 @@ export default function CrawlDeclarations() {
                 <>
                   <FilterSearch value={query} onChange={setQuery} placeholder="Filter by domain, named or naming" />
                   <FilterGroup>
-                    <FilterSelect value={kind} onChange={setKind} options={KIND_OPTIONS} leading="Kind" ariaLabel="Which declarations to show" />
+                    <FilterSelect value={kind} onChange={setKind} options={KIND_OPTIONS.filter(option => !data.legacy || option.value !== "manager domain")} leading="Kind" ariaLabel="Which declarations to show" />
                     <FilterSelect value={sort} onChange={setSort} options={SORT_OPTIONS} leading="Sort" ariaLabel="Sort declared domains" />
                   </FilterGroup>
                 </>

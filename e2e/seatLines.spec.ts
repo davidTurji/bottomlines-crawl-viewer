@@ -139,76 +139,24 @@ test.describe("line numbers", () => {
   });
 });
 
-test.describe("the seat line reads in full on a phone (David, 2026-10-27)", () => {
-  // At 390 px the partners at the right margin cut the line to "st...":
-  // on a phone they go on a line of their own under it, at the line's left
-  // edge, the number still on the first line; a long line wraps. Wider,
-  // nothing moves.
-  /** Opens rows until one lists a line with partners; its lines' geometry. */
-  const partnerRows = async (page: Page) => {
-    const all = page.locator('button[aria-label^="Show the seat lines of"], button[aria-label^="Hide the seat lines of"]');
-    await expect(all.first()).toBeVisible();
-    for (let i = 0; i < (await all.count()); i++) {
-      const row = all.nth(i);
-      if ((await row.getAttribute("aria-expanded")) !== "true") {
-        const box = await row.boundingBox();
-        await row.click({ position: { x: (box?.width ?? 100) - 24, y: 20 } });
-      }
-      await expect(openCard(page).locator("[data-line-text]").first()).toBeVisible();
-      const withVia = openCard(page).locator("li:has([data-line-via])");
-      if (await withVia.count()) return withVia;
-    }
-    throw new Error("no row with partners on the first page");
-  };
-  const geometry = (lis: Locator) =>
-    lis.evaluateAll((els) =>
-      els.map((li) => {
-        const text = li.querySelector("[data-line-text]") as HTMLElement;
-        // The copy shown at this width (one under the line on a phone, one
-        // at the margin wider).
-        const via = [...li.querySelectorAll("[data-line-via]")].find((e) => e.getClientRects().length > 0) as HTMLElement;
-        const no = li.querySelector("[data-line-no]") as HTMLElement;
-        const t = text.getBoundingClientRect();
-        const v = (li.querySelector("[data-ipd-explanation]") ?? via).getBoundingClientRect();
-        const n = no.getBoundingClientRect();
-        const lineH = parseFloat(getComputedStyle(text).lineHeight);
-        return {
-          clipped: text.scrollWidth > text.clientWidth + 1 || getComputedStyle(text).textOverflow === "ellipsis" && text.scrollWidth > text.clientWidth,
-          ellipsis: getComputedStyle(text).textOverflow,
-          viaBelow: v.top >= t.bottom - 1 && v.top - t.bottom <= 2,
-          sameLine: Math.abs(v.top - t.top) <= 2,
-          dx: Math.abs(v.left - t.left),
-          noOnFirstLine: Math.abs(n.top - t.top) <= 1 && n.height <= lineH + 1,
-          inside: v.right <= li.getBoundingClientRect().right + 1,
-        };
-      }),
-    );
-
-  test("390 px: the whole line, the partners under it at its left edge", async ({ page }) => {
-    const errors = watchErrors(page);
-    await page.setViewportSize({ width: 390, height: 844 });
-    await open(page, { matchType: true, realShapes: true });
-    const lis = await partnerRows(page);
-    const out = await geometry(lis);
-    expect(out.length).toBeGreaterThan(0);
-    for (const r of out) {
-      expect(r.clipped, "line text clipped").toBe(false);
-      expect(r.ellipsis).not.toBe("ellipsis");
-      expect(r.viaBelow, "partners right under the line").toBe(true);
-      expect(r.dx, "partners at the line's left edge").toBeLessThanOrEqual(1);
-      expect(r.noOnFirstLine, "number on the first line").toBe(true);
-      expect(r.inside, "partners inside the row").toBe(true);
-    }
-    expect(errors).toEqual([]);
-  });
-
-  test("desktop: IPD explanation stays directly under its seat line", async ({ page }) => {
+test.describe("IPD stays on the parent card; seat lines stay readable", () => {
+  for (const width of [1440, 390]) test(`${width}px: IPD summary and exact partner source remain available without repeated line badges`, async ({ page }) => {
+    await page.setViewportSize({ width, height: 844 });
     const errors = watchErrors(page);
     await open(page, { matchType: true, realShapes: true });
-    const out = await geometry(await partnerRows(page));
-    for (const r of out) {
-      expect(r.viaBelow, "match explanation below its seat line").toBe(true);
-      expect(r.ellipsis).toBe("ellipsis");
+    await chooseFilter(page, 'match-type', 'IPD');
+    const card = page.locator('.report-row').filter({hasText:'Samsung TV Plus'}).first();
+    await card.locator('.report-expand-control').click();
+    await expect(card.locator('[data-ipd-chip]')).toBeVisible();
+    await expect(card.locator('[data-ipd-where]')).toContainText('failarmy.tv');
+    await expect(card.locator('li [data-ipd-explanation], li [data-line-via], li .line-ipd-badge')).toHaveCount(0);
+    await expect(card.locator('[data-line-actions] .line-control-source').first()).toHaveAttribute('href', /^https:\/\/failarmy.tv\/ads.txt/);
+    if (width < 640) {
+      const geometry = await card.locator('[data-line-text]').evaluateAll(nodes => nodes.map(node => ({
+        clipped: node.scrollWidth > node.clientWidth + 1,
+        inside: node.getBoundingClientRect().right <= node.closest('li')!.getBoundingClientRect().right + 1,
+      })));
+      expect(geometry.every(item => !item.clipped && item.inside)).toBe(true);
     }
     expect(errors).toEqual([]);
   });
@@ -291,3 +239,4 @@ test.describe("seller roles live on the Sellers.json page", () => {
     expect(errors).toEqual([]);
   });
 });
+import { chooseFilter } from './filterChoice';

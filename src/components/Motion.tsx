@@ -75,10 +75,44 @@ export function Collapse({ open, children, id }: { open: boolean; children: Reac
 
 let cancelExpansionAnchor: (() => void) | undefined;
 
+/** Keep the current scroll range while a shorter list or panel replaces it.
+ * Without this floor, the browser clamps scrollTop before the close motion
+ * finishes, moving the KPIs even though the reader never asked to scroll.
+ * The floor shrinks as the reader scrolls up; a page change unmounts it. */
+function reserveViewport(anchor: HTMLElement) {
+  const scroller = anchor.closest<HTMLElement>("[data-report-main]");
+  const content = scroller?.querySelector<HTMLElement>("[data-report-content]");
+  if (!scroller || !content) return scroller;
+  const floor = Math.ceil(scroller.scrollTop + scroller.clientHeight);
+  content.style.minHeight = `${Math.max(floor, parseFloat(content.style.minHeight) || 0)}px`;
+  const existing = viewportFloors.get(scroller);
+  if (existing?.content !== content) {
+    if (existing) scroller.removeEventListener("scroll", existing.release);
+    const release = () => {
+      if (!content.isConnected) { scroller.removeEventListener("scroll", release); viewportFloors.delete(scroller); return; }
+      const next = Math.ceil(scroller.scrollTop + scroller.clientHeight);
+      if (next < (parseFloat(content.style.minHeight) || 0)) content.style.minHeight = `${next}px`;
+    };
+    scroller.addEventListener("scroll", release, { passive: true });
+    viewportFloors.set(scroller, { content, release });
+  }
+  return scroller;
+}
+const viewportFloors = new WeakMap<HTMLElement, { content: HTMLElement; release: () => void }>();
+
+/** Swap inventory/status without navigating away from the current viewport. */
+export function preserveReportViewport(anchor: HTMLElement | null, change: () => void) {
+  if (!anchor) { change(); return; }
+  const scroller = reserveViewport(anchor);
+  const top = scroller?.scrollTop;
+  flushSync(change);
+  if (scroller && top != null) scroller.scrollTop = top;
+}
+
 /** Keep the clicked header in place when another open panel above it closes. */
 export function toggleWithoutJump(button: HTMLElement, change: () => void) {
   cancelExpansionAnchor?.();
-  const scroller = button.closest<HTMLElement>("[data-report-main]");
+  const scroller = reserveViewport(button);
   const before = button.getBoundingClientRect().top;
   flushSync(change);
   if (!scroller || !button.isConnected) return;

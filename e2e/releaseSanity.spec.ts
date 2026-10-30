@@ -39,8 +39,9 @@ for (const width of [1440,390,320]) {
     await chooseFilter(page,'match-type','IPD');
     const samsung = page.locator('.report-row').filter({hasText:'Samsung TV Plus'}).first();
     await samsung.locator('.report-expand-control').click();
-    await expect(samsung.locator('[data-ipd-explanation]').first()).toContainText('IPD Matches via failarmy.tv');
-    await expect(samsung.locator('[data-ipd-explanation] a').first()).toHaveAttribute('href',/^https:\/\/failarmy.tv\/ads.txt/);
+    await expect(samsung.locator('[data-ipd-where]')).toContainText('Via failarmy.tv');
+    await expect(samsung.locator('[data-ipd-explanation]')).toHaveCount(0);
+    await expect(samsung.locator('[data-line-actions] .line-control-source').first()).toHaveAttribute('href',/^https:\/\/failarmy.tv\/ads.txt/);
     if(width<640) expect(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth)).toBe(true);
     await samsung.scrollIntoViewIfNeeded();
     await page.screenshot({path:`outputs/pathfinder-release-20261030/ipd-${width}.png`,animations:"disabled"});

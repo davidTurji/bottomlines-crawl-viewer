@@ -4,7 +4,7 @@ import { FilterBar, FilterGroup, FilterSearch, FilterSelect } from "@/components
 import InactiveSection, { type InactiveCards } from "@/components/InactiveSection";
 import LockedTail from "@/components/LockedTail";
 import { MiniStat } from "@/components/MiniStat";
-import { Collapse, Settle, glideTo, toggleWithoutJump } from "@/components/Motion";
+import { Collapse, Settle, glideTo, preserveReportViewport, toggleWithoutJump } from "@/components/Motion";
 import TrialBanner from "@/components/TrialBanner";
 import {
   OverviewSkeleton,
@@ -14,7 +14,7 @@ import {
   skeletonRowCount,
 } from "@/components/Skeleton";
 import { expectedRows, knownKey, type Landed } from "@/lib/expectedRows";
-import { useEffect, useId, useMemo, useRef, useState, type ReactNode } from "react";
+import { useCallback, useEffect, useId, useMemo, useRef, useState, type ReactNode } from "react";
 import { BEAT_PAUSE_MS, CountUp, landsAfterMs, payoffStyle } from "@/components/CountUp";
 import { LineFilter } from "@/components/LineFilter";
 import {
@@ -90,7 +90,6 @@ import {
   filesOf,
   linkable,
   LineActionGroup,
-  PartnerLinks,
   PublisherAvatarLink,
   PublisherDomainLink,
 } from "@/components/PublisherLinks";
@@ -182,7 +181,8 @@ export default function CrawlReport() {
     if (tab) setDrillTab(tab);
     setMatchedView(view);
   };
-  const pickView = (view: ListView) => showView(view);
+  const pickView = useCallback((view: ListView) => preserveReportViewport(listRef.current, () => setMatchedView(view)), []);
+  const pickStatus = useCallback((tab: DrillTab) => preserveReportViewport(listRef.current, () => setDrillTab(tab)), []);
   // Bumped by those two cards: the list opens its first row once it has
   // landed, so the reader sees the lines the card counted, not just names.
   const [openFirst, setOpenFirst] = useState(0);
@@ -705,7 +705,7 @@ export default function CrawlReport() {
             caps={summary.trial ?? null}
             inactive={inactive}
             tab={listTab}
-            setTab={setDrillTab}
+            setTab={pickStatus}
             openFirst={openFirst}
             matchType={matchType}
             setMatchType={setMatchType}
@@ -721,7 +721,7 @@ export default function CrawlReport() {
             caps={summary.trial ?? null}
             inactive={inactive}
             tab={listTab}
-            setTab={setDrillTab}
+            setTab={pickStatus}
             openFirst={openFirst}
             matchType={matchType}
             setMatchType={setMatchType}
@@ -3011,13 +3011,8 @@ export function SeatLineRow({
   // Why it was removed, when the report says (2026-10-26).
   const removal = change === "removed" ? removalReasonText(line) : null;
   const unchecked = lastConfirmedNote(line.last_confirmed);
-  // Keep the match chain beside the line on every screen size.
-  const via = partners.length > 0 && <RowNote data-ipd-explanation>
-    <span className="line-ipd-badge" title="Inventory partner domain">IPD</span>{" "}
-    <PartnerLinks partners={partners} line={line} gone={gone}
-      className="inline whitespace-normal break-words text-left text-slate-600" />
-    <span className="text-slate-500"> · declared inventory partner</span>
-  </RowNote>;
+  // The parent card explains IPD. Keep each line focused on its record,
+  // dates and source, while retaining its exact partner as the file target.
   const fileDomain = inOwn ? line.host || publisherDomain : partners[0];
   const foundIn = inOwn ? line.found_in : "ads.txt";
   const sourceKind = fileLabelOf(foundIn);
@@ -3030,7 +3025,6 @@ export function SeatLineRow({
           {line.cert_id && <span className="font-normal text-slate-400">, {line.cert_id}</span>}
         </RowText>
       )}
-      {via}
       {notes}
       {change === "cert" && typeof line.old_cert_id === "string" && (
         <RowNote data-cert-change>
