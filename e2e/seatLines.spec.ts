@@ -150,7 +150,10 @@ test.describe("IPD stays on the parent card; seat lines stay readable", () => {
     await expect(card.locator('[data-ipd-chip]')).toBeVisible();
     await expect(card.locator('[data-ipd-where]')).toContainText('failarmy.tv');
     await expect(card.locator('li [data-ipd-explanation], li [data-line-via], li .line-ipd-badge')).toHaveCount(0);
-    await expect(card.locator('[data-line-actions] .line-control-source').first()).toHaveAttribute('href', /^https:\/\/failarmy.tv\/ads.txt/);
+    await card.locator('[data-line-actions] .line-control-source').first().click();
+    const dialog=page.getByRole('dialog',{name:'Open source file'});
+    for(const partner of ['northfold-tv.com','failarmy.tv'])await expect(dialog.getByRole('link',{name:`${partner}/ads.txt`,exact:true})).toBeVisible();
+    await dialog.getByRole('button',{name:'Cancel',exact:true}).click();
     if (width < 640) {
       const geometry = await card.locator('[data-line-text]').evaluateAll(nodes => nodes.map(node => ({
         clipped: node.scrollWidth > node.clientWidth + 1,
