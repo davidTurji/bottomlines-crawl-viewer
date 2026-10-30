@@ -209,7 +209,11 @@ test.describe("an old report shows nothing of this", () => {
       for (const tab of ["All matched", "Added", "Removed", "Changed"]) {
         await page.getByRole("tab", { name: tab }).click();
         await expect(page.locator('[role="tab"][aria-selected="true"]', { hasText: tab })).toBeVisible();
-        await expect(anyCard(page)).toBeVisible();
+        if (view === "apps" && tab !== "All matched") {
+          await expect(page.locator("[data-unsupported-app-change]")).toBeVisible();
+          await expect(anyCard(page)).toHaveCount(0);
+          await expect(page.getByRole("button", { name: "Download", exact: true })).toHaveCount(0);
+        } else await expect(anyCard(page)).toBeVisible();
         await expect(control(page)).toHaveCount(0);
         await expect(page.locator("[data-ipd-chip], [data-ipd-where], [data-ipd-inconclusive]")).toHaveCount(0);
       }
@@ -307,7 +311,7 @@ test.describe("match type on a report that has it", () => {
     // Northfold TV carries all four in the fixtures (David, 2026-10-27:
     // "This page is all about matching and removing, nothing else").
     const errors = watchErrors(page);
-    await open(page, { matchType: true });
+    await open(page, { matchType: true, appChange: true });
     await page.getByRole("textbox", { name: "Search matched publishers" }).fill("Northfold");
     await expect(card(page, "Northfold TV")).toHaveCount(1);
     const closed = page.getByRole("button", { name: "Show the seat lines of Northfold TV" });

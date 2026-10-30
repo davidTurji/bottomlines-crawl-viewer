@@ -126,9 +126,12 @@ for (const width of [1440, 390]) {
     const last = rows.last();
     const text = last.locator('[data-line-text]');
     await text.scrollIntoViewIfNeeded();
-    const rowY = await last.evaluate(el => el.getBoundingClientRect().top);
+    // Playwright may scroll again to make the text actionable (font/layout
+    // differs on Linux). Only movement caused by selection is a UI jump.
+    await last.evaluate(el => el.addEventListener('click', () => el.setAttribute('data-click-y', String(el.getBoundingClientRect().top)), { capture: true, once: true }));
     await text.click();
-    expect(Math.abs(await last.evaluate(el => el.getBoundingClientRect().top) - rowY)).toBeLessThanOrEqual(2);
+    const clickedY = Number(await last.getAttribute('data-click-y'));
+    expect(Math.abs(await last.evaluate(el => el.getBoundingClientRect().top) - clickedY)).toBeLessThanOrEqual(2);
     await expect(rows.first().getByRole('toolbar')).toHaveCount(0);
     await expect(last.getByRole('toolbar')).toHaveCount(1);
     await expect(last).toHaveClass(/line-entry-selected/);
