@@ -56,13 +56,49 @@ for (const width of [1440, 390, 320]) {
     await fix.getByRole("button", { name: "Add", exact: true }).click();
     await remove.getByRole("button", { name: "Add", exact: true }).click();
     await add.getByRole("button", { name: "Open", exact: true }).click();
-    await page.getByRole("textbox", { name: "Name for seller add-1", exact: true }).fill("New company");
+    const evidence = add.getByTestId("seller-source-evidence"), preview = add.getByTestId("seller-file-preview");
+    const evidenceToggle = evidence.getByRole("button", { name: /^Source evidence/ });
+    const previewToggle = preview.getByRole("button", { name: "File preview", exact: true });
+    await expect(add.getByRole("group", { name: "Seller details", exact: true })).toBeVisible();
+    await expect(evidenceToggle).toHaveAttribute("aria-expanded", "false");
+    await expect(previewToggle).toHaveAttribute("aria-expanded", "false");
+    await add.getByText(width < 640 ? "Name" : "Seller name", { exact: true }).click();
+    await expect(page.getByRole("textbox", { name: "Seller name for seller add-1", exact: true })).toBeFocused();
+    await page.getByRole("textbox", { name: "Seller name for seller add-1", exact: true }).fill("New company");
     await page.getByRole("textbox", { name: "Domain for seller add-1", exact: true }).fill("new.example");
-    await page.getByRole("combobox", { name: "seller_type for seller add-1", exact: true }).selectOption("INTERMEDIARY");
+    await page.getByRole("combobox", { name: "Account role for seller add-1", exact: true }).selectOption("INTERMEDIARY");
+    if (width < 640) {
+      const help = add.getByRole("button", { name: "About account roles", exact: true });
+      await expect(help).toHaveAttribute("aria-expanded", "false");
+      await help.click();
+      await expect(help).toHaveAttribute("aria-expanded", "true");
+      await help.click();
+      await expect(help).toHaveAttribute("aria-expanded", "false");
+    }
     const expected = {
       ...original,
       sellers: [{ ...original.sellers[0], domain: "fix.example" }, original.sellers[2], { seller_id: "add-1", name: "New company", domain: "new.example", seller_type: "INTERMEDIARY" }],
     };
+    await evidenceToggle.click();
+    await expect(evidence.getByRole("link", { name: /Open exchange\.example, add-1, DIRECT in publisher\.example\/ads\.txt/ })).toBeVisible();
+    await evidence.getByRole("button", { name: "Copy exchange.example, add-1, DIRECT", exact: true }).click();
+    await expect.poll(() => page.evaluate(() => navigator.clipboard.readText())).toBe("exchange.example, add-1, DIRECT");
+    await previewToggle.click();
+    await expect(preview).toContainText("New company");
+    await evidenceToggle.click();
+    await previewToggle.click();
+    await add.getByRole("button", { name: "Close", exact: true }).click();
+    await add.getByRole("button", { name: "Open", exact: true }).click();
+    await expect(page.getByRole("textbox", { name: "Seller name for seller add-1", exact: true })).toHaveValue("New company");
+    await expect(page.getByRole("combobox", { name: "Account role for seller add-1", exact: true })).toHaveValue("INTERMEDIARY");
+    const rowBounds = await add.boundingBox();
+    for (const input of await add.locator("input, select").all()) {
+      const bounds = await input.boundingBox();
+      expect(bounds!.x + bounds!.width).toBeLessThanOrEqual(rowBounds!.x + rowBounds!.width);
+    }
+    expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
+    await add.scrollIntoViewIfNeeded();
+    await page.screenshot({ path: `outputs/pathfinder-contract-audit-20261030/sellers-form-${width}.png`, animations: "disabled" });
     expect(await exported(page)).toEqual(expected);
     expect(await exported(page, "last")).toEqual(expected);
     await page.getByRole("button", { name: "Copy file", exact: true }).first().click();
@@ -114,8 +150,8 @@ test("new file keeps explicit seller identity and header choices", async ({ page
   for (const label of ["Sellers found", "Selected", "Missing names"]) await expect(page.getByText(label, { exact: true })).toBeVisible();
   await page.locator("#sellers-contact_email").fill("new@exchange.example");
   await page.locator("#seller-add-1").getByRole("button", { name: "Open", exact: true }).click();
-  await page.getByRole("textbox", { name: "Name for seller add-1", exact: true }).fill("New company");
-  await page.getByRole("combobox", { name: "seller_type for seller add-1", exact: true }).selectOption("PUBLISHER");
+  await page.getByRole("textbox", { name: "Seller name for seller add-1", exact: true }).fill("New company");
+  await page.getByRole("combobox", { name: "Account role for seller add-1", exact: true }).selectOption("PUBLISHER");
   expect(await exported(page)).toEqual({ version: "1.0", contact_email: "new@exchange.example", sellers: [{ seller_id: "add-1", name: "New company", seller_type: "PUBLISHER" }] });
 });
 
@@ -126,4 +162,29 @@ test("unsafe numeric IDs still block every Copy file and Download file control",
     for (const button of await page.getByRole("button", { name: label, exact: true }).all()) await expect(button).toBeDisabled();
   }
   await expect(page.getByText("Copy and Download are off for this file", { exact: true })).toBeVisible();
+});
+
+test("fixes, duplicate copies and removal evidence remain available below their rows", async ({ page }) => {
+  const payload = fixture();
+  payload.file!.sellers.push({ ...payload.file!.sellers[0], name: "Other copy", custom: ["duplicate"] });
+  await open(page, payload);
+  const fix = page.locator("#seller-fix-1"), remove = page.locator("#seller-remove-1");
+  await fix.getByRole("button", { name: "Open", exact: true }).click();
+  const fixPreview = fix.getByTestId("seller-file-preview");
+  await fixPreview.getByRole("button", { name: "File preview", exact: true }).click();
+  await expect(fixPreview).toContainText("https://www.Fix.example/");
+  await expect(fixPreview).toContainText("fix.example");
+  await expect(fixPreview).toContainText("Its other copy, taken out");
+  await expect(fixPreview).toContainText("Other copy");
+  await fix.getByRole("button", { name: "Add", exact: true }).click();
+  const output = await exported(page);
+  expect(output.sellers.filter(s => s.seller_id === "fix-1")).toEqual([{ ...original.sellers[0], domain: "fix.example" }]);
+  await remove.getByRole("button", { name: "Open", exact: true }).click();
+  const source = remove.getByTestId("seller-source-evidence");
+  await source.getByRole("button", { name: /^Source evidence/ }).click();
+  await expect(source.getByRole("link", { name: "review.example/ads.txt", exact: true })).toBeVisible();
+  await expect(source.getByRole("link", { name: "review.example/app-ads.txt", exact: true })).toBeVisible();
+  const removePreview = remove.getByTestId("seller-file-preview");
+  await removePreview.getByRole("button", { name: "File preview", exact: true }).click();
+  await expect(removePreview).toContainText("Review company");
 });

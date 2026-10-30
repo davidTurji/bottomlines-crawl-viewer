@@ -11,7 +11,7 @@ import {
   ShieldCheck,
   X,
 } from "lucide-react";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useId, useMemo, useState } from "react";
 
 import { EntryDiff, JsonDiff } from "@/components/JsonDiff";
 import { Collapse, Settle, glideTo, toggleWithoutJump } from "@/components/Motion";
@@ -101,6 +101,7 @@ const day = (iso: string | null | undefined) =>
 const PEEK = 3;
 const SECTION_CARD = "report-panel rounded-2xl border border-border bg-white p-5";
 const SECTION_TITLE = "flex items-center gap-2 font-display text-sm font-medium text-slate-700";
+const SELLER_ROLE_GUIDE = "Publisher: owns inventory, paid directly. Intermediary: others’ inventory or indirect payment. Both: both roles. DIRECT/RESELLER does not determine the role.";
 
 type Header = { contact_email: string; contact_address: string; tag_id: string };
 
@@ -824,9 +825,12 @@ function SuggestionCard({
   onSet: (on: boolean) => void;
   onEdit: (field: FillField, value: string) => void;
 }) {
+  const formId = useId();
+  const [roleHelpOpen, setRoleHelpOpen] = useState(false);
   const g = GROUP[group];
   const Icon = g.icon;
   const fields = fillInFields(row);
+  const sourceCount = Math.max(row.listingsTotal ?? 0, row.listings.length);
   // What is still missing: an add needs at least a name; a fix needs what
   // it asks for.
   const wanted = row.kind === "add" ? fields.filter((f) => f === "name") : fields;
@@ -909,70 +913,114 @@ function SuggestionCard({
         </ReportButton>
       </div>
       <Collapse open={open}>
-        <div className="space-y-3 border-t border-border bg-muted/20 px-4 py-3 text-[12px] text-slate-600">
-          <p className="leading-snug">{row.reason}</p>
-          <CheckLinks row={row} domain={domain} fileHref={fileHref} />
-          {/* The entry as it changes in the file, and the ads.txt lines
-              behind it, side by side. */}
-          <div className="grid grid-cols-1 gap-3 lg:grid-cols-2">
-            <div className="min-w-0 space-y-1.5">
-              <div className="text-[11px] font-medium text-slate-500">{row.kind === "add" ? "Suggested entry" : "File change"}</div>
-              <EntryOrRaw before={row.current} after={row.kind === "remove" ? null : row.suggested} />
-              {/* A duplicate's other copies, which the change takes out. */}
-              {row.dropped && row.dropped.length > 0 && (
+        <div className="border-t border-border bg-slate-50/50 px-3 py-3 text-xs text-slate-600 sm:px-4 sm:py-4">
+          <p className="mb-4 hidden leading-relaxed sm:block">{row.reason}</p>
+          {fields.length > 0 && (
+            <fieldset className="min-w-0 border-0 p-0">
+              <legend className="sr-only text-[13px] font-semibold text-slate-900 sm:not-sr-only sm:mb-3 sm:block">Seller details</legend>
+              <div className="grid min-w-0 grid-cols-1 gap-x-4 gap-y-2.5 sm:grid-cols-2 sm:gap-y-3">
+                {fields.map((f) => {
+                  const inputId = `${formId}-${f}`;
+                  return (
+                    <div key={f} className={cn("min-w-0", f === "seller_type" && "sm:col-span-2")}>
+                      <div className="mb-1.5 flex min-h-6 items-center justify-between gap-2 sm:min-h-0">
+                        <label htmlFor={inputId} className="block text-xs font-medium text-slate-700">
+                          <span className="sm:hidden">{f === "name" ? "Name" : f === "domain" ? "Domain" : "Role"}</span>
+                          <span className="hidden sm:inline">{f === "name" ? "Seller name" : f === "domain" ? "Domain" : "Account role"}</span>
+                        </label>
+                        {f === "seller_type" && (
+                          <ReportButton
+                            variant="outline"
+                            size="sm"
+                            aria-label="About account roles"
+                            aria-expanded={roleHelpOpen}
+                            aria-controls={`${formId}-mobile-roles`}
+                            onClick={event => toggleWithoutJump(event.currentTarget, () => setRoleHelpOpen(value => !value))}
+                            className="h-6 w-6 border-transparent bg-transparent p-0 text-slate-500 max-sm:min-h-6 sm:hidden"
+                          >
+                            <Info aria-hidden className="h-3.5 w-3.5" />
+                          </ReportButton>
+                        )}
+                      </div>
+                      {f === "seller_type" ? (
+                        <select
+                          id={inputId}
+                          value={typed?.seller_type ?? ""}
+                          onChange={(e) => onEdit(f, e.target.value)}
+                          aria-label={`Account role for seller ${row.seller_id}`}
+                          aria-required="true"
+                          aria-describedby={`${formId}-roles`}
+                          className={cn(INPUT, "h-10 text-[13px]")}
+                        >
+                          <option value="" disabled>Choose a role</option>
+                          {SELLER_TYPES.map((t) => (
+                            <option key={t} value={t}>{t === "PUBLISHER" ? "Publisher" : t === "INTERMEDIARY" ? "Intermediary" : "Both"}</option>
+                          ))}
+                        </select>
+                      ) : (
+                        <input
+                          id={inputId}
+                          value={shownValue(f)}
+                          onChange={(e) => onEdit(f, e.target.value)}
+                          placeholder={f === "name" ? "Seller or company name" : "example.com"}
+                          aria-label={`${f === "name" ? "Seller name" : "Domain"} for seller ${row.seller_id}`}
+                          aria-required={f === "name"}
+                          className={cn(INPUT, "h-10 text-[13px]")}
+                        />
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
+              {fields.includes("seller_type") && (
                 <>
-                  <div className="pt-1 text-[11px] font-medium text-slate-500">
-                    {row.dropped.length === 1 ? "Its other copy, taken out" : `Its other ${row.dropped.length} copies, taken out`}
+                  <p id={`${formId}-roles`} className="mt-2 hidden text-[11px] leading-relaxed text-slate-500 sm:block">{SELLER_ROLE_GUIDE}</p>
+                  <div className="sm:hidden">
+                    <Collapse open={roleHelpOpen} id={`${formId}-mobile-roles`}>
+                      <p className="pt-2 text-[11px] leading-relaxed text-slate-500">{SELLER_ROLE_GUIDE}</p>
+                    </Collapse>
                   </div>
-                  {row.dropped.map((d, i) => (
-                    <EntryOrRaw key={i} before={d} after={null} />
-                  ))}
                 </>
               )}
-            </div>
-            <div className="min-w-0">
-              <div className="mb-1 text-[11px] font-medium text-slate-500">Publisher evidence</div>
-              <ListingWindow row={row} domain={domain} group={group} sellerDomain={sellerDomainOf(row)} />
-            </div>
-          </div>
-          {/* What only the reader can say: who an add is, or the name or
-              domain a fix needs. */}
-          {fields.length > 0 && (
-            <div className={cn("grid grid-cols-1 gap-2", fields.length > 1 && "sm:grid-cols-2")}>
-              {fields.includes("seller_type") && (
-                <p className="sm:col-span-2">PUBLISHER: owns inventory, paid directly. INTERMEDIARY: others’ inventory or indirect payment. BOTH: both roles. DIRECT/RESELLER does not determine the role.</p>
-              )}
-              {fields.map((f) =>
-                f === "seller_type" ? (
-                  <select
-                    key={f}
-                    value={typed?.seller_type ?? ""}
-                    onChange={(e) => onEdit(f, e.target.value)}
-                    aria-label={`seller_type for seller ${row.seller_id}`}
-                    className={cn(INPUT, "h-8 font-mono text-[12px]", fields.length === 1 && "sm:max-w-xs")}
-                  >
-                    <option value="" disabled>
-                      Pick a seller_type
-                    </option>
-                    {SELLER_TYPES.map((t) => (
-                      <option key={t} value={t}>
-                        {t}
-                      </option>
-                    ))}
-                  </select>
-                ) : (
-                  <input
-                    key={f}
-                    value={shownValue(f)}
-                    onChange={(e) => onEdit(f, e.target.value)}
-                    placeholder={f === "name" ? "Seller name" : "Business domain (if it has a website)"}
-                    aria-label={`${f === "name" ? "Name" : "Domain"} for seller ${row.seller_id}`}
-                    className={cn(INPUT, "h-8 text-[12px]", f === "domain" && "font-mono", fields.length === 1 && "sm:max-w-xs")}
-                  />
-                ),
-              )}
-            </div>
+            </fieldset>
           )}
+          <div className={cn("divide-y divide-border border-t border-border", fields.length > 0 && "mt-3 sm:mt-4")}>
+            <ReportDisclosure
+              summary={
+                <span className="flex min-w-0 flex-wrap items-baseline gap-x-2 gap-y-1">
+                  <span>Source evidence</span>
+                  <span className="text-[11px] font-normal text-slate-400">
+                    {sourceCount.toLocaleString()} {sourceCount === 1 ? "line" : "lines"}
+                  </span>
+                </span>
+              }
+              triggerClassName="items-center py-2.5 text-xs font-medium text-slate-700 sm:py-3"
+              testId="seller-source-evidence"
+            >
+              <div className="space-y-3 pb-3">
+                <p className="leading-relaxed sm:hidden">{row.reason}</p>
+                <CheckLinks row={row} domain={domain} fileHref={fileHref} />
+                <ListingWindow row={row} domain={domain} group={group} sellerDomain={sellerDomainOf(row)} />
+              </div>
+            </ReportDisclosure>
+            <ReportDisclosure
+              summary="File preview"
+              triggerClassName="items-center py-2.5 text-xs font-medium text-slate-700 sm:py-3"
+              testId="seller-file-preview"
+            >
+              <div className="min-w-0 space-y-2 pb-3">
+                <EntryOrRaw before={row.current} after={row.kind === "remove" ? null : row.suggested} />
+                {row.dropped && row.dropped.length > 0 && (
+                  <>
+                    <div className="pt-1 text-[11px] font-medium text-slate-500">
+                      {row.dropped.length === 1 ? "Its other copy, taken out" : `Its other ${row.dropped.length} copies, taken out`}
+                    </div>
+                    {row.dropped.map((d, i) => <EntryOrRaw key={i} before={d} after={null} />)}
+                  </>
+                )}
+              </div>
+            </ReportDisclosure>
+          </div>
         </div>
       </Collapse>
     </div>
@@ -1390,7 +1438,7 @@ function ProblemsLine({
     return (
       <div className="flex items-center gap-2.5 px-4 py-3 text-[13px] font-medium text-slate-800">
         <Check aria-hidden className="h-4 w-4 flex-shrink-0 text-ok" />
-        <span>No structural issues detected in the file you download. Confirm seller identities, account roles and business domains before publishing.</span>
+        <span>No structural issues detected in the file you download. Confirm seller identities, account roles and domains before publishing.</span>
       </div>
     );
   }

@@ -533,6 +533,7 @@ test.describe("sellers.json links", () => {
       "https://madeupmedia.com/sellers.json#:~:text=%22300210%22",
     );
     await card.getByRole("button", { name: "Seller 300210, details" }).click();
+    await card.getByTestId("seller-source-evidence").getByRole("button", { name: /^Source evidence/ }).click();
     await expect(card.getByRole("link", { name: /Open madeupmedia\.com, 300210, RESELLER in fernhollow-team\.it\/ads\.txt/ })).toHaveAttribute(
       "href",
       /^https:\/\/fernhollow-team\.it\/ads\.txt#:~:text=madeupmedia\.com%2C-,300210&text=300210$/,
@@ -573,6 +574,7 @@ test.describe("sellers.json links", () => {
     const first = group.locator('[id^="seller-"]').first();
     const id = (await first.getAttribute("id"))!.replace("seller-", "");
     await first.getByRole("button", { name: `Seller ${id}, details` }).click();
+    await first.getByTestId("seller-source-evidence").getByRole("button", { name: /^Source evidence/ }).click();
     await expect(first.getByText("Check it yourself:")).toBeVisible();
     await expect(first.getByRole("link", { name: `madeupmedia.com/sellers.json at ${id}` })).toBeVisible();
     await expect(first.getByRole("link", { name: /\/ads\.txt$/ }).first()).toHaveAttribute("href", /^https:\/\/[^/]+\/ads\.txt/);
@@ -940,6 +942,7 @@ test.describe("a seller seen only in its own file", () => {
     await expect(row).toBeVisible();
     await expect(row.getByText(/seller_type/)).toHaveCount(0);
     await row.getByRole("button", { name: "Seller 400160, details" }).click();
+    await row.getByTestId("seller-source-evidence").getByRole("button", { name: /^Source evidence/ }).click();
     await expect(row.getByText(/in the seller's own file on/)).toBeVisible();
     await expect(row.getByText(/The name has spaces around it/).first()).toBeVisible();
   });
