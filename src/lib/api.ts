@@ -365,7 +365,7 @@ export const api = {
   ) => {
     if (MOCK) {
       const { mockDeveloperEvents } = await import("./mockData");
-      const r = mockDeveloperEvents(event, page, lines ?? [], mockMatchType(matchType));
+      const r = mockDeveloperEvents(event, page, lines ?? [], mockMatchType(matchType), q, pageSize);
       return trialMock()
         ? {
             ...r,

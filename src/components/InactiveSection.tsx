@@ -208,7 +208,7 @@ export default function InactiveSection({
               : " Showing only those with the selected lines.")}
         </p>
         <div ref={paging.topRef}>
-          <FilterBar actions={ready && !loading && rows.length > 0 && !locked ? <ExportListButton run={exportList} noun={noun} /> : null}>
+          <FilterBar actions={ready && !loading && rows.length > 0 && !locked ? <ExportListButton run={exportList} noun={kind} status="inactive" query={query} filtered={lines.length > 0} /> : null}>
             <FilterSearch value={query} onChange={setQuery} placeholder={`Search ${noun}`} />
             {ready && !loading && rows.length > 0 && !locked && <>
               <Pager placement="inline" className="list-toolbar-pager" page={page} pageSize={PAGE_SIZE}

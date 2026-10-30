@@ -376,7 +376,6 @@ async function crawl(page: Page, vp: string): Promise<Run> {
   // every page of the list (it is never the metered export, but it is load).
   if (!LIVE) {
     await tap("list actions", page.getByRole("button", { name: "Download", exact: true }).first());
-    await tap("download CSV", page.getByRole("menuitem", { name: /Download .+ \(CSV\)/ }));
   }
 
   /* ── Popular: every choice, then the last one again (it clears). ── */

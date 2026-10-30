@@ -2482,7 +2482,7 @@ function DrilldownList({
             setQuery={setQuery}
             placeholder="Search publishers"
             label="Search matched publishers"
-            actions={!loading && settled > 0 && !error && rows.length > 0 && !trial && !caps ? <ExportListButton run={exportList} noun="publishers" /> : null}
+            actions={!loading && settled > 0 && !error && rows.length > 0 && !trial && !caps ? <ExportListButton run={exportList} noun="publishers" status={rowsTab} query={query} filtered={lines.length > 0 || rowsMatchType !== "all" || foundIn !== "all"} /> : null}
             filters={<>
               {foundInCounts && <FilterSelect value={foundIn} onChange={setFoundIn} leading="Found in" ariaLabel="Found in" testId="found-in" options={[
                 { value: "all", label: "All files", description: "Publishers matched in either source file." }, { value: "ads_txt", label: "ads.txt", description: "Publishers with matching lines in ads.txt." },
@@ -3707,7 +3707,7 @@ function MatchedAppsList({
             setQuery={setQuery}
             placeholder="Search apps"
             label="Search matched apps"
-            actions={!loading && settled > 0 && !failed && rows.length > 0 && !trial && !caps && !pageFiltered ? <ExportListButton run={exportList} noun="apps" /> : null}
+            actions={!loading && settled > 0 && !failed && rows.length > 0 && !trial && !caps && !pageFiltered ? <ExportListButton run={exportList} noun="apps" status={rowsTab} query={query} filtered={lines.length > 0 || rowsMatchType !== "all" || platform !== "all"} /> : null}
             filters={<>
               {platformCounts && <FilterSelect value={platform} onChange={setPlatform} leading="Platform" ariaLabel="Platform" testId="platform" options={[
                 { value: "all", label: "All", description: "Every app platform in this report." }, { value: "ctv", label: "CTV", description: "Connected TV apps and channels." }, { value: "mobile", label: "Mobile", description: "Mobile apps, including iOS and Android." }, { value: "web", label: "Web", description: "Apps classified as web by this report." },
