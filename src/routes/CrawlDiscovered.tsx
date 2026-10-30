@@ -716,7 +716,10 @@ function LineCard({
               ))}
             </ul>
           )}
-          <Roster token={token} line={line} initialQ={search} canExport={canExport} />
+          <Roster token={token} line={line}
+            initialQ={[line.ssp_domain, line.publisher_id, line.relationship, line.cert_id]
+              .some(value => value.toLowerCase().includes(search.trim().toLowerCase())) ? "" : search}
+            canExport={canExport} />
         </div>
       </Collapse>
     </div>
@@ -827,11 +830,11 @@ function Roster({
               onClick={() => {
                 setExporting(true);
                 setExportError(null);
-                downloadLineCsv(token, line).catch((e: unknown) => setExportError(e instanceof Error ? e.message : "Export failed. Please try again."))
+                downloadLineCsv(token, line, needle).catch((e: unknown) => setExportError(e instanceof Error ? e.message : "Export failed. Please try again."))
                   .finally(() => setExporting(false));
               }}
               className="report-download-action list-toolbar-action"
-              aria-label="Export every publisher source file carrying this line as CSV"
+              aria-label={needle ? "Export matching publisher source files as CSV" : "Export every publisher source file carrying this line as CSV"}
             >
               <Download className="h-3.5 w-3.5" />
               {exporting ? "Preparing..." : "Export CSV"}
@@ -894,7 +897,7 @@ function Roster({
                   onClick={() => setPaged(true)}
                   className="inline-flex items-center gap-1.5 rounded-full bg-primary px-4 py-2 text-[13px] font-semibold text-primary-foreground shadow-sm transition-colors hover:bg-primary/90"
                 >
-                  Show {Math.min(ROSTER_PAGE, total ?? 0).toLocaleString()} more
+                  Show {Math.max(0, Math.min(ROSTER_PAGE, total ?? 0) - rows.length).toLocaleString()} more
                 </button>
               </div>
             </div>
@@ -1048,7 +1051,7 @@ const fileSafe = (s: string) => s.replace(/[^A-Za-z0-9._-]+/g, "-").replace(/^-+
 
 /** Every publisher and app carrying one line, read whole from the
  *  placements endpoint (500 a page, its cap), one row each. */
-async function downloadLineCsv(token: string, line: DiscoveredLine) {
+async function downloadLineCsv(token: string, line: DiscoveredLine, query = "") {
   const header = [
     "ssp_domain",
     "seller_id",
@@ -1069,8 +1072,13 @@ async function downloadLineCsv(token: string, line: DiscoveredLine) {
     cert_id: line.cert_id,
   };
   const rows: string[][] = [];
+  if (query) {
+    const whole = await api.discoveredLinePlacements(token, id, { page: 1, page_size: 1 });
+    if (whole.total !== line.placements_count)
+      throw new Error("This report contains an incomplete source list. Request a complete new report. Nothing was exported.");
+  }
   await eachPage(
-    (page) => api.discoveredLinePlacements(token, id, { page, page_size: 500 }),
+    (page) => api.discoveredLinePlacements(token, id, { page, page_size: 500, q: query || undefined }),
     500,
     (pageRows) => { for (const p of pageRows) {
       rows.push([
@@ -1088,7 +1096,7 @@ async function downloadLineCsv(token: string, line: DiscoveredLine) {
       ]);
     }
     }, undefined, undefined, {
-      expectedTotal: line.placements_count,
+      expectedTotal: query ? undefined : line.placements_count,
       key: (p) => JSON.stringify([p.developer_domain, p.file_host || p.developer_domain, p.found_in, p.store || "", p.bundle_id || ""]),
     },
   );

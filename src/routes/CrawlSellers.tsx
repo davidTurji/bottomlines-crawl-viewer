@@ -42,6 +42,7 @@ import {
 } from "@/lib/sellersFix";
 import { cn, foundInLabel } from "@/lib/utils";
 import { checkSellerDraft, draftEdits, sameDraft, type SellerDraft } from "@/lib/sellerDraft";
+import { downloadBlob } from "@/lib/fileDownload";
 
 import { api, type SellersFixPayload, type Summary } from "../lib/api";
 import { SplitStat } from "./CrawlReport";
@@ -260,14 +261,7 @@ export default function CrawlSellers() {
     if (blocked) return;
     if (!data || !exportFile) return;
     const blob = new Blob([exportText], { type: "application/json;charset=utf-8" });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement("a");
-    a.href = url;
-    a.download = `${data.domain}-sellers.json`;
-    document.body.appendChild(a);
-    a.click();
-    a.remove();
-    URL.revokeObjectURL(url);
+    downloadBlob(blob, `${data.domain}-sellers.json`);
   };
 
   /** Only complete, explicitly selected drafts can enter the generated file. */
@@ -1409,7 +1403,7 @@ function Decision({
         onClick={() => onSet(false)}
         aria-pressed={!on}
         title={`Leave this ${d.action} suggestion out of your downloaded file`}
-        className={!on ? "border-slate-300 bg-slate-100 text-slate-800" : undefined}
+        className={!on ? "border-slate-400 bg-slate-200 text-slate-900 shadow-inner hover:border-slate-400 hover:bg-slate-200" : undefined}
       >
         <X aria-hidden className="h-3.5 w-3.5" strokeWidth={2.5} />
         Skip
