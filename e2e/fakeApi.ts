@@ -672,10 +672,10 @@ export async function installFakeApi(page: Page, scenario: Scenario = {}): Promi
         return reply(200, { format: "xlsx", line_export: true, excel_row_limit: 1_048_576 });
       case "developer-events": {
         const event = (q.get("event") ?? "added") as "added" | "removed" | "changed";
-        let r = mockDeveloperEvents(event, page_, lines, matchType);
+        let r = mockDeveloperEvents(event, page_, lines, matchType, q.get("q") ?? "");
         if (s.foundIn) {
           const asked = q.get("found_in");
-          const f = split(readAll((p) => mockDeveloperEvents(event, p, lines, matchType)), (d) => fakeFoundIn(d as unknown as Record<string, unknown>), ["ads_txt", "app_ads_txt", "both"], asked);
+          const f = split(readAll((p) => mockDeveloperEvents(event, p, lines, matchType, q.get("q") ?? "")), (d) => fakeFoundIn(d as unknown as Record<string, unknown>), ["ads_txt", "app_ads_txt", "both"], asked);
           r = { ...r, rows: f.kept.slice((page_ - 1) * 25, page_ * 25), total: f.kept.length, found_in_counts: f.counts, found_in: asked ?? "all" } as typeof r;
         }
         r.rows = r.rows.map(eventRow).map((d) => (s.removalReasons ? withRemovalReasons(d) : d));

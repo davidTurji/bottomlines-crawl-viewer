@@ -1,3 +1,5 @@
+import { selectStatus } from "./statusChoice";
+import { chooseFilter } from "./filterChoice";
 /**
  * EVERY SWITCH WAITS WITH THE SKELETON (David, 2026-10-27: production still
  * dimmed the old rows under a "•••" on the match type switch). Whatever the
@@ -65,7 +67,7 @@ test("match type pills, on publishers and on apps", async ({ page }) => {
   await open(page);
   await lands(page, rows(page));
   let release = await hold(page, /matched-developers\?.*match_type=ipd/);
-  await page.getByTestId("match-type").getByRole("button", { name: "IPD", exact: true }).click();
+  await chooseFilter(page, "match-type", "IPD");
   await waits(page, rows(page));
   release();
   await lands(page, rows(page));
@@ -73,7 +75,7 @@ test("match type pills, on publishers and on apps", async ({ page }) => {
   await page.getByRole("button", { name: /Matched apps/ }).first().click();
   await lands(page, rows(page));
   release = await hold(page, /matched-apps\?.*match_type=own/);
-  await page.getByTestId("match-type").getByRole("button", { name: "Own", exact: true }).click();
+  await chooseFilter(page, "match-type", "Own");
   await waits(page, rows(page));
   release();
   await lands(page, rows(page));
@@ -92,7 +94,7 @@ test("status tabs", async ({ page }) => {
   expect(errors).toEqual([]);
 });
 
-test("a Popular choice", async ({ page }) => {
+test.skip("a Popular choice (hidden for design review)", async ({ page }) => {
   const errors = watchErrors(page);
   await open(page);
   await lands(page, rows(page));
@@ -155,10 +157,10 @@ test("Inactive: its lists switch the same way", async ({ page }) => {
   const errors = watchErrors(page);
   await open(page);
   await lands(page, rows(page));
-  await page.getByRole("tab", { name: "Inactive", exact: true }).click();
+  await selectStatus(page, "Inactive");
   await lands(page, rows(page));
   const release = await hold(page, /\/inactive\?kind=apps/);
-  await page.getByRole("tablist", { name: "Inactive lists" }).getByRole("tab", { name: /Apps/ }).click();
+  await page.getByRole("button", { name: /Matched apps/ }).first().click();
   await waits(page, rows(page));
   release();
   await lands(page, rows(page));
@@ -184,7 +186,7 @@ test("the publishers / apps tiles, and a watch tab", async ({ page }) => {
 
   await page.getByRole("button", { name: /Matched publishers/ }).first().click();
   await lands(page, rows(page));
-  await page.getByRole("tab", { name: "Stopped watching", exact: true }).click();
+  await selectStatus(page, "Stopped watching");
   await waits(page, rows(page));
   stopped();
   await lands(page, rows(page));
@@ -196,7 +198,8 @@ test("the Found in switch (publishers) and the Platform switch (apps)", async ({
   await open(page);
   await lands(page, rows(page));
   let release = await hold(page, (u) => u.pathname.endsWith("/matched-developers") && u.searchParams.has("found_in"));
-  await page.getByTestId("found-in").getByRole("button").nth(1).click();
+  await page.getByTestId("found-in").click();
+  await page.getByRole("menuitem").nth(1).click();
   await waits(page, rows(page));
   release();
   await lands(page, rows(page));
@@ -204,7 +207,8 @@ test("the Found in switch (publishers) and the Platform switch (apps)", async ({
   await page.getByRole("button", { name: /Matched apps/ }).first().click();
   await lands(page, rows(page));
   release = await hold(page, (u) => u.pathname.endsWith("/matched-apps") && u.searchParams.has("platform"));
-  await page.getByTestId("platform").getByRole("button").nth(1).click();
+  await page.getByTestId("platform").click();
+  await page.getByRole("menuitem").nth(1).click();
   await waits(page, rows(page));
   release();
   await lands(page, rows(page));
@@ -223,15 +227,14 @@ test.describe("the skeleton draws the rows the list will land with (re-review of
     });
   const skeletonRows = (page: Page) => page.locator('[role="status"][aria-busy="true"] [data-skeleton-row]');
 
-  for (const how of ["the tab", "the Popular choice"] as const) {
+  for (const how of ["the tab"] as const) {
     test(`opened by ${how}: 2 rows, not a screenful`, async ({ page }) => {
       const errors = watchErrors(page);
       await open(page, "", () => two(page));
       await lands(page, rows(page));
-      await expect(page.locator('[data-popular="cert"]')).toBeVisible();
+
       const release = await hold(page, /developer-events\?event=changed/);
-      if (how === "the tab") await page.getByRole("tab", { name: "Changed", exact: true }).click();
-      else await page.locator('[data-popular="cert"]').click();
+      await page.getByRole("tab", { name: "Changed", exact: true }).click();
       await waits(page, rows(page));
       await expect(skeletonRows(page)).toHaveCount(2);
       release();

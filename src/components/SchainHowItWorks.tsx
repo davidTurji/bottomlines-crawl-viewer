@@ -1,6 +1,7 @@
 import * as Dialog from "@radix-ui/react-dialog";
 import { ArrowRight, ChevronDown, CircleHelp, X } from "lucide-react";
-import { useState, type ReactNode } from "react";
+import { useId, useState, type ReactNode } from "react";
+import { Collapse, toggleWithoutJump } from "@/components/Motion";
 
 import { cn } from "@/lib/utils";
 
@@ -52,7 +53,7 @@ export default function SchainHowItWorks({
         <Dialog.Overlay className="fixed inset-0 z-50 bg-slate-900/40 backdrop-blur-[2px] data-[state=open]:animate-sheet-overlay-in data-[state=closed]:animate-sheet-overlay-out" />
         <Dialog.Content
           aria-describedby={undefined}
-          className="fixed left-1/2 top-1/2 z-50 flex max-h-[min(44rem,calc(100dvh-2rem))] w-[min(42rem,calc(100vw-2rem))] -translate-x-1/2 -translate-y-1/2 flex-col overflow-hidden rounded-2xl border border-border bg-white shadow-2xl outline-none data-[state=open]:animate-dialog-in data-[state=closed]:animate-dialog-out"
+          className="report-dialog-center fixed z-50 flex max-h-[min(44rem,calc(var(--report-dialog-height,100dvh)-2rem))] w-[min(42rem,calc(var(--report-dialog-width,100vw)-2rem))] -translate-x-1/2 -translate-y-1/2 flex-col overflow-hidden rounded-2xl border border-border bg-white shadow-2xl outline-none data-[state=open]:animate-dialog-in data-[state=closed]:animate-dialog-out"
         >
           <div className="flex items-start justify-between gap-3 border-b border-border px-5 py-4 sm:px-6">
             <div className="min-w-0">
@@ -241,12 +242,14 @@ function Node({ label, value }: { label: string; value: string }) {
 
 function Faq({ q, children }: { q: string; children: ReactNode }) {
   const [open, setOpen] = useState(false);
+  const id = useId();
   return (
     <div>
       <button
         type="button"
-        onClick={() => setOpen((o) => !o)}
+        onClick={event => toggleWithoutJump(event.currentTarget, () => setOpen(value => !value))}
         aria-expanded={open}
+        aria-controls={id}
         className="flex w-full items-center justify-between gap-3 px-4 py-3 text-left text-[13px] font-medium text-slate-800 transition-colors hover:text-primary"
       >
         {q}
@@ -255,9 +258,9 @@ function Faq({ q, children }: { q: string; children: ReactNode }) {
           className={cn("h-4 w-4 flex-shrink-0 text-slate-400 transition-transform", open && "rotate-180")}
         />
       </button>
-      {open && (
+      <Collapse open={open} id={id}>
         <p className="px-4 pb-4 text-[13px] leading-relaxed text-slate-600">{children}</p>
-      )}
+      </Collapse>
     </div>
   );
 }

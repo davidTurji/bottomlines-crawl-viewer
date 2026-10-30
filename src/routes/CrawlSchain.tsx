@@ -1,3 +1,5 @@
+import { StoreBadge } from "@/components/StoreBadge";
+import { Collapse, toggleWithoutJump } from "@/components/Motion";
 import * as Dialog from "@radix-ui/react-dialog";
 import { Check, ChevronDown, CircleAlert, Clock, Download, Globe, Landmark, Loader2, Lock, Play, RefreshCw, Search, Smartphone } from "lucide-react";
 import { useEffect, useMemo, useState, type ReactNode } from "react";
@@ -7,13 +9,14 @@ import { PageShell } from "@/components/PageShell";
 import SchainHowItWorks from "@/components/SchainHowItWorks";
 import { Pager, usePaging } from "@/components/ListControls";
 import LockedTail from "@/components/LockedTail";
-import { SkeletonRows, SkeletonStatCards } from "@/components/Skeleton";
+import { ReportButton } from "@/components/ReportButton";
+import { SkeletonRows, SkeletonScreen, SkeletonStatCards } from "@/components/Skeleton";
 import TrialBanner from "@/components/TrialBanner";
 import { formatWeek, WeekLine } from "@/components/WeekLine";
 import { lineKey, lineLabel, sourceHint } from "@/lib/lineFilter";
 import { useReportScope } from "@/lib/reportScope";
 import { PAGE_SIZE } from "@/lib/paging";
-import { cn, foundInLabel, storeName } from "@/lib/utils";
+import { cn, foundInLabel } from "@/lib/utils";
 
 import {
   api,
@@ -166,7 +169,7 @@ export default function CrawlSchain() {
       </div>
 
       {error && <p className="py-4 text-sm text-critical">{error}</p>}
-      {!overview && !error && <SkeletonStatCards />}
+      {!overview && !error && <SkeletonScreen label="Loading schain"><SkeletonStatCards /></SkeletonScreen>}
       {overview && overview.status !== "ok" && <NotAvailable overview={overview} />}
 
       {overview && overview.status === "ok" && (
@@ -220,7 +223,7 @@ export default function CrawlSchain() {
                 type="button"
                 disabled={!selection || showResult}
                 onClick={() => setRan(selection)}
-                className="inline-flex h-10 flex-shrink-0 items-center justify-center gap-2 rounded-full bg-gradient-to-br from-primary to-[hsl(150_58%_22%)] px-5 text-sm font-medium text-primary-foreground shadow-sm transition-all hover:-translate-y-px hover:shadow-md disabled:pointer-events-none disabled:opacity-40"
+                className="inline-flex h-10 flex-shrink-0 items-center justify-center gap-2 rounded-lg report-action bg-primary px-5 text-sm font-medium text-primary-foreground transition-colors disabled:pointer-events-none disabled:opacity-40"
               >
                 <Play className="h-3.5 w-3.5" />
                 Run report
@@ -269,7 +272,7 @@ function Kpis({ overview, trial }: { overview: SchainOverview; trial: boolean })
   // Three left is green, two amber, one or none red.
   const leftTone = left >= 3 ? ("ok" as const) : left === 2 ? ("warn" as const) : ("critical" as const);
   return (
-    <div className="rounded-2xl border border-border bg-white p-5 shadow-sm" data-tour="schain-kpi">
+    <div className="report-panel rounded-2xl border border-border bg-white p-5" data-tour="schain-kpi">
       <div className="mb-3">
         <div className="font-display text-sm font-medium text-slate-700">Your sellers.json</div>
         <div className="text-[11px] text-slate-500">
@@ -777,7 +780,7 @@ function ChainStep({
         {/* 3. Node 2: you. */}
         <HopCard filled={!!sdk && !!sid2}>
           <div className="flex items-center gap-3">
-            <span className="flex h-9 w-9 flex-shrink-0 items-center justify-center rounded-full bg-gradient-to-br from-primary to-[hsl(150_58%_22%)] text-[11px] font-semibold text-primary-foreground shadow-sm ring-1 ring-inset ring-white/30">
+            <span className="flex h-9 w-9 flex-shrink-0 items-center justify-center rounded-full bg-primary text-[11px] font-semibold text-primary-foreground">
               You
             </span>
             <div className="min-w-0 flex-1">
@@ -1033,7 +1036,7 @@ function Result({
   }, [token, selection, page, view]);
 
   if (error) return <p className="py-2 text-sm text-critical">{error}</p>;
-  if (!preview) return <SkeletonStatCards />;
+  if (!preview) return <SkeletonScreen label="Loading schain preview"><SkeletonStatCards /></SkeletonScreen>;
 
   const f = preview.funnel;
   const t = preview.totals;
@@ -1050,14 +1053,14 @@ function Result({
       {/* All the KPIs first, in one card: what was run, the file, and the
           four checks. The publishers and apps that close the chain follow
           underneath (David, 2026-10-04: the stacked layout reads better). */}
-      <div className="rounded-2xl border border-border bg-white p-5 shadow-sm">
+      <div className="report-panel rounded-2xl border border-border bg-white p-5">
         <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
           <div className="min-w-0">
             <p className="font-display text-[17px] font-semibold leading-snug tracking-tight text-slate-900">
               {t.apps > 0 ? (
                 <>
-                  <span className="font-mono tabular-nums">{t.apps.toLocaleString()}</span> apps from{" "}
-                  <span className="font-mono tabular-nums">{t.publishers.toLocaleString()}</span> publishers close the
+                  <span className="font-sans tabular-nums">{t.apps.toLocaleString()}</span> apps from{" "}
+                  <span className="font-sans tabular-nums">{t.publishers.toLocaleString()}</span> publishers close the
                   chain
                 </>
               ) : (
@@ -1225,13 +1228,13 @@ function SchainPublisherCard({
   return (
     <div
       className={cn(
-        "overflow-hidden rounded-3xl border border-border bg-white shadow-sm transition-colors",
+        "report-row overflow-hidden rounded-xl border border-border bg-white shadow-sm transition-colors",
         open && "shadow-md",
       )}
     >
       <button
         type="button"
-        onClick={onToggle}
+        onClick={event => toggleWithoutJump(event.currentTarget, onToggle)}
         aria-expanded={open}
         className="flex w-full items-center gap-4 px-4 py-4 text-left sm:px-5"
       >
@@ -1257,7 +1260,7 @@ function SchainPublisherCard({
           className={cn("h-4 w-4 flex-shrink-0 text-slate-400 transition-transform", open && "rotate-180")}
         />
       </button>
-      {open && (
+      <Collapse open={open}>
         <div className="space-y-1.5 border-t border-border bg-accent/30 px-4 pb-4 pt-3 sm:px-5">
           <CardLine label="Your seat line" line={row.seat_written} />
           {row.direct_written.map((l) => (
@@ -1274,7 +1277,7 @@ function SchainPublisherCard({
             </a>
           </p>
         </div>
-      )}
+      </Collapse>
     </div>
   );
 }
@@ -1286,13 +1289,13 @@ function SchainAppCard({ row, open, onToggle }: { row: SchainRow; open: boolean;
   return (
     <div
       className={cn(
-        "overflow-hidden rounded-3xl border shadow-sm transition-colors",
+        "report-row overflow-hidden rounded-xl border shadow-sm transition-colors",
         open ? "border-app-border bg-app-bg/40 shadow-md" : "border-border bg-white",
       )}
     >
       <button
         type="button"
-        onClick={onToggle}
+        onClick={event => toggleWithoutJump(event.currentTarget, onToggle)}
         aria-expanded={open}
         className="flex w-full items-center gap-4 px-4 py-4 text-left sm:px-5"
       >
@@ -1304,9 +1307,7 @@ function SchainAppCard({ row, open, onToggle }: { row: SchainRow; open: boolean;
             <span title={row.app_name} className="truncate text-base font-semibold tracking-tight text-slate-900">
               {row.app_name}
             </span>
-            <span className="flex-shrink-0 rounded-full border border-app-border bg-app-bg px-1.5 py-px text-[10px] font-medium text-app">
-              {storeName(row)}
-            </span>
+            <StoreBadge row={row} />
           </div>
           <div className="truncate text-xs text-slate-500">
             publisher: <span className="text-slate-600">{row.publisher_domain}</span>
@@ -1321,7 +1322,7 @@ function SchainAppCard({ row, open, onToggle }: { row: SchainRow; open: boolean;
           className={cn("h-4 w-4 flex-shrink-0 text-slate-400 transition-transform", open && "rotate-180")}
         />
       </button>
-      {open && (
+      <Collapse open={open}>
         <div className="space-y-1.5 border-t border-app-border bg-app-bg/30 px-4 pb-4 pt-3 sm:px-5">
           <CardLine label="Bundle / store ID" line={row.bundle_id} />
           <CardLine label="Node 1 (asi1, sid1)" line={`${row.asi1}, ${row.sid1}`} />
@@ -1335,7 +1336,7 @@ function SchainAppCard({ row, open, onToggle }: { row: SchainRow; open: boolean;
             </p>
           )}
         </div>
-      )}
+      </Collapse>
     </div>
   );
 }
@@ -1410,7 +1411,7 @@ function Download3({
         type="button"
         disabled={empty || out}
         onClick={() => setOpen(true)}
-        className="inline-flex h-10 items-center gap-2 rounded-full bg-gradient-to-br from-primary to-[hsl(150_58%_22%)] px-5 text-sm font-medium text-primary-foreground shadow-sm transition-all hover:-translate-y-px hover:shadow-md disabled:pointer-events-none disabled:opacity-40"
+        className="inline-flex h-10 items-center gap-2 rounded-lg report-action bg-primary px-5 text-sm font-medium text-primary-foreground transition-colors disabled:pointer-events-none disabled:opacity-40"
       >
         <Download className="h-4 w-4" />
         Export
@@ -1424,7 +1425,7 @@ function Download3({
           <Dialog.Overlay className="fixed inset-0 z-50 bg-slate-900/40 backdrop-blur-[2px] data-[state=open]:animate-sheet-overlay-in data-[state=closed]:animate-sheet-overlay-out" />
           <Dialog.Content
             aria-describedby={undefined}
-            className="fixed left-1/2 top-1/2 z-50 w-[min(26rem,calc(100vw-2rem))] -translate-x-1/2 -translate-y-1/2 rounded-2xl border border-border bg-white p-5 shadow-2xl outline-none data-[state=open]:animate-dialog-in data-[state=closed]:animate-dialog-out sm:p-6"
+            className="report-dialog-center report-dialog-scroll fixed z-50 w-[min(26rem,calc(var(--report-dialog-width,100vw)-2rem))] -translate-x-1/2 -translate-y-1/2 rounded-2xl border border-border bg-white p-5 shadow-2xl outline-none data-[state=open]:animate-dialog-in data-[state=closed]:animate-dialog-out sm:p-6"
           >
             <Dialog.Title className="font-display text-[17px] font-semibold leading-snug tracking-tight text-slate-900">
               Download this schain file?
@@ -1494,23 +1495,12 @@ function Download3({
             {error && <p className="mt-2 text-[12px] text-critical">{error}</p>}
             <div className="mt-5 flex justify-end gap-2">
               <Dialog.Close asChild>
-                <button
-                  type="button"
-                  disabled={busy}
-                  className="h-10 rounded-full border border-border px-4 text-sm font-medium text-slate-700 hover:bg-muted/50"
-                >
-                  Cancel
-                </button>
+                <ReportButton variant="outline" disabled={busy}>Cancel</ReportButton>
               </Dialog.Close>
-              <button
-                type="button"
-                onClick={go}
-                disabled={busy || !agreed}
-                className="inline-flex h-10 items-center gap-2 rounded-full bg-gradient-to-br from-primary to-[hsl(150_58%_22%)] px-5 text-sm font-medium text-primary-foreground shadow-sm transition-all hover:-translate-y-px hover:shadow-md disabled:opacity-60"
-              >
+              <ReportButton onClick={go} disabled={busy || !agreed}>
                 {busy ? <Loader2 className="h-4 w-4 animate-spin" /> : <Download className="h-4 w-4" />}
                 {busy ? "Preparing" : "Download"}
-              </button>
+              </ReportButton>
             </div>
           </Dialog.Content>
         </Dialog.Portal>

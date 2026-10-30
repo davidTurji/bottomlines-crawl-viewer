@@ -117,12 +117,12 @@ export type SortKey =
   | "biggest_decrease"
   | "ssp_az";
 
-export const SORT_OPTIONS: { value: SortKey; label: string }[] = [
-  { value: "default", label: "New and biggest gains" },
-  { value: "most_publishers", label: "Most publishers" },
-  { value: "biggest_increase", label: "Biggest increase" },
-  { value: "biggest_decrease", label: "Biggest decrease" },
-  { value: "ssp_az", label: "SSP domain (A-Z)" },
+export const SORT_OPTIONS: { value: SortKey; label: string; description: string; group: string }[] = [
+  { value: "default", label: "New and biggest gains", description: "New lines first, then the largest increases across the full list.", group: "Recommended" },
+  { value: "most_publishers", label: "Most publishers", description: "Rank the current page by reach, largest first.", group: "Current page" },
+  { value: "biggest_increase", label: "Biggest increase", description: "Rank the current page by growth since the compared crawl.", group: "Current page" },
+  { value: "biggest_decrease", label: "Biggest decrease", description: "Rank the current page by losses since the compared crawl.", group: "Current page" },
+  { value: "ssp_az", label: "SSP domain (A-Z)", description: "Sort the current page alphabetically by exchange domain.", group: "Current page" },
 ];
 
 /**

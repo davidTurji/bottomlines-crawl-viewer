@@ -59,7 +59,7 @@ export function Skeleton({
  * `animate-in fade-in` on a short duration keeps the skeleton itself from
  * snapping in on a fast connection, where it may only exist for a frame.
  */
-function SkeletonScreen({
+export function SkeletonScreen({
   label,
   children,
 }: {

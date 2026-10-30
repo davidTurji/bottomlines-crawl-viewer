@@ -1,3 +1,5 @@
+import { selectStatus } from "./statusChoice";
+import { chooseFilter } from "./filterChoice";
 /**
  * MATCH TYPE: own or IPD (crawler PR #348).
  *
@@ -67,8 +69,6 @@ async function open(page: Page, scenario: Scenario): Promise<Calls> {
 }
 
 const control = (page: Page) => page.getByTestId("match-type");
-const pill = (page: Page, name: "All" | "Own" | "IPD") =>
-  control(page).getByRole("button", { name, exact: true });
 const card = (page: Page, name: string) =>
   page.getByRole("button", { name: new RegExp(`^(Show|Hide) the seat lines of ${name}$`) });
 const anyCard = (page: Page) =>
@@ -209,14 +209,18 @@ test.describe("an old report shows nothing of this", () => {
       for (const tab of ["All matched", "Added", "Removed", "Changed"]) {
         await page.getByRole("tab", { name: tab }).click();
         await expect(page.locator('[role="tab"][aria-selected="true"]', { hasText: tab })).toBeVisible();
-        await expect(anyCard(page)).toBeVisible();
+        if (view === "apps" && tab !== "All matched") {
+          await expect(page.locator("[data-unsupported-app-change]")).toBeVisible();
+          await expect(anyCard(page)).toHaveCount(0);
+          await expect(page.getByRole("button", { name: "Download", exact: true })).toHaveCount(0);
+        } else await expect(anyCard(page)).toBeVisible();
         await expect(control(page)).toHaveCount(0);
         await expect(page.locator("[data-ipd-chip], [data-ipd-where], [data-ipd-inconclusive]")).toHaveCount(0);
       }
       await page.getByRole("tab", { name: "All matched" }).click();
       // Row 1 is the tabs alone; row 2 the search and the count with the pager.
-      const row = page.getByRole("tablist").first().locator("xpath=../../..");
-      await expect(row).toHaveText(/^All matchedAddedRemovedChanged(Started watching)?(Stopped watching)?(Unconfirmed)?Inactive$/);
+      const row = page.getByRole("tablist").first();
+      await expect(row.getByRole("tab")).toHaveText(["All matched", "Added", "Removed", "Changed"]);
       await expect(page.locator("[data-list-count] p")).toHaveText(
         new RegExp(`^1–${PAGE_SIZE} of [\\d,]+ ${view}$`),
       );
@@ -239,10 +243,12 @@ test.describe("match type on a report that has it", () => {
     const counts = mockMatchedApps(1, "", [], "all").match_type_counts!;
     // One row with the tabs: All / Own / IPD, counts in the tooltips.
     await expect(control(page)).toBeVisible();
-    await expect(pill(page, "All")).toHaveAttribute("aria-pressed", "true");
-    await expect(pill(page, "All")).toHaveAttribute("title", `${counts.all.toLocaleString()} matched`);
-    await expect(pill(page, "Own")).toHaveAttribute("title", `${counts.own.toLocaleString()} own`);
-    await expect(pill(page, "IPD")).toHaveAttribute("title", `${counts.ipd.toLocaleString()} IPD`);
+    await expect(page.getByTestId("match-type")).toContainText("All");
+    await control(page).click();
+    await expect(page.getByRole("menuitem", { name: /^All/ })).toContainText(counts.all.toLocaleString());
+    await expect(page.getByRole("menuitem", { name: /^Own/ })).toContainText(counts.own.toLocaleString());
+    await expect(page.getByRole("menuitem", { name: /^IPD/ })).toContainText(counts.ipd.toLocaleString());
+    await page.keyboard.press("Escape");
     // The one Matched number counts IPD too: the count on the search row.
     await expect(page.locator("[data-list-count] p")).toHaveText(`1–${PAGE_SIZE} of ${counts.all.toLocaleString()} apps`);
 
@@ -260,15 +266,15 @@ test.describe("match type on a report that has it", () => {
     await expect(page.locator("[data-list-count] p")).toHaveText("1 app");
 
     // Under IPD.
-    await pill(page, "IPD").click();
-    await expect(pill(page, "IPD")).toHaveAttribute("aria-pressed", "true");
+    await chooseFilter(page, "match-type", "IPD");
+    await expect(page.getByTestId("match-type")).toContainText("IPD");
     await expect(card(page, "Samsung TV Plus")).toHaveCount(1);
     await expect(page.locator("[data-ipd-inconclusive]")).toHaveText(APP_NOTE);
     expect(calls.some((c) => c.path.endsWith("/matched-apps") && c.query.includes("match_type=ipd"))).toBe(true);
 
     // Never under Own; no chip there at all, and no note.
-    await pill(page, "Own").click();
-    await expect(pill(page, "Own")).toHaveAttribute("aria-pressed", "true");
+    await chooseFilter(page, "match-type", "Own");
+    await expect(page.getByTestId("match-type")).toContainText("Own");
     await expect(card(page, "Samsung TV Plus")).toHaveCount(0);
     await page.getByRole("textbox", { name: "Search matched apps" }).fill("");
     await expect(anyCard(page)).toBeVisible();
@@ -282,7 +288,7 @@ test.describe("match type on a report that has it", () => {
   test("the IPD publisher row, its lines in the partner's ads.txt, and the note on publishers too", async ({ page }) => {
     const errors = watchErrors(page);
     await open(page, { matchType: true });
-    await pill(page, "IPD").click();
+    await chooseFilter(page, "match-type", "IPD");
     await expect(card(page, "Samsung TV Plus")).toHaveCount(1);
     await expect(page.locator("[data-ipd-where]")).toHaveText([PUBLISHER_WHERE]);
     await expect(page.locator("[data-ipd-chip]")).toHaveAttribute(
@@ -305,7 +311,7 @@ test.describe("match type on a report that has it", () => {
     // Northfold TV carries all four in the fixtures (David, 2026-10-27:
     // "This page is all about matching and removing, nothing else").
     const errors = watchErrors(page);
-    await open(page, { matchType: true });
+    await open(page, { matchType: true, appChange: true });
     await page.getByRole("textbox", { name: "Search matched publishers" }).fill("Northfold");
     await expect(card(page, "Northfold TV")).toHaveCount(1);
     const closed = page.getByRole("button", { name: "Show the seat lines of Northfold TV" });
@@ -359,7 +365,7 @@ test.describe("match type on a report that has it", () => {
     const errors = watchErrors(page);
     const calls = await open(page, { matchType: true });
     await page.getByRole("tab", { name: "Added" }).click();
-    await pill(page, "IPD").click();
+    await chooseFilter(page, "match-type", "IPD");
     await expect(card(page, "Samsung TV Plus")).toHaveCount(1);
     await expect(page.locator("[data-ipd-chip]")).toHaveCount(1);
     await expect(page.locator("[data-ipd-where]")).toHaveText([PUBLISHER_WHERE]);
@@ -372,29 +378,29 @@ test.describe("match type on a report that has it", () => {
   test("match type stays across views and tabs, rides on Added, and hides on Inactive", async ({ page }) => {
     const errors = watchErrors(page);
     const calls = await open(page, { matchType: true });
-    await pill(page, "Own").click();
+    await chooseFilter(page, "match-type", "Own");
     await page.getByRole("tab", { name: "Added" }).click();
-    await expect(pill(page, "Own")).toHaveAttribute("aria-pressed", "true");
+    await expect(page.getByTestId("match-type")).toContainText("Own");
     await expect
       .poll(() => calls.some((c) => c.path.endsWith("/developer-events") && c.query.includes("match_type=own")))
       .toBe(true);
     await toApps(page);
     await expect(page.getByRole("tab", { name: "Added" })).toHaveAttribute("aria-selected", "true");
-    await expect(pill(page, "Own")).toHaveAttribute("aria-pressed", "true");
-    await page.getByRole("tab", { name: "Inactive" }).click();
+    await expect(page.getByTestId("match-type")).toContainText("Own");
+    await selectStatus(page, "Inactive");
     await expect(control(page)).toHaveCount(0);
     await page.getByRole("tab", { name: "All matched" }).click();
-    await expect(pill(page, "Own")).toHaveAttribute("aria-pressed", "true");
+    await expect(page.getByTestId("match-type")).toContainText("Own");
     await toPublishers(page);
-    await expect(pill(page, "Own")).toHaveAttribute("aria-pressed", "true");
+    await expect(page.getByTestId("match-type")).toContainText("Own");
     expect(errors).toEqual([]);
   });
 
   test("a list that does not say how it splits drops the pills and the filter", async ({ page }) => {
     const errors = watchErrors(page);
     await open(page, { matchType: true });
-    await pill(page, "IPD").click();
-    await expect(pill(page, "IPD")).toHaveAttribute("aria-pressed", "true");
+    await chooseFilter(page, "match-type", "IPD");
+    await expect(page.getByTestId("match-type")).toContainText("IPD");
     // This API's matched-apps answers in the old shape.
     await page.route("**/matched-apps?*", async (route) => {
       const url = new URL(route.request().url());
@@ -405,7 +411,7 @@ test.describe("match type on a report that has it", () => {
     await expect(control(page)).toHaveCount(0);
     await expect(page.locator("[data-ipd-chip]")).toHaveCount(0);
     await toPublishers(page);
-    await expect(pill(page, "All")).toHaveAttribute("aria-pressed", "true");
+    await expect(page.getByTestId("match-type")).toContainText("All");
     expect(errors).toEqual([]);
   });
 });
@@ -418,12 +424,6 @@ test.describe("match type on a report that has it", () => {
  * page already read lands at once. The one thumb still slides under the
  * chosen option; less motion asked for, it jumps.
  */
-const thumb = (page: Page) => page.locator("[data-match-type-thumb]");
-const centreX = async (l: ReturnType<Page["locator"]>) => {
-  const b = await l.boundingBox();
-  return b ? Math.round(b.x + b.width / 2) : -1;
-};
-
 /** Holds every answer of one list route until `release` is called, so a
  *  test can see what the page shows while it waits. */
 async function holdList(page: Page, glob: string) {
@@ -462,25 +462,22 @@ test.describe("a list that waits shows the skeleton", () => {
     expect(errors).toEqual([]);
   });
 
-  test("a match type switch on either list: the skeleton while it waits; the thumb follows", async ({ page }) => {
+  test("a match type switch on either list: the skeleton while it waits; the selected filter stays visible", async ({ page }) => {
     const errors = watchErrors(page);
     await open(page, { matchType: true });
-    await expect(thumb(page)).toHaveAttribute("data-match-type-thumb", "all");
     for (const view of ["publishers", "apps"] as const) {
       if (view === "apps") await toApps(page);
       await expect(anyCard(page)).toBeVisible();
       const held = await holdList(page, view === "apps" ? "**/matched-apps?*" : "**/matched-developers?*");
-      await pill(page, "Own").click();
-      await expect(pill(page, "Own")).toHaveAttribute("aria-pressed", "true");
-      await expect(thumb(page)).toHaveAttribute("data-match-type-thumb", "own");
-      await expect.poll(() => centreX(thumb(page))).toBe(await centreX(pill(page, "Own")));
+      await chooseFilter(page, "match-type", "Own");
+      await expect(page.getByTestId("match-type")).toContainText("Own");
       await expect(listSkeleton(page, view)).toBeVisible();
       await expect(anyCard(page)).toHaveCount(0);
       held.release();
       await expect(anyCard(page)).toBeVisible();
       await expect(listSkeleton(page, view)).toHaveCount(0);
       // Back to All: read before, so it lands at once (no skeleton needed).
-      await pill(page, "All").click();
+      await chooseFilter(page, "match-type", "All");
       await expect(anyCard(page)).toBeVisible();
     }
     expect(errors).toEqual([]);
@@ -500,24 +497,19 @@ test.describe("a list that waits shows the skeleton", () => {
     expect(errors).toEqual([]);
   });
 
-  test("arrow keys, Home and End move the choice; the control is one Tab stop", async ({ page }) => {
+  test("filter menu supports keyboard selection and returns focus to its trigger", async ({ page }) => {
     await open(page, { matchType: true });
-    await expect(pill(page, "All")).toHaveAttribute("tabindex", "0");
-    await expect(pill(page, "Own")).toHaveAttribute("tabindex", "-1");
-    await pill(page, "All").focus();
-    await page.keyboard.press("ArrowRight");
-    await expect(pill(page, "Own")).toHaveAttribute("aria-pressed", "true");
-    await expect(pill(page, "Own")).toBeFocused();
-    await expect(pill(page, "Own")).toHaveAttribute("tabindex", "0");
+    const trigger = control(page);
+    await trigger.focus();
+    await page.keyboard.press("Enter");
+    await expect(page.getByRole("menu")).toBeVisible();
+    await page.getByRole("menuitem").first().focus();
     await page.keyboard.press("End");
-    await expect(pill(page, "IPD")).toHaveAttribute("aria-pressed", "true");
-    await page.keyboard.press("ArrowRight");
-    await expect(pill(page, "All")).toHaveAttribute("aria-pressed", "true");
-    await page.keyboard.press("ArrowLeft");
-    await expect(pill(page, "IPD")).toHaveAttribute("aria-pressed", "true");
-    await page.keyboard.press("Home");
-    await expect(pill(page, "All")).toHaveAttribute("aria-pressed", "true");
-    await expect(pill(page, "All")).toBeFocused();
+    await expect(page.getByRole("menuitem", {name:/^IPD/})).toBeFocused();
+    await page.keyboard.press("Enter");
+    await expect(trigger).toContainText("IPD");
+    await expect(trigger).toBeFocused();
+    await expect(card(page, "Samsung TV Plus")).toHaveCount(1);
   });
 });
 
@@ -528,11 +520,9 @@ test.describe("less motion asked for", () => {
     const errors = watchErrors(page);
     await open(page, { matchType: true });
     await expect(anyCard(page)).toBeVisible();
-    expect(await thumb(page).evaluate((el) => getComputedStyle(el).transitionProperty)).toBe("none");
-    await pill(page, "IPD").click();
+    await chooseFilter(page, "match-type", "IPD");
     await expect(card(page, "Samsung TV Plus")).toHaveCount(1);
     // The thumb is already there: nothing to wait for.
-    expect(await centreX(thumb(page))).toBe(await centreX(pill(page, "IPD")));
     // Never a fade over the rows: they simply replace each other.
     await expect(page.locator("[data-list-fade], [data-list-swap]")).toHaveCount(0);
     expect(errors).toEqual([]);

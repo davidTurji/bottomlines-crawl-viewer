@@ -7,6 +7,7 @@ const BASE = (import.meta.env.VITE_API_BASE as string) ?? "/api";
 // The mock adapter lives in src/lib/mockData.ts.
 import { LINES_PARAM, linesQuery, serializeLines } from "./lineFilter";
 import { PAGE_SIZE } from "./paging";
+import { downloadBlob } from "./fileDownload";
 import { pageFromGone } from "./inactive";
 
 export const MOCK = (import.meta.env.VITE_MOCK as string | undefined) === "true";
@@ -61,9 +62,9 @@ function mockInactiveVariant(s: Summary): Summary {
 
 // ── AI chat flag ─────────────────────────────────────────────────
 // The MVP backend ships no chat endpoint, so the Ask AI surface is
-// hidden unless explicitly enabled (VITE_ENABLE_CHAT=true), e.g. for
-// mock-mode demos. Default off.
-export const ENABLE_CHAT =
+// available only in mock-mode demos. A production build cannot expose
+// a control whose backend endpoint has not shipped.
+export const ENABLE_CHAT = MOCK &&
   (import.meta.env.VITE_ENABLE_CHAT as string | undefined) === "true";
 
 export class ApiError extends Error {
@@ -364,7 +365,7 @@ export const api = {
   ) => {
     if (MOCK) {
       const { mockDeveloperEvents } = await import("./mockData");
-      const r = mockDeveloperEvents(event, page, lines ?? [], mockMatchType(matchType));
+      const r = mockDeveloperEvents(event, page, lines ?? [], mockMatchType(matchType), q, pageSize);
       return trialMock()
         ? {
             ...r,
@@ -504,8 +505,8 @@ export const api = {
     foundIn: FoundInFilter = "all",
   ) => {
     if (MOCK) {
-      const { mockMatchedDevelopers } = await import("./mockData");
-      const r = mockMatchedDevelopers(page, q, lines ?? [], mockMatchType(matchType));
+      const { mockMatchedDevelopers, mockWatchView } = await import("./mockData");
+      const r = mockWatchView(p => mockMatchedDevelopers(p, q, lines ?? [], mockMatchType(matchType)), page, pageSize, change, lines);
       return trialMock()
         ? {
             ...r,
@@ -563,8 +564,8 @@ export const api = {
     platform: PlatformFilter = "all",
   ) => {
     if (MOCK) {
-      const { mockMatchedApps } = await import("./mockData");
-      const r = mockMatchedApps(page, q, lines ?? [], mockMatchType(matchType), change ?? null);
+      const { mockMatchedApps, mockWatchView } = await import("./mockData");
+      const r = mockWatchView(p => mockMatchedApps(p, q, lines ?? [], mockMatchType(matchType), change ?? null), page, pageSize, change, lines);
       return trialMock()
         ? { ...r, page: 1, ...cutRows(r.rows, TRIAL_CAPS_MOCK.apps, r.total) }
         : r;
@@ -1118,14 +1119,7 @@ export const api = {
       /filename="?([^";]+)"?/.exec(
         res.headers.get("Content-Disposition") ?? "",
       )?.[1] ?? `schain.${format}`;
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement("a");
-    a.href = url;
-    a.download = name;
-    document.body.appendChild(a);
-    a.click();
-    document.body.removeChild(a);
-    URL.revokeObjectURL(url);
+    downloadBlob(blob, name);
     return { used, limit };
   },
   chat: async function* (

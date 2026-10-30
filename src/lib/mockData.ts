@@ -775,6 +775,8 @@ export function mockDeveloperEvents(
   lines: string[] = [],
   /** null: a report frozen before match types (today's exact answer). */
   matchType: MatchTypeFilter | null = null,
+  query = "",
+  pageSize = PAGE_SIZE,
 ): DeveloperEventsPage {
   // Attach the seat lines behind each row's counts, so its expanded card can
   // show WHAT moved. Seeded off the developer id (see changeArrays), so a
@@ -785,14 +787,16 @@ export function mockDeveloperEvents(
       ...changeArrays(d.developer_id, d.lines_added, d.lines_removed, d.lines_cert_changed),
     }))
     .filter((d) => carries(d.matched_lines ?? matchedLinesFor(d.developer_id, 6), lines));
-  if (matchType !== null) return matchTypeEvents(event, rows, page, lines, matchType);
+  if (matchType !== null) return matchTypeEvents(event, rows, page, lines, matchType, query, pageSize);
+  const needle = query.trim().toLowerCase();
+  const searched = needle ? rows.filter(row => `${row.developer_name ?? ""} ${row.developer_domain ?? ""}`.toLowerCase().includes(needle)) : rows;
   // Paged like the live endpoint, so the change tabs page in a local run.
   return {
     event,
     page,
-    page_size: PAGE_SIZE,
-    total: rows.length,
-    rows: rows.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE),
+    page_size: pageSize,
+    total: searched.length,
+    rows: searched.slice((page - 1) * pageSize, page * pageSize),
   };
 }
 
@@ -1518,6 +1522,46 @@ function mockPage<T extends Record<string, unknown>>(
   };
 }
 
+/** Local preview only: expose watch statuses from the fixture's existing
+ * line events, with the same counts/filter echo as the snapshot API. */
+export function mockWatchView<P extends { rows: { developer_id?: number | null }[]; total: number; page: number; page_size: number }>(
+  read: (page: number) => P,
+  page: number,
+  pageSize: number,
+  change: AppChange | undefined,
+  selectedLines: string[] = [],
+): P {
+  const first = read(1);
+  const all = [...first.rows];
+  for (let next = 2; all.length < first.total; next++) {
+    const part = read(next).rows;
+    if (!part.length) break;
+    all.push(...part);
+  }
+  const kinds = { started_watching: "newly_monitored", stopped_watching: "monitoring_stopped", unconfirmed: "unconfirmed" } as const;
+  const events = Object.fromEntries(Object.entries(kinds).map(([status, event]) => {
+    const byPublisher = new Map<number, LineEvent[]>();
+    for (const line of mockLineEvents({ event, page_size: 500, lines: selectedLines }).rows) {
+      const rows = byPublisher.get(line.developer_id) ?? [];
+      rows.push(line);
+      byPublisher.set(line.developer_id, rows);
+    }
+    return [status, byPublisher];
+  })) as Record<keyof typeof kinds, Map<number, LineEvent[]>>;
+  const counts = Object.fromEntries(Object.keys(kinds).map(status => [status, all.filter(row => events[status as keyof typeof kinds].has(row.developer_id ?? -1)).length]));
+  const watch = change && change in kinds ? change as keyof typeof kinds : null;
+  const kept = watch ? all.filter(row => events[watch].has(row.developer_id ?? -1)) : all;
+  const rows = kept.slice((page - 1) * pageSize, page * pageSize).map(row => ({
+    ...row,
+    ...Object.fromEntries(Object.keys(kinds).map(status => [`${status}_lines`, (events[status as keyof typeof kinds].get(row.developer_id ?? -1) ?? []).map(event => ({
+      ...event,
+      cert_id: event.new_cert_id || event.old_cert_id || undefined,
+      found_in: event.file_kind === "app_ads_txt" ? "app-ads.txt" : event.file_kind === "ads_txt" ? "ads.txt" : undefined,
+    }))])),
+  }));
+  return { ...first, page, page_size: pageSize, total: kept.length, change_counts: counts, ...(watch ? { change: watch } : {}), rows } as P;
+}
+
 const MATCHED_DEVS = buildMatchedDevs();
 
 export function mockMatchedDevelopers(
@@ -1941,6 +1985,8 @@ function matchTypeEvents(
   page: number,
   lines: string[],
   matchType: MatchTypeFilter,
+  query = "",
+  pageSize = PAGE_SIZE,
 ): DeveloperEventsPage {
   const all: DeveloperEvent[] = [
     ...rows.map((d): DeveloperEvent => ({ ...d, ...MT_OWN })),
@@ -1948,13 +1994,13 @@ function matchTypeEvents(
     // developer-events rows carry them too (crawler #348).
     ...(event === "added" && carries(MT_ADDED_EVENT.matched_lines, lines) ? [MT_ADDED_EVENT] : []),
   ];
-  const split = mtSplit(all, matchType);
+  const split = mtSplit(mtSearch(all, query, row => [row.developer_name, row.developer_domain, row.ipd_partner, row.ipd_platform]), matchType);
   return {
     event,
     page,
-    page_size: PAGE_SIZE,
+    page_size: pageSize,
     total: split.rows.length,
-    rows: split.rows.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE),
+    rows: split.rows.slice((page - 1) * pageSize, page * pageSize),
     match_type_counts: split.counts,
   };
 }

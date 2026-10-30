@@ -1,6 +1,10 @@
+import { ReportKpiGrid } from "@/components/ReportKpiGrid";
+import { csvLine, downloadCsvParts } from "@/lib/csvDownload";
+import { ReportButton } from "@/components/ReportButton";
+import { ReportDescription } from "@/components/ReportDescription";
 import { eachPage } from "@/lib/completePages";
 import { Pager, usePaging } from "@/components/ListControls";
-import { Collapse, Settle } from "@/components/Motion";
+import { Collapse, Settle, glideTo, preserveReportViewport, toggleWithoutJump } from "@/components/Motion";
 import { usePageCache } from "@/lib/pageCache";
 import LockedTail from "@/components/LockedTail";
 import { MiniStat } from "@/components/MiniStat";
@@ -8,7 +12,7 @@ import TrialBanner from "@/components/TrialBanner";
 import { SkeletonInlineRows, SkeletonRows, SkeletonStatCards } from "@/components/Skeleton";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { BadgeCheck, ChevronDown, CircleAlert, Download, Radar, Search, Users, Wrench } from "lucide-react";
+import { Check, ChevronDown, CircleAlert, Download, Radar, Users, Wrench } from "lucide-react";
 
 import {
   ApiError,
@@ -22,9 +26,9 @@ import {
   type Summary,
 } from "../lib/api";
 import { lineMeasure, SORT_OPTIONS, type SortKey, sortDiscoveredLines } from "../lib/discoveredSort";
-import { FilterAction, FilterBar, FilterSearch, FilterSelect } from "@/components/FilterBar";
+import { FilterAction, FilterBar, FilterGroup, FilterSearch, FilterSelect } from "@/components/FilterBar";
 import { PageShell } from "@/components/PageShell";
-import { ActionableLine, PublisherDomainLink } from "@/components/PublisherLinks";
+import { ActionableLine, LineActionGroup, PublisherDomainLink } from "@/components/PublisherLinks";
 import { formatWeek, WeekLine } from "@/components/WeekLine";
 import { PAGE_SIZE } from "@/lib/paging";
 import { useReportScope } from "@/lib/reportScope";
@@ -95,7 +99,7 @@ export default function CrawlDiscovered() {
   const [error, setError] = useState<string | null>(null);
   const [exporting, setExporting] = useState(false);
   const [exportError, setExportError] = useState<string | null>(null);
-  const [open, setOpen] = useState<Set<string>>(new Set());
+  const [open, setOpen] = useState<string | null>(null);
   // Whether this crawl has any discovered lines at all, independent of the
   // filter, so an over-narrow filter never renders the "did not look"
   // card, which would be a lie about the report rather than a fact about
@@ -155,7 +159,7 @@ export default function CrawlDiscovered() {
       setTrial(r.trial ?? null);
       // A different set of cards: an expansion held open from the previous
       // set would vanish or, worse, appear to belong to another line.
-      setOpen(new Set());
+      setOpen(null);
       // An unfiltered answer settles the question for the whole report.
       if (!filtered) setAnyDiscovered(r.total > 0);
       else if (r.total > 0) setAnyDiscovered(true);
@@ -184,12 +188,7 @@ export default function CrawlDiscovered() {
   }, [token, page, filter, show, filtered, cache]);
 
   const toggle = useCallback((key: string) => {
-    setOpen((prev) => {
-      const next = new Set(prev);
-      if (next.has(key)) next.delete(key);
-      else next.add(key);
-      return next;
-    });
+    setOpen(prev => prev === key ? null : key);
   }, []);
 
   const weekLabel = summary?.finished_at ? formatWeek(new Date(summary.finished_at)) : null;
@@ -218,16 +217,16 @@ export default function CrawlDiscovered() {
   const hasSellersJson = Boolean(totals?.sellers_json);
   const checkedLines = totals?.needs_fixing != null;
   const showOptions = useMemo(() => {
-    const o: { value: ShowFilter; label: string }[] = [
-      { value: "all", label: "All lines" },
-      { value: "direct", label: "DIRECT lines" },
-      { value: "reseller", label: "RESELLER lines" },
+    const o: { value: ShowFilter; label: string; description: string; group: string }[] = [
+      { value: "all", label: "All lines", description: "Every discovered line using your domains.", group: "Line types" },
+      { value: "direct", label: "DIRECT lines", description: "The file names the seller account as DIRECT.", group: "Line types" },
+      { value: "reseller", label: "RESELLER lines", description: "The file names the seller account as RESELLER.", group: "Line types" },
     ];
-    if (baseline.lines) o.push({ value: "new", label: "New this week" });
-    if (checkedLines) o.push({ value: "fixing", label: "Needs fixing" });
+    if (baseline.lines) o.push({ value: "new", label: "New this week", description: "Lines that no publisher carried in the compared crawl.", group: "Weekly changes" });
+    if (checkedLines) o.push({ value: "fixing", label: "Needs fixing", description: "Lines with a seller ID or relationship issue to review.", group: "Sellers.json" });
     if (hasSellersJson) {
-      o.push({ value: "listed", label: "In your sellers.json" });
-      o.push({ value: "unlisted", label: "Not in your sellers.json" });
+      o.push({ value: "listed", label: "In your sellers.json", description: "The seller ID is present in your sellers.json.", group: "Sellers.json" });
+      o.push({ value: "unlisted", label: "Not in your sellers.json", description: "The seller ID is absent from your sellers.json.", group: "Sellers.json" });
     }
     return o;
   }, [baseline.lines, checkedLines, hasSellersJson]);
@@ -243,7 +242,7 @@ export default function CrawlDiscovered() {
         <h1 className="text-xl font-bold leading-tight tracking-tight text-slate-900 sm:text-2xl">
           Discovery
         </h1>
-        <p className="mt-1 text-sm text-slate-500">
+        <ReportDescription className="mt-1" label="Discovery" summary="Lines across publisher files that start with your domain.">
           Every ads.txt and app-ads.txt line on the open web that starts with your domain
           {domains.length > 0 && (
             <>
@@ -266,7 +265,7 @@ export default function CrawlDiscovered() {
               .
             </>
           )}
-        </p>
+        </ReportDescription>
         <WeekLine
           week={weekLabel}
           previousWeek={prevWeekLabel}
@@ -281,7 +280,7 @@ export default function CrawlDiscovered() {
       {loading && !totals && <SkeletonStatCards />}
 
       {!noDiscovery && totals && (
-        <div className="rounded-2xl border border-border bg-white p-5 shadow-sm" data-tour="discovery-kpi">
+        <div className="report-panel rounded-2xl border border-border bg-white p-5" data-tour="discovery-kpi">
           <div className="mb-3 flex items-baseline justify-between gap-3">
             <div>
               <div className="font-display text-sm font-medium text-slate-700">
@@ -294,16 +293,17 @@ export default function CrawlDiscovered() {
               discovered this week (on a first report, all of them), the
               unique lines actually found with the domain, and the
               publishers holding them. */}
-          <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
+          <ReportKpiGrid className="report-kpi-discovery">
             <SplitStat
               tone="info"
               prefix={newLines ? "+" : undefined}
               number={newLines ?? 0}
               label="New lines this week"
               caption={newLines != null ? "No publisher carried them last week" : "No prior week to compare"}
-              className="rounded-xl border border-border bg-white"
+              className="report-kpi-cell"
             />
             <SplitStat
+              tone="info"
               number={totals.lines}
               label="Lines found with your domain"
               caption={
@@ -321,7 +321,7 @@ export default function CrawlDiscovered() {
                     }`
                   : "Each line counted once"
               }
-              className="rounded-xl border border-border bg-white"
+              className="report-kpi-cell"
               delta={
                 baseline.totals && totals.previous_lines != null
                   ? computeDelta(totals.lines, totals.previous_lines)
@@ -330,6 +330,7 @@ export default function CrawlDiscovered() {
               note={baseline.totals ? undefined : "not compared"}
             />
             <SplitStat
+              tone="publisher"
               number={countsPublishers ? (totals.publishers ?? 0) : totals.placements}
               label={countsPublishers ? "Unique publishers carrying them" : "Publisher listings"}
               caption={
@@ -337,7 +338,7 @@ export default function CrawlDiscovered() {
                   ? "Several of these lines, still one publisher"
                   : "One per publisher file carrying a line"
               }
-              className="rounded-xl border border-border bg-white"
+              className="report-kpi-cell"
               delta={
                 baseline.totals &&
                 (countsPublishers ? totals.previous_publishers : totals.previous_placements) != null
@@ -349,7 +350,7 @@ export default function CrawlDiscovered() {
               }
               note={baseline.totals ? undefined : "not compared"}
             />
-          </div>
+          </ReportKpiGrid>
           {/* A list shorter than its numbers says so, never passes for
               whole. */}
           {totals.listed_lines != null && totals.listed_lines < totals.lines && (
@@ -368,8 +369,23 @@ export default function CrawlDiscovered() {
 
       {!noDiscovery && (
         <div className="space-y-2">
-          <FilterBar className="w-full min-w-0">
-            <FilterSearch value={q} onChange={setQ} placeholder="Search seller IDs, publishers or apps" />
+          <FilterBar className="discovery-list-tools" actions={
+            <FilterAction
+              icon={Download}
+              disabled={exporting || total === 0}
+              onClick={() => {
+                setExporting(true);
+                setExportError(null);
+                downloadCsv(token, filter, show).catch((e: unknown) => setExportError(e instanceof Error ? e.message : "Export failed. Please try again."))
+                  .finally(() => setExporting(false));
+              }}
+            >
+              {exporting ? "Preparing..." : "Export CSV"}
+            </FilterAction>
+          }>
+            <FilterSearch value={q} onChange={setQ} placeholder="Search seller IDs or publishers" />
+
+            <FilterGroup>
             <FilterSelect
               value={show}
               onChange={setShow}
@@ -384,18 +400,12 @@ export default function CrawlDiscovered() {
               leading="Sort"
               ariaLabel="Sort discovered lines"
             />
-            <FilterAction
-              icon={Download}
-              disabled={exporting || total === 0}
-              onClick={() => {
-                setExporting(true);
-                setExportError(null);
-                downloadCsv(token, filter, show).catch((e: unknown) => setExportError(e instanceof Error ? e.message : "Export failed. Please try again."))
-                  .finally(() => setExporting(false));
-              }}
-            >
-              {exporting ? "Preparing..." : "Export CSV"}
-            </FilterAction>
+            </FilterGroup>
+
+          {!loading && !error && !onTrial && total > 0 && (
+            <Pager placement="inline" anchorRef={paging.topRef} page={page} pageSize={PAGE_SIZE}
+              total={total} onPage={paging.onPage} noun="lines" className="list-toolbar-pager" />
+          )}
           </FilterBar>
           {exportError && <p role="alert" className="text-sm text-red-700">{exportError}</p>}
           {localOnly && (
@@ -417,20 +427,6 @@ export default function CrawlDiscovered() {
         </p>
       )}
 
-      {/* No pager while a new list is on the way: its count would be the
-          old filter's under the new one (David, 2026-10-27). */}
-      {!loading && !error && !onTrial && total > 0 && (
-        <Pager
-          placement="top"
-          anchorRef={paging.topRef}
-          page={page}
-          pageSize={PAGE_SIZE}
-          total={total ?? 0}
-          onPage={paging.onPage}
-          noun="lines"
-        />
-      )}
-
       {!loading && !error && sorted.length > 0 && (
         <div className="space-y-3">
           {sorted.map((line, i) => {
@@ -445,7 +441,7 @@ export default function CrawlDiscovered() {
                   search={filter}
                   canExport={!onTrial}
                   sellersPage={sellersPage}
-                  open={open.has(key)}
+                  open={open === key}
                   onToggle={() => toggle(key)}
                 />
               </Settle>
@@ -588,14 +584,14 @@ function LineCard({
     <div
       data-discovered-line={lineKey(line)}
       className={cn(
-        "overflow-hidden rounded-3xl border shadow-sm transition-colors",
+        "report-row overflow-hidden rounded-xl border shadow-sm transition-colors",
         isNew ? "border-info-border bg-info-bg/60" : "border-border bg-white",
         open && "shadow-md",
       )}
     >
       <button
         type="button"
-        onClick={onToggle}
+        onClick={event => toggleWithoutJump(event.currentTarget, onToggle)}
         aria-expanded={open}
         className="flex w-full items-center gap-4 px-4 py-4 text-left sm:px-5"
       >
@@ -616,9 +612,9 @@ function LineCard({
             {line.cert_id && <span className="font-normal text-slate-400">, {line.cert_id}</span>}
           </code>
 
-          <div className="mt-0.5 flex items-center gap-2.5 truncate text-xs text-slate-500">
-            <span className="sm:hidden">
-              <span className="font-mono tabular-nums text-slate-700">{count.toLocaleString()}</span>{" "}
+          <div className="discovery-line-meta mt-0.5 flex flex-wrap items-center gap-x-2.5 gap-y-0.5 text-xs text-slate-500 sm:flex-nowrap">
+            <span className="flex-shrink-0 sm:hidden">
+              <span className="font-sans tabular-nums text-slate-700">{count.toLocaleString()}</span>{" "}
               {byPublisher ? (count === 1 ? "publisher" : "publishers") : count === 1 ? "listing" : "listings"}
             </span>
             {/* THE BADGE. The Sellers.json page owns the story (to add, to
@@ -626,7 +622,7 @@ function LineCard({
                 seller ID is in, and opens that page when the report has
                 it. A click on it must not toggle the card. */}
             {mark && (
-              <span className="flex min-w-0 items-center gap-1.5" title={mark.detail || undefined}>
+              <span className="discovery-line-status order-2 flex min-w-0 basis-full flex-wrap items-center gap-1.5 sm:order-none sm:basis-auto sm:flex-nowrap" title={mark.detail || undefined}>
                 <span
                   role={sellersPage ? "link" : undefined}
                   tabIndex={sellersPage ? 0 : undefined}
@@ -650,21 +646,21 @@ function LineCard({
                       : undefined
                   }
                   className={cn(
-                    "inline-flex flex-shrink-0 items-center gap-1 rounded-full border px-2 py-0.5 text-[11px] font-semibold tracking-tight transition-colors",
+                    "discovery-seller-mark inline-flex max-w-full flex-shrink-0 items-center gap-1.5 rounded-sm text-[12px] font-medium leading-5 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2",
                     MARK_STYLE[mark.kind].cls,
                     sellersPage && cn("cursor-pointer", MARK_STYLE[mark.kind].hover),
                   )}
                 >
                   {(() => {
                     const MarkIcon = MARK_STYLE[mark.kind].icon;
-                    return <MarkIcon aria-hidden className="h-3 w-3" strokeWidth={2.4} />;
+                    return <MarkIcon aria-hidden className="h-3.5 w-3.5" strokeWidth={1.75} />;
                   })()}
                   {mark.pill}
                 </span>
                 {mark.detail && <span className="truncate text-[11px] text-slate-500">{mark.detail}</span>}
               </span>
             )}
-            {isNew && <span className="flex-shrink-0 font-medium text-info">new this week</span>}
+            {isNew && <span className="order-1 flex-shrink-0 font-medium text-info sm:order-none">new this week</span>}
           </div>
         </div>
 
@@ -720,7 +716,10 @@ function LineCard({
               ))}
             </ul>
           )}
-          {open && <Roster token={token} line={line} initialQ={search} canExport={canExport} />}
+          <Roster token={token} line={line}
+            initialQ={[line.ssp_domain, line.publisher_id, line.relationship, line.cert_id]
+              .some(value => value.toLowerCase().includes(search.trim().toLowerCase())) ? "" : search}
+            canExport={canExport} />
         </div>
       </Collapse>
     </div>
@@ -751,9 +750,10 @@ function Roster({
   const [data, setData] = useState<RosterData>("loading");
   const [exporting, setExporting] = useState(false);
   const [exportError, setExportError] = useState<string | null>(null);
-  // Liveness, not per-run cancellation: setData("loading") re-renders, and
-  // a `let cancelled` closure would then discard the very response it
-  // waited for.
+  const rosterRef = useRef<HTMLDivElement>(null);
+  const latestRequest = useRef(0);
+  // Only the latest page/search response may land. A slower old response
+  // must never overwrite the current query's source files or count.
   const alive = useRef(true);
   useEffect(() => {
     alive.current = true;
@@ -765,14 +765,15 @@ function Roster({
   useEffect(() => setPage(1), [needle]);
   const key = lineKey(line);
   useEffect(() => {
-    setData((prev) => (typeof prev === "object" ? prev : "loading"));
+    const request = ++latestRequest.current;
+    setData("loading");
     const [ssp_domain, publisher_id, relationship, cert_id] = key.split("|");
     const lineId: DiscoveredLineKey = { ssp_domain, publisher_id, relationship, cert_id };
     api
       .discoveredLinePlacements(token, lineId, { page, page_size: ROSTER_PAGE, q: needle || undefined })
-      .then((r) => alive.current && setData({ rows: r.rows, total: r.total }))
+      .then((r) => alive.current && request === latestRequest.current && setData({ rows: r.rows, total: r.total }))
       .catch((e: unknown) => {
-        if (!alive.current) return;
+        if (!alive.current || request !== latestRequest.current) return;
         // 503 with the bake's own words: the report did not keep this
         // line's roster, which a retry cannot change. Any other failure,
         // a passing storage hiccup included, is an error.
@@ -786,8 +787,15 @@ function Roster({
   const rows = typeof data === "object" ? (whole ? data.rows : data.rows.slice(0, ROSTER_FIRST)) : [];
   const hidden = !whole && total != null ? Math.max(0, total - rows.length) : 0;
 
+  const showFewer = () => {
+    const root = rosterRef.current;
+    preserveReportViewport(root, () => { setPaged(false); setPage(1); setQ(""); });
+    const scroller = root?.closest<HTMLElement>("[data-report-main]");
+    if (root && scroller && root.getBoundingClientRect().top < scroller.getBoundingClientRect().top) glideTo(root, 16);
+  };
+
   return (
-    <>
+    <div ref={rosterRef} data-discovery-roster>
       <div className="mb-2 flex flex-wrap items-center justify-between gap-x-3 gap-y-1">
         <span className="text-xs font-medium text-slate-700">Where it was found</span>
         <span className="flex items-center gap-4">
@@ -796,51 +804,45 @@ function Roster({
           <span className="text-[11px] text-slate-500">
             {line.publishers_count != null ? (
               <>
-                <span className="font-mono tabular-nums">{line.publishers_count.toLocaleString()}</span>{" "}
+                <span className="font-sans tabular-nums">{line.publishers_count.toLocaleString()}</span>{" "}
                 {line.publishers_count === 1 ? "publisher" : "publishers"},{" "}
-                <span className="font-mono tabular-nums">{line.placements_count.toLocaleString()}</span>{" "}
+                <span className="font-sans tabular-nums">{line.placements_count.toLocaleString()}</span>{" "}
                 {line.placements_count === 1 ? "file" : "files"}
               </>
             ) : (
               <>
-                <span className="font-mono tabular-nums">{(line.placements_count ?? 0).toLocaleString()}</span>{" "}
+                <span className="font-sans tabular-nums">{(line.placements_count ?? 0).toLocaleString()}</span>{" "}
                 {line.placements_count === 1 ? "listing" : "listings"}
               </>
             )}
           </span>
-          {/* The page toolbar's Export, the same look, for this line alone. */}
-          {canExport && data !== "toolarge" && (
-            <button
-              type="button"
-              disabled={exporting || total === 0}
-              onClick={() => {
-                setExporting(true);
-                setExportError(null);
-                downloadLineCsv(token, line).catch((e: unknown) => setExportError(e instanceof Error ? e.message : "Export failed. Please try again."))
-                  .finally(() => setExporting(false));
-              }}
-              className="inline-flex items-center gap-1.5 text-xs font-medium text-slate-700 transition-colors hover:text-primary disabled:opacity-50"
-              aria-label="Export every publisher and app carrying this line as CSV"
-            >
-              <Download className="h-3.5 w-3.5" />
-              {exporting ? "Preparing..." : "Export CSV"}
-            </button>
-          )}
+
         </span>
       </div>
       {exportError && <p role="alert" className="mb-3 text-sm text-red-700">{exportError}</p>}
       {data !== "toolarge" && (
-        /* The Overview's search: round, the icon inside. */
-        <div className="relative mb-3 w-full">
-          <Search className="pointer-events-none absolute left-3.5 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
-          <input
-            value={q}
-            onChange={(e) => setQ(e.target.value)}
-            placeholder="Search publishers or apps"
-            aria-label="Search the publishers and apps carrying this line"
-            className="h-10 w-full rounded-full border border-border bg-white pl-10 pr-4 text-sm text-slate-900 outline-none transition-colors placeholder:text-slate-400 focus:border-primary/40"
-          />
-        </div>
+        <FilterBar className="mb-3">
+          <FilterSearch value={q} onChange={setQ} placeholder="Search publishers" ariaLabel="Search publishers carrying this line" />
+          {/* The page toolbar's Export, the same look, for this line alone. */}
+          {canExport && (
+            <ReportButton
+              disabled={exporting || total === 0}
+              onClick={() => {
+                setExporting(true);
+                setExportError(null);
+                downloadLineCsv(token, line, needle).catch((e: unknown) => setExportError(e instanceof Error ? e.message : "Export failed. Please try again."))
+                  .finally(() => setExporting(false));
+              }}
+              className="report-download-action list-toolbar-action"
+              aria-label={needle ? "Export matching publisher source files as CSV" : "Export every publisher source file carrying this line as CSV"}
+            >
+              <Download className="h-3.5 w-3.5" />
+              {exporting ? "Preparing..." : "Export CSV"}
+            </ReportButton>
+          )}
+          {whole && typeof data === "object" && <Pager placement="inline" className="list-toolbar-pager" page={page}
+            pageSize={ROSTER_PAGE} total={total ?? 0} onPage={setPage} noun="source files" />}
+        </FilterBar>
       )}
       {/* A report frozen before 2026-10-14 kept only the first files of a
           wide line (200). Under a card that counts 10,801, the list says
@@ -862,26 +864,17 @@ function Roster({
         <p className="py-2 text-xs text-critical">Could not load the publishers for this line.</p>
       ) : data.rows.length === 0 ? (
         <p className="py-2 text-xs text-slate-500">
-          {needle ? "No publisher or app on this line matches." : "No publishers recorded."}
+          {needle ? "No publisher on this line matches." : "No publishers recorded."}
         </p>
       ) : (
         <div>
-          {whole && (
-            <Pager
-              placement="top"
-              className="mb-3"
-              page={page}
-              pageSize={ROSTER_PAGE}
-              total={total ?? 0}
-              onPage={setPage}
-              noun="publishers and apps"
-            />
-          )}
+          <LineActionGroup tone="added">
           <ul className="space-y-2">
             {rows.map((p, i) => (
               <PlacementCard key={`${p.developer_domain}|${p.bundle_id ?? ""}|${p.found_in}|${i}`} line={line} p={p} />
             ))}
           </ul>
+          </LineActionGroup>
           {hidden > 0 && (
             /* The trial card's look (LockedTail), small: how many more carry
                the line, and the one button that opens them. */
@@ -892,52 +885,55 @@ function Roster({
                 </span>
                 <div className="min-w-0 flex-1">
                   <p className="font-display text-[15px] font-semibold leading-snug tracking-tight text-slate-900">
-                    {hidden.toLocaleString()} more {hidden === 1 ? "publisher or app carries" : "publishers and apps carry"}{" "}
+                    {hidden.toLocaleString()} more {hidden === 1 ? "source file carries" : "source files carry"}{" "}
                     this line
                   </p>
                   <p className="mt-0.5 text-[12px] text-slate-600">
                     Showing {rows.length.toLocaleString()} of {(total ?? 0).toLocaleString()}.
                   </p>
                 </div>
-                <button
-                  type="button"
+                <ReportButton
+                  size="sm"
                   onClick={() => setPaged(true)}
-                  className="inline-flex items-center gap-1.5 rounded-full bg-primary px-4 py-2 text-[13px] font-semibold text-primary-foreground shadow-sm transition-colors hover:bg-primary/90"
+                  className="rounded-md"
                 >
-                  Show {Math.min(ROSTER_PAGE, total ?? 0).toLocaleString()} more
-                </button>
+                  Show {Math.max(0, Math.min(ROSTER_PAGE, total ?? 0) - rows.length).toLocaleString()} more
+                </ReportButton>
               </div>
             </div>
           )}
           {whole && (
-            <div className="mt-3">
+            <div className="mt-3 flex flex-wrap items-center justify-between gap-3">
+              <ReportButton size="sm" variant="outline" className="rounded-md border-slate-200 bg-slate-50 hover:bg-slate-100" onClick={showFewer} title="Return to the first three source files and clear the search">Show fewer</ReportButton>
               <Pager
                 page={page}
                 pageSize={ROSTER_PAGE}
                 total={total ?? 0}
                 onPage={setPage}
-                noun="publishers and apps"
+                noun="source files"
               />
             </div>
           )}
         </div>
       )}
-    </>
+    </div>
   );
 }
 
-/** One publisher or app carrying a line: the Overview's card look. The card
- *  opens the publisher's file at this line; the name opens their site. */
+/** A publisher carrying a line, with separate copy and source
+ *  actions. The publisher name remains a link to its website. */
 function PlacementCard({ line, p }: { line: DiscoveredLine; p: DiscoveredPlacement }) {
   const name = p.developer_name || p.developer_domain;
+  const sourceLabel = foundInLabel(p.found_in)?.replace(/^Found in /, "") ?? "File not recorded";
   const initial = (name.replace(/^www\./i, "").charAt(0) || "?").toUpperCase();
   return (
     <ActionableLine
       line={line}
+      selectionLabel={name}
       publisherDomain={p.file_host || p.developer_domain}
       foundIn={p.found_in}
       shown
-      className="flex items-center gap-3 rounded-2xl border border-border bg-white px-4 py-3 shadow-sm"
+      className="discovery-placement flex items-center gap-3 rounded-2xl border border-border bg-white px-4 py-3 shadow-sm"
     >
       <span
         aria-hidden
@@ -946,27 +942,17 @@ function PlacementCard({ line, p }: { line: DiscoveredLine; p: DiscoveredPlaceme
         {initial}
       </span>
       <span className="min-w-0 flex-1">
-        <span className="block truncate text-sm font-semibold tracking-tight text-slate-900">
+        <span className="discovery-placement-name block truncate text-sm font-semibold tracking-tight text-slate-900">
           <PublisherDomainLink domain={p.developer_domain} label={name} shown />
         </span>
-        <span className="mt-0.5 flex min-w-0 items-center gap-1.5 text-[11px] text-slate-500">
-          {p.app_name ? (
-            <>
-              <span className="truncate text-slate-700">{p.app_name}</span>
-              <span className="flex-shrink-0 rounded-full border border-app-border bg-app-bg px-1.5 py-px text-[10px] font-medium text-app">
-                {storeName(p)}
-              </span>
-              {p.bundle_id && (
-                <span className="truncate font-mono text-[10px] tabular-nums text-slate-400">{p.bundle_id}</span>
-              )}
-            </>
-          ) : name !== p.developer_domain ? (
-            <span className="truncate font-mono">{p.developer_domain}</span>
-          ) : null}
+        <span className="discovery-placement-meta mt-0.5 flex min-w-0 flex-wrap items-center gap-x-2 gap-y-0.5 text-[11px] text-slate-500">
+          {name !== p.developer_domain && <span className="break-all">{p.developer_domain}</span>}
+          {name !== p.developer_domain && <span aria-hidden className="text-slate-300">·</span>}
+          <span data-line-text className="discovery-placement-source" title={`Source file: ${sourceLabel}`}>
+            {sourceLabel}
+          </span>
+          {p.file_host && p.file_host !== p.developer_domain && <span className="break-all">on {p.file_host}</span>}
         </span>
-      </span>
-      <span data-line-text className="flex-shrink-0 text-[11px] text-slate-400">
-        {foundInLabel(p.found_in)}
       </span>
     </ActionableLine>
   );
@@ -991,12 +977,11 @@ function deltaOf(line: DiscoveredLine): Delta {
  *  or what a publisher should fix. Null on a report without the check. */
 type MarkKind = "fix" | "listed" | "unlisted";
 
-/** The badge per kind, in the system's tones (owner, 2026-10-15: "more
- *  premium"): an icon that says what it is, the tone's own ground. */
+/** Quiet status links: the words and a simple icon carry the meaning. */
 const MARK_STYLE: Record<MarkKind, { cls: string; hover: string; icon: typeof Wrench }> = {
-  listed: { cls: "border-ok-border bg-ok-bg text-ok", hover: "hover:border-ok", icon: BadgeCheck },
-  unlisted: { cls: "border-warn-border bg-warn-bg text-warn", hover: "hover:border-warn", icon: CircleAlert },
-  fix: { cls: "border-critical-border bg-critical-bg text-critical", hover: "hover:border-critical", icon: Wrench },
+  listed: { cls: "text-ok", hover: "hover:underline underline-offset-4", icon: Check },
+  unlisted: { cls: "text-warn", hover: "hover:underline underline-offset-4", icon: CircleAlert },
+  fix: { cls: "text-critical", hover: "hover:underline underline-offset-4", icon: Wrench },
 };
 
 function markOf(
@@ -1056,21 +1041,9 @@ function NoDiscoveryCard() {
  * carrying the active search and Show filter. Walks every page; the cap
  * that remains is a runaway guard far above any real report.
  */
-/** One CSV cell: always quoted, inner quotes doubled (RFC 4180). */
-const csvCell = (v: string) => `"${v.replace(/"/g, '""')}"`;
-
-/** Save rows as a CSV file Excel opens with accents intact (the BOM). */
+/** Save through the shared CSV writer used by all report lists. */
 function saveCsv(name: string, header: readonly string[], rows: string[][]) {
-  const csv = "\uFEFF" + [header, ...rows].map((r) => r.map(csvCell).join(",")).join("\r\n");
-  const blob = new Blob([csv], { type: "text/csv;charset=utf-8" });
-  const url = URL.createObjectURL(blob);
-  const a = document.createElement("a");
-  a.href = url;
-  a.download = name;
-  document.body.appendChild(a);
-  a.click();
-  document.body.removeChild(a);
-  URL.revokeObjectURL(url);
+  downloadCsvParts(["\uFEFF", csvLine([...header]), ...rows.map(row => "\r\n" + csvLine(row))], name);
 }
 
 const today = () => new Date().toISOString().slice(0, 10);
@@ -1078,7 +1051,7 @@ const fileSafe = (s: string) => s.replace(/[^A-Za-z0-9._-]+/g, "-").replace(/^-+
 
 /** Every publisher and app carrying one line, read whole from the
  *  placements endpoint (500 a page, its cap), one row each. */
-async function downloadLineCsv(token: string, line: DiscoveredLine) {
+async function downloadLineCsv(token: string, line: DiscoveredLine, query = "") {
   const header = [
     "ssp_domain",
     "seller_id",
@@ -1099,8 +1072,13 @@ async function downloadLineCsv(token: string, line: DiscoveredLine) {
     cert_id: line.cert_id,
   };
   const rows: string[][] = [];
+  if (query) {
+    const whole = await api.discoveredLinePlacements(token, id, { page: 1, page_size: 1 });
+    if (whole.total !== line.placements_count)
+      throw new Error("This report contains an incomplete source list. Request a complete new report. Nothing was exported.");
+  }
   await eachPage(
-    (page) => api.discoveredLinePlacements(token, id, { page, page_size: 500 }),
+    (page) => api.discoveredLinePlacements(token, id, { page, page_size: 500, q: query || undefined }),
     500,
     (pageRows) => { for (const p of pageRows) {
       rows.push([
@@ -1118,7 +1096,7 @@ async function downloadLineCsv(token: string, line: DiscoveredLine) {
       ]);
     }
     }, undefined, undefined, {
-      expectedTotal: line.placements_count,
+      expectedTotal: query ? undefined : line.placements_count,
       key: (p) => JSON.stringify([p.developer_domain, p.file_host || p.developer_domain, p.found_in, p.store || "", p.bundle_id || ""]),
     },
   );

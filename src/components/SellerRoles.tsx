@@ -15,7 +15,7 @@
  * report carries #364's read summary (``sellers_json_reads`` on its
  * summary) or this segment is one quiet line and nothing else.
  */
-import { Search } from "lucide-react";
+import { FilterBar, FilterSearch } from "@/components/FilterBar";
 import { useEffect, useState } from "react";
 
 import { Pager, usePaging } from "@/components/ListControls";
@@ -150,33 +150,11 @@ function RolesList({ token, reads }: { token: string; reads: SellersJsonReads })
           </p>
         )}
       </div>
-      <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between sm:gap-x-6">
-        <div className="relative w-full min-w-0 sm:min-w-[12rem] sm:flex-1">
-          <Search className="pointer-events-none absolute left-3.5 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
-          <input
-            value={query}
-            onChange={(e) => setQuery(e.target.value)}
-            placeholder="Search publishers"
-            aria-label="Search seller roles"
-            className="h-10 w-full rounded-full border border-border bg-white pl-10 pr-4 text-sm text-slate-900 outline-none transition-colors placeholder:text-slate-400 focus:border-primary/40"
-          />
-        </div>
-        {/* No count while a page is on the way: never the old one under a
-            new search. */}
-        {!loading && !error && total > 0 && (
-          <div className="flex min-h-10 items-center justify-end sm:ml-auto sm:flex-shrink-0">
-            <Pager
-              placement="inline"
-              page={page}
-              pageSize={PAGE_SIZE}
-              total={total}
-              onPage={paging.onPage}
-              noun="publishers"
-              nounOne="publisher"
-            />
-          </div>
-        )}
-      </div>
+      <FilterBar>
+        <FilterSearch value={query} onChange={setQuery} placeholder="Search publishers" ariaLabel="Search seller roles" />
+        {!loading && !error && total > 0 && <Pager placement="inline" className="list-toolbar-pager"
+          page={page} pageSize={PAGE_SIZE} total={total} onPage={paging.onPage} noun="publishers" nounOne="publisher" />}
+      </FilterBar>
       {loading ? (
         <SkeletonInlineRows rows={6} label="Loading seller roles" />
       ) : error ? (

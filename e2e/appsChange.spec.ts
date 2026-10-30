@@ -1,3 +1,4 @@
+import { chooseFilter } from "./filterChoice";
 /**
  * THE MATCHED APPS CHANGE TABS count the whole list, never one page.
  *
@@ -5,7 +6,8 @@
  * "0 with changes" on a report with 82 apps lost, because the tabs filtered
  * the 25 rows already loaded and counted those. The crawler now filters the
  * whole list (``?change=``) and echoes the filter; an API from before it
- * ignores the parameter, and the tab then says its count covers this page.
+ * ignores the parameter: the view explains it is unavailable instead of
+ * filtering the current page in the browser.
  */
 import { expect, test, type Page } from "@playwright/test";
 
@@ -53,8 +55,6 @@ const count = (page: Page) => page.locator("[data-list-count] p");
 const cards = (page: Page) => page.locator('button[aria-label^="Show the seat lines of"]');
 const card = (page: Page, name: string) =>
   page.getByRole("button", { name: new RegExp(`^(Show|Hide) the seat lines of ${name}$`) });
-const pill = (page: Page, name: "All" | "Own" | "IPD") =>
-  page.getByTestId("match-type").getByRole("button", { name, exact: true });
 
 const moved = (a: MatchedApp, change: AppChange) =>
   (change === "added" ? a.lines_added : change === "removed" ? a.lines_removed : a.lines_cert_changed) ?? 0;
@@ -93,40 +93,39 @@ test.describe("the matched apps change tabs", () => {
     expect(errors).toEqual([]);
   });
 
-  test("with today's API (no echo): the page's apps, counted as this page only", async ({ page }) => {
+  test("an older API that ignores change never creates a status list from the loaded page", async ({ page }) => {
     const errors = watchErrors(page);
     const calls = await open(page, {});
     await toApps(page);
-    const firstPage = mockMatchedApps(1).rows;
-    for (const [name, change] of [
-      ["Added", "added"],
-      ["Removed", "removed"],
-      ["Changed", "changed"],
-    ] as const) {
-      const onPage = firstPage.filter((a) => moved(a, change) > 0);
-      expect(onPage.length).toBeGreaterThan(0);
+    for (const [name, change] of [["Added", "added"], ["Removed", "removed"], ["Changed", "changed"]] as const) {
       await tab(page, name).click();
       await expect.poll(() => appsCalls(calls, change).length).toBeGreaterThan(0);
-      await expect(count(page)).toHaveText(`${onPage.length} on this page`);
-      await expect(cards(page)).toHaveCount(onPage.length);
-      // Never a whole-list claim, and nothing to page.
-      await expect(list(page).getByText(/with changes/)).toHaveCount(0);
+      await expect(page.locator("[data-unsupported-app-change]")).toContainText("This report cannot filter apps by this status.");
+      await expect(cards(page)).toHaveCount(0);
+      await expect(count(page)).toHaveCount(0);
       await expect(list(page).getByRole("navigation", { name: "Pages" })).toHaveCount(0);
+      await expect(page.getByRole("button", { name: "Download", exact: true })).toHaveCount(0);
+      await page.getByRole("button", { name: "View all matched apps", exact: true }).click();
+      await expect(tab(page, "All matched")).toHaveAttribute("aria-selected", "true");
+      await expect(cards(page)).toHaveCount(PAGE_SIZE);
     }
     expect(errors).toEqual([]);
   });
 
-  test("with today's API, a page with none says this page, not this report", async ({ page }) => {
+  test("unsupported status keeps the search and never claims that zero apps matched", async ({ page }) => {
     const errors = watchErrors(page);
-    await open(page, {});
+    const calls = await open(page, {});
     await toApps(page);
-    // A search the first page answers with apps that did not move.
     const still = mockMatchedApps(1).rows.find((a) => !a.lines_added && !a.lines_removed && !a.lines_cert_changed)!;
     await page.getByRole("textbox", { name: "Search matched apps" }).fill(still.bundle_id);
     await expect(card(page, still.app_name)).toHaveCount(1);
     await tab(page, "Added").click();
-    await expect(page.getByText(`No apps with changes match "${still.bundle_id}" on this page.`)).toBeVisible();
-    await expect(list(page).getByText(/on this report/)).toHaveCount(0);
+    await expect(page.locator("[data-unsupported-app-change]")).toBeVisible();
+    expect(appsCalls(calls, "added").some(c => new URLSearchParams(c.query).get("q") === still.bundle_id)).toBe(true);
+    await expect(page.getByText(/No apps with changes match/)).toHaveCount(0);
+    await page.getByRole("button", { name: "View all matched apps", exact: true }).click();
+    await expect(page.getByRole("textbox", { name: "Search matched apps" })).toHaveValue(still.bundle_id);
+    await expect(card(page, still.app_name)).toHaveCount(1);
     expect(errors).toEqual([]);
   });
 
@@ -158,8 +157,8 @@ test.describe("the matched apps change tabs", () => {
     await expect(count(page)).toHaveText(serverCount(both("all").total));
 
     // IPD and Added: the Samsung TV Plus app, whose partner gained two lines.
-    await pill(page, "IPD").click();
-    await expect(pill(page, "IPD")).toHaveAttribute("aria-pressed", "true");
+    await chooseFilter(page, "match-type", "IPD");
+    await expect(page.getByTestId("match-type")).toContainText("IPD");
     await expect(count(page)).toHaveText(serverCount(both("ipd").total));
     await expect(card(page, MT_PLATFORM.name)).toHaveCount(1);
     await expect
@@ -172,7 +171,7 @@ test.describe("the matched apps change tabs", () => {
       .toBe(true);
 
     // Own and Added: never the IPD app.
-    await pill(page, "Own").click();
+    await chooseFilter(page, "match-type", "Own");
     await expect(count(page)).toHaveText(serverCount(both("own").total));
     await expect(card(page, MT_PLATFORM.name)).toHaveCount(0);
     await expect(tab(page, "Added")).toHaveAttribute("aria-selected", "true");

@@ -3,7 +3,10 @@ import { Collapse, Settle } from "@/components/Motion";
 import LockedTail from "@/components/LockedTail";
 import TrialBanner from "@/components/TrialBanner";
 import { DeclarationsSkeleton } from "@/components/Skeleton";
-import { useCallback, useEffect, useMemo, useState, type ReactNode } from "react";
+import { SourceFileButton, PublisherDomainLink } from "@/components/PublisherLinks";
+import { ReportButton } from "@/components/ReportButton";
+import { ReportDescription } from "@/components/ReportDescription";
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { ChevronDown, Download } from "lucide-react";
 
 import { api, type RelationshipMismatch, type Summary } from "../lib/api";
@@ -13,13 +16,13 @@ import {
   countryName,
   downloadCsv,
   normalizeDeclarations,
-  subjectCsv,
+  declarationsCsv,
   type DeclarationKind,
   type DeclarationSection,
   type DeclarationSubject,
   type NormalizedDeclarations,
 } from "../lib/declarations";
-import { FilterBar, FilterSearch, FilterSelect } from "@/components/FilterBar";
+import { FilterBar, FilterGroup, FilterSearch, FilterSelect } from "@/components/FilterBar";
 import { PageShell } from "@/components/PageShell";
 import { formatWeek, WeekLine } from "@/components/WeekLine";
 import { PAGE_SIZE } from "@/lib/paging";
@@ -57,16 +60,16 @@ import { MiniStat, SplitStat, reportDate, type StatTone } from "./CrawlReport";
 type KindFilter = "all" | DeclarationKind;
 type SortKey = "files" | "name";
 
-const KIND_OPTIONS: { value: KindFilter; label: string }[] = [
-  { value: "all", label: "All kinds" },
-  { value: "inventory partner", label: "Inventory partners" },
-  { value: "owner domain", label: "Owner domains" },
-  { value: "manager domain", label: "Manager domains" },
+const KIND_OPTIONS: { value: KindFilter; label: string; description: string; group: string }[] = [
+  { value: "all", label: "All kinds", description: "Show every declaration type captured in this report.", group: "Declaration type" },
+  { value: "inventory partner", label: "Inventory partners", description: "Publishers naming a domain as their inventory partner.", group: "Declaration type" },
+  { value: "owner domain", label: "Owner domains", description: "Publishers naming a domain as the owner of their inventory.", group: "Declaration type" },
+  { value: "manager domain", label: "Manager domains", description: "Publishers naming a domain as their sales manager.", group: "Declaration type" },
 ];
 
-const SORT_OPTIONS: { value: SortKey; label: string }[] = [
-  { value: "files", label: "Most files first" },
-  { value: "name", label: "A to Z" },
+const SORT_OPTIONS: { value: SortKey; label: string; description: string; group: string }[] = [
+  { value: "files", label: "Most files first", description: "Domains with the most publishers naming them, first.", group: "Sort domains" },
+  { value: "name", label: "A to Z", description: "Sort the declared domains alphabetically.", group: "Sort domains" },
 ];
 
 /** The yellow each kind wears: foreground, tint, hairline, solid disc. */
@@ -118,6 +121,8 @@ export default function CrawlDeclarations() {
   const [query, setQuery] = useState("");
   const [kind, setKind] = useState<KindFilter>("all");
   const [sort, setSort] = useState<SortKey>("files");
+  const [focusKind, setFocusKind] = useState<KindFilter | null>(null);
+  const focusPending = useRef(false);
   const [open, setOpen] = useState<Set<string>>(new Set());
   const [pages, setPages] = useState<Record<DeclarationKind, number>>({
     "inventory partner": 1,
@@ -155,12 +160,10 @@ export default function CrawlDeclarations() {
         setData(normalized);
         // A customer report names the customer's own few domains, so each
         // section is a handful of cards whose roster IS the content. Those
-        // open on arrival; a long list (an older run-wide report) stays
-        // collapsed, like the Discovery page.
+        // open on arrival and can be collapsed from their header.
         setOpen(
           new Set(
             normalized.sections
-              .filter((sec) => sec.subjects.length <= 3)
               .flatMap((sec) => sec.subjects.map((sub) => `${sub.kind}|${sub.domain}`)),
           ),
         );
@@ -219,6 +222,24 @@ export default function CrawlDeclarations() {
       });
   }, [data, kind, needle, sort]);
 
+  const focusSection = (target: KindFilter) => {
+    setQuery(""); setKind("all");
+    setFocusKind(target); focusPending.current = true;
+  };
+  useEffect(() => {
+    if (!focusPending.current || focusKind === null) return;
+    focusPending.current = false;
+    const id = focusKind === "all" ? data?.sections.find(section => section.new_declarations > 0)?.kind ?? data?.sections[0]?.kind : focusKind;
+    const target = document.querySelector<HTMLElement>(`[data-declaration-section="${id}"]`);
+    if (!target) return;
+    const scroller = target.closest<HTMLElement>("[data-report-main]");
+    if (scroller) scroller.scrollBy({ top: target.getBoundingClientRect().top - scroller.getBoundingClientRect().top - 16,
+      behavior: window.matchMedia("(prefers-reduced-motion: reduce)").matches ? "auto" : "smooth" });
+    target.focus({ preventScroll: true });
+    const timer = window.setTimeout(() => setFocusKind(null), 1600);
+    return () => window.clearTimeout(timer);
+  }, [focusKind, data, kind, query]);
+
   const weekLabel = summary?.finished_at
     ? formatWeek(new Date(summary.finished_at))
     : null;
@@ -252,7 +273,7 @@ export default function CrawlDeclarations() {
           file), which is the count the Excel sheet has; the domains named
           sit underneath as the hint. */}
       {!loading && data && data.total > 0 && (
-        <div className="rounded-2xl border border-border bg-white p-5 shadow-sm">
+        <div className="report-panel declaration-kpis rounded-2xl border border-border bg-white p-5">
           <div className="mb-3 flex items-baseline justify-between gap-3">
             <div>
               <div className="font-display text-sm font-medium text-slate-700">
@@ -285,6 +306,7 @@ export default function CrawlDeclarations() {
                 label="New this week"
                 caption="Declarations no publisher made last week"
                 className="bg-white"
+                onClick={() => focusSection("all")}
               />
             )}
             {data.sections.map((s) => (
@@ -294,6 +316,7 @@ export default function CrawlDeclarations() {
                 tone={s.declarations > 0 ? KIND_TONE[s.kind].stat : undefined}
                 number={s.declarations}
                 label={KIND_COPY[s.kind].title}
+                onClick={() => focusSection(s.kind)}
                 {...kindHint(s, data.legacy, data.new_total != null)}
               />
             ))}
@@ -301,29 +324,7 @@ export default function CrawlDeclarations() {
         </div>
       )}
 
-      {!loading && data && data.total > 0 && (
-        <FilterBar className="w-full min-w-0">
-          <FilterSearch
-            value={query}
-            onChange={setQuery}
-            placeholder="Filter by domain, named or naming"
-          />
-          <FilterSelect
-            value={kind}
-            onChange={setKind}
-            options={KIND_OPTIONS}
-            leading="Kind"
-            ariaLabel="Which declarations to show"
-          />
-          <FilterSelect
-            value={sort}
-            onChange={setSort}
-            options={SORT_OPTIONS}
-            leading="Sort"
-            ariaLabel="Sort declared domains"
-          />
-        </FilterBar>
-      )}
+
 
       {loading && (
         <DeclarationsSkeleton />
@@ -352,7 +353,17 @@ export default function CrawlDeclarations() {
             .map((section) => (
             <KindSection
               key={section.kind}
+              focused={focusKind === section.kind || (focusKind === "all" && section.new_declarations > 0)}
               section={section}
+              controls={
+                <>
+                  <FilterSearch value={query} onChange={setQuery} placeholder="Filter by domain, named or naming" />
+                  <FilterGroup>
+                    <FilterSelect value={kind} onChange={setKind} options={KIND_OPTIONS.filter(option => !data.legacy || option.value !== "manager domain")} leading="Kind" ariaLabel="Which declarations to show" />
+                    <FilterSelect value={sort} onChange={setSort} options={SORT_OPTIONS} leading="Sort" ariaLabel="Sort declared domains" />
+                  </FilterGroup>
+                </>
+              }
               fileDate={reportDate({ finished_at: summary?.finished_at ?? null })}
               filtered={needle.length > 0}
               page={pages[section.kind]}
@@ -434,6 +445,8 @@ function kindHint(
 /* ── One kind: heading, cards, pager ───────────────────────────────── */
 
 function KindSection({
+  focused,
+  controls,
   section,
   fileDate,
   filtered,
@@ -443,6 +456,8 @@ function KindSection({
   onToggle,
   capped,
 }: {
+  focused: boolean;
+  controls: React.ReactNode;
   section: DeclarationSection;
   /** The report's date, for the CSV filenames. */
   fileDate: string;
@@ -462,7 +477,7 @@ function KindSection({
   const slice = section.subjects.slice(start, start + PAGE_SIZE);
 
   return (
-    <div>
+    <section tabIndex={-1} data-declaration-section={section.kind} data-focused={focused} className="declaration-section outline-none">
       <div className="mb-3 flex items-end justify-between gap-3">
         <div className="min-w-0">
           <h2
@@ -475,28 +490,25 @@ function KindSection({
             />
             {copy.title}
           </h2>
-          <p className="mt-0.5 text-sm text-slate-500">{copy.blurb}</p>
+          <ReportDescription className="mt-0.5" label={copy.title}
+            summary={section.kind === "inventory partner" ? "Partners named in publisher files." : section.kind === "owner domain" ? "Owners named in publisher files." : "Sales managers named in publisher files."}>
+            {copy.blurb}
+          </ReportDescription>
         </div>
-        {total > 0 && (
-          <div className="hidden flex-shrink-0 text-right text-xs text-slate-500 sm:block">
-            <span className="font-mono tabular-nums text-slate-700">
-              {total.toLocaleString()}
-            </span>{" "}
-            {total === 1 ? "domain" : "domains"}
-          </div>
-        )}
       </div>
 
-      <Pager
-        placement="top"
-        anchorRef={paging.topRef}
-        className="mb-3"
-        page={page}
-        pageSize={PAGE_SIZE}
-        total={total}
-        onPage={paging.onPage}
-        noun="domains"
-      />
+      <div ref={paging.topRef} className="mb-3">
+        <FilterBar>
+          {controls}
+          <ReportButton size="sm" className="report-download-action" disabled={total === 0}
+            title={capped ? "Download captured publisher records for all matching domains in this section" : "Download all publisher records for matching domains in this section, across every page"}
+            onClick={() => downloadCsv(`${section.kind.replace(/ /g, "-")}s-${fileDate}.csv`, declarationsCsv(section.subjects))}>
+            <Download className="h-3 w-3" />Export CSV
+          </ReportButton>
+          <Pager placement="inline" className="list-toolbar-pager" page={page} pageSize={PAGE_SIZE}
+            total={total} onPage={paging.onPage} noun="domains" nounOne="domain" />
+        </FilterBar>
+      </div>
 
       {total === 0 ? (
         <SectionEmpty>
@@ -510,7 +522,6 @@ function KindSection({
             <Settle key={`${s.kind}|${s.domain}`} index={i}>
               <SubjectCard
                 subject={s}
-                fileDate={fileDate}
                 capped={capped}
                 open={open.has(`${s.kind}|${s.domain}`)}
                 onToggle={() => onToggle(`${s.kind}|${s.domain}`)}
@@ -527,10 +538,10 @@ function KindSection({
           pageSize={PAGE_SIZE}
           total={total}
           onPage={paging.onPage}
-          noun="domains"
+          noun="domains" nounOne="domain"
         />
       )}
-    </div>
+    </section>
   );
 }
 
@@ -539,21 +550,16 @@ function KindSection({
 /**
  * One declared domain, a deliberate sibling of the Discovery page's
  * LineCard: rounded-3xl, a 44px disc, the subject dominant in mono,
- * right-aligned counts, a chevron, a tinted expanded body. The card ground
- * is the kind's yellow at a tint and the hairline its border, so a run of
- * inventory partners reads as one gold band, owner domains as a paler one,
- * manager domains as the deepest. The disc is solid, the strongest yellow
- * on the card, and carries the initial.
+ * right-aligned counts, a chevron, and a neutral expanded body. The
+ * section heading supplies the kind accent; the roster stays easy to read.
  */
 function SubjectCard({
   subject,
-  fileDate,
   capped,
   open,
   onToggle,
 }: {
   subject: DeclarationSubject;
-  fileDate: string;
   /** Legacy payloads cap the roster at 50; the count stays honest. */
   capped: boolean;
   open: boolean;
@@ -568,10 +574,10 @@ function SubjectCard({
   return (
     <div
       className={cn(
-        "overflow-hidden rounded-3xl border shadow-sm transition-colors",
-        tone.border,
-        open ? cn(tone.bg, "shadow-md") : cn(tone.tint),
+        "report-row declaration-card overflow-hidden rounded-xl border border-border bg-white transition-colors",
       )}
+      data-declaration-kind={subject.kind}
+      data-expanded={open}
     >
       <button
         type="button"
@@ -582,17 +588,17 @@ function SubjectCard({
         <div
           className={cn(
             "flex h-11 w-11 flex-shrink-0 items-center justify-center rounded-full text-base font-semibold",
-            tone.solid,
+            tone.bg, tone.text,
           )}
         >
           {initial}
         </div>
 
         <div className="min-w-0 flex-1">
-          <code className="block truncate font-mono text-[13px] font-semibold tracking-tight text-slate-900 sm:text-[15px]">
-            {subject.domain}
-          </code>
-          <div className="mt-0.5 flex flex-wrap items-center gap-x-2 gap-y-0.5 text-xs text-slate-500">
+          <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
+            <code className="min-w-0 truncate font-mono text-[13px] font-semibold tracking-tight text-slate-900 sm:text-[15px]">
+              {subject.domain}
+            </code>
             {/* What's new on this domain, in words: the whole domain when
                 nobody named it last week, else how many publishers are new
                 to naming it. */}
@@ -603,9 +609,11 @@ function SubjectCard({
                 +{subject.new_count.toLocaleString()} new this week
               </NewMark>
             ) : null}
+          </div>
+          <div className="mt-0.5 flex flex-wrap items-center gap-x-2 gap-y-0.5 text-xs text-slate-500">
             {/* The count lives in the Declarations column from sm up. */}
             <span className="sm:hidden">
-              <span className="font-mono tabular-nums text-slate-700">
+              <span className="font-sans tabular-nums text-slate-700">
                 {subject.total.toLocaleString()}
               </span>{" "}
               {subject.total === 1 ? "publisher" : "publishers"}
@@ -614,19 +622,8 @@ function SubjectCard({
               {both ? "ads.txt, app-ads.txt" : subject.app_ads_txt > 0 ? "app-ads.txt" : "ads.txt"}
             </span>
             {subject.countries.length > 0 && (
-              <span className="flex flex-wrap gap-1">
-                {subject.countries.map((c) => (
-                  <span
-                    key={c}
-                    className={cn(
-                      "rounded-full border px-1.5 py-px font-mono text-[10px]",
-                      tone.border, tone.text,
-                    )}
-                    title={countryName(c)}
-                  >
-                    {c}
-                  </span>
-                ))}
+              <span className="declaration-countries text-slate-500">
+                {subject.countries.map(countryName).join(" · ")}
               </span>
             )}
           </div>
@@ -637,7 +634,7 @@ function SubjectCard({
             the other numbers across. */}
         <div className="hidden items-center gap-6 text-right sm:flex">
           <div className="w-[76px]">
-            <MiniStat label="Declarations" value={subject.total} emphasis />
+            <MiniStat label="Publishers" value={subject.total} emphasis />
           </div>
           <div className="w-[64px]">
             <MiniStat label="ads.txt" value={subject.ads_txt} />
@@ -657,41 +654,20 @@ function SubjectCard({
       </button>
 
       <Collapse open={open}>
-        <div className={cn("border-t px-4 pb-4 pt-3 sm:px-5", tone.border)}>
-          <div className="mb-1 flex items-center justify-between gap-3">
+        <div className="declaration-detail border-t border-border px-4 pb-4 pt-3 sm:px-5">
+          <div className="mb-2 flex flex-wrap items-center gap-x-3 gap-y-2">
             <span className="text-xs font-medium text-slate-700">
               Named by{" "}
-              <span className="font-mono tabular-nums text-slate-500">
+              <span className="font-sans tabular-nums text-slate-500">
                 {subject.total.toLocaleString()}
               </span>{" "}
               {subject.total === 1 ? "publisher" : "publishers"}
             </span>
-            {/* Every publisher that named this domain, which file, and the
-                country: the workbook's Declarations sheet, for this one
-                domain and kind. Built from the frozen payload in the
-                browser, so it costs no request and works while the
-                crawler sleeps. */}
-            <button
-              type="button"
-              onClick={(e) => {
-                e.stopPropagation();
-                // Named like the workbook: the customer's domain, the
-                // kind, and the report's date.
-                downloadCsv(
-                  `${subject.domain.replace(/^www\./i, "")}-${subject.kind.replace(/ /g, "-")}s-${fileDate}.csv`,
-                  subjectCsv(subject),
-                );
-              }}
-              className="inline-flex items-center gap-1.5 rounded-full border border-border bg-white px-3 py-1 text-[11px] text-slate-700 transition-colors hover:border-primary/30"
-            >
-              <Download className="h-3 w-3" />
-              Export CSV
-            </button>
           </div>
           {/* Three rows tall, the rest by scrolling inside the card (David,
               2026-09-15), so a domain named by forty files does not push
               the next section off screen. */}
-          <div className="scroll-y max-h-[6.6rem] overflow-y-auto rounded-md border border-border bg-white">
+          <div className="scroll-y max-h-[13rem] overflow-y-auto rounded-md border border-border bg-white">
             <ul className="divide-y divide-border">
               {/* One row per publisher, its files on the right in the
                   overview's wording ("Found in ads.txt + app-ads.txt"): the
@@ -700,28 +676,29 @@ function SubjectCard({
               {subject.declarers.map((d, i) => (
                 <li
                   key={`${d.domain}|${i}`}
-                  className="flex items-center gap-3 px-3 py-1.5 font-mono text-[11px] tabular-nums"
+                  className="declaration-publisher text-xs tabular-nums"
                 >
-                  <span className="truncate text-slate-800">{d.domain}</span>
-                  {d.is_new && <NewMark className={tone.text}>new</NewMark>}
-                  {d.country && (
-                    <span
-                      className={cn("flex-shrink-0 text-[10px]", tone.text)}
-                      title={countryName(d.country)}
-                    >
-                      {d.country}
-                    </span>
-                  )}
-                  <span className="ml-auto flex-shrink-0 font-sans text-[10px] text-slate-400">
-                    {d.found_in}
-                  </span>
+                  <span className="declaration-match-number" aria-label={`Publisher ${i + 1}`}>{i + 1}</span>
+                  <div className="min-w-0">
+                    <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
+                      <PublisherDomainLink domain={d.domain} className="break-all font-medium text-slate-800" />
+                    </div>
+                    <div className="mt-1 flex flex-wrap items-center gap-x-2 gap-y-1 text-[11px] text-slate-500">
+                      <span>{d.files.length > 0 ? `${d.files.length} ${d.files.length === 1 ? "file" : "files"} · ${d.files.join(" + ")}` : "Source file not recorded"}</span>
+                      {d.country && <span className="declaration-country">{countryName(d.country)}</span>}
+                      {d.is_new && <NewMark className="text-primary">New</NewMark>}
+                    </div>
+                  </div>
+                  <div className="declaration-publisher-actions">
+                    <SourceFileButton domain={d.domain} foundIn={d.files.length > 1 ? "both" : d.files[0]} />
+                  </div>
                 </li>
               ))}
             </ul>
           </div>
           {capped && notShown > 0 && (
             <p className="mt-1 text-[10px] text-slate-500">
-              and {notShown.toLocaleString()} more
+              {notShown.toLocaleString()} more were not captured in this older report. CSV includes the captured publishers only.
             </p>
           )}
         </div>
@@ -739,7 +716,7 @@ function MismatchCard({ row }: { row: RelationshipMismatch }) {
   const initial = (row.ssp_domain.replace(/^www\./i, "").charAt(0) || "?")
     .toUpperCase();
   return (
-    <div className="overflow-hidden rounded-3xl border border-border bg-white shadow-sm">
+    <div className="report-row overflow-hidden rounded-xl border border-border bg-white shadow-sm">
       <div className="flex w-full items-center gap-4 px-4 py-4 sm:px-5">
         <div className="flex h-11 w-11 flex-shrink-0 items-center justify-center rounded-full bg-warn-bg text-base font-semibold text-warn">
           {initial}

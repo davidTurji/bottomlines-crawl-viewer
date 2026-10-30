@@ -13,39 +13,17 @@
  * or return is written with a leading ' so it is never run as a formula;
  * the file starts with a UTF-8 byte order mark so accents survive Excel.
  */
-import { Download } from "lucide-react";
-import { useEffect, useRef, useState } from "react";
+import { Download, Info, Loader2 } from "lucide-react";
+import { useEffect, useId, useRef, useState } from "react";
+import { listDownloadDescription, type DownloadStatus } from "@/lib/listDownloadScope";
 
 import { cn } from "@/lib/utils";
 
-export type CsvCell = string | number | null | undefined;
+import { csvLine, downloadCsvParts, type CsvCell } from "@/lib/csvDownload";
+export { csvCell, csvLine, type CsvCell } from "@/lib/csvDownload";
 
 /** Where an export writes: its header once, then each page's rows. */
 export type CsvSink = { header: (cols: string[]) => void; rows: (rows: CsvCell[][]) => void };
-
-/** One cell, RFC 4180 quoted, never a formula. */
-export function csvCell(v: CsvCell): string {
-  const t = v == null ? "" : String(v);
-  const safe = /^[=+\-@\t\r]/.test(t) ? `'${t}` : t;
-  return `"${safe.replace(/"/g, '""')}"`;
-}
-
-/** One CSV line (no line end). */
-export function csvLine(cells: CsvCell[]): string {
-  return cells.map(csvCell).join(",");
-}
-
-function download(parts: string[], filename: string) {
-  const url = URL.createObjectURL(new Blob(parts, { type: "text/csv;charset=utf-8" }));
-  const a = document.createElement("a");
-  a.href = url;
-  a.download = filename;
-  document.body.appendChild(a);
-  a.click();
-  a.remove();
-  // Safari starts the download after the click returns: let it go first.
-  window.setTimeout(() => URL.revokeObjectURL(url), 1500);
-}
 
 /** A file name from words: lower case, dashes, ".csv". */
 export function csvName(...parts: (string | null | undefined)[]): string {
@@ -65,21 +43,44 @@ export type ExportDone = string | { name: string; note?: string };
 export function ExportListButton({
   run,
   className,
+  noun = "results",
+  status = "all",
+  query = "",
+  filtered = false,
 }: {
   /** Reads the whole list into the sink, page by page, reporting its pages
    *  as it goes; answers the file's name. */
   run: (sink: CsvSink, onProgress: (done: number, of: number) => void, signal: AbortSignal) => Promise<ExportDone>;
   className?: string;
+  noun?: string;
+  status?: DownloadStatus;
+  query?: string;
+  filtered?: boolean;
 }) {
   const [busy, setBusy] = useState(false);
   const [progress, setProgress] = useState<{ done: number; of: number } | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [note, setNote] = useState<string | null>(null);
   const controller = useRef<AbortController | null>(null);
+  const helpId = useId();
+  const [showInfo, setShowInfo] = useState(false);
+  const root = useRef<HTMLSpanElement>(null);
+  const infoButton = useRef<HTMLButtonElement>(null);
+  const inFlight = useRef(false);
+  const explanation = listDownloadDescription(noun, status, query, filtered);
   useEffect(() => () => controller.current?.abort(), []);
+  useEffect(() => {
+    if (!showInfo) return;
+    const outside = (event: PointerEvent) => { if (!root.current?.contains(event.target as Node)) setShowInfo(false); };
+    const escape = (event: KeyboardEvent) => { if (event.key === "Escape") { setShowInfo(false); infoButton.current?.focus(); } };
+    document.addEventListener("pointerdown", outside); document.addEventListener("keydown", escape);
+    return () => { document.removeEventListener("pointerdown", outside); document.removeEventListener("keydown", escape); };
+  }, [showInfo]);
 
   const go = async () => {
-    if (busy) return;
+    if (inFlight.current) return;
+    inFlight.current = true;
+    setShowInfo(false);
     const c = new AbortController();
     controller.current = c;
     setBusy(true);
@@ -104,33 +105,33 @@ export function ExportListButton({
       const done = await run(sink, (n, of) => !c.signal.aborted && setProgress({ done: n, of }), c.signal);
       const filename = typeof done === "string" ? done : done.name;
       if (!c.signal.aborted && lines > 0) {
-        download(parts, filename);
+        downloadCsvParts(parts, filename);
         if (typeof done === "object" && done.note) setNote(done.note);
       }
     } catch (e) {
       if (!c.signal.aborted) setError(e instanceof Error && e.message ? e.message : "Could not export this list.");
     } finally {
+      inFlight.current = false;
       if (!c.signal.aborted) setBusy(false);
     }
   };
 
   return (
-    <span className={cn("inline-flex flex-shrink-0 items-center gap-2", className)}>
-      <button
-        type="button"
-        data-export-list
-        onClick={go}
-        disabled={busy}
-        title="A CSV of this list as it stands: its tab, filters and search, every page"
-        className="inline-flex h-8 flex-shrink-0 items-center gap-1.5 whitespace-nowrap rounded-full border border-border bg-white px-3 text-[12px] font-medium text-slate-600 shadow-sm transition-colors hover:bg-muted disabled:cursor-progress"
-      >
-        <Download aria-hidden className="h-3.5 w-3.5" />
-        {busy
-          ? progress && progress.of > 1
-            ? `Preparing ${progress.done.toLocaleString()} of ${progress.of.toLocaleString()}`
-            : "Preparing…"
-          : "Export this list"}
-      </button>
+    <span ref={root} className={cn("list-export-options", className)}>
+      <span id={helpId} className="sr-only">{explanation}</span>
+      <span className="list-download-control">
+          <button type="button" data-export-list disabled={busy} onClick={() => void go()} aria-label={busy ? "Preparing CSV download" : "Download"}
+            aria-describedby={helpId} title={busy ? "Preparing CSV download" : explanation} className="list-options-trigger report-download-action">
+            {busy ? <Loader2 aria-hidden className="list-download-icon h-3.5 w-3.5 animate-spin" /> : <Download aria-hidden className="list-download-icon h-3.5 w-3.5" />}
+            <span>{busy ? "Preparing" : "Download"}</span>
+          </button>
+          <button ref={infoButton} type="button" className="download-info-trigger" aria-label="About this download"
+            aria-expanded={showInfo} aria-controls={`${helpId}-info`} onClick={() => setShowInfo(value => !value)} title="What this downloads">
+            <Info aria-hidden className="h-3.5 w-3.5" />
+          </button>
+      </span>
+      {showInfo && <span id={`${helpId}-info`} role="note" aria-label="What this downloads" className="download-info-popover">{explanation}</span>}
+      {busy && <span role="status" className="sr-only">{progress ? `Preparing ${progress.done} of ${progress.of}` : "Preparing CSV download"}</span>}
       {error && (
         <span role="alert" className="text-[11px] text-critical">
           {error}

@@ -66,7 +66,7 @@ const reportPages = (
         until it was renamed. Kept as a redirect rather than dropped: a
         share link a customer already has in their inbox must not break
         because we renamed a page. */}
-    <Route path="discovered" element={<Navigate to="../discovery" replace />} />
+    <Route path="discovered" element={<ReportSubpathRedirect page="discovery" />} />
     {/* Unknown sub-path of a valid report: the link is fine, the page
         name is not. Send the reader to the overview. This is also what
         now catches /results, the retired Matched inventory page, so an

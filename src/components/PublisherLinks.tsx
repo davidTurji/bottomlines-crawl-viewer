@@ -1,28 +1,13 @@
-/**
- * Getting from a row to the publisher's own files in one click (David,
- * 2026-10-06): hover a publisher's domain and it is a link to their site;
- * click a seat line and it is copied, and the publisher's ads.txt or
- * app-ads.txt opens in a new tab with that line highlighted, so checking a
- * line against the source takes no typing at all. A line found in both files
- * asks which file to open.
- *
- * The highlight is a text fragment on the Seller ID (`#:~:text=`): the ID is
- * the part of a line written the same way in every file, where the spacing
- * around the commas is not. Browsers without text fragments simply open the
- * file at the top.
- */
-import { useEffect, useRef, useState, type KeyboardEvent, type MouseEvent, type PointerEvent } from "react";
-import { ArrowUpRight, Check, Copy } from "lucide-react";
+/** Explicit line actions: selectable record text, a copy control, and a
+ *  separate source-file link. Opening a source never changes the clipboard. */
+import { createContext, useCallback, useContext, useEffect, useId, useLayoutEffect, useMemo, useRef, useState, type KeyboardEvent, type MouseEvent, type PointerEvent } from "react";
+import { ArrowUpRight, Check, ChevronDown, Copy } from "lucide-react";
 
-import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuLabel,
-  DropdownMenuTrigger,
-} from "@/components/ui/dropdown-menu";
+
+import * as Dialog from "@radix-ui/react-dialog";
 import type { MatchedSeatLine } from "@/lib/api";
-import { cn, foundInLabel } from "@/lib/utils";
+import { cn } from "@/lib/utils";
+import { toggleWithoutJump } from "@/components/Motion";
 
 export type PublisherFile = "ads.txt" | "app-ads.txt";
 
@@ -111,16 +96,6 @@ export async function copyText(text: string): Promise<boolean> {
   }
 }
 
-/** Selecting part of a line to copy it by hand is not a click on the line. */
-function selecting(): boolean {
-  const sel = window.getSelection();
-  return !!sel && !sel.isCollapsed && sel.toString().trim() !== "";
-}
-
-function openTab(url: string) {
-  window.open(url, "_blank", "noopener,noreferrer");
-}
-
 /** A link inside a card or a row: never toggles the card, sits above any
  *  full-row overlay, and keeps its own pointer events. */
 const NESTED = "pointer-events-auto relative z-[1]";
@@ -136,11 +111,6 @@ const SHOWN_TEXT =
 const SHOWN_BOX = "-mx-0.5 rounded-[3px] px-0.5 hover:bg-primary/[0.07]";
 const SHOWN_ARROW =
   "h-3 w-3 flex-shrink-0 transition-transform duration-150 group-hover/shown:-translate-y-[1.5px] group-hover/shown:translate-x-[1.5px]";
-/** The same nudge for a whole line, on its own group name, so hovering a
- *  line never moves the arrow of a link inside it. */
-const SHOWN_LINE_ARROW =
-  "transition-transform duration-150 group-hover/shownline:-translate-y-[1.5px] group-hover/shownline:translate-x-[1.5px]";
-
 /**
  * The publisher's domain, quiet until hovered, then a link to their site.
  * Sits inside clickable cards, so its click never reaches the card.
@@ -273,150 +243,189 @@ function useCopied(): [boolean, () => void] {
   ];
 }
 
-/**
- * A seat line that opens the publisher's file at it (David, 2026-10-06). The
- * row keeps its own content; over it lies one real control:
- *
- * - found in one file: a real link (`<a target="_blank">`), so a click,
- *   Enter, a middle-click or Cmd-click all open the file;
- * - found in both, or unknown: a real button that opens a small menu to pick
- *   the file, and closes it again on a second press.
- *
- * Either way the line is also copied, quietly, for the browser's own search
- * when a file shows no highlight. The row's text sits under the control
- * (pointer events pass through to it), except links inside the row, which
- * stay their own. Callers mark the text that should read as the link with
- * `data-line-text`. `gone` (a removed line) opens the file at the top: the
- * line is no longer in it. Without a publisher domain the row is plain.
- */
-export function ActionableLine({
-  line,
-  publisherDomain,
-  foundIn,
-  gone = false,
-  shown = false,
-  className,
-  children,
-}: {
-  line: Pick<MatchedSeatLine, "ssp_domain" | "publisher_id" | "relationship" | "cert_id">;
-  publisherDomain: string | null | undefined;
-  foundIn: string | null | undefined;
-  /** The line has left the publisher's file (a removed line). */
+/** A copy action with visible confirmation and an accessible failure state. */
+function LineCopyButton({ text }: { text: string }) {
+  const [copied, flash] = useCopied();
+  const [failed, setFailed] = useState(false);
+  return (
+    <button
+      type="button"
+      aria-label={`Copy ${text}`}
+      className="line-control"
+      onClick={(e) => {
+        e.stopPropagation();
+        void copyText(text).then((ok) => {
+          setFailed(!ok);
+          if (ok) flash();
+        });
+      }}
+      onKeyDown={(e) => e.stopPropagation()}
+    >
+      {copied ? <Check aria-hidden className="h-3.5 w-3.5 text-ok" /> : <Copy aria-hidden className="h-3.5 w-3.5" />}
+      <span>{copied ? "Copied" : failed ? "Retry copy" : "Copy line"}</span>
+      <span role="status" className="sr-only">{copied ? "Line copied" : failed ? "Could not copy. Select the line text to copy it manually." : ""}</span>
+    </button>
+  );
+}
+
+type LineRecord = Pick<MatchedSeatLine, "ssp_domain" | "publisher_id" | "relationship" | "cert_id">;
+type LineTarget = { key: string; line: LineRecord; domain: string | null; sourceDomains?: string[]; foundIn: string | null | undefined; gone: boolean; label: string };
+const LineSelection = createContext<{
+  selected: LineTarget | null;
+  select: (line: LineTarget | null) => void;
+  register: (target: LineTarget, owner: string) => () => void;
+  activate: (owner: string) => void;
+} | null>(null);
+const LineGroup = createContext("");
+
+/** One selection across every expanded list on the current report page. */
+export function LineSelectionProvider({ children }: { children: React.ReactNode }) {
+  const [selected, select] = useState<LineTarget | null>(null);
+  const entries = useRef(new Map<string, { target: LineTarget; owner: string }>());
+  const nextDefault = useRef<string | null>(null);
+  const scheduled = useRef(false);
+  const alive = useRef(true);
+  useLayoutEffect(() => { alive.current = true; return () => { alive.current = false; }; }, []);
+  const reconcile = useCallback(() => {
+    if (scheduled.current) return;
+    scheduled.current = true;
+    // All windows in an expansion mount together. Pick the first registered
+    // line once, rather than preselecting one line in every window.
+    queueMicrotask(() => {
+      scheduled.current = false;
+      if (!alive.current) return;
+      const preferred = nextDefault.current;
+      nextDefault.current = null;
+      select(previous => {
+        if (preferred && entries.current.has(preferred)) return entries.current.get(preferred)!.target;
+        if (previous && entries.current.has(previous.key)) return entries.current.get(previous.key)!.target;
+        return entries.current.values().next().value?.target ?? null;
+      });
+    });
+  }, []);
+  const register = useCallback((target: LineTarget, owner: string) => {
+    entries.current.set(target.key, { target, owner });
+    reconcile();
+    return () => { entries.current.delete(target.key); reconcile(); };
+  }, [reconcile]);
+  const activate = useCallback((owner: string) => {
+    if (!nextDefault.current) nextDefault.current = [...entries.current.values()].find(entry => entry.owner === owner)?.target.key ?? null;
+    reconcile();
+  }, [reconcile]);
+  return (
+    <LineSelection.Provider value={{ selected, select, register, activate }}>{children}</LineSelection.Provider>
+  );
+}
+
+/** A newly opened group exposes its first line's actions; later clicks share the page selection. */
+export function LineActionGroup({ children, className, tone = "neutral" }: {
+  children: React.ReactNode; className?: string; tone?: "added" | "removed" | "cert" | "neutral";
+}) {
+  const owner = useId();
+  const scope = useContext(LineSelection);
+  const activate = scope?.activate;
+  useLayoutEffect(() => { activate?.(owner); }, [activate, owner]);
+  return <LineGroup.Provider value={owner}><div data-line-tone={tone} className={cn("line-action-group", className)}>{children}</div></LineGroup.Provider>;
+}
+
+function SelectedLineActions({ target }: { target: LineTarget }) {
+  return <>
+    <LineCopyButton key={target.key} text={lineText(target.line)} />
+    <SourceFileButton domain={target.domain} sourceDomains={target.sourceDomains} foundIn={target.foundIn} line={target.line} gone={target.gone} />
+  </>;
+}
+
+/** Shared source action for matched lines, Discovery and declaration rosters. */
+export function SourceFileButton({ domain, sourceDomains = [], foundIn, line, gone = false }: {
+  domain: string | null;
+  sourceDomains?: string[];
+  foundIn?: string | null;
+  line?: LineRecord;
   gone?: boolean;
-  /** Always in the hover look (David, 2026-10-11: a reader must see it is a
-   *  link without pointing at it). */
+}) {
+  const text = line ? lineText(line) : "declaration";
+  const files = filesOf(foundIn);
+  const domains = [...new Set([domain, ...sourceDomains].filter(linkable))];
+  const targets = domains.flatMap(domain => files.map(file => ({ domain, file })));
+  const multipleHosts = domains.length > 1;
+  const at = gone ? null : line;
+  const stop = (e: MouseEvent | KeyboardEvent | PointerEvent) => e.stopPropagation();
+  const label = (f: PublisherFile) => gone
+    ? `Open ${host(domain!)}/${f}. ${text} is no longer in it`
+    : `Open ${text} in ${host(domain!)}/${f}`;
+  return (
+    <>
+      {domain && (targets.length === 1 ? (
+        <a href={fileUrl(domain, files[0], at)} target="_blank" rel="noopener noreferrer"
+          aria-label={label(files[0])} title={`${gone ? "Current file" : "Source"}: ${host(domain)}/${files[0]}`}
+          onClick={stop} onKeyDown={stop} className="line-control line-control-source">
+          Open file <ArrowUpRight aria-hidden className="h-3.5 w-3.5" />
+        </a>
+      ) : (
+        <Dialog.Root>
+          <Dialog.Trigger asChild>
+            <button type="button" className="line-control line-control-source"
+              aria-label={multipleHosts ? `Open ${text}: choose a source file` : `Open ${text}: choose ads.txt or app-ads.txt on ${host(domain)}`} onClick={stop}>
+              Open file <ChevronDown aria-hidden className="h-3.5 w-3.5" />
+            </button>
+          </Dialog.Trigger>
+          <Dialog.Portal>
+            <Dialog.Overlay className="fixed inset-0 z-50 bg-black/25" />
+            <Dialog.Content onClick={stop} className="source-file-dialog report-dialog-center fixed z-50 max-h-[calc(var(--report-dialog-height,100dvh)-32px)] w-[calc(var(--report-dialog-width,100vw)-32px)] max-w-sm -translate-x-1/2 -translate-y-1/2 overflow-y-auto rounded-xl border border-border bg-white p-5 shadow-xl">
+              <Dialog.Title className="text-base font-semibold text-slate-900">Open source file</Dialog.Title>
+              <Dialog.Description className="mt-1 break-words text-xs leading-relaxed text-slate-500">
+                {multipleHosts ? `This line appears in ${targets.length} inventory partner files. Choose a source.` : <>{host(domain)}{foundIn === "both" ? " · Found in both files" : " · Choose a file; the report did not record which one"}</>}
+              </Dialog.Description>
+              <div className="mt-4 grid gap-2">
+                {targets.map(({domain, file}) => <a key={`${domain}/${file}`} href={fileUrl(domain, file, at)} target="_blank" rel="noopener noreferrer"
+                  className="line-control line-file-link px-3 py-3 text-sm"><span className="min-w-0 break-all">{multipleHosts ? `${host(domain)}/${file}` : file}</span><ArrowUpRight aria-hidden className="h-4 w-4 flex-none" /></a>)}
+                {targets.length <= 2 && <button type="button" className="line-control line-file-both min-h-11"
+                  onClick={() => { for (const {domain, file} of targets) window.open(fileUrl(domain, file, at), "_blank", "noopener,noreferrer"); }}>
+                  Open both files <ArrowUpRight aria-hidden className="h-4 w-4" />
+                </button>}
+              </div>
+              <Dialog.Close className="mt-4 min-h-10 w-full rounded-md text-xs font-medium text-slate-600 hover:bg-muted">Cancel</Dialog.Close>
+            </Dialog.Content>
+          </Dialog.Portal>
+        </Dialog.Root>
+      ))}
+    </>
+  );
+}
+
+/** Clicking a record reveals its own actions; text selection and nested links keep their normal behavior. */
+export function ActionableLine({ line, publisherDomain, sourceDomains, foundIn, gone = false, selectionLabel, className, children }: {
+  line: LineRecord;
+  publisherDomain: string | null | undefined;
+  sourceDomains?: string[];
+  foundIn: string | null | undefined;
+  gone?: boolean;
   shown?: boolean;
+  selectionLabel?: string;
   className?: string;
-  /** The row's content: the line text and whatever sits at its margin. */
   children: React.ReactNode;
 }) {
-  const [copied, flash] = useCopied();
-  const [menu, setMenu] = useState(false);
-  if (!linkable(publisherDomain)) return <li className={className}>{children}</li>;
-  const domain = publisherDomain;
-
-  const files = filesOf(foundIn);
+  const group = useContext(LineSelection);
+  const owner = useContext(LineGroup);
+  const instance = useId();
+  const domain = linkable(publisherDomain) ? publisherDomain : null;
   const text = lineText(line);
-  const at = gone ? null : line;
-  const copy = () => {
-    void copyText(text).then((ok) => ok && flash());
-  };
-  const where = (f: PublisherFile) => `${host(domain)}/${f}`;
-  const label =
-    files.length === 1
-      ? gone
-        ? `Open ${where(files[0])}. ${text} is no longer in it`
-        : `Open ${text} in ${where(files[0])}`
-      : `Open ${text}: choose ads.txt or app-ads.txt on ${host(domain)}`;
-  const overlay =
-    "absolute inset-0 z-0 cursor-pointer rounded-[inherit] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-primary/40";
-
+  const key = `${instance}|${text}|${domain}|${sourceDomains?.join(",") ?? ""}|${foundIn}|${gone}|${selectionLabel ?? ""}`;
+  const target = useMemo<LineTarget>(() => ({ key, line, domain, sourceDomains, foundIn, gone, label: selectionLabel ?? text }), [key, selectionLabel]);
+  const register = group?.register;
+  useLayoutEffect(() => register?.(target, owner), [register, target, owner]);
+  const on = group?.selected?.key === key;
   return (
-    <li
-      className={cn(
-        // A link, like every other link: the line text underlines and takes
-        // the brand colour on hover or focus, with the new-tab arrow.
-        "group/line relative transition-colors hover:bg-accent/40 focus-within:bg-accent/40",
-        "[&_[data-line-text]]:decoration-primary/40 [&_[data-line-text]]:underline-offset-2",
-        "[&:hover_[data-line-text]]:text-primary [&:hover_[data-line-text]]:underline",
-        "[&:focus-within_[data-line-text]]:text-primary [&:focus-within_[data-line-text]]:underline",
-        shown &&
-          "group/shownline [&_[data-line-text]]:text-primary [&_[data-line-text]]:underline [&_[data-line-text]]:decoration-primary/35 [&_[data-line-text]]:decoration-1 [&_[data-line-text]]:underline-offset-[3px] [&:hover_[data-line-text]]:decoration-primary",
-        className,
-      )}
-    >
-      {files.length === 1 ? (
-        <a
-          href={fileUrl(domain, files[0], at)}
-          target="_blank"
-          rel="noopener noreferrer"
-          aria-label={label}
-          title={gone ? `Open ${where(files[0])}` : `Open ${where(files[0])} at this line`}
-          className={overlay}
-          onClick={(e) => {
-            e.stopPropagation();
-            if (selecting()) {
-              e.preventDefault();
-              return;
-            }
-            copy();
-          }}
-        />
-      ) : (
-        <DropdownMenu
-          open={menu}
-          onOpenChange={(open) => {
-            setMenu(open);
-            if (open) copy();
-          }}
-        >
-          <DropdownMenuTrigger asChild>
-            <button
-              type="button"
-              aria-label={label}
-              title={`Open this line's file on ${host(domain)}`}
-              className={overlay}
-              onClick={(e) => e.stopPropagation()}
-              onPointerDown={(e) => {
-                if (selecting()) e.preventDefault();
-              }}
-            />
-          </DropdownMenuTrigger>
-          <DropdownMenuContent
-            align="end"
-            sideOffset={4}
-            className="min-w-[200px]"
-            onClick={(e) => e.stopPropagation()}
-          >
-            <DropdownMenuLabel className="text-[11px] font-normal text-slate-500">
-              Open on {host(domain)}
-            </DropdownMenuLabel>
-            {(["ads.txt", "app-ads.txt"] as PublisherFile[]).map((f) => (
-              <DropdownMenuItem
-                key={f}
-                className="cursor-pointer gap-2 text-[13px]"
-                onSelect={() => openTab(fileUrl(domain, f, at))}
-              >
-                <ArrowUpRight className="h-3.5 w-3.5 text-slate-400" />
-                {f}
-              </DropdownMenuItem>
-            ))}
-          </DropdownMenuContent>
-        </DropdownMenu>
-      )}
-      {/* The row's own content, under the control: clicks pass through to
-          it, links inside it (NESTED) keep their own. */}
-      <span className="pointer-events-none contents">{children}</span>
-      <ArrowUpRight
-        aria-hidden
-        className={cn(
-          "pointer-events-none h-3 w-3 flex-shrink-0 self-center text-primary opacity-0 transition-opacity group-focus-within/line:opacity-100 group-hover/line:opacity-100",
-          shown && cn("opacity-100", SHOWN_LINE_ARROW),
-        )}
-      />
-      <span role="status" className="sr-only">
-        {copied ? "Line copied" : ""}
-      </span>
+    <li className={cn(className, "line-entry", on && "line-entry-selected")}
+      onClick={e => { if (!(e.target as HTMLElement).closest("a,button")) toggleWithoutJump(e.currentTarget, () => group?.select(target)); }}>
+      <button type="button" className="line-select" aria-label={`Select ${selectionLabel ?? text}`}
+        aria-pressed={on} onClick={e => { e.stopPropagation(); toggleWithoutJump(e.currentTarget.closest<HTMLElement>(".line-entry") ?? e.currentTarget, () => group?.select(target)); }}
+        onKeyDown={e => { if (e.key === "Escape") { e.preventDefault(); group?.select(null); } }} />
+      <div className="line-record">{children}
+      {on && <div data-line-actions className="line-inline-actions" role="toolbar" aria-label={`Actions for ${selectionLabel ?? text}`}>
+        <SelectedLineActions target={target} />
+      </div>}
+      </div>
     </li>
   );
 }
@@ -463,111 +472,6 @@ export function ShownLink({
 }
 
 /**
- * A removed line copies on click (David, 2026-10-20). It has left the
- * publisher's file, so opening the file at it finds nothing; what a reader
- * wants is the line itself, to search for it or send it on. The click copies
- * it and the row says "Copied". The file stays one click away on the row's
- * margin (`FoundInLinks`), a link of its own above the copy control.
- */
-export function CopyableLine({
-  line,
-  className,
-  children,
-}: {
-  line: Pick<MatchedSeatLine, "ssp_domain" | "publisher_id" | "relationship" | "cert_id">;
-  className?: string;
-  /** The row's content: the line text and whatever sits at its margin. */
-  children: React.ReactNode;
-}) {
-  const [copied, flash] = useCopied();
-  const text = lineText(line);
-  return (
-    <li
-      className={cn(
-        "group/line relative transition-colors hover:bg-accent/40 focus-within:bg-accent/40",
-        "[&_[data-line-text]]:decoration-primary/40 [&_[data-line-text]]:underline-offset-2",
-        "[&:hover_[data-line-text]]:text-primary [&:hover_[data-line-text]]:underline",
-        "[&:focus-within_[data-line-text]]:text-primary [&:focus-within_[data-line-text]]:underline",
-        className,
-      )}
-    >
-      <button
-        type="button"
-        aria-label={`Copy ${text}`}
-        title="Copy this line"
-        className="absolute inset-0 z-0 cursor-pointer rounded-[inherit] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-primary/40"
-        onClick={(e) => {
-          e.stopPropagation();
-          if (selecting()) return;
-          void copyText(text).then((ok) => ok && flash());
-        }}
-      />
-      <span className="pointer-events-none contents">{children}</span>
-      {copied ? (
-        <span className="pointer-events-none flex flex-shrink-0 items-center gap-1 self-center text-[10px] font-medium text-ok">
-          <Check aria-hidden className="h-3 w-3" />
-          Copied
-        </span>
-      ) : (
-        <Copy
-          aria-hidden
-          className="pointer-events-none h-3 w-3 flex-shrink-0 self-center text-primary opacity-0 transition-opacity group-focus-within/line:opacity-100 group-hover/line:opacity-100"
-        />
-      )}
-      <span role="status" className="sr-only">
-        {copied ? "Line copied" : ""}
-      </span>
-    </li>
-  );
-}
-
-/**
- * "Found in app-ads.txt" with each file a quiet link to the publisher's copy,
- * opened at the top. For a row whose own click does something else (a removed
- * line copies). Without a publisher domain it is the plain label.
- */
-export function FoundInLinks({
-  publisherDomain,
-  foundIn,
-  className,
-}: {
-  publisherDomain: string | null | undefined;
-  foundIn: string | null | undefined;
-  className?: string;
-}) {
-  const label = foundInLabel(foundIn);
-  if (!label) return null;
-  if (!linkable(publisherDomain)) return <span className={className}>{label}</span>;
-  const domain = publisherDomain;
-  const stop = (e: MouseEvent | KeyboardEvent | PointerEvent) => e.stopPropagation();
-  return (
-    <span className={className}>
-      Found in{" "}
-      {filesOf(foundIn).map((f, i) => (
-        <span key={f}>
-          {i > 0 && " + "}
-          <a
-            href={fileUrl(domain, f)}
-            target="_blank"
-            rel="noopener noreferrer"
-            title={`Open ${host(domain)}/${f}`}
-            onClick={stop}
-            onKeyDown={stop}
-            onPointerDown={stop}
-            className={cn(
-              NESTED,
-              "rounded-[2px] underline decoration-slate-300 underline-offset-2 hover:text-primary hover:decoration-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40",
-            )}
-          >
-            {f}
-          </a>
-        </span>
-      ))}
-    </span>
-  );
-}
-
-/**
  * "via failarmy.tv, familyhandyman.tv +3" at a seat line's margin (David,
  * 2026-10-27): the inventory partners whose ads.txt carries the line, each
  * a link to THAT partner's own ads.txt at the line (a line that has left
@@ -595,10 +499,10 @@ export function PartnerLinks({
   return (
     <span
       data-line-via
-      title={`Via ${named.join(", ")}`}
+      title={`The publisher declares ${named.join(", ")} as an inventory partner. This line matches in the partner’s ads.txt.`}
       className={cn(all ? "min-w-0 max-w-[55%] whitespace-normal break-words text-right" : "flex-shrink-0", className)}
     >
-      via{" "}
+      Matches via{" "}
       {shown.map((p, i) => (
         <span key={p}>
           {i > 0 && ", "}

@@ -18,6 +18,7 @@
  * report simply has no tab.
  */
 
+import { csvLine, downloadCsvParts } from "./csvDownload";
 import { foundInLabel } from "./utils";
 import type {
   TrialSlice,
@@ -350,13 +351,15 @@ export function countryName(code: string): string {
 
 /** One declared domain's roster as a CSV in the Excel sheet's columns. */
 export function subjectCsv(subject: DeclarationSubject): string {
-  const esc = (v: string) => (/[",\n]/.test(v) ? `"${v.replace(/"/g, '""')}"` : v);
-  const lines = ["Declaration,Domain declared,Declared by,Country,Found in"];
-  for (const d of subject.declarers) {
+  return declarationsCsv([subject]);
+}
+
+/** Export the filtered section across every displayed page, with one header. */
+export function declarationsCsv(subjects: DeclarationSubject[]): string {
+  const lines = [csvLine(["Declaration", "Domain declared", "Declared by", "Country", "Found in"])];
+  for (const subject of subjects) for (const d of subject.declarers) {
     lines.push(
-      [subject.kind, subject.domain, d.domain, d.country, d.files.join(" + ")]
-        .map(esc)
-        .join(","),
+      csvLine([subject.kind, subject.domain, d.domain, d.country, d.files.join(" + ")]),
     );
   }
   return lines.join("\n") + "\n";
@@ -364,13 +367,5 @@ export function subjectCsv(subject: DeclarationSubject): string {
 
 /** Hand the browser a file. Same columns as the workbook's Declarations sheet. */
 export function downloadCsv(filename: string, csv: string): void {
-  const blob = new Blob([csv], { type: "text/csv;charset=utf-8" });
-  const url = URL.createObjectURL(blob);
-  const a = document.createElement("a");
-  a.href = url;
-  a.download = filename;
-  document.body.appendChild(a);
-  a.click();
-  a.remove();
-  URL.revokeObjectURL(url);
+  downloadCsvParts(["\uFEFF", csv], filename);
 }

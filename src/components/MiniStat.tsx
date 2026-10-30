@@ -25,7 +25,7 @@ export function MiniStat({
       </div>
       <div
         className={cn(
-          "font-mono text-sm tabular-nums",
+          "font-sans text-sm tabular-nums",
           emphasis ? "font-semibold text-slate-900" : "text-slate-700",
         )}
       >

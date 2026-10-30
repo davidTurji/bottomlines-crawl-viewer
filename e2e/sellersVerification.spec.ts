@@ -13,15 +13,14 @@ for(const scenario of ["browser", "proxy", "gb", "blocked"] as const) {
     await page.route('**/api/v1/viewer/*/sellers-fix',route=>route.fulfill({json:payload}));
     await page.goto(`/crawl-report/${TOKEN}/sellers`);
     await expect(page.getByRole('heading',{name:'Sellers.json',exact:true})).toBeVisible();
-    await expect(page.getByRole('checkbox',{name:'Remove from file',exact:true})).toHaveCount(0);
     const group=page.getByTestId('seller-info');
     const unknown=page.getByTestId('seller-info-unreachable');
     await expect(unknown).not.toBeVisible();
-    await group.locator(':scope > summary').click();
-    await expect(unknown.locator('summary')).toContainText('Unreachable files');
+    await group.locator(':scope > button').click();
+    await expect(unknown.locator(':scope > button')).toContainText('Unreachable files');
     await expect(page.getByText('Needs checking', {exact:true})).toHaveCount(0);
-    await expect(page.getByText('Not seen in checked files', {exact:true}).locator('..')).toContainText('0');
-    await unknown.locator('summary').click();
+    await expect(page.getByText('Not seen', {exact:true}).locator('..')).toContainText('0');
+    await unknown.locator(':scope > button').click();
     await expect(unknown.getByText('From your file: BOTH',{exact:false})).toBeVisible();
     if(recovered) await expect(unknown.getByText('Sega',{exact:true})).toHaveCount(0);
     else {
@@ -44,9 +43,9 @@ test('full viewer distinguishes read outcomes from seller fixes', async ({page})
   const group=page.getByTestId('seller-info');
   const info=page.getByTestId('seller-info-unreachable');
   await expect(info).not.toBeVisible();
-  await expect(page.getByRole('button',{name:'Download fixed file',exact:true})).toHaveCount(2);
-  await group.locator(':scope > summary').click();
-  await info.locator(':scope > summary').click();
+  await expect(page.getByRole('button',{name:'Download file',exact:true})).toHaveCount(2);
+  await group.locator(':scope > button').click();
+  await info.locator(':scope > button').click();
   await expect(info).toContainText('Fogharbor News');
   await expect(info).toContainText('Bramblemist TV');
   await expect(info).toContainText('Cloudwillow Media');
@@ -70,5 +69,5 @@ test('successful checks do not create an empty customer Info section', async ({p
   await page.goto(`/crawl-report/${TOKEN}/sellers`);
   await expect(page.getByRole('heading',{name:'Sellers.json',exact:true})).toBeVisible();
   await expect(page.getByTestId('seller-info')).toHaveCount(0);
-  await expect(page.getByRole('checkbox',{name:'Remove from file',exact:true})).toHaveCount(0);
+  await expect(page.getByRole('heading',{name:/Not seen, check first/})).toHaveCount(0);
 });

@@ -201,9 +201,11 @@ function ResolvingScreen() {
  * inside a link that is perfectly valid, so telling the reader it has
  * expired is a lie. Send them to the report's overview instead.
  */
-export function ReportSubpathRedirect() {
+export function ReportSubpathRedirect({ page = "" }: { page?: string }) {
   const { basePath } = useReportScope();
-  return <Navigate to={basePath || "/"} replace />;
+  const { search, hash } = useLocation();
+  const pathname = page ? `${basePath}/${page}` : basePath || "/";
+  return <Navigate to={{ pathname, search, hash }} replace />;
 }
 
 /**

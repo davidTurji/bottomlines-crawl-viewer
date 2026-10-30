@@ -21,6 +21,7 @@ import { createPortal } from "react-dom";
 import { Compass, X } from "lucide-react";
 
 import { api } from "@/lib/api";
+import { ReportButton } from "@/components/ReportButton";
 import { useReportScope } from "@/lib/reportScope";
 import { TourOverlay } from "./TourOverlay";
 import { reportTourSteps, type ReportFeatures, type ReportPage } from "./reportTourSteps";
@@ -252,15 +253,16 @@ function WelcomePrompt({
 
   return createPortal(
     <div
-      className="fixed inset-0 z-[100] flex items-center justify-center bg-slate-900/30 px-5 backdrop-blur-[2px] animate-tour-fade motion-reduce:animate-none"
+      className="report-dialog-viewport fixed z-[100] bg-slate-900/30 backdrop-blur-[2px] animate-tour-fade motion-reduce:animate-none"
       role="dialog"
       aria-modal
       aria-labelledby="walkthrough-prompt-title"
     >
+      <div className="report-dialog-stage">
       <div
         ref={cardRef}
         tabIndex={-1}
-        className="relative w-full max-w-[21rem] rounded-3xl border border-slate-200/70 bg-white p-5 shadow-[0_24px_60px_-12px_rgba(15,23,42,0.35)] outline-none animate-tour-pop motion-reduce:animate-none"
+        className="walkthrough-prompt report-dialog-scroll relative w-full max-w-[21rem] rounded-xl border border-slate-200/70 bg-white p-5 shadow-[0_24px_60px_-12px_rgba(15,23,42,0.35)] outline-none animate-tour-pop motion-reduce:animate-none"
       >
         <button
           type="button"
@@ -270,7 +272,7 @@ function WelcomePrompt({
         >
           <X className="h-4 w-4" />
         </button>
-        <span className="flex h-9 w-9 items-center justify-center rounded-full bg-gradient-to-b from-[hsl(152_50%_32%)] to-primary text-white shadow-md shadow-primary/25">
+        <span className="flex h-9 w-9 items-center justify-center rounded-full bg-primary text-white ">
           <Compass className="h-4 w-4" />
         </span>
         <h2
@@ -284,39 +286,36 @@ function WelcomePrompt({
           of your report.
         </p>
         {mode === "intro" ? (
-          <button
-            type="button"
+          <ReportButton
             onClick={() => onAnswer(true)}
-            className="mt-4 inline-flex h-10 w-full items-center justify-center rounded-full border border-transparent bg-gradient-to-b from-[hsl(152_50%_32%)] to-primary px-3 text-[13px] font-semibold text-primary-foreground shadow-md shadow-primary/25 transition-all duration-200 hover:brightness-110 active:scale-[0.98] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
+            className="mt-4 w-full"
           >
             Continue
-          </button>
+          </ReportButton>
         ) : (
         <>
         {/* Two equal columns on every screen, so the answers are exactly the
             same size: green for yes, white for no. */}
         <div className="mt-4 grid grid-cols-2 gap-2">
-          <button
-            type="button"
+          <ReportButton
+            variant="outline"
             onClick={() => onAnswer(false)}
-            className="inline-flex h-10 items-center justify-center rounded-full border border-slate-200 bg-white px-3 text-[13px] font-semibold text-slate-700 shadow-sm transition-all duration-200 hover:border-slate-300 hover:bg-slate-50 active:scale-[0.98] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
           >
             No thanks
-          </button>
-          <button
-            type="button"
+          </ReportButton>
+          <ReportButton
             onClick={() => onAnswer(true)}
-            className="inline-flex h-10 items-center justify-center rounded-full border border-transparent bg-gradient-to-b from-[hsl(152_50%_32%)] to-primary px-3 text-[13px] font-semibold text-primary-foreground shadow-md shadow-primary/25 transition-all duration-200 hover:brightness-110 active:scale-[0.98] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
           >
-            Show me around
-          </button>
+            <span className="hidden sm:inline">Show me around</span><span className="sm:hidden">Start tour</span>
+          </ReportButton>
         </div>
         <p className="mt-3 text-center text-[11px] text-slate-400">
           Replay anytime from{" "}
-          <strong className="font-semibold text-slate-500">How this works</strong>.
+          <strong className="font-semibold text-slate-500"><span className="hidden sm:inline">How this works</span><span className="sm:hidden">Guide</span></strong>.
         </p>
         </>
         )}
+      </div>
       </div>
     </div>,
     document.body,

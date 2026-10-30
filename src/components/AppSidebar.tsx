@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { X } from "lucide-react";
 import { NavLink } from "react-router-dom";
 import { api } from "@/lib/api";
 import {
@@ -11,7 +12,7 @@ import {
   SidebarMenuItem,
   useSidebar,
 } from "@/components/ui/sidebar";
-import { pathfinderLogo } from "@/lib/brand";
+import { refinedPathfinderLogo } from "@/lib/brand";
 import { useReportScope } from "@/lib/reportScope";
 import { useSellersPage } from "@/lib/useSellersPage";
 
@@ -78,13 +79,6 @@ export function AppSidebar() {
   // Discovery badges link with (lib/useSellersPage).
   const hasSellers = useSellersPage(token);
 
-  /* Active nav state is signalled by a solid accent-tile fill (elevation),
-     not by recoloring the text, the teal is reserved for the brand mark. */
-  const getNavCls = ({ isActive }: { isActive: boolean }) =>
-    isActive
-      ? "bg-sidebar-accent text-sidebar-foreground font-semibold"
-      : "text-sidebar-foreground hover:bg-sidebar-accent/50 transition-colors duration-150";
-
   const handleMobileNavClick = () => {
     if (isMobile && openMobile) setOpenMobile(false);
   };
@@ -123,38 +117,26 @@ export function AppSidebar() {
   return (
     <Sidebar
       className="w-[--sidebar-width] border-r border-sidebar-border"
-      collapsible="icon"
+      collapsible="none"
     >
       <SidebarContent className="bg-transparent overflow-hidden relative pt-0">
-        {/* Brand slot — a tall header (h-20 sm:h-24) so the lockup reads as
-            the brand, not a footnote. The PathFinder asset is a full
-            horizontal lockup (~2.5:1), shown WHOLE and scaled to roughly
-            double its old height (h-14 sm:h-16), object-contain / object-left
-            so it is never clipped and the collapsed icon rail still frames
-            its left edge. The nav list below is offset to match. */}
-        {/* SAME HEIGHT AS THE CONTENT HEADER (h-12 sm:h-14), so the
-            brand's baseline and the menu line across the top of the page
-            are one line. The old h-20/h-24 slot floated the lockup above
-            everything else on screen -- David circled it. */}
+        {/* Preserve the original Pathfinder mark and arrow in a local lockup. */}
+        <div className="pathfinder-brand-header">
         <NavLink
           to={basePath}
-          className="flex items-center px-3 h-14 sm:h-16 border-b border-sidebar-border/50 transition-colors duration-150 hover:bg-sidebar-accent/40"
+          className="flex min-w-0 items-center"
           onClick={handleMobileNavClick}
           aria-label="PathFinder, Overview"
         >
-          {/* Sized to the RAIL, not to a comfortable minimum. At h-8 the
-              mark was ~90px in a 232px rail, so the lockup sat in the corner
-              as a stamp and the wordmark was unreadable: David could not see
-              the logo. The header grew just enough to hold a bigger one,
-              which is the opposite failure from the old h-20 slot that
-              floated it above everything else. */}
-          <img
-            src={pathfinderLogo}
-            alt="PathFinder"
-            draggable={false}
-            className="h-11 sm:h-12 w-auto max-w-full object-contain object-left select-none"
-          />
+          <span className="pathfinder-brand-lockup select-none" aria-label="Pathfinder by BottomLines.ai">
+            <span className="pathfinder-brand-symbol" aria-hidden="true">
+              <img src={refinedPathfinderLogo} alt="" draggable={false} />
+            </span>
+            <span className="pathfinder-brand-wordmark" aria-hidden="true">Pathf<span className="pathfinder-brand-i">i</span>nder</span>
+          </span>
         </NavLink>
+        {isMobile && <button type="button" aria-label="Close navigation" onClick={() => setOpenMobile(false)} className="pathfinder-nav-close"><X aria-hidden className="h-4 w-4" /></button>}
+        </div>
 
         {/* A flat list, not a collapsible "Crawler" group. The group was
             borrowed from the console, where it is one section among several
@@ -166,7 +148,7 @@ export function AppSidebar() {
             after the brand shrank, so the menu floated a
             full row below where the eye expects it -- the gap David
             circled. One number, one source of truth: the brand row. */}
-        <div className="absolute inset-x-0 bottom-0 top-14 sm:top-16 overflow-y-auto">
+        <div className="pathfinder-nav absolute inset-x-0 bottom-0 top-12 sm:top-14 overflow-y-auto">
           <SidebarGroup className="px-2.5 py-3" data-tour="report-nav">
             <SidebarGroupContent>
               <SidebarMenu className="gap-0.5">
@@ -180,7 +162,7 @@ export function AppSidebar() {
                         to={item.to}
                         end={item.end}
                         data-tour={item.tour}
-                        className={getNavCls}
+                        className="text-sidebar-foreground transition-colors"
                         onClick={handleMobileNavClick}
                       >
                         <span className="text-[0.9375rem]">{item.label}</span>
