@@ -1511,6 +1511,7 @@ a.line-source-reference:hover { color:hsl(var(--primary)); text-decoration-color
   min-height:40px; padding:0 12px; border:1px solid hsl(var(--primary)); border-radius:7px;
   background:hsl(var(--primary)); color:hsl(var(--primary-foreground)); font-size:12px; font-weight:600;
 }
+.report-download-action[data-size="sm"] { min-height:32px; padding:0 9px; font-size:11px; }
 .report-download-action:hover,.list-toolbar .report-download-action:hover { background:#12452e; color:white; }
 .report-download-action:disabled { opacity:.5; }
 .report-description-toggle { min-width:28px; min-height:28px; vertical-align:baseline; }
@@ -1557,6 +1558,8 @@ a.line-source-reference:hover { color:hsl(var(--primary)); text-decoration-color
 .download-info-popover { position:absolute; right:0; top:calc(100% + 8px); z-index:40; width:280px; max-width:calc(100vw - 32px); padding:12px 14px; border:1px solid hsl(var(--border)); border-radius:8px; background:white; color:hsl(var(--muted-foreground)); font-size:12px; line-height:1.6; box-shadow:0 4px 16px rgb(15 35 25 / .09); }
 @media(max-width:639px) { .download-info-popover { left:0; right:auto; } .download-info-trigger { min-height:40px; width:30px; } }
 
-/* Center report modals in the current mobile viewport, including browser chrome changes. */
-.report-dialog-center { top:50dvh; }
-.report-dialog-viewport { inset:0 0 auto; height:100dvh; padding-block:16px; }
+/* Desktop modals center over the report; mobile uses the visible screen. */
+.report-dialog-center { left:var(--report-dialog-x,50vw); top:var(--report-dialog-y,50dvh); }
+.report-dialog-viewport { inset:0; }
+.report-dialog-stage { position:fixed; left:var(--report-dialog-left,0px); top:var(--report-dialog-top,0px); width:var(--report-dialog-width,100vw); height:var(--report-dialog-height,100dvh); display:flex; align-items:center; justify-content:center; padding:16px 20px; }
+.report-dialog-scroll { max-height:calc(var(--report-dialog-height,100dvh) - 32px); overflow-y:auto; }

@@ -1,5 +1,6 @@
 import { expect, test, type Locator } from '@playwright/test';
 import { readFile } from 'node:fs/promises';
+import { expectReportCentered } from './modalGeometry';
 import { installFakeApi, TOKEN } from './fakeApi';
 import { mockDeclarationRows } from '../src/lib/mockData';
 import { normalizeDeclarations, subjectCsv } from '../src/lib/declarations';
@@ -7,8 +8,8 @@ const BASE = `/crawl-report/${TOKEN}`;
 const quietTour = () => localStorage.setItem('pf_report_walkthrough_v1',JSON.stringify({status:'completed',stepId:null,open:false}));
 const green = async (button:Locator) => {
   await expect(button).toHaveClass(/report-download-action/);
-  const style=await button.evaluate(el=>({background:getComputedStyle(el).backgroundColor,color:getComputedStyle(el).color}));
-  expect(style.background).toBe('rgb(21, 81, 53)');expect(style.color).toBe('rgb(255, 255, 255)');
+  await expect.poll(() => button.evaluate(el => getComputedStyle(el).backgroundColor)).toBe('rgb(21, 81, 53)');
+  await expect.poll(() => button.evaluate(el => getComputedStyle(el).color)).toBe('rgb(255, 255, 255)');
 };
 for(const width of [1440,390,320]) {
   test(`${width}px: declarations keep their cards, count publishers, export exact CSVs and share source-file dialogs`,async({page})=>{
@@ -134,7 +135,9 @@ test('phone Schain builder wires SDK, counts, preview and both export formats to
   for(const path of ['/seat-counts','/preview'])expect(calls.some(c=>c.path===path&&new URLSearchParams(c.query).get('sdk')===sdk)).toBe(true);
   for(const format of ['csv','xlsx']){
     await result.getByRole('button',{name:'Export',exact:true}).click();
-    const dialog=page.getByRole('dialog',{name:'Download this schain file?'});await expect(dialog).toBeVisible();
+    const dialog=page.getByRole('dialog',{name:'Download this schain file?'});await expectReportCentered(page, dialog);
+    await page.setViewportSize({width:1440,height:844});await expectReportCentered(page, dialog);
+    await page.setViewportSize({width:390,height:844});await expectReportCentered(page, dialog);
     await dialog.getByRole('radio',{name:format==='csv'?/CSV/:/Excel/}).click();
     const download=dialog.getByRole('button',{name:'Download',exact:true});await expect(download).toBeDisabled();
     await dialog.getByRole('checkbox').check();await expect(download).toBeEnabled();

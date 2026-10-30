@@ -66,7 +66,7 @@ export default function ContactUs({
         <Dialog.Overlay className="fixed inset-0 z-50 bg-slate-900/40 backdrop-blur-[2px] data-[state=open]:animate-sheet-overlay-in data-[state=closed]:animate-sheet-overlay-out" />
         <Dialog.Content
           aria-describedby={undefined}
-          className="report-dialog-center fixed left-1/2 z-50 w-[min(26rem,calc(100vw-2rem))] -translate-x-1/2 -translate-y-1/2 rounded-2xl border border-border bg-white p-5 shadow-2xl outline-none data-[state=open]:animate-dialog-in data-[state=closed]:animate-dialog-out sm:p-6"
+          className="report-dialog-center report-dialog-scroll fixed z-50 w-[min(26rem,calc(var(--report-dialog-width,100vw)-2rem))] -translate-x-1/2 -translate-y-1/2 rounded-2xl border border-border bg-white p-5 shadow-2xl outline-none data-[state=open]:animate-dialog-in data-[state=closed]:animate-dialog-out sm:p-6"
         >
           <Dialog.Close
             aria-label="Close"

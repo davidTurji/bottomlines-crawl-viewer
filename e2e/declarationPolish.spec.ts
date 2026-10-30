@@ -1,16 +1,9 @@
-import { test, expect, type Locator } from '@playwright/test';
+import { test, expect } from '@playwright/test';
 import { installFakeApi, TOKEN } from './fakeApi';
+import { expectReportCentered } from './modalGeometry';
 
 const BASE = `/crawl-report/${TOKEN}`;
-async function centered(target: Locator, width: number, height: number) {
-  await expect(target).toBeVisible();
-  await expect.poll(async () => {
-    const box = await target.boundingBox();
-    return box ? Math.max(Math.abs(box.x + box.width / 2 - width / 2), Math.abs(box.y + box.height / 2 - height / 2)) : Infinity;
-  }).toBeLessThan(1);
-}
-
-for (const width of [1440, 390, 320]) {
+for (const width of [1440, 800, 390, 320]) {
   test(`${width}px: declarations collapse cleanly, dialogs center, and seller KPIs fit`, async ({ page }) => {
     const height = 844;
     await page.setViewportSize({ width, height });
@@ -22,6 +15,15 @@ for (const width of [1440, 390, 320]) {
     const card = section.locator('.declaration-card').first();
     const toggle = card.locator(':scope > button');
     await expect(toggle).toHaveAttribute('aria-expanded', 'true');
+    const exportButton = card.getByRole('button', {name:'Export CSV',exact:true});
+    const exportBox = (await exportButton.boundingBox())!;
+    expect(exportBox.height).toBeLessThanOrEqual(width < 640 ? 36 : 32);
+    await expect.poll(() => card.evaluate(el => {
+      const toolbar = el.querySelector('.declaration-detail > div')!;
+      const count = toolbar.querySelector('span')!.getBoundingClientRect();
+      const button = toolbar.querySelector('button')!.getBoundingClientRect();
+      return button.x - count.right <= 16 && Math.abs(button.y + button.height / 2 - count.y - count.height / 2) < 1;
+    })).toBe(true);
     await toggle.click();
     await expect(toggle).toHaveAttribute('aria-expanded', 'false');
     await expect(card.getByRole('button', { name: 'Export CSV', exact: true })).not.toBeVisible();
@@ -32,10 +34,16 @@ for (const width of [1440, 390, 320]) {
     await toggle.click();
     await expect(card.getByRole('button', { name: 'Export CSV', exact: true })).toBeVisible();
     await card.getByRole('button', { name: /choose ads.txt or app-ads.txt/ }).first().click();
-    await centered(page.getByRole('dialog', { name: 'Open source file' }), width, height);
+    await expectReportCentered(page, page.getByRole('dialog', { name: 'Open source file' }));
     await page.getByRole('button', { name: 'Cancel', exact: true }).click();
     await page.getByRole('button', { name: /^(How this works|Guide)$/ }).click();
-    await centered(page.locator('.walkthrough-prompt'), width, height);
+    await expectReportCentered(page, page.locator('.walkthrough-prompt'));
+    if (width === 1440) {
+      for (const resized of [800, 390, 1440]) {
+        await page.setViewportSize({ width: resized, height });
+        await expectReportCentered(page, page.locator('.walkthrough-prompt'));
+      }
+    }
     await page.getByRole('button', { name: 'Close', exact: true }).click();
     await page.screenshot({ path: `outputs/pathfinder-contract-audit-20261030/declarations-polished-${width}.png` });
     await page.goto(`${BASE}/sellers`);

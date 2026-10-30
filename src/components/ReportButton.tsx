@@ -13,6 +13,7 @@ export const ReportButton = forwardRef<HTMLButtonElement, ReportButtonProps>(
       <button
         ref={ref}
         type={type}
+        data-size={size}
         className={cn(
           "inline-flex h-10 min-w-0 items-center justify-center gap-2 whitespace-nowrap rounded-lg border px-3 text-[13px] font-semibold transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:pointer-events-none disabled:opacity-50 max-sm:min-h-11",
           size === "sm" && "h-8 gap-1.5 px-2.5 text-xs max-sm:min-h-9",

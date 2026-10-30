@@ -653,7 +653,7 @@ function SubjectCard({
 
       <Collapse open={open}>
         <div className="declaration-detail border-t border-border px-4 pb-4 pt-3 sm:px-5">
-          <div className="mb-1 flex items-center justify-between gap-3">
+          <div className="mb-2 flex flex-wrap items-center gap-x-3 gap-y-2">
             <span className="text-xs font-medium text-slate-700">
               Named by{" "}
               <span className="font-sans tabular-nums text-slate-500">
@@ -667,6 +667,7 @@ function SubjectCard({
                 browser, so it costs no request and works while the
                 crawler sleeps. */}
             <ReportButton
+              size="sm"
               title={notShown > 0 ? `Download the ${subject.declarers.length} publishers captured in this older report` : "Download every publisher that names this domain"}
               onClick={(e) => {
                 e.stopPropagation();

@@ -371,7 +371,7 @@ export function SourceFileButton({ domain, sourceDomains = [], foundIn, line, go
           </Dialog.Trigger>
           <Dialog.Portal>
             <Dialog.Overlay className="fixed inset-0 z-50 bg-black/25" />
-            <Dialog.Content onClick={stop} className="source-file-dialog report-dialog-center fixed left-1/2 z-50 max-h-[calc(100dvh-32px)] w-[calc(100%-32px)] max-w-sm -translate-x-1/2 -translate-y-1/2 overflow-y-auto rounded-xl border border-border bg-white p-5 shadow-xl">
+            <Dialog.Content onClick={stop} className="source-file-dialog report-dialog-center fixed z-50 max-h-[calc(var(--report-dialog-height,100dvh)-32px)] w-[calc(var(--report-dialog-width,100vw)-32px)] max-w-sm -translate-x-1/2 -translate-y-1/2 overflow-y-auto rounded-xl border border-border bg-white p-5 shadow-xl">
               <Dialog.Title className="text-base font-semibold text-slate-900">Open source file</Dialog.Title>
               <Dialog.Description className="mt-1 break-words text-xs leading-relaxed text-slate-500">
                 {multipleHosts ? `This line appears in ${targets.length} inventory partner files. Choose a source.` : <>{host(domain)}{foundIn === "both" ? " · Found in both files" : " · Choose a file; the report did not record which one"}</>}
