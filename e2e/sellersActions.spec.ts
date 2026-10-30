@@ -55,7 +55,10 @@ for (const width of [1440, 390, 320]) {
     for (const row of [fix, remove, add]) await expect(row.getByRole("button", { name: "Skip", exact: true })).toHaveAttribute("aria-pressed", "true");
     await fix.getByRole("button", { name: "Add", exact: true }).click();
     await remove.getByRole("button", { name: "Add", exact: true }).click();
-    await add.getByRole("button", { name: "Open", exact: true }).click();
+    const beforeNewSeller = await exported(page);
+    await add.getByRole("button", { name: "Add", exact: true }).click();
+    await expect(page.getByRole("textbox", { name: "Seller name for seller add-1", exact: true })).toBeFocused();
+    expect(await exported(page)).toEqual(beforeNewSeller);
     const evidence = add.getByTestId("seller-source-evidence"), preview = add.getByTestId("seller-file-preview");
     const evidenceToggle = evidence.getByRole("button", { name: /^Source evidence/ });
     const previewToggle = preview.getByRole("button", { name: "File preview", exact: true });
@@ -79,6 +82,9 @@ for (const width of [1440, 390, 320]) {
       ...original,
       sellers: [{ ...original.sellers[0], domain: "fix.example" }, original.sellers[2], { seller_id: "add-1", name: "New company", domain: "new.example", seller_type: "INTERMEDIARY" }],
     };
+    expect(await exported(page)).toEqual(beforeNewSeller);
+    await add.getByRole("button", { name: "Add", exact: true }).click();
+    await expect(add.getByRole("status")).toHaveText("Added");
     await evidenceToggle.click();
     await expect(evidence.getByRole("link", { name: /Open exchange\.example, add-1, DIRECT in publisher\.example\/ads\.txt/ })).toBeVisible();
     await evidence.getByRole("button", { name: "Copy exchange.example, add-1, DIRECT", exact: true }).click();
@@ -134,6 +140,17 @@ test("Add all and Skip all stay inside their suggestion group, including header 
   for (const title of [/^Add 1$/, /^Fix 2$/, /^Not seen, check first 1$/]) {
     const section = page.locator("section").filter({ has: page.getByRole("heading", { name: title }) });
     await section.getByRole("button", { name: "Add all", exact: true }).click();
+    if (title.source === "^Add 1$") {
+      await expect(section.getByRole("status", { name: "Bulk selection" })).toContainText("0 added · 1 needs details");
+      expect(await exported(page)).toEqual(payload.file);
+      await section.getByRole("button", { name: "Review", exact: true }).click();
+      await expect(page.getByRole("textbox", { name: "Seller name for seller add-1", exact: true })).toBeFocused();
+      await page.getByRole("textbox", { name: "Seller name for seller add-1", exact: true }).fill("Reviewed seller");
+      await page.getByRole("checkbox", { name: "No website for seller add-1", exact: true }).check();
+      await page.getByRole("combobox", { name: "Account role for seller add-1", exact: true }).selectOption("BOTH");
+      await section.getByRole("button", { name: "Add", exact: true }).click();
+      await expect(section.getByRole("button", { name: "Review", exact: true })).toHaveCount(0);
+    }
     for (const button of await section.getByRole("button", { name: "Add", exact: true }).all()) await expect(button).toHaveAttribute("aria-pressed", "true");
     const output = await exported(page);
     if (title.source.includes("Fix")) expect(output.version).toBe("1.0");
@@ -152,6 +169,8 @@ test("new file keeps explicit seller identity and header choices", async ({ page
   await page.locator("#seller-add-1").getByRole("button", { name: "Open", exact: true }).click();
   await page.getByRole("textbox", { name: "Seller name for seller add-1", exact: true }).fill("New company");
   await page.getByRole("combobox", { name: "Account role for seller add-1", exact: true }).selectOption("PUBLISHER");
+  await page.getByRole("checkbox", { name: "No website for seller add-1", exact: true }).check();
+  await page.locator("#seller-add-1").getByRole("button", { name: "Add", exact: true }).click();
   expect(await exported(page)).toEqual({ version: "1.0", contact_email: "new@exchange.example", sellers: [{ seller_id: "add-1", name: "New company", seller_type: "PUBLISHER" }] });
 });
 
@@ -187,4 +206,71 @@ test("fixes, duplicate copies and removal evidence remain available below their 
   const removePreview = remove.getByTestId("seller-file-preview");
   await removePreview.getByRole("button", { name: "File preview", exact: true }).click();
   await expect(removePreview).toContainText("Review company");
+});
+
+test("Add guides validation, keeps closed drafts excluded, and requires explicit confirmation", async ({ page }) => {
+  const writes = await open(page);
+  const row = page.locator("#seller-add-1");
+  const name = row.getByRole("textbox", { name: "Seller name for seller add-1", exact: true });
+  const domain = row.getByRole("textbox", { name: "Domain for seller add-1", exact: true });
+  await row.getByRole("button", { name: "Add", exact: true }).click();
+  await expect(name).toBeFocused();
+  await row.getByRole("button", { name: "Add", exact: true }).click();
+  await expect(name).toBeFocused();
+  await expect(name).toHaveAttribute("aria-invalid", "true");
+  await expect(row.getByText("Enter a seller name.", { exact: true })).toBeVisible();
+  await name.fill("Draft payee");
+  await row.getByRole("combobox", { name: "Account role for seller add-1", exact: true }).selectOption("BOTH");
+  await domain.fill("invalid domain");
+  await row.getByRole("button", { name: "Add", exact: true }).click();
+  await expect(domain).toBeFocused();
+  await expect(row.getByText("Enter a valid domain.", { exact: true })).toBeVisible();
+  await row.getByRole("checkbox", { name: "No website for seller add-1", exact: true }).check();
+  await expect(domain).toBeDisabled();
+  await row.getByRole("button", { name: "Close", exact: true }).click();
+  expect(await exported(page)).toEqual(original);
+  await row.getByRole("button", { name: "Add", exact: true }).click();
+  await expect(name).toHaveValue("Draft payee");
+  await expect(row.getByRole("checkbox", { name: "No website for seller add-1", exact: true })).toBeChecked();
+  expect(await exported(page)).toEqual(original);
+  await name.press("Enter");
+  const confirmed = await exported(page);
+  expect(confirmed.sellers.at(-1)).toEqual({ seller_id: "add-1", name: "Draft payee", seller_type: "BOTH" });
+  expect(confirmed.sellers.at(-1)).not.toHaveProperty("noWebsite");
+  await name.fill("");
+  expect(await exported(page)).toEqual(confirmed);
+  await row.getByRole("button", { name: "Add", exact: true }).click();
+  await expect(name).toBeFocused();
+  expect(await exported(page)).toEqual(confirmed);
+  await name.fill("Updated payee");
+  await row.getByRole("button", { name: "Skip", exact: true }).click();
+  await expect(name).not.toBeVisible();
+  expect(await exported(page)).toEqual(original);
+  await row.getByRole("button", { name: "Add", exact: true }).click();
+  await expect(name).toHaveValue("Updated payee");
+  expect(await exported(page)).toEqual(original);
+  await row.getByRole("button", { name: "Add", exact: true }).click();
+  expect((await exported(page)).sellers.at(-1)).toMatchObject({ name: "Updated payee" });
+  expect(writes).toEqual([]);
+});
+
+test("Add all applies a complete fix and reviews an incomplete fix without changing its original entry", async ({ page }) => {
+  const payload = fixture();
+  payload.file!.sellers.push({ seller_id: "need-name", name: "", domain: "known-payee.example", seller_type: "BOTH" });
+  payload.sightings.push({ seller_id: "need-name", relationship: "RESELLER", publishers: [{ domain: "publisher.example", found_in: "ads.txt" }] });
+  await open(page, payload);
+  const group = page.locator("section").filter({ has: page.getByRole("heading", { name: /^Fix 2$/ }) });
+  await group.getByRole("button", { name: "Add all", exact: true }).click();
+  await expect(group.getByRole("status", { name: "Bulk selection" })).toContainText("1 added · 1 needs details");
+  const output = await exported(page);
+  expect(output.sellers.find(s => s.seller_id === "fix-1")?.domain).toBe("fix.example");
+  expect(output.sellers.find(s => s.seller_id === "need-name")).toEqual(payload.file!.sellers.at(-1));
+  await group.getByRole("button", { name: "Review", exact: true }).click();
+  const name = page.getByRole("textbox", { name: "Seller name for seller need-name", exact: true });
+  await expect(name).toBeFocused();
+  await name.fill("Confirmed payee");
+  expect((await exported(page)).sellers.find(s => s.seller_id === "need-name")?.name).toBe("");
+  await page.locator("#seller-need-name").getByRole("button", { name: "Add", exact: true }).click();
+  expect((await exported(page)).sellers.find(s => s.seller_id === "need-name")?.name).toBe("Confirmed payee");
+  await expect(group.getByRole("button", { name: "Review", exact: true })).toHaveCount(0);
 });

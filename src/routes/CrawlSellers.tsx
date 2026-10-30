@@ -11,7 +11,7 @@ import {
   ShieldCheck,
   X,
 } from "lucide-react";
-import { useEffect, useId, useMemo, useState } from "react";
+import { useEffect, useId, useMemo, useRef, useState } from "react";
 
 import { EntryDiff, JsonDiff } from "@/components/JsonDiff";
 import { Collapse, Settle, glideTo, toggleWithoutJump } from "@/components/Motion";
@@ -25,7 +25,6 @@ import { formatWeek, WeekLine } from "@/components/WeekLine";
 import { useReportScope } from "@/lib/reportScope";
 import {
   buildExport,
-  fillInFields,
   isEntry,
   norm,
   SELLER_TYPES,
@@ -33,7 +32,6 @@ import {
   unsafeNumbers,
   validate,
   withEdits,
-  type Edit,
   type FillField,
   type Issue,
   type Seller,
@@ -41,6 +39,7 @@ import {
   type SellersFile,
 } from "@/lib/sellersFix";
 import { cn, foundInLabel } from "@/lib/utils";
+import { checkSellerDraft, draftEdits, sameDraft, type SellerDraft } from "@/lib/sellerDraft";
 
 import { api, type SellersFixPayload, type Summary } from "../lib/api";
 import { SplitStat } from "./CrawlReport";
@@ -113,13 +112,16 @@ export default function CrawlSellers() {
   const [summarySettled, setSummarySettled] = useState(false);
   const [previous, setPrevious] = useState<Summary | null>(null);
   const [ticked, setTicked] = useState<Set<string>>(new Set());
-  const [edits, setEdits] = useState<Record<string, Edit>>({});
+  const [edits, setEdits] = useState<Record<string, SellerDraft>>({});
+  const [confirmedEdits, setConfirmedEdits] = useState<Record<string, SellerDraft>>({});
   // Header fields the reader adds to an existing file (a missing version).
   const [headerPatch, setHeaderPatch] = useState<{ version?: string }>({});
   /** The list of what is still wrong in the file, open under its line. */
   const [problemsOpen, setProblemsOpen] = useState(false);
   const [openCards, setOpenCards] = useState<Set<string>>(new Set());
   const [openGroups, setOpenGroups] = useState<Set<GroupKey>>(new Set());
+  const focusRequest = useRef(0);
+  useEffect(() => () => { focusRequest.current += 1; }, []);
   // Only asked for when there is no file yet; an existing file keeps its own.
   const [header, setHeader] = useState<Header>({ contact_email: "", contact_address: "", tag_id: "" });
 
@@ -171,11 +173,16 @@ export default function CrawlSellers() {
     () => (data ? suggest(data.file ?? { sellers: [] }, data.sightings, data.domain, data.file_checks ?? []) : []),
     [data],
   );
-  const rows = useMemo(() => withEdits(plain, edits), [plain, edits]);
+  const rows = useMemo(() => withEdits(plain, draftEdits(edits)), [plain, edits]);
+  const confirmedRows = useMemo(() => withEdits(plain, draftEdits(confirmedEdits)), [plain, confirmedEdits]);
+  const draftChecks = useMemo(() => Object.fromEntries(plain.map(row => [row.seller_id, checkSellerDraft(row, edits[row.seller_id])])), [plain, edits]);
+  const isConfirmed = (id: string) => ticked.has(id) && sameDraft(edits[id], confirmedEdits[id]);
 
   // Every suggestion starts off; new suggestions start off again.
   useEffect(() => {
     setTicked(new Set());
+    setEdits({});
+    setConfirmedEdits({});
   }, [plain]);
 
   const groupOf = (r: SellerRow): GroupKey | null => (r.kind === "keep" ? null : r.kind);
@@ -216,8 +223,8 @@ export default function CrawlSellers() {
   }, [rows, ticked]);
 
   const exportFile = useMemo(
-    () => (base ? buildExport(base, rows, ticked) : null),
-    [base, rows, ticked],
+    () => (base ? buildExport(base, confirmedRows, ticked) : null),
+    [base, confirmedRows, ticked],
   );
   const issues = useMemo(() => (exportFile ? validate(exportFile, { creating }) : []), [exportFile, creating]);
   // Numbers a browser cannot copy exactly: exporting from here would change
@@ -241,11 +248,11 @@ export default function CrawlSellers() {
    *  kept copy up with its fix. */
   const pairs = useMemo(() => {
     const m = new Map<Seller, Seller>();
-    for (const r of rows) {
+    for (const r of confirmedRows) {
       if (r.kind === "fix" && r.current && r.suggested && ticked.has(r.seller_id)) m.set(r.current, r.suggested);
     }
     return m;
-  }, [rows, ticked]);
+  }, [confirmedRows, ticked]);
 
   const download = () => {
     if (blocked) return;
@@ -261,20 +268,34 @@ export default function CrawlSellers() {
     URL.revokeObjectURL(url);
   };
 
-  const setOn = (ids: string[], on: boolean) =>
-    setTicked((prev) => {
+  /** Only complete, explicitly selected drafts can enter the generated file. */
+  const setOn = (ids: string[], on: boolean): string[] => {
+    const ready = on ? ids.filter(id => draftChecks[id]?.ready) : ids;
+    if (on) {
+      setConfirmedEdits(prev => ({ ...prev, ...Object.fromEntries(ready.map(id => [id, { ...edits[id] }])) }));
+    }
+    setTicked(prev => {
       const next = new Set(prev);
-      for (const id of ids) {
+      for (const id of ready) {
         if (on) next.add(id);
         else next.delete(id);
       }
       return next;
     });
+    return on ? ids.filter(id => !ready.includes(id)) : [];
+  };
 
   const edit = (id: string, field: FillField, value: string) => {
-    setEdits((prev) => ({ ...prev, [id]: { ...prev[id], [field]: value } }));
-    // Filling in who a seller is says the reader wants it in the file.
-    setTicked((prev) => (prev.has(id) ? prev : new Set(prev).add(id)));
+    setEdits(prev => ({ ...prev, [id]: { ...prev[id], [field]: value } }));
+  };
+  const setNoWebsite = (id: string, noWebsite: boolean) => {
+    setEdits(prev => ({ ...prev, [id]: { ...prev[id], noWebsite } }));
+  };
+  const requestAdd = (id: string) => {
+    const check = draftChecks[id];
+    if (!check) return;
+    if (check.fields.length > 0 || !check.ready) goTo(id, undefined, true);
+    else setOn([id], true);
   };
 
   const flip = <T,>(set: Set<T>, v: T) => {
@@ -287,6 +308,7 @@ export default function CrawlSellers() {
   /** Take the reader to what an issue is about: open its group and its
    *  card, then glide there. */
   const goTo = (sellerId?: string, field?: string, fill = false) => {
+    const request = ++focusRequest.current;
     if (field === "version") {
       setOpenGroups((prev) => new Set(prev).add("fix"));
       window.setTimeout(() => glideTo(document.getElementById("file-version"), 140), 60);
@@ -309,9 +331,11 @@ export default function CrawlSellers() {
       // input is there, for a second and a half at most.
       let tries = 0;
       const focusInput = () => {
-        const input = document
-          .getElementById(`seller-${r.seller_id}`)
-          ?.querySelector<HTMLElement>("input, select");
+        if (request !== focusRequest.current) return;
+        const root = document.getElementById(`seller-${r.seller_id}`);
+        const field = (["name", "domain", "seller_type"] as FillField[]).find(key => draftChecks[r.seller_id]?.errors[key]);
+        const input = (field ? root?.querySelector<HTMLElement>(`[data-seller-field="${field}"]`) : null)
+          ?? root?.querySelector<HTMLElement>("input, select");
         if (input && input.offsetParent !== null) {
           input.focus({ preventScroll: true });
         } else if (tries++ < 12) {
@@ -500,10 +524,15 @@ export default function CrawlSellers() {
                 showAll={openGroups.has(g.key)}
                 onShowAll={() => setOpenGroups((prev) => flip(prev, g.key))}
                 openCards={openCards}
-                onOpen={(id) => setOpenCards((prev) => flip(prev, id))}
+                onOpen={(id) => { focusRequest.current += 1; setOpenCards((prev) => flip(prev, id)); }}
                 onSet={setOn}
+                onRequestAdd={requestAdd}
+                onReview={(id) => goTo(id, undefined, true)}
                 onEdit={edit}
+                onNoWebsite={setNoWebsite}
                 edits={edits}
+                checks={draftChecks}
+                isConfirmed={isConfirmed}
                 flagged={new Set(issues.map((x) => x.sellerId).filter(Boolean) as string[])}
                 domain={data.domain}
                 fileHref={creating ? null : fileHref}
@@ -610,7 +639,7 @@ export default function CrawlSellers() {
                   rows={rows}
                   ticked={ticked}
                   versionOn={Boolean(headerPatch.version)}
-                  onApply={(id) => setOn([id], true)}
+                  onApply={requestAdd}
                   onAddVersion={() => setHeaderPatch({ version: "1.0" })}
                   onGo={goTo}
                 />
@@ -651,7 +680,12 @@ function SuggestionGroup({
   openCards,
   onOpen,
   onSet,
+  onRequestAdd,
+  onReview,
   onEdit,
+  onNoWebsite,
+  checks,
+  isConfirmed,
   edits,
   flagged,
   domain,
@@ -664,23 +698,31 @@ function SuggestionGroup({
   fileHref: string | null;
   /** A fix to the file's header (a missing version), shown first. */
   headerFix?: { on: boolean; onSet: (on: boolean) => void };
-  edits: Record<string, Edit>;
+  edits: Record<string, SellerDraft>;
+  checks: Record<string, ReturnType<typeof checkSellerDraft>>;
+  isConfirmed: (id: string) => boolean;
+  onRequestAdd: (id: string) => void;
+  onReview: (id: string) => void;
+  onNoWebsite: (id: string, value: boolean) => void;
   rows: SellerRow[];
   ticked: Set<string>;
   showAll: boolean;
   onShowAll: () => void;
   openCards: Set<string>;
   onOpen: (id: string) => void;
-  onSet: (ids: string[], on: boolean) => void;
+  onSet: (ids: string[], on: boolean) => string[];
   onEdit: (id: string, field: FillField, value: string) => void;
   flagged: Set<string>;
 }) {
+  const [reviewIds, setReviewIds] = useState<string[]>([]);
+  const pending = reviewIds.filter(id => !isConfirmed(id));
   const g = GROUP[group];
   const Icon = g.icon;
   const taken = rows.filter((r) => ticked.has(r.seller_id)).length + (headerFix?.on ? 1 : 0);
   const total = rows.length + (headerFix ? 1 : 0);
   const shown = rows.slice(0, PEEK);
   const ids = rows.map((r) => r.seller_id);
+  const setOnComplete = (id: string) => { onSet([id], true); };
   const renderRows = (items: SellerRow[], offset = 0) => items.map((r, i) => (
     <Settle key={r.seller_id} index={offset + i}>
       <SuggestionCard
@@ -690,8 +732,12 @@ function SuggestionGroup({
         open={openCards.has(r.seller_id)}
         flagged={flagged.has(r.seller_id)}
         onOpen={() => onOpen(r.seller_id)}
-        onSet={(on) => onSet([r.seller_id], on)}
+        onSet={(on) => on ? onRequestAdd(r.seller_id) : onSet([r.seller_id], false)}
+        onConfirm={() => setOnComplete(r.seller_id)}
         onEdit={(field, value) => onEdit(r.seller_id, field, value)}
+        onNoWebsite={(value) => onNoWebsite(r.seller_id, value)}
+        check={checks[r.seller_id]}
+        confirmed={isConfirmed(r.seller_id)}
         typed={edits[r.seller_id]}
         domain={domain}
         fileHref={fileHref}
@@ -722,7 +768,7 @@ function SuggestionGroup({
             variant="outline"
             size="sm"
             onClick={() => {
-              onSet(ids, true);
+              setReviewIds(onSet(ids, true));
               headerFix?.onSet(true);
             }}
           >
@@ -733,6 +779,7 @@ function SuggestionGroup({
             size="sm"
             onClick={() => {
               onSet(ids, false);
+              setReviewIds([]);
               headerFix?.onSet(false);
             }}
           >
@@ -741,6 +788,12 @@ function SuggestionGroup({
 
         </div>
       </div>
+      {pending.length > 0 && (
+        <div role="status" aria-label="Bulk selection" className="mb-3 flex flex-wrap items-center justify-between gap-2 text-xs text-slate-600">
+          <span>{taken} added · {pending.length} {pending.length === 1 ? "needs" : "need"} details</span>
+          <ReportButton variant="outline" size="sm" onClick={() => onReview(pending[0])}>Review</ReportButton>
+        </div>
+      )}
       <div className="overflow-hidden rounded-xl border border-border">
         <div className="divide-y divide-border">
           {headerFix && <VersionCard on={headerFix.on} onSet={headerFix.onSet} />}
@@ -806,7 +859,11 @@ function SuggestionCard({
   flagged,
   onOpen,
   onSet,
+  onConfirm,
   onEdit,
+  onNoWebsite,
+  check,
+  confirmed,
   typed,
   domain,
   fileHref,
@@ -817,7 +874,11 @@ function SuggestionCard({
   fileHref: string | null;
   /** What the reader typed into this card, as typed (the file gets it
    *  cleaned: trimmed, a domain made plain). */
-  typed?: Edit;
+  typed?: SellerDraft;
+  check: ReturnType<typeof checkSellerDraft>;
+  confirmed: boolean;
+  onConfirm: () => void;
+  onNoWebsite: (value: boolean) => void;
   on: boolean;
   open: boolean;
   flagged: boolean;
@@ -827,18 +888,17 @@ function SuggestionCard({
 }) {
   const formId = useId();
   const [roleHelpOpen, setRoleHelpOpen] = useState(false);
+  const [attempted, setAttempted] = useState(false);
   const g = GROUP[group];
   const Icon = g.icon;
-  const fields = fillInFields(row);
+  const fields = check.fields;
   const sourceCount = Math.max(row.listingsTotal ?? 0, row.listings.length);
-  // What is still missing: an add needs at least a name; a fix needs what
-  // it asks for.
-  const wanted = row.kind === "add" ? fields.filter((f) => f === "name") : fields;
-  const missing = wanted.filter((f) => !String(typed?.[f] ?? "").trim());
-  /** What an input shows: what the reader typed, else (on an add) the
-   *  domain we could fill, else nothing. */
-  const shownValue = (f: FillField) =>
-    typed?.[f] ?? (row.kind === "add" && f === "domain" ? String(row.suggested?.domain ?? "") : "");
+  const missing = Object.keys(check.errors).length > 0 || check.other.length > 0;
+  const dirty = !confirmed && Object.keys(typed ?? {}).length > 0;
+  const publicSeller = Number(row.suggested?.is_confidential ?? 0) !== 1;
+  const shownValue = (f: FillField) => f === "domain" && typed?.noWebsite
+    ? ""
+    : typed?.[f] ?? String(row.suggested?.[f] ?? "");
   return (
     <div
       id={`seller-${row.seller_id}`}
@@ -884,9 +944,9 @@ function SuggestionCard({
             <span className={cn("seller-header-summary min-w-0 truncate text-[12px] text-slate-600", row.kind === "remove" && on && "line-through")}>
               {row.kind === "fix" ? summaryOf(row) : <SellerWho seller={row.kind === "remove" ? row.current : row.suggested} fromFile={row.kind !== "add"} />}
             </span>
-            {missing.length > 0 && (
-              <span className="flex-shrink-0 text-[11px] font-medium text-warn">needs a {missing.join(" and a ")}</span>
-            )}
+            <span role="status" className={cn("flex-shrink-0 text-[11px] font-medium", confirmed ? "text-ok" : "text-slate-500")}>
+              {confirmed ? "Added" : dirty ? "Draft" : missing ? "Needs details" : ""}
+            </span>
             {row.check && <span className="flex-shrink-0 text-[11px] font-medium text-warn">check first</span>}
           </span>
           {/* Open, the card says the whole reason below; the short line
@@ -898,9 +958,11 @@ function SuggestionCard({
         </div>
         {/* On a phone the worded choice takes its own row under the seller,
             so neither squeezes the other. */}
-        <div className="order-last flex basis-full items-center gap-2 pl-10 sm:order-none sm:basis-auto sm:pl-0">
-          <Decision on={on} onSet={onSet} id={row.seller_id} group={group} />
-        </div>
+        {!(open && fields.length > 0) && (
+          <div className="order-last flex basis-full items-center gap-2 pl-10 sm:order-none sm:basis-auto sm:pl-0">
+            <Decision on={on} onSet={onSet} id={row.seller_id} group={group} />
+          </div>
+        )}
         <ReportButton
           variant="outline"
           size="sm"
@@ -916,6 +978,20 @@ function SuggestionCard({
         <div className="border-t border-border bg-slate-50/50 px-3 py-3 text-xs text-slate-600 sm:px-4 sm:py-4">
           <p className="mb-4 hidden leading-relaxed sm:block">{row.reason}</p>
           {fields.length > 0 && (
+            <form
+              noValidate
+              onSubmit={event => {
+                event.preventDefault();
+                if (check.ready) {
+                  onConfirm();
+                  setAttempted(false);
+                } else {
+                  setAttempted(true);
+                  const field = fields.find(key => check.errors[key]);
+                  if (field) event.currentTarget.querySelector<HTMLElement>(`[data-seller-field="${field}"]`)?.focus();
+                }
+              }}
+            >
             <fieldset className="min-w-0 border-0 p-0">
               <legend className="sr-only text-[13px] font-semibold text-slate-900 sm:not-sr-only sm:mb-3 sm:block">Seller details</legend>
               <div className="grid min-w-0 grid-cols-1 gap-x-4 gap-y-2.5 sm:grid-cols-2 sm:gap-y-3">
@@ -945,12 +1021,14 @@ function SuggestionCard({
                       {f === "seller_type" ? (
                         <select
                           id={inputId}
-                          value={typed?.seller_type ?? ""}
+                          data-seller-field={f}
+                          value={typed?.seller_type ?? String(row.suggested?.seller_type ?? "")}
                           onChange={(e) => onEdit(f, e.target.value)}
                           aria-label={`Account role for seller ${row.seller_id}`}
                           aria-required="true"
-                          aria-describedby={`${formId}-roles`}
-                          className={cn(INPUT, "h-10 text-[13px]")}
+                          aria-invalid={attempted && Boolean(check.errors[f])}
+                          aria-describedby={`${formId}-roles${attempted && check.errors[f] ? ` ${inputId}-error` : ""}`}
+                          className={cn(INPUT, "h-10 text-[13px]", attempted && check.errors[f] && "border-critical")}
                         >
                           <option value="" disabled>Choose a role</option>
                           {SELLER_TYPES.map((t) => (
@@ -960,14 +1038,34 @@ function SuggestionCard({
                       ) : (
                         <input
                           id={inputId}
+                          data-seller-field={f}
                           value={shownValue(f)}
+                          disabled={f === "domain" && Boolean(typed?.noWebsite)}
+                          inputMode={f === "domain" ? "url" : "text"}
+                          autoCapitalize={f === "domain" ? "none" : "words"}
+                          spellCheck={f !== "domain"}
                           onChange={(e) => onEdit(f, e.target.value)}
                           placeholder={f === "name" ? "Seller or company name" : "example.com"}
                           aria-label={`${f === "name" ? "Seller name" : "Domain"} for seller ${row.seller_id}`}
-                          aria-required={f === "name"}
-                          className={cn(INPUT, "h-10 text-[13px]")}
+                          aria-required={publicSeller && (f === "name" || (f === "domain" && !typed?.noWebsite))}
+                          aria-invalid={attempted && Boolean(check.errors[f])}
+                          aria-describedby={attempted && check.errors[f] ? `${inputId}-error` : undefined}
+                          className={cn(INPUT, "h-10 text-[13px]", attempted && check.errors[f] && "border-critical")}
                         />
                       )}
+                      {f === "domain" && publicSeller && (
+                        <label className="mt-2 inline-flex items-center gap-2 text-xs text-slate-600">
+                          <input
+                            type="checkbox"
+                            checked={Boolean(typed?.noWebsite)}
+                            onChange={event => onNoWebsite(event.target.checked)}
+                            aria-label={`No website for seller ${row.seller_id}`}
+                            className="h-4 w-4 rounded border-border accent-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                          />
+                          No website
+                        </label>
+                      )}
+                      {attempted && check.errors[f] && <p id={`${inputId}-error`} className="mt-1.5 text-xs text-critical">{check.errors[f]}</p>}
                     </div>
                   );
                 })}
@@ -983,6 +1081,17 @@ function SuggestionCard({
                 </>
               )}
             </fieldset>
+            {attempted && check.other.map(message => <p key={message} role="alert" className="mt-2 text-xs text-critical">{message}</p>)}
+            <div className="mt-3 flex items-center gap-2">
+              <Decision
+                on={confirmed}
+                onSet={value => { if (!value) { onSet(false); onOpen(); } }}
+                id={row.seller_id}
+                group={group}
+                submit
+              />
+            </div>
+            </form>
           )}
           <div className={cn("divide-y divide-border border-t border-border", fields.length > 0 && "mt-3 sm:mt-4")}>
             <ReportDisclosure
@@ -1291,11 +1400,13 @@ function Decision({
   onSet,
   id,
   group,
+  submit = false,
 }: {
   on: boolean;
   onSet: (on: boolean) => void;
   id: string;
   group: GroupKey;
+  submit?: boolean;
 }) {
   const d = DECISION[group];
   return (
@@ -1303,10 +1414,11 @@ function Decision({
       <ReportButton
         variant="outline"
         size="sm"
-        onClick={() => onSet(true)}
+        type={submit ? "submit" : "button"}
+        onClick={submit ? undefined : () => onSet(true)}
         aria-pressed={on}
         title={`Include this ${d.action} suggestion in your downloaded file`}
-        className={on ? d.solid : undefined}
+        className={on ? d.solid : submit ? "border-primary bg-primary text-white hover:bg-primary/90" : undefined}
       >
         <Check aria-hidden className="h-3.5 w-3.5" strokeWidth={2.5} />
         Add
