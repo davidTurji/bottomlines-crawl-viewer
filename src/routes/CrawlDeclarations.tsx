@@ -160,12 +160,10 @@ export default function CrawlDeclarations() {
         setData(normalized);
         // A customer report names the customer's own few domains, so each
         // section is a handful of cards whose roster IS the content. Those
-        // open on arrival; a long list (an older run-wide report) stays
-        // collapsed, like the Discovery page.
+        // open on arrival and can be collapsed from their header.
         setOpen(
           new Set(
             normalized.sections
-              .filter((sec) => sec.subjects.length <= 3)
               .flatMap((sec) => sec.subjects.map((sub) => `${sub.kind}|${sub.domain}`)),
           ),
         );
@@ -497,14 +495,6 @@ function KindSection({
             {copy.blurb}
           </ReportDescription>
         </div>
-        {total > 0 && (
-          <div className="hidden flex-shrink-0 text-right text-xs text-slate-500 sm:block">
-            <span className="font-sans tabular-nums text-slate-700">
-              {total.toLocaleString()}
-            </span>{" "}
-            {total === 1 ? "domain" : "domains"}
-          </div>
-        )}
       </div>
 
       <div ref={paging.topRef} className="mb-3">
@@ -585,6 +575,7 @@ function SubjectCard({
         "report-row declaration-card overflow-hidden rounded-xl border border-border bg-white transition-colors",
       )}
       data-declaration-kind={subject.kind}
+      data-expanded={open}
     >
       <button
         type="button"
@@ -602,10 +593,10 @@ function SubjectCard({
         </div>
 
         <div className="min-w-0 flex-1">
-          <code className="block truncate font-mono text-[13px] font-semibold tracking-tight text-slate-900 sm:text-[15px]">
-            {subject.domain}
-          </code>
-          <div className="mt-0.5 flex flex-wrap items-center gap-x-2 gap-y-0.5 text-xs text-slate-500">
+          <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
+            <code className="min-w-0 truncate font-mono text-[13px] font-semibold tracking-tight text-slate-900 sm:text-[15px]">
+              {subject.domain}
+            </code>
             {/* What's new on this domain, in words: the whole domain when
                 nobody named it last week, else how many publishers are new
                 to naming it. */}
@@ -616,6 +607,8 @@ function SubjectCard({
                 +{subject.new_count.toLocaleString()} new this week
               </NewMark>
             ) : null}
+          </div>
+          <div className="mt-0.5 flex flex-wrap items-center gap-x-2 gap-y-0.5 text-xs text-slate-500">
             {/* The count lives in the Declarations column from sm up. */}
             <span className="sm:hidden">
               <span className="font-sans tabular-nums text-slate-700">
@@ -627,19 +620,8 @@ function SubjectCard({
               {both ? "ads.txt, app-ads.txt" : subject.app_ads_txt > 0 ? "app-ads.txt" : "ads.txt"}
             </span>
             {subject.countries.length > 0 && (
-              <span className="flex flex-wrap gap-1">
-                {subject.countries.map((c) => (
-                  <span
-                    key={c}
-                    className={cn(
-                      "rounded-full border px-1.5 py-px font-mono text-[10px]",
-                      tone.border, tone.text,
-                    )}
-                    title={countryName(c)}
-                  >
-                    {c}
-                  </span>
-                ))}
+              <span className="declaration-countries text-slate-500">
+                {subject.countries.map(countryName).join(" · ")}
               </span>
             )}
           </div>
@@ -719,15 +701,11 @@ function SubjectCard({
                   <div className="min-w-0">
                     <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
                       <PublisherDomainLink domain={d.domain} className="break-all font-medium text-slate-800" />
-                      {d.is_new && <NewMark className="text-primary">new</NewMark>}
-                      {d.country && (
-                        <span className={cn("flex-shrink-0 text-[10px]", tone.text)} title={countryName(d.country)}>
-                          {d.country}
-                        </span>
-                      )}
                     </div>
-                    <div className="mt-1 text-[11px] text-slate-500">
-                      {d.files.length > 0 ? `${d.files.length} ${d.files.length === 1 ? "file" : "files"} · ${d.files.join(" + ")}` : "Source file not recorded"}
+                    <div className="mt-1 flex flex-wrap items-center gap-x-2 gap-y-1 text-[11px] text-slate-500">
+                      <span>{d.files.length > 0 ? `${d.files.length} ${d.files.length === 1 ? "file" : "files"} · ${d.files.join(" + ")}` : "Source file not recorded"}</span>
+                      {d.country && <span className="declaration-country">{countryName(d.country)}</span>}
+                      {d.is_new && <NewMark className="text-primary">New</NewMark>}
                     </div>
                   </div>
                   <div className="declaration-publisher-actions">

@@ -1025,14 +1025,15 @@ All colors MUST be HSL.
 .report-kpi-cell {
   background: transparent;
 }
-.report-kpi-discovery > .report-stat + .report-stat {
-  border-top: 1px solid hsl(var(--border) / 0.7);
-}
-@media (min-width: 640px) {
-  .report-kpi-discovery > .report-stat + .report-stat {
-    border-top: 0;
-    border-left: 1px solid hsl(var(--border) / 0.7);
-  }
+.report-kpi-grid { display:grid; grid-template-columns:1fr; gap:12px; }
+.report-kpi-grid > .report-stat + .report-stat { border-top:1px solid hsl(var(--border) / .7); }
+.report-kpi-grid[data-columns="4"] { grid-template-columns:repeat(2,minmax(0,1fr)); gap:0; }
+.report-kpi-grid[data-columns="4"] > .report-stat:nth-child(2) { border-top:0; }
+.report-kpi-grid[data-columns="4"] > .report-stat:nth-child(even) { border-left:1px solid hsl(var(--border) / .7); }
+@media(min-width:640px) {
+  .report-kpi-grid { grid-template-columns:repeat(3,minmax(0,1fr)); }
+  .report-kpi-grid[data-columns="4"] { grid-template-columns:repeat(4,minmax(0,1fr)); }
+  .report-kpi-grid > .report-stat + .report-stat { border-top:0; border-left:1px solid hsl(var(--border) / .7); }
 }
 .inventory-movement {
   display: flex;
@@ -1391,9 +1392,10 @@ a.line-source-reference:hover { color:hsl(var(--primary)); text-decoration-color
 }
 
 /* Declarations use the same quiet surfaces as the rest of the report. */
-.declaration-card { --declaration-accent:var(--tone-decl-ipd); --declaration-wash:46 65% 97%; border-bottom:2px solid hsl(var(--declaration-accent) / .45); box-shadow:0 1px 2px rgb(25 48 34 / .025); }
+.declaration-card { --declaration-accent:var(--tone-decl-ipd); --declaration-wash:46 65% 97%; box-shadow:0 1px 2px rgb(25 48 34 / .025); }
 .declaration-card[data-declaration-kind="owner domain"] { --declaration-accent:var(--tone-decl-owner); --declaration-wash:57 40% 97%; }
 .declaration-card[data-declaration-kind="manager domain"] { --declaration-accent:var(--tone-decl-manager); --declaration-wash:34 60% 97%; }
+.declaration-card[data-expanded="true"] { border-bottom-color:hsl(var(--declaration-accent) / .45); }
 .declaration-detail { background:hsl(var(--declaration-wash)); }
 .declaration-card > button:hover { background:#f8faf7; }
 .declaration-section { scroll-margin-top:16px; }
@@ -1554,3 +1556,7 @@ a.line-source-reference:hover { color:hsl(var(--primary)); text-decoration-color
 .download-info-trigger:focus-visible { outline:2px solid hsl(var(--ring)); outline-offset:2px; }
 .download-info-popover { position:absolute; right:0; top:calc(100% + 8px); z-index:40; width:280px; max-width:calc(100vw - 32px); padding:12px 14px; border:1px solid hsl(var(--border)); border-radius:8px; background:white; color:hsl(var(--muted-foreground)); font-size:12px; line-height:1.6; box-shadow:0 4px 16px rgb(15 35 25 / .09); }
 @media(max-width:639px) { .download-info-popover { left:0; right:auto; } .download-info-trigger { min-height:40px; width:30px; } }
+
+/* Center report modals in the current mobile viewport, including browser chrome changes. */
+.report-dialog-center { top:50dvh; }
+.report-dialog-viewport { inset:0 0 auto; height:100dvh; padding-block:16px; }

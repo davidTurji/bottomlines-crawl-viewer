@@ -1,3 +1,4 @@
+import { ReportKpiGrid } from "@/components/ReportKpiGrid";
 import {
   Check,
   ChevronDown,
@@ -418,38 +419,38 @@ export default function CrawlSellers() {
               </span>
             </div>
             {creating ? (
-              <div className="grid grid-cols-1 gap-px overflow-hidden rounded-xl border border-border bg-border sm:grid-cols-3">
+              <ReportKpiGrid>
                 <SplitStat
-                  className="bg-white"
+                  className="report-kpi-cell"
                   tone="ok"
                   number={counts.add}
                   label="Sellers found"
                   caption="Listed under your domain by publishers"
                 />
                 <SplitStat
-                  className="bg-white"
+                  className="report-kpi-cell"
                   number={taken.add}
                   label="Selected"
                   caption="The ones you added"
                 />
                 <SplitStat
-                  className="bg-white"
+                  className="report-kpi-cell"
                   tone="warn"
                   number={counts.unnamed}
                   label="Missing names"
                   caption="Only you can say who they are"
                 />
-              </div>
+              </ReportKpiGrid>
             ) : (
-              <div className="grid grid-cols-2 gap-px overflow-hidden rounded-xl border border-border bg-border sm:grid-cols-4">
+              <ReportKpiGrid columns={4}>
                 <SplitStat
-                  className="bg-white"
+                  className="report-kpi-cell"
                   number={data.file?.sellers.length ?? 0}
                   label="In your file"
                   caption={readOn ? `As read on ${readOn}` : "As read for this report"}
                 />
                 <SplitStat
-                  className="bg-white"
+                  className="report-kpi-cell"
                   tone="ok"
                   prefix="+"
                   number={counts.add}
@@ -457,20 +458,20 @@ export default function CrawlSellers() {
                   caption="Publishers list them, your file doesn't"
                 />
                 <SplitStat
-                  className="bg-white"
+                  className="report-kpi-cell"
                   tone="warn"
                   number={counts.fix}
                   label="Needs fixes"
                   caption="Written wrong, duplicated or disputed"
                 />
                 <SplitStat
-                  className="bg-white"
+                  className="report-kpi-cell"
                   tone={counts.remove ? "warn" : undefined}
                   number={counts.remove}
                   label="Not seen"
                   caption="Review before removing"
                 />
-              </div>
+              </ReportKpiGrid>
             )}
           </div>
 

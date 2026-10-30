@@ -253,7 +253,7 @@ function WelcomePrompt({
 
   return createPortal(
     <div
-      className="fixed inset-0 z-[100] flex items-center justify-center bg-slate-900/30 px-5 backdrop-blur-[2px] animate-tour-fade motion-reduce:animate-none"
+      className="report-dialog-viewport fixed z-[100] flex items-center justify-center bg-slate-900/30 px-5 backdrop-blur-[2px] animate-tour-fade motion-reduce:animate-none"
       role="dialog"
       aria-modal
       aria-labelledby="walkthrough-prompt-title"
