@@ -118,8 +118,9 @@ test("every status tab is in sight and clickable, on both lists", async ({ page 
     if (view === "apps") await page.getByRole("button", { name: /Matched apps/ }).first().click();
     const status = page.getByRole("combobox", { name: "Matched status" });
     await expect(status).toBeVisible();
+    // Watch/unconfirmed choices arrive with the list's capability response.
+    await expect(status.locator("option"), view).toContainText(["All matched", "Added", "Removed", "Changed", "Started watching", "Stopped watching", "Unconfirmed"]);
     const names = await status.locator("option").allTextContents();
-    expect(names, view).toEqual(expect.arrayContaining(["All matched", "Added", "Removed", "Changed", "Started watching", "Stopped watching", "Unconfirmed"]));
     for (const name of names) {
       await status.selectOption({ label: name });
       await expect(status.locator("option:checked")).toHaveText(name);
