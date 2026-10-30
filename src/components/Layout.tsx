@@ -1,5 +1,6 @@
 import ContactUs from "@/components/ContactUs";
 import { MOCK } from "@/lib/api";
+import { useReportDialogBounds } from "@/lib/useReportDialogBounds";
 import { LineSelectionProvider } from "@/components/PublisherLinks";
 import { useReportScope } from "@/lib/reportScope";
 import { useLocation } from "react-router-dom";
@@ -59,6 +60,7 @@ export default function Layout({ children, email }: LayoutProps) {
   const location = useLocation();
   const [showBackToTop, setShowBackToTop] = useState(false);
   const mainRef = useRef<HTMLElement>(null);
+  useReportDialogBounds(mainRef);
 
   // Back-to-top visibility, ported verbatim from the console: only surface
   // once the reader is deep into the page (> 1.5 viewport heights) AND is

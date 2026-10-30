@@ -1,3 +1,5 @@
+import { SellerSetup } from "@/components/SellerSetup";
+import { ReportKpiGrid } from "@/components/ReportKpiGrid";
 import {
   Check,
   ChevronDown,
@@ -8,14 +10,14 @@ import {
   Info,
   Plus,
   RefreshCw,
-  RotateCcw,
   ShieldCheck,
   X,
 } from "lucide-react";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useId, useMemo, useRef, useState } from "react";
 
 import { EntryDiff, JsonDiff } from "@/components/JsonDiff";
 import { Collapse, Settle, glideTo, toggleWithoutJump } from "@/components/Motion";
+import { ReportButton } from "@/components/ReportButton";
 import { ReportDisclosure } from "@/components/ReportDisclosure";
 import { PageShell } from "@/components/PageShell";
 import SellerRoles from "@/components/SellerRoles";
@@ -25,7 +27,6 @@ import { formatWeek, WeekLine } from "@/components/WeekLine";
 import { useReportScope } from "@/lib/reportScope";
 import {
   buildExport,
-  fillInFields,
   isEntry,
   norm,
   SELLER_TYPES,
@@ -33,7 +34,6 @@ import {
   unsafeNumbers,
   validate,
   withEdits,
-  type Edit,
   type FillField,
   type Issue,
   type Seller,
@@ -41,6 +41,7 @@ import {
   type SellersFile,
 } from "@/lib/sellersFix";
 import { cn, foundInLabel } from "@/lib/utils";
+import { checkSellerDraft, draftEdits, sameDraft, type SellerDraft } from "@/lib/sellerDraft";
 
 import { api, type SellersFixPayload, type Summary } from "../lib/api";
 import { SplitStat } from "./CrawlReport";
@@ -65,7 +66,7 @@ import { SplitStat } from "./CrawlReport";
  * was mocked and taken out; it is not something the platform does.
  *
  * EVERYTHING STARTS OFF (David, 2026-10-06): every suggestion opens as
- * "Don't" and the reader switches on what they want.
+ * "Skip" and the reader switches on what they want.
  */
 
 type GroupKey = "add" | "fix" | "remove";
@@ -101,6 +102,7 @@ const day = (iso: string | null | undefined) =>
 const PEEK = 3;
 const SECTION_CARD = "report-panel rounded-2xl border border-border bg-white p-5";
 const SECTION_TITLE = "flex items-center gap-2 font-display text-sm font-medium text-slate-700";
+const SELLER_ROLE_GUIDE = "Publisher: owns inventory, paid directly. Intermediary: others’ inventory or indirect payment. Both: both roles. DIRECT/RESELLER does not determine the role.";
 
 type Header = { contact_email: string; contact_address: string; tag_id: string };
 
@@ -112,13 +114,16 @@ export default function CrawlSellers() {
   const [summarySettled, setSummarySettled] = useState(false);
   const [previous, setPrevious] = useState<Summary | null>(null);
   const [ticked, setTicked] = useState<Set<string>>(new Set());
-  const [edits, setEdits] = useState<Record<string, Edit>>({});
+  const [edits, setEdits] = useState<Record<string, SellerDraft>>({});
+  const [confirmedEdits, setConfirmedEdits] = useState<Record<string, SellerDraft>>({});
   // Header fields the reader adds to an existing file (a missing version).
   const [headerPatch, setHeaderPatch] = useState<{ version?: string }>({});
   /** The list of what is still wrong in the file, open under its line. */
   const [problemsOpen, setProblemsOpen] = useState(false);
   const [openCards, setOpenCards] = useState<Set<string>>(new Set());
   const [openGroups, setOpenGroups] = useState<Set<GroupKey>>(new Set());
+  const focusRequest = useRef(0);
+  useEffect(() => () => { focusRequest.current += 1; }, []);
   // Only asked for when there is no file yet; an existing file keeps its own.
   const [header, setHeader] = useState<Header>({ contact_email: "", contact_address: "", tag_id: "" });
 
@@ -170,36 +175,17 @@ export default function CrawlSellers() {
     () => (data ? suggest(data.file ?? { sellers: [] }, data.sightings, data.domain, data.file_checks ?? []) : []),
     [data],
   );
-  const rows = useMemo(() => withEdits(plain, edits), [plain, edits]);
+  const rows = useMemo(() => withEdits(plain, draftEdits(edits)), [plain, edits]);
+  const confirmedRows = useMemo(() => withEdits(plain, draftEdits(confirmedEdits)), [plain, confirmedEdits]);
+  const draftChecks = useMemo(() => Object.fromEntries(plain.map(row => [row.seller_id, checkSellerDraft(row, edits[row.seller_id])])), [plain, edits]);
+  const isConfirmed = (id: string) => ticked.has(id) && sameDraft(edits[id], confirmedEdits[id]);
 
   // Every suggestion starts off; new suggestions start off again.
   useEffect(() => {
     setTicked(new Set());
+    setEdits({});
+    setConfirmedEdits({});
   }, [plain]);
-
-  /** Whether the reader has touched a suggestion: switched it on, or typed
-   *  into it. */
-  const changed = (id: string) => ticked.has(id) || Boolean(edits[id]);
-  /** Back to off, for these sellers (David, 2026-10-06: a reset everywhere a
-   *  choice is made). */
-  const reset = (ids: string[]) => {
-    setTicked((prev) => {
-      const next = new Set(prev);
-      for (const id of ids) next.delete(id);
-      return next;
-    });
-    setEdits((prev) => {
-      const next = { ...prev };
-      for (const id of ids) delete next[id];
-      return next;
-    });
-  };
-  const allIds = plain.map((r) => r.seller_id);
-  const anyChanged = allIds.some(changed) || Boolean(headerPatch.version);
-  const resetAll = () => {
-    reset(allIds);
-    setHeaderPatch({});
-  };
 
   const groupOf = (r: SellerRow): GroupKey | null => (r.kind === "keep" ? null : r.kind);
 
@@ -239,8 +225,8 @@ export default function CrawlSellers() {
   }, [rows, ticked]);
 
   const exportFile = useMemo(
-    () => (base ? buildExport(base, rows, ticked) : null),
-    [base, rows, ticked],
+    () => (base ? buildExport(base, confirmedRows, ticked) : null),
+    [base, confirmedRows, ticked],
   );
   const issues = useMemo(() => (exportFile ? validate(exportFile, { creating }) : []), [exportFile, creating]);
   // Numbers a browser cannot copy exactly: exporting from here would change
@@ -264,11 +250,11 @@ export default function CrawlSellers() {
    *  kept copy up with its fix. */
   const pairs = useMemo(() => {
     const m = new Map<Seller, Seller>();
-    for (const r of rows) {
+    for (const r of confirmedRows) {
       if (r.kind === "fix" && r.current && r.suggested && ticked.has(r.seller_id)) m.set(r.current, r.suggested);
     }
     return m;
-  }, [rows, ticked]);
+  }, [confirmedRows, ticked]);
 
   const download = () => {
     if (blocked) return;
@@ -284,20 +270,34 @@ export default function CrawlSellers() {
     URL.revokeObjectURL(url);
   };
 
-  const setOn = (ids: string[], on: boolean) =>
-    setTicked((prev) => {
+  /** Only complete, explicitly selected drafts can enter the generated file. */
+  const setOn = (ids: string[], on: boolean): string[] => {
+    const ready = on ? ids.filter(id => draftChecks[id]?.ready) : ids;
+    if (on) {
+      setConfirmedEdits(prev => ({ ...prev, ...Object.fromEntries(ready.map(id => [id, { ...edits[id] }])) }));
+    }
+    setTicked(prev => {
       const next = new Set(prev);
-      for (const id of ids) {
+      for (const id of ready) {
         if (on) next.add(id);
         else next.delete(id);
       }
       return next;
     });
+    return on ? ids.filter(id => !ready.includes(id)) : [];
+  };
 
   const edit = (id: string, field: FillField, value: string) => {
-    setEdits((prev) => ({ ...prev, [id]: { ...prev[id], [field]: value } }));
-    // Filling in who a seller is says the reader wants it in the file.
-    setTicked((prev) => (prev.has(id) ? prev : new Set(prev).add(id)));
+    setEdits(prev => ({ ...prev, [id]: { ...prev[id], [field]: value } }));
+  };
+  const setNoWebsite = (id: string, noWebsite: boolean) => {
+    setEdits(prev => ({ ...prev, [id]: { ...prev[id], noWebsite } }));
+  };
+  const requestAdd = (id: string) => {
+    const check = draftChecks[id];
+    if (!check) return;
+    if (check.fields.length > 0 || !check.ready) goTo(id, undefined, true);
+    else setOn([id], true);
   };
 
   const flip = <T,>(set: Set<T>, v: T) => {
@@ -310,6 +310,7 @@ export default function CrawlSellers() {
   /** Take the reader to what an issue is about: open its group and its
    *  card, then glide there. */
   const goTo = (sellerId?: string, field?: string, fill = false) => {
+    const request = ++focusRequest.current;
     if (field === "version") {
       setOpenGroups((prev) => new Set(prev).add("fix"));
       window.setTimeout(() => glideTo(document.getElementById("file-version"), 140), 60);
@@ -332,9 +333,11 @@ export default function CrawlSellers() {
       // input is there, for a second and a half at most.
       let tries = 0;
       const focusInput = () => {
-        const input = document
-          .getElementById(`seller-${r.seller_id}`)
-          ?.querySelector<HTMLElement>("input, select");
+        if (request !== focusRequest.current) return;
+        const root = document.getElementById(`seller-${r.seller_id}`);
+        const field = (["name", "domain", "seller_type"] as FillField[]).find(key => draftChecks[r.seller_id]?.errors[key]);
+        const input = (field ? root?.querySelector<HTMLElement>(`[data-seller-field="${field}"]`) : null)
+          ?? root?.querySelector<HTMLElement>("input, select");
         if (input && input.offsetParent !== null) {
           input.focus({ preventScroll: true });
         } else if (tries++ < 12) {
@@ -370,8 +373,8 @@ export default function CrawlSellers() {
         </div>
         {data && (
           <div className="flex flex-wrap items-center gap-2 self-start">
-            <CopyButton text={exportText} label={creating ? "Copy new file" : "Copy fixed file"} disabled={blocked} />
-            <ExportButton onClick={download} label={creating ? "Download new file" : "Download fixed file"} disabled={blocked} />
+            <CopyButton text={exportText} label="Copy file" disabled={blocked} />
+            <ExportButton onClick={download} label="Download file" disabled={blocked} />
           </div>
         )}
       </div>
@@ -417,59 +420,59 @@ export default function CrawlSellers() {
               </span>
             </div>
             {creating ? (
-              <div className="grid grid-cols-1 gap-px overflow-hidden rounded-xl border border-border bg-border sm:grid-cols-3">
+              <ReportKpiGrid>
                 <SplitStat
-                  className="bg-white"
+                  className="report-kpi-cell"
                   tone="ok"
                   number={counts.add}
                   label="Sellers found"
                   caption="Listed under your domain by publishers"
                 />
                 <SplitStat
-                  className="bg-white"
+                  className="report-kpi-cell"
                   number={taken.add}
-                  label="In your new file"
+                  label="Selected"
                   caption="The ones you added"
                 />
                 <SplitStat
-                  className="bg-white"
+                  className="report-kpi-cell"
                   tone="warn"
                   number={counts.unnamed}
-                  label="Need a name"
+                  label="Missing names"
                   caption="Only you can say who they are"
                 />
-              </div>
+              </ReportKpiGrid>
             ) : (
-              <div className="grid grid-cols-2 gap-px overflow-hidden rounded-xl border border-border bg-border sm:grid-cols-4">
+              <ReportKpiGrid columns={4}>
                 <SplitStat
-                  className="bg-white"
+                  className="report-kpi-cell"
                   number={data.file?.sellers.length ?? 0}
-                  label="Sellers in your file"
+                  label="In your file"
                   caption={readOn ? `As read on ${readOn}` : "As read for this report"}
                 />
                 <SplitStat
-                  className="bg-white"
+                  className="report-kpi-cell"
                   tone="ok"
                   prefix="+"
                   number={counts.add}
-                  label="To add"
+                  label="Missing sellers"
                   caption="Publishers list them, your file doesn't"
                 />
                 <SplitStat
-                  className="bg-white"
+                  className="report-kpi-cell"
                   tone="warn"
                   number={counts.fix}
-                  label="To fix"
+                  label="Needs fixes"
                   caption="Written wrong, duplicated or disputed"
                 />
                 <SplitStat
-                  className="bg-white"
+                  className="report-kpi-cell"
                   tone={counts.remove ? "warn" : undefined}
                   number={counts.remove}
-                  label="Not seen in checked files"
+                  label="Not seen"
                   caption="Review before removing"
                 />
-              </div>
+              </ReportKpiGrid>
             )}
           </div>
 
@@ -523,12 +526,14 @@ export default function CrawlSellers() {
                 showAll={openGroups.has(g.key)}
                 onShowAll={() => setOpenGroups((prev) => flip(prev, g.key))}
                 openCards={openCards}
-                onOpen={(id) => setOpenCards((prev) => flip(prev, id))}
+                onOpen={(id) => { focusRequest.current += 1; setOpenCards((prev) => flip(prev, id)); }}
                 onSet={setOn}
+                onRequestAdd={requestAdd}
                 onEdit={edit}
+                onNoWebsite={setNoWebsite}
                 edits={edits}
-                changed={changed}
-                onReset={reset}
+                checks={draftChecks}
+                isConfirmed={isConfirmed}
                 flagged={new Set(issues.map((x) => x.sellerId).filter(Boolean) as string[])}
                 domain={data.domain}
                 fileHref={creating ? null : fileHref}
@@ -584,7 +589,7 @@ export default function CrawlSellers() {
           <div className="report-panel rounded-2xl border border-border bg-white p-5">
             {/* WHAT YOU ARE EXPORTING, in one plain line (David, 2026-10-06:
                 the chips and the verdict were clutter). Copy and Download
-                sit at the top of the page; Reset puts every pick back. */}
+                sit at the top of the page; Add / Skip controls the downloaded file. */}
             <div className="mb-4 flex flex-wrap items-start justify-between gap-3">
               <div className="min-w-0">
                 <div className="font-display text-base font-semibold tracking-tight text-slate-900">
@@ -604,7 +609,6 @@ export default function CrawlSellers() {
                   })()}
                 </div>
               </div>
-              <ResetButton disabled={!anyChanged} onClick={resetAll} label="Reset all" />
             </div>
             {/* One comparison, read only (David, 2026-10-06): the live file on
                 the left, the file with the changes taken above on the right.
@@ -636,7 +640,7 @@ export default function CrawlSellers() {
                   rows={rows}
                   ticked={ticked}
                   versionOn={Boolean(headerPatch.version)}
-                  onApply={(id) => setOn([id], true)}
+                  onApply={requestAdd}
                   onAddVersion={() => setHeaderPatch({ version: "1.0" })}
                   onGo={goTo}
                 />
@@ -649,8 +653,8 @@ export default function CrawlSellers() {
                   : ""}
               </p>
               <div className="flex flex-wrap items-center gap-2">
-                <CopyButton text={exportText} label={creating ? "Copy new file" : "Copy fixed file"} disabled={blocked} />
-                <ExportButton onClick={download} label={creating ? "Download new file" : "Download fixed file"} disabled={blocked} />
+                <CopyButton text={exportText} label="Copy file" disabled={blocked} />
+                <ExportButton onClick={download} label="Download file" disabled={blocked} />
               </div>
             </div>
           </div>
@@ -665,8 +669,8 @@ export default function CrawlSellers() {
 }
 
 /**
- * One group of suggestions: its sign and count, a way to take or skip the
- * lot, three cards, and the rest behind "Show all".
+ * One group of individual suggestions, three cards and the rest behind
+ * "Show all".
  */
 function SuggestionGroup({
   group,
@@ -677,10 +681,12 @@ function SuggestionGroup({
   openCards,
   onOpen,
   onSet,
+  onRequestAdd,
   onEdit,
+  onNoWebsite,
+  checks,
+  isConfirmed,
   edits,
-  changed,
-  onReset,
   flagged,
   domain,
   fileHref,
@@ -692,17 +698,19 @@ function SuggestionGroup({
   fileHref: string | null;
   /** A fix to the file's header (a missing version), shown first. */
   headerFix?: { on: boolean; onSet: (on: boolean) => void };
-  edits: Record<string, Edit>;
+  edits: Record<string, SellerDraft>;
+  checks: Record<string, ReturnType<typeof checkSellerDraft>>;
+  isConfirmed: (id: string) => boolean;
+  onRequestAdd: (id: string) => void;
+  onNoWebsite: (id: string, value: boolean) => void;
   rows: SellerRow[];
   ticked: Set<string>;
   showAll: boolean;
   onShowAll: () => void;
   openCards: Set<string>;
   onOpen: (id: string) => void;
-  onSet: (ids: string[], on: boolean) => void;
+  onSet: (ids: string[], on: boolean) => string[];
   onEdit: (id: string, field: FillField, value: string) => void;
-  changed: (id: string) => boolean;
-  onReset: (ids: string[]) => void;
   flagged: Set<string>;
 }) {
   const g = GROUP[group];
@@ -710,7 +718,7 @@ function SuggestionGroup({
   const taken = rows.filter((r) => ticked.has(r.seller_id)).length + (headerFix?.on ? 1 : 0);
   const total = rows.length + (headerFix ? 1 : 0);
   const shown = rows.slice(0, PEEK);
-  const ids = rows.map((r) => r.seller_id);
+  const setOnComplete = (id: string) => { onSet([id], true); };
   const renderRows = (items: SellerRow[], offset = 0) => items.map((r, i) => (
     <Settle key={r.seller_id} index={offset + i}>
       <SuggestionCard
@@ -720,11 +728,13 @@ function SuggestionGroup({
         open={openCards.has(r.seller_id)}
         flagged={flagged.has(r.seller_id)}
         onOpen={() => onOpen(r.seller_id)}
-        onSet={(on) => onSet([r.seller_id], on)}
+        onSet={(on) => on ? onRequestAdd(r.seller_id) : onSet([r.seller_id], false)}
+        onConfirm={() => setOnComplete(r.seller_id)}
         onEdit={(field, value) => onEdit(r.seller_id, field, value)}
+        onNoWebsite={(value) => onNoWebsite(r.seller_id, value)}
+        check={checks[r.seller_id]}
+        confirmed={isConfirmed(r.seller_id)}
         typed={edits[r.seller_id]}
-        changed={changed(r.seller_id)}
-        onReset={() => onReset([r.seller_id])}
         domain={domain}
         fileHref={fileHref}
       />
@@ -749,37 +759,6 @@ function SuggestionGroup({
             {group === "remove" ? `${taken} of ${total} taken out of your file` : `${taken} of ${total} going into your file`}
           </div>
         </div>
-        <div className="flex items-center gap-3 text-xs text-slate-500">
-          <button
-            type="button"
-            onClick={() => {
-              onSet(ids, true);
-              headerFix?.onSet(true);
-            }}
-            className="font-medium text-slate-700 hover:text-primary"
-          >
-            Take all
-          </button>
-          <button
-            type="button"
-            onClick={() => {
-              onSet(ids, false);
-              headerFix?.onSet(false);
-            }}
-            className="font-medium text-slate-700 hover:text-primary"
-          >
-            Skip all
-          </button>
-          <ResetButton
-            disabled={!ids.some(changed) && !headerFix?.on}
-            onClick={() => {
-              onReset(ids);
-              headerFix?.onSet(false);
-            }}
-            label="Reset"
-            quiet
-          />
-        </div>
       </div>
       <div className="overflow-hidden rounded-xl border border-border">
         <div className="divide-y divide-border">
@@ -791,15 +770,16 @@ function SuggestionGroup({
         </Collapse>}
       </div>
       {rows.length > PEEK && (
-        <button
-          type="button"
+        <ReportButton
+          variant="outline"
+          size="sm"
           onClick={event => showAll ? toggleWithoutJump(event.currentTarget, onShowAll) : onShowAll()}
           aria-expanded={showAll}
-          className="mt-3 inline-flex items-center gap-1 text-xs font-medium text-slate-600 hover:text-primary"
+          className="mt-3"
         >
           {showAll ? "Show fewer" : `Show all ${rows.length}`}
           <ChevronDown aria-hidden className={cn("h-3.5 w-3.5 transition-transform", showAll && "rotate-180")} />
-        </button>
+        </ReportButton>
       )}
     </section>
   );
@@ -845,10 +825,12 @@ function SuggestionCard({
   flagged,
   onOpen,
   onSet,
+  onConfirm,
   onEdit,
+  onNoWebsite,
+  check,
+  confirmed,
   typed,
-  changed,
-  onReset,
   domain,
   fileHref,
 }: {
@@ -858,27 +840,38 @@ function SuggestionCard({
   fileHref: string | null;
   /** What the reader typed into this card, as typed (the file gets it
    *  cleaned: trimmed, a domain made plain). */
-  typed?: Edit;
+  typed?: SellerDraft;
+  check: ReturnType<typeof checkSellerDraft>;
+  confirmed: boolean;
+  onConfirm: () => void;
+  onNoWebsite: (value: boolean) => void;
   on: boolean;
   open: boolean;
   flagged: boolean;
   onOpen: () => void;
   onSet: (on: boolean) => void;
   onEdit: (field: FillField, value: string) => void;
-  changed: boolean;
-  onReset: () => void;
 }) {
+  const formId = useId();
+  const [setupStep, setSetupStep] = useState(0);
+  const disclosureButton = useRef<HTMLButtonElement>(null);
+  const finishSetup = (apply: () => void) => {
+    apply();
+    onOpen();
+    requestAnimationFrame(() => disclosureButton.current?.focus({ preventScroll: true }));
+  };
+  const [roleHelpOpen, setRoleHelpOpen] = useState(false);
+  const [attempted, setAttempted] = useState(false);
   const g = GROUP[group];
   const Icon = g.icon;
-  const fields = fillInFields(row);
-  // What is still missing: an add needs at least a name; a fix needs what
-  // it asks for.
-  const wanted = row.kind === "add" ? fields.filter((f) => f === "name") : fields;
-  const missing = wanted.filter((f) => !String(typed?.[f] ?? "").trim());
-  /** What an input shows: what the reader typed, else (on an add) the
-   *  domain we could fill, else nothing. */
-  const shownValue = (f: FillField) =>
-    typed?.[f] ?? (row.kind === "add" && f === "domain" ? String(row.suggested?.domain ?? "") : "");
+  const fields = check.fields;
+  const sourceCount = Math.max(row.listingsTotal ?? 0, row.listings.length);
+  const missing = Object.keys(check.errors).length > 0 || check.other.length > 0;
+  const dirty = !confirmed && Object.keys(typed ?? {}).length > 0;
+  const publicSeller = Number(row.suggested?.is_confidential ?? 0) !== 1;
+  const shownValue = (f: FillField) => f === "domain" && typed?.noWebsite
+    ? ""
+    : typed?.[f] ?? String(row.suggested?.[f] ?? "");
   return (
     <div
       id={`seller-${row.seller_id}`}
@@ -924,9 +917,9 @@ function SuggestionCard({
             <span className={cn("seller-header-summary min-w-0 truncate text-[12px] text-slate-600", row.kind === "remove" && on && "line-through")}>
               {row.kind === "fix" ? summaryOf(row) : <SellerWho seller={row.kind === "remove" ? row.current : row.suggested} fromFile={row.kind !== "add"} />}
             </span>
-            {missing.length > 0 && (
-              <span className="flex-shrink-0 text-[11px] font-medium text-warn">needs a {missing.join(" and a ")}</span>
-            )}
+            <span role="status" className={cn("flex-shrink-0 text-[11px] font-medium", confirmed ? "text-ok" : "text-slate-500")}>
+              {confirmed ? "Added" : dirty ? "Draft" : missing ? "Needs details" : ""}
+            </span>
             {row.check && <span className="flex-shrink-0 text-[11px] font-medium text-warn">check first</span>}
           </span>
           {/* Open, the card says the whole reason below; the short line
@@ -938,84 +931,185 @@ function SuggestionCard({
         </div>
         {/* On a phone the worded choice takes its own row under the seller,
             so neither squeezes the other. */}
-        <div className="order-last flex basis-full items-center gap-2 pl-10 sm:order-none sm:basis-auto sm:pl-0">
-          {changed && <ResetButton onClick={onReset} label="Reset" quiet />}
-          <Decision on={on} onSet={onSet} id={row.seller_id} group={group} />
-        </div>
-        <button
-          type="button"
+        {!(open && fields.length > 0) && (
+          <div className="order-last flex basis-full items-center gap-2 pl-10 sm:order-none sm:basis-auto sm:pl-0">
+            <Decision on={on} onSet={onSet} id={row.seller_id} group={group} />
+            {group === "add" && on && fields.length > 0 && <ReportButton variant="outline" size="sm" onClick={() => { setSetupStep(0); onOpen(); }}>Edit</ReportButton>}
+          </div>
+        )}
+        <ReportButton
+          ref={disclosureButton}
+          variant="outline"
+          size="sm"
           onClick={onOpen}
+          aria-expanded={open}
           aria-label={open ? "Close" : "Open"}
-          className="flex-shrink-0 rounded-full p-1 text-slate-400 transition-colors hover:bg-muted hover:text-slate-600"
+          className="w-8 flex-shrink-0 px-0 max-sm:w-11"
         >
           <ChevronDown aria-hidden className={cn("h-4 w-4 transition-transform", open && "rotate-180")} />
-        </button>
+        </ReportButton>
       </div>
       <Collapse open={open}>
-        <div className="space-y-3 border-t border-border bg-muted/20 px-4 py-3 text-[12px] text-slate-600">
-          <p className="leading-snug">{row.reason}</p>
-          <CheckLinks row={row} domain={domain} fileHref={fileHref} />
-          {/* The entry as it changes in the file, and the ads.txt lines
-              behind it, side by side. */}
-          <div className="grid grid-cols-1 gap-3 lg:grid-cols-2">
-            <div className="min-w-0 space-y-1.5">
-              <div className="text-[11px] font-medium text-slate-500">In your sellers.json</div>
-              <EntryOrRaw before={row.current} after={row.kind === "remove" ? null : row.suggested} />
-              {/* A duplicate's other copies, which the change takes out. */}
-              {row.dropped && row.dropped.length > 0 && (
+        <div className="border-t border-border bg-slate-50/50 px-3 py-3 text-xs text-slate-600 sm:px-4 sm:py-4">
+          {group !== "add" && <p className="mb-4 hidden leading-relaxed sm:block">{row.reason}</p>}
+          {fields.length > 0 && group === "add" && open && <SellerSetup
+            row={row} draft={typed} check={check} step={setupStep} onStep={setSetupStep} onEdit={onEdit} onNoWebsite={onNoWebsite}
+            onSave={() => finishSetup(onConfirm)} onSkip={() => finishSetup(() => onSet(false))}
+            inputClassName={INPUT} roleGuide={SELLER_ROLE_GUIDE}
+          />}
+          {fields.length > 0 && group !== "add" && (
+            <form
+              noValidate
+              onSubmit={event => {
+                event.preventDefault();
+                if (check.ready) {
+                  onConfirm();
+                  setAttempted(false);
+                } else {
+                  setAttempted(true);
+                  const field = fields.find(key => check.errors[key]);
+                  if (field) event.currentTarget.querySelector<HTMLElement>(`[data-seller-field="${field}"]`)?.focus();
+                }
+              }}
+            >
+            <fieldset className="min-w-0 border-0 p-0">
+              <legend className="sr-only text-[13px] font-semibold text-slate-900 sm:not-sr-only sm:mb-3 sm:block">Seller details</legend>
+              <div className="grid min-w-0 grid-cols-1 gap-x-4 gap-y-2.5 sm:grid-cols-2 sm:gap-y-3">
+                {fields.map((f) => {
+                  const inputId = `${formId}-${f}`;
+                  return (
+                    <div key={f} className={cn("min-w-0", f === "seller_type" && "sm:col-span-2")}>
+                      <div className="mb-1.5 flex min-h-6 items-center justify-between gap-2 sm:min-h-0">
+                        <label htmlFor={inputId} className="block text-xs font-medium text-slate-700">
+                          <span className="sm:hidden">{f === "name" ? "Name" : f === "domain" ? "Domain" : "Role"}</span>
+                          <span className="hidden sm:inline">{f === "name" ? "Seller name" : f === "domain" ? "Domain" : "Account role"}</span>
+                        </label>
+                        {f === "seller_type" && (
+                          <ReportButton
+                            variant="outline"
+                            size="sm"
+                            aria-label="About account roles"
+                            aria-expanded={roleHelpOpen}
+                            aria-controls={`${formId}-mobile-roles`}
+                            onClick={event => toggleWithoutJump(event.currentTarget, () => setRoleHelpOpen(value => !value))}
+                            className="h-6 w-6 border-transparent bg-transparent p-0 text-slate-500 max-sm:min-h-6 sm:hidden"
+                          >
+                            <Info aria-hidden className="h-3.5 w-3.5" />
+                          </ReportButton>
+                        )}
+                      </div>
+                      {f === "seller_type" ? (
+                        <select
+                          id={inputId}
+                          data-seller-field={f}
+                          value={typed?.seller_type ?? String(row.suggested?.seller_type ?? "")}
+                          onChange={(e) => onEdit(f, e.target.value)}
+                          aria-label={`Account role for seller ${row.seller_id}`}
+                          aria-required="true"
+                          aria-invalid={attempted && Boolean(check.errors[f])}
+                          aria-describedby={`${formId}-roles${attempted && check.errors[f] ? ` ${inputId}-error` : ""}`}
+                          className={cn(INPUT, "h-10 text-[13px]", attempted && check.errors[f] && "border-critical")}
+                        >
+                          <option value="" disabled>Choose a role</option>
+                          {SELLER_TYPES.map((t) => (
+                            <option key={t} value={t}>{t === "PUBLISHER" ? "Publisher" : t === "INTERMEDIARY" ? "Intermediary" : "Both"}</option>
+                          ))}
+                        </select>
+                      ) : (
+                        <input
+                          id={inputId}
+                          data-seller-field={f}
+                          value={shownValue(f)}
+                          disabled={f === "domain" && Boolean(typed?.noWebsite)}
+                          inputMode={f === "domain" ? "url" : "text"}
+                          autoCapitalize={f === "domain" ? "none" : "words"}
+                          spellCheck={f !== "domain"}
+                          onChange={(e) => onEdit(f, e.target.value)}
+                          placeholder={f === "name" ? "Seller or company name" : "example.com"}
+                          aria-label={`${f === "name" ? "Seller name" : "Domain"} for seller ${row.seller_id}`}
+                          aria-required={publicSeller && (f === "name" || (f === "domain" && !typed?.noWebsite))}
+                          aria-invalid={attempted && Boolean(check.errors[f])}
+                          aria-describedby={attempted && check.errors[f] ? `${inputId}-error` : undefined}
+                          className={cn(INPUT, "h-10 text-[13px]", attempted && check.errors[f] && "border-critical")}
+                        />
+                      )}
+                      {f === "domain" && publicSeller && (
+                        <label className="mt-2 inline-flex items-center gap-2 text-xs text-slate-600">
+                          <input
+                            type="checkbox"
+                            checked={Boolean(typed?.noWebsite)}
+                            onChange={event => onNoWebsite(event.target.checked)}
+                            aria-label={`No website for seller ${row.seller_id}`}
+                            className="h-4 w-4 rounded border-border accent-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                          />
+                          No website
+                        </label>
+                      )}
+                      {attempted && check.errors[f] && <p id={`${inputId}-error`} className="mt-1.5 text-xs text-critical">{check.errors[f]}</p>}
+                    </div>
+                  );
+                })}
+              </div>
+              {fields.includes("seller_type") && (
                 <>
-                  <div className="pt-1 text-[11px] font-medium text-slate-500">
-                    {row.dropped.length === 1 ? "Its other copy, taken out" : `Its other ${row.dropped.length} copies, taken out`}
+                  <p id={`${formId}-roles`} className="mt-2 hidden text-[11px] leading-relaxed text-slate-500 sm:block">{SELLER_ROLE_GUIDE}</p>
+                  <div className="sm:hidden">
+                    <Collapse open={roleHelpOpen} id={`${formId}-mobile-roles`}>
+                      <p className="pt-2 text-[11px] leading-relaxed text-slate-500">{SELLER_ROLE_GUIDE}</p>
+                    </Collapse>
                   </div>
-                  {row.dropped.map((d, i) => (
-                    <EntryOrRaw key={i} before={d} after={null} />
-                  ))}
                 </>
               )}
+            </fieldset>
+            {attempted && check.other.map(message => <p key={message} role="alert" className="mt-2 text-xs text-critical">{message}</p>)}
+            <div className="mt-3 flex items-center gap-2">
+              <Decision
+                on={confirmed}
+                onSet={value => { if (!value) { onSet(false); onOpen(); } }}
+                id={row.seller_id}
+                group={group}
+                submit
+              />
             </div>
-            <div className="min-w-0">
-              <div className="mb-1 text-[11px] font-medium text-slate-500">In publishers' files</div>
-              <ListingWindow row={row} domain={domain} group={group} sellerDomain={sellerDomainOf(row)} />
-            </div>
-          </div>
-          {/* What only the reader can say: who an add is, or the name or
-              domain a fix needs. */}
-          {fields.length > 0 && (
-            <div className={cn("grid grid-cols-1 gap-2", fields.length > 1 && "sm:grid-cols-2")}>
-              {fields.includes("seller_type") && (
-                <p className="sm:col-span-2">PUBLISHER sells owned inventory and is paid directly; INTERMEDIARY sells others' inventory or is not paid directly; BOTH transacts both kinds through this account. DIRECT/RESELLER declarations alone do not establish the role.</p>
-              )}
-              {fields.map((f) =>
-                f === "seller_type" ? (
-                  <select
-                    key={f}
-                    value={typed?.seller_type ?? ""}
-                    onChange={(e) => onEdit(f, e.target.value)}
-                    aria-label={`seller_type for seller ${row.seller_id}`}
-                    className={cn(INPUT, "h-8 font-mono text-[12px]", fields.length === 1 && "sm:max-w-xs")}
-                  >
-                    <option value="" disabled>
-                      Pick a seller_type
-                    </option>
-                    {SELLER_TYPES.map((t) => (
-                      <option key={t} value={t}>
-                        {t}
-                      </option>
-                    ))}
-                  </select>
-                ) : (
-                  <input
-                    key={f}
-                    value={shownValue(f)}
-                    onChange={(e) => onEdit(f, e.target.value)}
-                    placeholder={f === "name" ? "Seller name" : "Business domain (if it has a website)"}
-                    aria-label={`${f === "name" ? "Name" : "Domain"} for seller ${row.seller_id}`}
-                    className={cn(INPUT, "h-8 text-[12px]", f === "domain" && "font-mono", fields.length === 1 && "sm:max-w-xs")}
-                  />
-                ),
-              )}
-            </div>
+            </form>
           )}
+          <div className={cn("divide-y divide-border border-t border-border", fields.length > 0 && "mt-3 sm:mt-4")}>
+            <ReportDisclosure
+              summary={
+                <span className="flex min-w-0 flex-wrap items-baseline gap-x-2 gap-y-1">
+                  <span>Source evidence</span>
+                  <span className="text-[11px] font-normal text-slate-400">
+                    {sourceCount.toLocaleString()} {sourceCount === 1 ? "line" : "lines"}
+                  </span>
+                </span>
+              }
+              triggerClassName="items-center py-2.5 text-xs font-medium text-slate-700 sm:py-3"
+              testId="seller-source-evidence"
+            >
+              <div className="space-y-3 pb-3">
+                <p className={cn("leading-relaxed", group !== "add" && "sm:hidden")}>{row.reason}</p>
+                <CheckLinks row={row} domain={domain} fileHref={fileHref} />
+                <ListingWindow row={row} domain={domain} group={group} sellerDomain={sellerDomainOf(row)} />
+              </div>
+            </ReportDisclosure>
+            <ReportDisclosure
+              summary="File preview"
+              triggerClassName="items-center py-2.5 text-xs font-medium text-slate-700 sm:py-3"
+              testId="seller-file-preview"
+            >
+              <div className="min-w-0 space-y-2 pb-3">
+                <EntryOrRaw before={row.current} after={row.kind === "remove" ? null : row.suggested} />
+                {row.dropped && row.dropped.length > 0 && (
+                  <>
+                    <div className="pt-1 text-[11px] font-medium text-slate-500">
+                      {row.dropped.length === 1 ? "Its other copy, taken out" : `Its other ${row.dropped.length} copies, taken out`}
+                    </div>
+                    {row.dropped.map((d, i) => <EntryOrRaw key={i} before={d} after={null} />)}
+                  </>
+                )}
+              </div>
+            </ReportDisclosure>
+          </div>
         </div>
       </Collapse>
     </div>
@@ -1210,7 +1304,7 @@ function ListingWindow({
       <div className={cn("flex items-baseline justify-between gap-2 border-b px-3 py-1.5", w.border, w.head)}>
         <span className={cn("flex items-baseline gap-1.5 text-xs font-medium", w.text)}>
           <span className="font-mono">{w.glyph}</span>
-          {total ? "Lines naming this seller" : "No line names this seller"}
+          {total ? "Source lines" : "No source lines"}
         </span>
         <span className={cn("font-mono text-[11px] font-semibold tabular-nums", w.text)}>{total.toLocaleString()}</span>
       </div>
@@ -1273,108 +1367,67 @@ function ListingWindow({
   );
 }
 
-/**
- * TAKE IT OR NOT, IN WORDS (David, 2026-10-05: a bare tick and cross did
- * not say which was chosen). Each side names what it does to the file for
- * this kind of suggestion; the chosen side is filled, in the kind's ink
- * when it goes into the file and in slate when it stays out.
- */
-// The tick always means "do what we suggest" and the cross "don't", so
-// every label is the suggestion or its negation (David, 2026-10-05: a
-// tick beside "Remove" and a cross beside "Keep" read backwards).
-const DECISION: Record<GroupKey, { take: string; skip: string; solid: string }> = {
-  add: { take: "Add to file", skip: "Don't add", solid: "bg-ok text-white" },
-  fix: { take: "Apply fix", skip: "Don't fix", solid: "bg-warn text-white" },
-  remove: { take: "Remove from file", skip: "Don't remove", solid: "bg-warn text-white" },
+/** Add / Skip always selects or excludes the displayed suggestion,
+ * including a removal. Keep its meaning in the title and its group color. */
+const DECISION: Record<GroupKey, { action: string; solid: string }> = {
+  add: { action: "addition", solid: "border-ok bg-ok text-white hover:bg-ok/90" },
+  fix: { action: "fix", solid: "border-warn bg-warn text-white hover:bg-warn/90" },
+  remove: { action: "removal", solid: "border-warn bg-warn text-white hover:bg-warn/90" },
 };
-
-/** Puts picks back where the suggestions started. Quiet in a group or a
- *  card; a pill for the whole file. */
-function ResetButton({
-  onClick,
-  label,
-  disabled = false,
-  quiet = false,
-}: {
-  onClick: () => void;
-  label: string;
-  disabled?: boolean;
-  quiet?: boolean;
-}) {
-  return (
-    <button
-      type="button"
-      onClick={onClick}
-      disabled={disabled}
-      title="Back to the suggested choices"
-      className={cn(
-        "inline-flex items-center gap-1 font-medium transition-colors disabled:pointer-events-none disabled:opacity-40",
-        quiet
-          ? "text-[12px] text-slate-500 hover:text-primary"
-          : "h-9 rounded-full border border-border bg-white px-3.5 text-[12.5px] text-slate-700 hover:bg-slate-50",
-      )}
-    >
-      <RotateCcw aria-hidden className="h-3.5 w-3.5" />
-      {label}
-    </button>
-  );
-}
 
 function Decision({
   on,
   onSet,
   id,
   group,
+  submit = false,
 }: {
   on: boolean;
   onSet: (on: boolean) => void;
   id: string;
   group: GroupKey;
+  submit?: boolean;
 }) {
   const d = DECISION[group];
-  const side = "inline-flex h-7 items-center gap-1 rounded-full px-2.5 text-[12px] font-semibold transition-colors";
   return (
-    <div role="group" aria-label={`Seller ${id}`} className="inline-flex flex-shrink-0 rounded-full border border-border bg-white p-0.5">
-      <button
-        type="button"
-        onClick={() => onSet(true)}
+    <div role="group" aria-label={`Seller ${id}`} className="inline-flex flex-shrink-0 gap-1.5">
+      <ReportButton
+        variant="outline"
+        size="sm"
+        type={submit ? "submit" : "button"}
+        onClick={submit ? undefined : () => onSet(true)}
         aria-pressed={on}
-        className={cn(side, on ? d.solid : "text-slate-500 hover:bg-muted hover:text-slate-700")}
+        title={`Include this ${d.action} suggestion in your downloaded file`}
+        className={on ? d.solid : submit ? "border-primary bg-primary text-white hover:bg-primary/90" : undefined}
       >
         <Check aria-hidden className="h-3.5 w-3.5" strokeWidth={2.5} />
-        {d.take}
-      </button>
-      <button
-        type="button"
+        Add
+      </ReportButton>
+      <ReportButton
+        variant="outline"
+        size="sm"
         onClick={() => onSet(false)}
         aria-pressed={!on}
-        // Off is where every card starts (2026-10-06): a quiet fill, so the
-        // ones switched on are what stand out.
-        className={cn(side, !on ? "bg-slate-200 text-slate-800" : "text-slate-500 hover:bg-muted hover:text-slate-700")}
+        title={`Leave this ${d.action} suggestion out of your downloaded file`}
+        className={!on ? "border-slate-300 bg-slate-100 text-slate-800" : undefined}
       >
         <X aria-hidden className="h-3.5 w-3.5" strokeWidth={2.5} />
-        {d.skip}
-      </button>
+        Skip
+      </ReportButton>
     </div>
   );
 }
 
 function ExportButton({ onClick, label, disabled = false }: { onClick: () => void; label: string; disabled?: boolean }) {
   return (
-    <button
-      type="button"
-      onClick={onClick}
-      disabled={disabled}
-      className="disabled:pointer-events-none disabled:opacity-40 inline-flex h-9 flex-shrink-0 items-center gap-2 self-start rounded-lg report-action bg-primary px-4 text-[13px] font-semibold text-primary-foreground transition-colors duration-150 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
-    >
+    <ReportButton size="sm" onClick={onClick} disabled={disabled}>
       <Download aria-hidden className="h-4 w-4" />
       {label}
-    </button>
+    </ReportButton>
   );
 }
 
-/** Copies the file with the reader's picks, for pasting straight into
- *  wherever they publish it. Says so for a moment, then settles back. */
+/** Copy the exact same selected file as Download. */
 function CopyButton({ text, label, disabled = false }: { text: string; label: string; disabled?: boolean }) {
   const [copied, setCopied] = useState(false);
   useEffect(() => {
@@ -1383,8 +1436,9 @@ function CopyButton({ text, label, disabled = false }: { text: string; label: st
     return () => window.clearTimeout(t);
   }, [copied]);
   return (
-    <button
-      type="button"
+    <ReportButton
+      variant="outline"
+      size="sm"
       onClick={() => {
         navigator.clipboard
           ?.writeText(text)
@@ -1392,11 +1446,10 @@ function CopyButton({ text, label, disabled = false }: { text: string; label: st
           .catch(() => {});
       }}
       disabled={disabled}
-      className="disabled:pointer-events-none disabled:opacity-40 inline-flex h-9 flex-shrink-0 items-center gap-2 rounded-full border border-border bg-white px-4 text-[13px] font-semibold text-slate-700 shadow-sm transition-colors hover:border-primary/30"
     >
       {copied ? <Check aria-hidden className="h-4 w-4 text-ok" /> : <Copy aria-hidden className="h-4 w-4" />}
       {copied ? "Copied" : label}
-    </button>
+    </ReportButton>
   );
 }
 
@@ -1452,7 +1505,6 @@ function VersionCard({ on, onSet }: { on: boolean; onSet: (on: boolean) => void 
           </span>
         </div>
         <div className="order-last flex basis-full items-center gap-2 pl-10 sm:order-none sm:basis-auto sm:pl-0">
-          {on && <ResetButton onClick={() => onSet(false)} label="Reset" quiet />}
           <Decision on={on} onSet={onSet} id="version" group="fix" />
         </div>
         {/* Nothing to open: the space of the other cards' arrow, so the
@@ -1478,7 +1530,7 @@ function ProblemsLine({
     return (
       <div className="flex items-center gap-2.5 px-4 py-3 text-[13px] font-medium text-slate-800">
         <Check aria-hidden className="h-4 w-4 flex-shrink-0 text-ok" />
-        <span>No structural issues detected in the file you download. Confirm seller identities, account roles and business domains before publishing.</span>
+        <span>No structural issues detected in the file you download. Confirm seller identities, account roles and domains before publishing.</span>
       </div>
     );
   }
@@ -1493,7 +1545,7 @@ function ProblemsLine({
       <span className="min-w-0 flex-1 text-[13px] font-medium text-slate-800">
         {issues.length} {issues.length === 1 ? "thing is" : "things are"} still wrong in the file you download
       </span>
-      <span className="inline-flex flex-shrink-0 items-center gap-1 rounded-full border border-border bg-white px-3 py-1 text-[11.5px] font-medium text-slate-700 shadow-sm">
+      <span className="inline-flex flex-shrink-0 items-center gap-1 rounded-lg border border-border bg-white px-3 py-1.5 text-xs font-semibold text-slate-700">
         {open ? "Hide" : "Show them"}
         <ChevronDown aria-hidden className={cn("h-3.5 w-3.5 transition-transform", open && "rotate-180")} />
       </span>
@@ -1525,8 +1577,6 @@ function ProblemsList({
   onGo: (sellerId?: string, field?: string, fill?: boolean) => void;
 }) {
   const byId = new Map(rows.map((r) => [r.seller_id, r]));
-  const pill =
-    "flex-shrink-0 rounded-full border px-3 py-1 text-[11px] font-medium transition-colors";
   return (
     <ul className="divide-y divide-border border-t border-warn-border bg-white">
       {issues.map((x) => {
@@ -1540,44 +1590,43 @@ function ProblemsList({
             <span className="flex flex-shrink-0 items-center gap-2">
               {x.field === "version" ? (
                 !versionOn && (
-                  <button type="button" onClick={onAddVersion} className={cn(pill, "border-warn bg-warn text-white hover:brightness-110")}>
+                  <ReportButton variant="outline" size="sm" onClick={onAddVersion} className="border-warn bg-warn text-white hover:bg-warn/90">
                     Add version 1.0
-                  </button>
+                  </ReportButton>
                 )
               ) : x.field === "contact_email" ? (
-                <button type="button" onClick={() => onGo(undefined, x.field)} className={cn(pill, "border-border bg-white text-slate-700 hover:border-primary/30")}>
+                <ReportButton variant="outline" size="sm" onClick={() => onGo(undefined, x.field)} className="flex-shrink-0">
                   Fill in
-                </button>
+                </ReportButton>
               ) : row && needsInput ? (
-                <button
-                  type="button"
+                <ReportButton
+                  variant="outline"
+                  size="sm"
                   onClick={() => onGo(x.sellerId, undefined, true)}
-                  className={cn(pill, "border-border bg-white text-slate-700 hover:border-primary/30")}
+                  className="flex-shrink-0"
                 >
                   Fill in
-                </button>
+                </ReportButton>
               ) : row && row.kind !== "keep" && !ticked.has(row.seller_id) ? (
-                <button
-                  type="button"
+                <ReportButton
+                  variant="outline"
+                  size="sm"
                   title={what}
                   onClick={() => onApply(row.seller_id)}
-                  className={cn(
-                    pill,
-                    "border-warn bg-warn text-white hover:brightness-110",
-                  )}
+                  className="border-warn bg-warn text-white hover:bg-warn/90"
                 >
-                  {row.kind === "remove" ? "Remove" : "Apply fix"}
-                </button>
+                  Add
+                </ReportButton>
               ) : null}
               {x.sellerId !== undefined && row && (
-                <button type="button" onClick={() => onGo(x.sellerId)} className="text-[11px] font-medium text-slate-500 hover:text-primary">
+                <ReportButton variant="outline" size="sm" onClick={() => onGo(x.sellerId)}>
                   Show me
-                </button>
+                </ReportButton>
               )}
               {x.field === "version" && (
-                <button type="button" onClick={() => onGo(undefined, "version")} className="text-[11px] font-medium text-slate-500 hover:text-primary">
+                <ReportButton variant="outline" size="sm" onClick={() => onGo(undefined, "version")}>
                   Show me
-                </button>
+                </ReportButton>
               )}
             </span>
           </li>

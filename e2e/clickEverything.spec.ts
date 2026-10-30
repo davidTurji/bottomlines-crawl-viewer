@@ -431,7 +431,8 @@ test.describe("click everything", () => {
   test.describe.configure({ mode: "serial", retries: LIVE ? 0 : undefined });
 
   test(LIVE ? "a real link: every click, desktop and phone, no crash" : "every click, desktop and phone, on the crawler's real shapes: no crash", async ({ browser }) => {
-    test.setTimeout(LIVE ? 20 * 60_000 : 6 * 60_000);
+    // Both viewports perform over 1,100 real interactions; CI needs headroom.
+    test.setTimeout(LIVE ? 20 * 60_000 : 10 * 60_000);
     const failures: string[] = [];
     // SMOKE_VIEWPORT=phone (or desktop) walks one screen only.
     for (const vp of VIEWPORTS.filter((v) => !process.env.SMOKE_VIEWPORT || v.name === process.env.SMOKE_VIEWPORT)) {

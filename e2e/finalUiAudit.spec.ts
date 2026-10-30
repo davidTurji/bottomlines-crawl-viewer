@@ -1,14 +1,15 @@
 import { expect, test, type Locator } from '@playwright/test';
 import { readFile } from 'node:fs/promises';
+import { expectReportCentered } from './modalGeometry';
 import { installFakeApi, TOKEN } from './fakeApi';
 import { mockDeclarationRows } from '../src/lib/mockData';
-import { normalizeDeclarations, subjectCsv } from '../src/lib/declarations';
+import { normalizeDeclarations, declarationsCsv } from '../src/lib/declarations';
 const BASE = `/crawl-report/${TOKEN}`;
 const quietTour = () => localStorage.setItem('pf_report_walkthrough_v1',JSON.stringify({status:'completed',stepId:null,open:false}));
 const green = async (button:Locator) => {
   await expect(button).toHaveClass(/report-download-action/);
-  const style=await button.evaluate(el=>({background:getComputedStyle(el).backgroundColor,color:getComputedStyle(el).color}));
-  expect(style.background).toBe('rgb(21, 81, 53)');expect(style.color).toBe('rgb(255, 255, 255)');
+  await expect.poll(() => button.evaluate(el => getComputedStyle(el).backgroundColor)).toBe('rgb(21, 81, 53)');
+  await expect.poll(() => button.evaluate(el => getComputedStyle(el).color)).toBe('rgb(255, 255, 255)');
 };
 for(const width of [1440,390,320]) {
   test(`${width}px: declarations keep their cards, count publishers, export exact CSVs and share source-file dialogs`,async({page})=>{
@@ -19,6 +20,10 @@ for(const width of [1440,390,320]) {
     const data=normalizeDeclarations(mockDeclarationRows);
     for(const section of data.sections){
       const root=page.locator(`[data-declaration-section="${section.kind}"]`);
+      const button=root.locator('[data-list-toolbar]').getByRole('button',{name:'Export CSV',exact:true});await green(button);
+      const ready=page.waitForEvent('download');await button.click();const download=await ready;
+      expect(download.suggestedFilename()).toContain(section.kind.replace(/ /g,'-'));
+      expect(await readFile((await download.path())!,'utf8')).toBe('\uFEFF'+declarationsCsv(section.subjects));
       for(const subject of section.subjects){
         const card=root.locator('.declaration-card').filter({has:page.locator('code').filter({hasText:subject.domain})}).first();
         const toggle=card.locator(':scope > button');
@@ -26,10 +31,6 @@ for(const width of [1440,390,320]) {
         const rows=card.locator('.declaration-publisher');await expect(rows).toHaveCount(subject.declarers.length);
         await expect(rows.first().locator('.declaration-match-number')).toHaveText('1');
         await expect(rows.locator('.line-control-source')).toHaveCount(subject.declarers.length);
-        const button=card.getByRole('button',{name:'Export CSV',exact:true});await green(button);
-        const ready=page.waitForEvent('download');await button.click();const download=await ready;
-        expect(download.suggestedFilename()).toContain(subject.kind.replace(/ /g,'-'));
-        expect(await readFile((await download.path())!,'utf8')).toBe('\uFEFF'+subjectCsv(subject));
         const bothIndex=subject.declarers.findIndex(row=>row.files.length>1);
         if(bothIndex>=0){
           const first=rows.nth(bothIndex).locator('.line-control-source');await first.click();
@@ -134,7 +135,9 @@ test('phone Schain builder wires SDK, counts, preview and both export formats to
   for(const path of ['/seat-counts','/preview'])expect(calls.some(c=>c.path===path&&new URLSearchParams(c.query).get('sdk')===sdk)).toBe(true);
   for(const format of ['csv','xlsx']){
     await result.getByRole('button',{name:'Export',exact:true}).click();
-    const dialog=page.getByRole('dialog',{name:'Download this schain file?'});await expect(dialog).toBeVisible();
+    const dialog=page.getByRole('dialog',{name:'Download this schain file?'});await expectReportCentered(page, dialog);
+    await page.setViewportSize({width:1440,height:844});await expectReportCentered(page, dialog);
+    await page.setViewportSize({width:390,height:844});await expectReportCentered(page, dialog);
     await dialog.getByRole('radio',{name:format==='csv'?/CSV/:/Excel/}).click();
     const download=dialog.getByRole('button',{name:'Download',exact:true});await expect(download).toBeDisabled();
     await dialog.getByRole('checkbox').check();await expect(download).toBeEnabled();

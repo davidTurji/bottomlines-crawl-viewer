@@ -60,6 +60,25 @@ for(const width of [1440,390])for(const reduced of [false,true]){
     await exercise(page,button,panel,reduced);
     expect(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth)).toBe(true);
   });
+  test(`${label}: seller form evidence and preview animate without hiding its fields`,async({page})=>{
+    await page.setViewportSize({width,height:900});await page.emulateMedia({reducedMotion:reduced?'reduce':'no-preference'});await page.addInitScript(quiet);
+    await installFakeApi(page,{sellers:'page'});await page.goto(BASE+'/sellers');
+    const row=page.locator('#seller-500301');
+    await row.getByRole('button',{name:'Open',exact:true}).click();
+    await row.getByRole('textbox',{name:'Seller name for seller 500301',exact:true}).fill('Sample seller');
+    await row.getByRole('button',{name:'Next',exact:true}).click();
+    await row.getByRole('checkbox',{name:'No website for seller 500301',exact:true}).check();
+    await row.getByRole('button',{name:'Next',exact:true}).click();
+    const help=row.getByRole('button',{name:'About account roles',exact:true});
+    await exercise(page,help,await panelFor(page,help),reduced);
+    await row.getByRole('button',{name:'Back',exact:true}).click();
+    await row.getByRole('button',{name:'Back',exact:true}).click();
+    for(const section of ['seller-source-evidence','seller-file-preview']){
+      const button=row.getByTestId(section).locator(':scope > button');
+      await exercise(page,button,await panelFor(page,button),reduced);
+      await expect(row.getByRole('textbox',{name:'Seller name for seller 500301',exact:true})).toBeVisible();
+    }
+  });
   test(`${label}: Schain publisher/app rows and FAQs share the same motion`,async({page})=>{
     await page.setViewportSize({width,height:900});await page.emulateMedia({reducedMotion:reduced?'reduce':'no-preference'});await page.addInitScript(quiet);
     await installFakeApi(page,{schain:'ok'});

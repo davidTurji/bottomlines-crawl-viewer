@@ -107,7 +107,8 @@ test.describe("line numbers", () => {
     await open(page, {});
     await expect(page.getByRole("heading", { name: "Your weekly crawl" })).toBeVisible();
     const check = async (where: string) => {
-      const rows = page.locator("li:has([data-line-no])");
+      // Closing panels retain their children briefly for the transition.
+      const rows = openCard(page).locator("li:has([data-line-no])");
       await expect(rows.first(), where).toBeVisible();
       const out = await rows.evaluateAll((lis) => {
         const baseline = (el: Element) => {

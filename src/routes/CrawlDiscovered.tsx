@@ -1,3 +1,4 @@
+import { ReportKpiGrid } from "@/components/ReportKpiGrid";
 import { csvLine, downloadCsvParts } from "@/lib/csvDownload";
 import { ReportButton } from "@/components/ReportButton";
 import { ReportDescription } from "@/components/ReportDescription";
@@ -292,7 +293,7 @@ export default function CrawlDiscovered() {
               discovered this week (on a first report, all of them), the
               unique lines actually found with the domain, and the
               publishers holding them. */}
-          <div className="report-kpi-discovery grid grid-cols-1 gap-3 sm:grid-cols-3">
+          <ReportKpiGrid className="report-kpi-discovery">
             <SplitStat
               tone="info"
               prefix={newLines ? "+" : undefined}
@@ -349,7 +350,7 @@ export default function CrawlDiscovered() {
               }
               note={baseline.totals ? undefined : "not compared"}
             />
-          </div>
+          </ReportKpiGrid>
           {/* A list shorter than its numbers says so, never passes for
               whole. */}
           {totals.listed_lines != null && totals.listed_lines < totals.lines && (

@@ -47,6 +47,16 @@ test("an added account waits for its identity and role, and exports the user's c
   expect(validate(out)).toEqual([]);
 });
 
+for (const relationship of ["DIRECT", "RESELLER"] as const) {
+  test(`${relationship} source domain alone never supplies a new seller's company domain`, () => {
+    const file = { version: "1.0", sellers: [] };
+    const rows = suggest(file, [{ seller_id: "new-id", relationship, publishers: [{ domain: "inventory-site.example", found_in: "ads.txt" }] }], "exchange.example");
+    expect(rows[0].suggested?.domain).toBeUndefined();
+    const edited = withEdits(rows, { "new-id": { name: "Confirmed payee", seller_type: "BOTH", domain: "payee-company.example" } });
+    expect(buildExport(file, edited, new Set(["new-id"])).sellers[0].domain).toBe("payee-company.example");
+  });
+}
+
 test("a DIRECT file does not replace the paid entity's business domain", () => {
   const rows = suggest({ sellers: [seller] }, [sightings[0]], "exchange.example");
   expect(rows[0].suggested?.domain).toBe("owner.example");

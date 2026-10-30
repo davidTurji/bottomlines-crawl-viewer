@@ -45,7 +45,7 @@ for(const width of [1440,960,390,320]){
     await menu.getByRole('menuitem',{name:'SSP domain (A-Z)',exact:true}).click();
     expect(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth)).toBe(true);
     await page.goto(BASE);
-    const match=page.getByTestId('match-type');if(!await match.isVisible())await page.getByRole('button',{name:'List filters',exact:true}).click();
+    const match=page.getByTestId('match-type');await expect(match).toBeAttached();if(!await match.isVisible())await page.getByRole('button',{name:'List filters',exact:true}).click();
     await match.click();await expect(menu.getByRole('menuitem',{name:'IPD',exact:true})).toHaveAccessibleDescription('Via a declared inventory partner');
     await menu.getByRole('menuitem',{name:'IPD',exact:true}).click();
     await expect.poll(()=>calls.some(call=>call.path.endsWith('/matched-developers')&&call.query.includes('match_type=ipd'))).toBe(true);

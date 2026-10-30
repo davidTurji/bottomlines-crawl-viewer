@@ -253,15 +253,16 @@ function WelcomePrompt({
 
   return createPortal(
     <div
-      className="fixed inset-0 z-[100] flex items-center justify-center bg-slate-900/30 px-5 backdrop-blur-[2px] animate-tour-fade motion-reduce:animate-none"
+      className="report-dialog-viewport fixed z-[100] bg-slate-900/30 backdrop-blur-[2px] animate-tour-fade motion-reduce:animate-none"
       role="dialog"
       aria-modal
       aria-labelledby="walkthrough-prompt-title"
     >
+      <div className="report-dialog-stage">
       <div
         ref={cardRef}
         tabIndex={-1}
-        className="walkthrough-prompt relative w-full max-w-[21rem] rounded-xl border border-slate-200/70 bg-white p-5 shadow-[0_24px_60px_-12px_rgba(15,23,42,0.35)] outline-none animate-tour-pop motion-reduce:animate-none"
+        className="walkthrough-prompt report-dialog-scroll relative w-full max-w-[21rem] rounded-xl border border-slate-200/70 bg-white p-5 shadow-[0_24px_60px_-12px_rgba(15,23,42,0.35)] outline-none animate-tour-pop motion-reduce:animate-none"
       >
         <button
           type="button"
@@ -314,6 +315,7 @@ function WelcomePrompt({
         </p>
         </>
         )}
+      </div>
       </div>
     </div>,
     document.body,

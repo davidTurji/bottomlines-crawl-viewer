@@ -114,6 +114,9 @@ for (const width of [1440, 390]) {
     const box = await toggle.boundingBox();
     await toggle.click({ position: { x: (box?.width ?? 100) - 30, y: 24 } });
     const group = page.locator('.line-action-group').first();
+    // Measure line-selection stability after the parent opening has settled.
+    await expect(group.locator('xpath=ancestor::div[contains(@class,"report-expansion")][1]')).toHaveAttribute('data-expanded', 'true');
+    await expect.poll(() => group.evaluate(el => el.closest('.report-expansion')?.getAnimations({subtree:true}).filter(a => a.playState === 'running' && a.effect?.getComputedTiming().iterations !== Infinity).length ?? 0)).toBe(0);
     const rows = group.locator('.line-entry');
     await expect(rows.nth(1)).toBeVisible();
     await expect(group.getByRole('toolbar')).toHaveCount(1);
@@ -123,9 +126,12 @@ for (const width of [1440, 390]) {
     const last = rows.last();
     const text = last.locator('[data-line-text]');
     await text.scrollIntoViewIfNeeded();
-    const rowY = await last.evaluate(el => el.getBoundingClientRect().top);
+    // Playwright may scroll again to make the text actionable (font/layout
+    // differs on Linux). Only movement caused by selection is a UI jump.
+    await last.evaluate(el => el.addEventListener('click', () => el.setAttribute('data-click-y', String(el.getBoundingClientRect().top)), { capture: true, once: true }));
     await text.click();
-    expect(Math.abs(await last.evaluate(el => el.getBoundingClientRect().top) - rowY)).toBeLessThanOrEqual(2);
+    const clickedY = Number(await last.getAttribute('data-click-y'));
+    expect(Math.abs(await last.evaluate(el => el.getBoundingClientRect().top) - clickedY)).toBeLessThanOrEqual(2);
     await expect(rows.first().getByRole('toolbar')).toHaveCount(0);
     await expect(last.getByRole('toolbar')).toHaveCount(1);
     await expect(last).toHaveClass(/line-entry-selected/);
@@ -133,9 +139,9 @@ for (const width of [1440, 390]) {
     const toolbar = group.getByRole('toolbar');
     const before = await page.locator('[data-report-main]').evaluate(el => el.scrollTop);
     await toolbar.getByRole('button', { name: /^Copy / }).click();
+    await expect(toolbar.getByText('Copied', { exact: true })).toBeVisible();
     expect(await page.evaluate(() => navigator.clipboard.readText())).toBe((await text.innerText()).trim());
     const after = await page.locator('[data-report-main]').evaluate(el => el.scrollTop);
     expect(Math.abs(after - before)).toBeLessThanOrEqual(2);
-    await expect(toolbar.getByText('Copied', { exact: true })).toBeVisible();
   });
 }

@@ -1,6 +1,8 @@
 import { expect, type Page } from '@playwright/test';
 
 export async function revealStatuses(page: Page) {
+  // The native phone selector already contains every supported status.
+  if (await page.getByRole('combobox', {name:'Matched status'}).isVisible()) return;
   const more = page.getByTestId('status-toggle');
   await expect(more).toBeVisible();
   if (await more.getAttribute('aria-expanded') !== 'true') await more.click();
