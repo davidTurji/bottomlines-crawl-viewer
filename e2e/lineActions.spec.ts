@@ -114,6 +114,9 @@ for (const width of [1440, 390]) {
     const box = await toggle.boundingBox();
     await toggle.click({ position: { x: (box?.width ?? 100) - 30, y: 24 } });
     const group = page.locator('.line-action-group').first();
+    // Measure line-selection stability after the parent opening has settled.
+    await expect(group.locator('xpath=ancestor::div[contains(@class,"report-expansion")][1]')).toHaveAttribute('data-expanded', 'true');
+    await expect.poll(() => group.evaluate(el => el.closest('.report-expansion')?.getAnimations({subtree:true}).filter(a => a.playState === 'running' && a.effect?.getComputedTiming().iterations !== Infinity).length ?? 0)).toBe(0);
     const rows = group.locator('.line-entry');
     await expect(rows.nth(1)).toBeVisible();
     await expect(group.getByRole('toolbar')).toHaveCount(1);
@@ -133,9 +136,9 @@ for (const width of [1440, 390]) {
     const toolbar = group.getByRole('toolbar');
     const before = await page.locator('[data-report-main]').evaluate(el => el.scrollTop);
     await toolbar.getByRole('button', { name: /^Copy / }).click();
+    await expect(toolbar.getByText('Copied', { exact: true })).toBeVisible();
     expect(await page.evaluate(() => navigator.clipboard.readText())).toBe((await text.innerText()).trim());
     const after = await page.locator('[data-report-main]').evaluate(el => el.scrollTop);
     expect(Math.abs(after - before)).toBeLessThanOrEqual(2);
-    await expect(toolbar.getByText('Copied', { exact: true })).toBeVisible();
   });
 }

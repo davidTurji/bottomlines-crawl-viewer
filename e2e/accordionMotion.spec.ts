@@ -10,10 +10,19 @@ for(const width of [1440,390])for(const discovery of [false,true])for(const redu
     const headers=page.locator(discovery?'[data-discovered-line] > button':'button[aria-label*="the seat lines of"]');
     const first=headers.nth(0),second=headers.nth(1);
     const clickHeader=async(header:typeof first)=>{const box=(await header.boundingBox())!;await header.click({position:{x:box.width-24,y:20}});};
-    await first.scrollIntoViewIfNeeded();await clickHeader(first);
+    await first.scrollIntoViewIfNeeded();
+    // Start sampling at the click, rather than after Playwright returns:
+    // on a busy runner the complete transition can finish before that return.
+    await first.evaluate((el, discovery) => {
+      const panel = (discovery ? el.closest('[data-discovered-line]') : el.parentElement?.parentElement)?.querySelector('.report-expansion') as HTMLElement & { motionSamples?: Promise<number[]> };
+      el.addEventListener('click', () => {
+        panel.motionSamples = (async () => { const samples: number[] = []; for (let i = 0; i < 22; i++) { await new Promise(requestAnimationFrame); samples.push(panel.getBoundingClientRect().height); } return samples; })();
+      }, { capture: true, once: true });
+    }, discovery);
+    await clickHeader(first);
     const firstPanel=discovery?page.locator('[data-discovered-line]').first().locator('.report-expansion'):first.locator('xpath=../..').locator(':scope > .report-expansion');
     await expect(first).toHaveAttribute('aria-expanded','true');
-    const heights=await firstPanel.evaluate(async el=>{const values:number[]=[];for(let i=0;i<18;i++){await new Promise(requestAnimationFrame);values.push(el.getBoundingClientRect().height);}return values;});
+    const heights=await firstPanel.evaluate(async el => await (el as HTMLElement & {motionSamples: Promise<number[]>}).motionSamples);
     expect(heights.at(-1)!).toBeGreaterThan(0);
     if(reducedMotion==='no-preference')expect(heights.some(h=>h>0&&h<heights.at(-1)!-1)).toBe(true);
     else expect(await firstPanel.evaluate(el=>getComputedStyle(el).transitionDuration)).toBe('0s');
