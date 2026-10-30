@@ -68,7 +68,7 @@ for(const width of [1440,390]){
     await page.route(`**/api/v1/viewer/${TOKEN}/declarations`,route=>route.fulfill({json:mockDeclarations}));
     await page.goto(BASE+'/declarations');
     const section=page.locator('[data-declaration-section]').first();
-    const filter=section.getByRole('button',{name:'Which declarations to show'});
+    const filter=section.getByRole('button',{name:'Which declarations to show',includeHidden:true});
     await expect(filter).toBeAttached();
     if(!await filter.isVisible())await section.getByRole('button',{name:'List filters'}).click();
     await filter.click();await expect(page.getByRole('menuitem',{name:'Manager domains',exact:true})).toHaveCount(0);
