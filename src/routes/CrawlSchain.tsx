@@ -1,4 +1,5 @@
 import { StoreBadge } from "@/components/StoreBadge";
+import { Collapse, toggleWithoutJump } from "@/components/Motion";
 import * as Dialog from "@radix-ui/react-dialog";
 import { Check, ChevronDown, CircleAlert, Clock, Download, Globe, Landmark, Loader2, Lock, Play, RefreshCw, Search, Smartphone } from "lucide-react";
 import { useEffect, useMemo, useState, type ReactNode } from "react";
@@ -1233,7 +1234,7 @@ function SchainPublisherCard({
     >
       <button
         type="button"
-        onClick={onToggle}
+        onClick={event => toggleWithoutJump(event.currentTarget, onToggle)}
         aria-expanded={open}
         className="flex w-full items-center gap-4 px-4 py-4 text-left sm:px-5"
       >
@@ -1259,7 +1260,7 @@ function SchainPublisherCard({
           className={cn("h-4 w-4 flex-shrink-0 text-slate-400 transition-transform", open && "rotate-180")}
         />
       </button>
-      {open && (
+      <Collapse open={open}>
         <div className="space-y-1.5 border-t border-border bg-accent/30 px-4 pb-4 pt-3 sm:px-5">
           <CardLine label="Your seat line" line={row.seat_written} />
           {row.direct_written.map((l) => (
@@ -1276,7 +1277,7 @@ function SchainPublisherCard({
             </a>
           </p>
         </div>
-      )}
+      </Collapse>
     </div>
   );
 }
@@ -1294,7 +1295,7 @@ function SchainAppCard({ row, open, onToggle }: { row: SchainRow; open: boolean;
     >
       <button
         type="button"
-        onClick={onToggle}
+        onClick={event => toggleWithoutJump(event.currentTarget, onToggle)}
         aria-expanded={open}
         className="flex w-full items-center gap-4 px-4 py-4 text-left sm:px-5"
       >
@@ -1321,7 +1322,7 @@ function SchainAppCard({ row, open, onToggle }: { row: SchainRow; open: boolean;
           className={cn("h-4 w-4 flex-shrink-0 text-slate-400 transition-transform", open && "rotate-180")}
         />
       </button>
-      {open && (
+      <Collapse open={open}>
         <div className="space-y-1.5 border-t border-app-border bg-app-bg/30 px-4 pb-4 pt-3 sm:px-5">
           <CardLine label="Bundle / store ID" line={row.bundle_id} />
           <CardLine label="Node 1 (asi1, sid1)" line={`${row.asi1}, ${row.sid1}`} />
@@ -1335,7 +1336,7 @@ function SchainAppCard({ row, open, onToggle }: { row: SchainRow; open: boolean;
             </p>
           )}
         </div>
-      )}
+      </Collapse>
     </div>
   );
 }

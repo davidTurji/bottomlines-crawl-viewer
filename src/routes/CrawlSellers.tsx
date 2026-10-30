@@ -15,7 +15,8 @@ import {
 import { useEffect, useMemo, useState } from "react";
 
 import { EntryDiff, JsonDiff } from "@/components/JsonDiff";
-import { Collapse, Settle, glideTo } from "@/components/Motion";
+import { Collapse, Settle, glideTo, toggleWithoutJump } from "@/components/Motion";
+import { ReportDisclosure } from "@/components/ReportDisclosure";
 import { PageShell } from "@/components/PageShell";
 import SellerRoles from "@/components/SellerRoles";
 import { ActionableLine, LineActionGroup, fileUrl, filesOf, linkable, PublisherDomainLink, ShownLink, siteUrl } from "@/components/PublisherLinks";
@@ -544,11 +545,9 @@ export default function CrawlSellers() {
           </div>
 
           {rows.some(r => r.unverified) && (
-            <details className={cn(SECTION_CARD, "group/info")} data-testid="seller-info">
-              <summary className="cursor-pointer list-none [&::-webkit-details-marker]:hidden">
-                <div className="flex items-start justify-between gap-3">
-                  <div>
-                    <h2 className={SECTION_TITLE}>
+            <ReportDisclosure className={SECTION_CARD} testId="seller-info" summary={
+                  <span>
+                    <span className={SECTION_TITLE}>
                       <span className="flex h-4 w-4 items-center justify-center rounded-full bg-slate-100 text-slate-500">
                         <Info aria-hidden className="h-2.5 w-2.5" strokeWidth={3} />
                       </span>
@@ -556,18 +555,15 @@ export default function CrawlSellers() {
                       <span className="font-mono text-[12px] font-normal tabular-nums text-slate-400">
                         1
                       </span>
-                    </h2>
-                    <p className="text-[11px] text-slate-500">File status, no changes to your file</p>
-                  </div>
-                  <ChevronDown aria-hidden className="mt-0.5 h-3.5 w-3.5 text-slate-500 transition-transform group-open/info:rotate-180" />
-                </div>
-              </summary>
+                    </span>
+                    <span className="block text-[11px] text-slate-500">File status, no changes to your file</span>
+                  </span>
+              }>
               <div className="mt-3 divide-y divide-border overflow-hidden rounded-xl border border-border">
-                {rows.some(r => r.unverified) && <details data-testid="seller-info-unreachable" className="group/unreachable">
-                  <summary className="flex cursor-pointer list-none items-center justify-between gap-3 px-4 py-3 text-[12.5px] font-medium text-slate-700 [&::-webkit-details-marker]:hidden">
+                {rows.some(r => r.unverified) && <ReportDisclosure testId="seller-info-unreachable"
+                  triggerClassName="px-4 py-3 text-[12.5px] font-medium text-slate-700" summary={
                     <span>Unreachable files <span className="ml-2 font-mono text-[11px] font-normal text-slate-400">{rows.filter(r => r.unverified).length} sellers kept</span></span>
-                    <ChevronDown aria-hidden className="h-3.5 w-3.5 shrink-0 text-slate-400 transition-transform group-open/unreachable:rotate-180" />
-                  </summary>
+                  }>
                   <div className="border-t border-border px-4 pb-3">
                     <p className="mt-3 text-xs text-slate-500">Some files couldn’t be fetched or verified. This does not mean the seller is missing; no removal recommendation is made.</p>
                     <div className="mt-2 divide-y divide-border">{rows.filter(r => r.unverified).slice(0, 50).map(r => <div key={r.seller_id} className="py-3 text-xs">
@@ -576,10 +572,10 @@ export default function CrawlSellers() {
                     </div>)}</div>
                     {rows.filter(r => r.unverified).length > 50 && <p className="text-xs text-slate-500">Showing the first 50; all unverified sellers are preserved.</p>}
                   </div>
-                </details>}
+                </ReportDisclosure>}
 
               </div>
-            </details>
+            </ReportDisclosure>
           )}
 
           {/* THE FILE, after the panels that change it: live against the
@@ -713,8 +709,27 @@ function SuggestionGroup({
   const Icon = g.icon;
   const taken = rows.filter((r) => ticked.has(r.seller_id)).length + (headerFix?.on ? 1 : 0);
   const total = rows.length + (headerFix ? 1 : 0);
-  const shown = showAll ? rows : rows.slice(0, PEEK);
+  const shown = rows.slice(0, PEEK);
   const ids = rows.map((r) => r.seller_id);
+  const renderRows = (items: SellerRow[], offset = 0) => items.map((r, i) => (
+    <Settle key={r.seller_id} index={offset + i}>
+      <SuggestionCard
+        row={r}
+        group={group}
+        on={ticked.has(r.seller_id)}
+        open={openCards.has(r.seller_id)}
+        flagged={flagged.has(r.seller_id)}
+        onOpen={() => onOpen(r.seller_id)}
+        onSet={(on) => onSet([r.seller_id], on)}
+        onEdit={(field, value) => onEdit(r.seller_id, field, value)}
+        typed={edits[r.seller_id]}
+        changed={changed(r.seller_id)}
+        onReset={() => onReset([r.seller_id])}
+        domain={domain}
+        fileHref={fileHref}
+      />
+    </Settle>
+  ));
   // Each group in its own card (David, 2026-10-06: Add, Fix and Remove
   // apart, each in a wrapper), in the report's own card grammar: the KPI
   // card's head (a quiet title and a line under it) over one bordered
@@ -766,32 +781,20 @@ function SuggestionGroup({
           />
         </div>
       </div>
-      <div className="divide-y divide-border overflow-hidden rounded-xl border border-border">
-        {headerFix && <VersionCard on={headerFix.on} onSet={headerFix.onSet} />}
-        {shown.map((r, i) => (
-          <Settle key={r.seller_id} index={i}>
-            <SuggestionCard
-              row={r}
-              group={group}
-              on={ticked.has(r.seller_id)}
-              open={openCards.has(r.seller_id)}
-              flagged={flagged.has(r.seller_id)}
-              onOpen={() => onOpen(r.seller_id)}
-              onSet={(on) => onSet([r.seller_id], on)}
-              onEdit={(field, value) => onEdit(r.seller_id, field, value)}
-              typed={edits[r.seller_id]}
-              changed={changed(r.seller_id)}
-              onReset={() => onReset([r.seller_id])}
-              domain={domain}
-              fileHref={fileHref}
-            />
-          </Settle>
-        ))}
+      <div className="overflow-hidden rounded-xl border border-border">
+        <div className="divide-y divide-border">
+          {headerFix && <VersionCard on={headerFix.on} onSet={headerFix.onSet} />}
+          {renderRows(shown)}
+        </div>
+        {rows.length > PEEK && <Collapse open={showAll}>
+          <div className="divide-y divide-border border-t border-border">{showAll && renderRows(rows.slice(PEEK), PEEK)}</div>
+        </Collapse>}
       </div>
       {rows.length > PEEK && (
         <button
           type="button"
-          onClick={onShowAll}
+          onClick={event => showAll ? toggleWithoutJump(event.currentTarget, onShowAll) : onShowAll()}
+          aria-expanded={showAll}
           className="mt-3 inline-flex items-center gap-1 text-xs font-medium text-slate-600 hover:text-primary"
         >
           {showAll ? "Show fewer" : `Show all ${rows.length}`}

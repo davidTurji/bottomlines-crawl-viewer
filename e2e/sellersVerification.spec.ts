@@ -17,11 +17,11 @@ for(const scenario of ["browser", "proxy", "gb", "blocked"] as const) {
     const group=page.getByTestId('seller-info');
     const unknown=page.getByTestId('seller-info-unreachable');
     await expect(unknown).not.toBeVisible();
-    await group.locator(':scope > summary').click();
-    await expect(unknown.locator('summary')).toContainText('Unreachable files');
+    await group.locator(':scope > button').click();
+    await expect(unknown.locator(':scope > button')).toContainText('Unreachable files');
     await expect(page.getByText('Needs checking', {exact:true})).toHaveCount(0);
     await expect(page.getByText('Not seen in checked files', {exact:true}).locator('..')).toContainText('0');
-    await unknown.locator('summary').click();
+    await unknown.locator(':scope > button').click();
     await expect(unknown.getByText('From your file: BOTH',{exact:false})).toBeVisible();
     if(recovered) await expect(unknown.getByText('Sega',{exact:true})).toHaveCount(0);
     else {
@@ -45,8 +45,8 @@ test('full viewer distinguishes read outcomes from seller fixes', async ({page})
   const info=page.getByTestId('seller-info-unreachable');
   await expect(info).not.toBeVisible();
   await expect(page.getByRole('button',{name:'Download fixed file',exact:true})).toHaveCount(2);
-  await group.locator(':scope > summary').click();
-  await info.locator(':scope > summary').click();
+  await group.locator(':scope > button').click();
+  await info.locator(':scope > button').click();
   await expect(info).toContainText('Fogharbor News');
   await expect(info).toContainText('Bramblemist TV');
   await expect(info).toContainText('Cloudwillow Media');

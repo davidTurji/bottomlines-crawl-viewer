@@ -17,6 +17,7 @@
  * look exactly as they did (links are forever).
  */
 import { useId, useRef, useState, type KeyboardEvent } from "react";
+import { Collapse, toggleWithoutJump } from "@/components/Motion";
 
 import type {
   IpdInconclusive,
@@ -337,7 +338,7 @@ export function IpdInconclusiveNote({
               type="button"
               aria-expanded={open}
               aria-controls={listId}
-              onClick={() => setOpen((o) => !o)}
+              onClick={event => toggleWithoutJump(event.currentTarget, () => setOpen(value => !value))}
               className="rounded-sm font-medium text-slate-600 underline decoration-slate-300 underline-offset-2 transition-colors hover:text-primary hover:decoration-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40"
             >
               {open ? "Hide them" : "Show them"}
@@ -345,8 +346,8 @@ export function IpdInconclusiveNote({
           </>
         )}
       </p>
-      {open && pairs.length > 0 && (
-        <div id={listId} data-ipd-inconclusive-list className="mt-2 max-w-xl">
+      <Collapse open={open && pairs.length > 0} id={listId}>
+        <div data-ipd-inconclusive-list className="mt-2 max-w-xl">
           <ul className="divide-y divide-border rounded-md border border-border bg-white">
             {pairs.map((e, i) => (
               <li key={`${e.partner}|${e.platform}|${i}`} className="px-3 py-1.5 text-[11px] text-slate-700">
@@ -358,7 +359,7 @@ export function IpdInconclusiveNote({
             <p className="mt-1 text-[10px] text-slate-500">Plus {more.toLocaleString()} more.</p>
           )}
         </div>
-      )}
+      </Collapse>
     </div>
   );
 }

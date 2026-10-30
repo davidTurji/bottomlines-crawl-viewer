@@ -43,7 +43,7 @@ export function useLingering(on: boolean, ms: number): boolean {
 
 /** Shared accordion motion. Keep the outgoing body for its short close
  *  transition, then unmount it so closed rows do no background work. */
-export function Collapse({ open, children }: { open: boolean; children: ReactNode }) {
+export function Collapse({ open, children, id }: { open: boolean; children: ReactNode; id?: string }) {
   const [mounted, setMounted] = useState(open);
   const [expanded, setExpanded] = useState(open);
   const body = useRef<HTMLDivElement | null>(null);
@@ -67,7 +67,7 @@ export function Collapse({ open, children }: { open: boolean; children: ReactNod
     }
     return () => { cancelAnimationFrame(frame); window.clearTimeout(timer); };
   }, [open]);
-  return <div ref={node => { body.current = node; if (node) node.inert = !open; }}
+  return <div id={id} ref={node => { body.current = node; if (node) node.inert = !open; }}
     aria-hidden={!open} data-expanded={expanded} className="report-expansion">
     <div>{(open || mounted) ? (open ? children : lastContent.current) : null}</div>
   </div>;
