@@ -25,6 +25,7 @@ export const STORE_LABELS: Record<string, string> = {
   samsung: "Samsung",
   lg: "LG",
   vizio: "Vizio",
+  ctv: "CTV",
   website: "Website",
 };
 
@@ -38,7 +39,7 @@ export function storeLabel(store?: string | null): string {
  *  the same map (`storeLabel`). */
 export function storeName(row: { store?: string | null; store_label?: unknown } | null | undefined): string {
   const given = row?.store_label;
-  if (typeof given === "string" && given.trim()) return given.trim();
+  if (typeof given === "string" && given.trim()) return /^ctv$/i.test(given.trim()) ? "CTV" : given.trim();
   return storeLabel(row?.store);
 }
 

@@ -892,19 +892,19 @@ function Roster({
                     Showing {rows.length.toLocaleString()} of {(total ?? 0).toLocaleString()}.
                   </p>
                 </div>
-                <button
-                  type="button"
+                <ReportButton
+                  size="sm"
                   onClick={() => setPaged(true)}
-                  className="inline-flex items-center gap-1.5 rounded-full bg-primary px-4 py-2 text-[13px] font-semibold text-primary-foreground shadow-sm transition-colors hover:bg-primary/90"
+                  className="rounded-md"
                 >
                   Show {Math.max(0, Math.min(ROSTER_PAGE, total ?? 0) - rows.length).toLocaleString()} more
-                </button>
+                </ReportButton>
               </div>
             </div>
           )}
           {whole && (
             <div className="mt-3 flex flex-wrap items-center justify-between gap-3">
-              <ReportButton variant="outline" onClick={showFewer} title="Return to the first three source files and clear the search">Show fewer</ReportButton>
+              <ReportButton size="sm" variant="outline" className="rounded-md border-slate-200 bg-slate-50 hover:bg-slate-100" onClick={showFewer} title="Return to the first three source files and clear the search">Show fewer</ReportButton>
               <Pager
                 page={page}
                 pageSize={ROSTER_PAGE}
