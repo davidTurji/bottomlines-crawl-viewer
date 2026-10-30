@@ -1545,3 +1545,12 @@ a.line-source-reference:hover { color:hsl(var(--primary)); text-decoration-color
 .filter-option-description { display:block; margin-top:2px; font-size:11px; font-weight:400; line-height:16px; color:hsl(var(--muted-foreground)); }
 .filter-option-count { flex:none; padding-left:6px; margin-top:2px; font-size:11px; font-variant-numeric:tabular-nums; color:hsl(var(--muted-foreground)); }
 @media(prefers-reduced-motion:reduce) { .report-description-reveal { transition:none; } }
+
+/* Download acts immediately; its separate info control only describes scope. */
+.list-download-control { display:inline-flex; align-items:stretch; border-radius:7px; background:hsl(var(--primary)); color:white; }
+.list-toolbar .list-download-control > [data-export-list] { min-width:92px; border:0; border-radius:7px 0 0 7px; }
+.download-info-trigger { display:grid; place-items:center; flex:none; width:30px; min-height:38px; border-left:1px solid rgb(255 255 255 / .18); border-radius:0 7px 7px 0; color:rgb(255 255 255 / .8); }
+.download-info-trigger:hover { background:rgb(0 0 0 / .12); color:white; }
+.download-info-trigger:focus-visible { outline:2px solid hsl(var(--ring)); outline-offset:2px; }
+.download-info-popover { position:absolute; right:0; top:calc(100% + 8px); z-index:40; width:280px; max-width:calc(100vw - 32px); padding:12px 14px; border:1px solid hsl(var(--border)); border-radius:8px; background:white; color:hsl(var(--muted-foreground)); font-size:12px; line-height:1.6; box-shadow:0 4px 16px rgb(15 35 25 / .09); }
+@media(max-width:639px) { .download-info-popover { left:0; right:auto; } .download-info-trigger { min-height:40px; width:30px; } }

@@ -15,7 +15,7 @@
  */
 import { Download, Info, Loader2 } from "lucide-react";
 import { useEffect, useId, useRef, useState } from "react";
-import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuLabel, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
+import { listDownloadDescription, type DownloadStatus } from "@/lib/listDownloadScope";
 
 import { cn } from "@/lib/utils";
 
@@ -44,12 +44,18 @@ export function ExportListButton({
   run,
   className,
   noun = "results",
+  status = "all",
+  query = "",
+  filtered = false,
 }: {
   /** Reads the whole list into the sink, page by page, reporting its pages
    *  as it goes; answers the file's name. */
   run: (sink: CsvSink, onProgress: (done: number, of: number) => void, signal: AbortSignal) => Promise<ExportDone>;
   className?: string;
   noun?: string;
+  status?: DownloadStatus;
+  query?: string;
+  filtered?: boolean;
 }) {
   const [busy, setBusy] = useState(false);
   const [progress, setProgress] = useState<{ done: number; of: number } | null>(null);
@@ -57,11 +63,24 @@ export function ExportListButton({
   const [note, setNote] = useState<string | null>(null);
   const controller = useRef<AbortController | null>(null);
   const helpId = useId();
-  const explanation = `Current ${noun} view as CSV. All matching pages, with filters applied.`;
+  const [showInfo, setShowInfo] = useState(false);
+  const root = useRef<HTMLSpanElement>(null);
+  const infoButton = useRef<HTMLButtonElement>(null);
+  const inFlight = useRef(false);
+  const explanation = listDownloadDescription(noun, status, query, filtered);
   useEffect(() => () => controller.current?.abort(), []);
+  useEffect(() => {
+    if (!showInfo) return;
+    const outside = (event: PointerEvent) => { if (!root.current?.contains(event.target as Node)) setShowInfo(false); };
+    const escape = (event: KeyboardEvent) => { if (event.key === "Escape") { setShowInfo(false); infoButton.current?.focus(); } };
+    document.addEventListener("pointerdown", outside); document.addEventListener("keydown", escape);
+    return () => { document.removeEventListener("pointerdown", outside); document.removeEventListener("keydown", escape); };
+  }, [showInfo]);
 
   const go = async () => {
-    if (busy) return;
+    if (inFlight.current) return;
+    inFlight.current = true;
+    setShowInfo(false);
     const c = new AbortController();
     controller.current = c;
     setBusy(true);
@@ -92,30 +111,26 @@ export function ExportListButton({
     } catch (e) {
       if (!c.signal.aborted) setError(e instanceof Error && e.message ? e.message : "Could not export this list.");
     } finally {
+      inFlight.current = false;
       if (!c.signal.aborted) setBusy(false);
     }
   };
 
   return (
-    <span className={cn("list-export-options", className)}>
+    <span ref={root} className={cn("list-export-options", className)}>
       <span id={helpId} className="sr-only">{explanation}</span>
-      <DropdownMenu>
-        <DropdownMenuTrigger asChild>
-          <button type="button" data-export-list disabled={busy} aria-label={busy ? "Preparing CSV download" : "Download"}
+      <span className="list-download-control">
+          <button type="button" data-export-list disabled={busy} onClick={() => void go()} aria-label={busy ? "Preparing CSV download" : "Download"}
             aria-describedby={helpId} title={busy ? "Preparing CSV download" : explanation} className="list-options-trigger report-download-action">
             {busy ? <Loader2 aria-hidden className="list-download-icon h-3.5 w-3.5 animate-spin" /> : <Download aria-hidden className="list-download-icon h-3.5 w-3.5" />}
             <span>{busy ? "Preparing" : "Download"}</span>
-            <Info aria-hidden className="list-download-info h-3.5 w-3.5 flex-none opacity-70" />
           </button>
-        </DropdownMenuTrigger>
-        <DropdownMenuContent align="end" className="w-72">
-          <DropdownMenuLabel className="px-2 pb-1 pt-2 text-xs font-medium text-slate-800">What this downloads</DropdownMenuLabel>
-          <p className="px-2 pb-3 text-xs leading-relaxed text-slate-500">{explanation}</p>
-          <DropdownMenuItem onSelect={() => void go()} className="cursor-pointer gap-2">
-            <Download aria-hidden className="h-4 w-4" /> Download {noun} (CSV)
-          </DropdownMenuItem>
-        </DropdownMenuContent>
-      </DropdownMenu>
+          <button ref={infoButton} type="button" className="download-info-trigger" aria-label="About this download"
+            aria-expanded={showInfo} aria-controls={`${helpId}-info`} onClick={() => setShowInfo(value => !value)} title="What this downloads">
+            <Info aria-hidden className="h-3.5 w-3.5" />
+          </button>
+      </span>
+      {showInfo && <span id={`${helpId}-info`} role="note" aria-label="What this downloads" className="download-info-popover">{explanation}</span>}
       {busy && <span role="status" className="sr-only">{progress ? `Preparing ${progress.done} of ${progress.of}` : "Preparing CSV download"}</span>}
       {error && (
         <span role="alert" className="text-[11px] text-critical">

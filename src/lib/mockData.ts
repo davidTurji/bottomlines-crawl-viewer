@@ -1156,7 +1156,10 @@ export function mockDeveloperEvents(
   event: "added" | "removed" | "changed" | "unconfirmed",
   page: number,
   lines: string[] = [],
+  /** null: a report frozen before match types (today's exact answer). */
   matchType: MatchTypeFilter | null = null,
+  query = "",
+  pageSize = PAGE_SIZE,
 ): DeveloperEventsPage {
   // Attach the seat lines behind each row's counts, so its expanded card can
   // show WHAT moved. Seeded off the developer id (see changeArrays), so a
@@ -1167,18 +1170,16 @@ export function mockDeveloperEvents(
       ...changeArrays(d.developer_id, d.lines_added, d.lines_removed, d.lines_cert_changed),
     }))
     .filter((d) => carries(d.matched_lines ?? matchedLinesFor(d.developer_id, 6), lines));
-  if (matchType !== null) return matchTypeEvents(event, rows, page, lines, matchType);
-  // Actually paged. It used to return every row whatever the page, which
-  // was invisible while the tables held six rows and would now hand the
-  // browser eleven hundred publishers per request. Same page size as live.
-  const page_size = PAGE_SIZE;
-  const start = Math.max(0, (page - 1) * page_size);
+  if (matchType !== null) return matchTypeEvents(event, rows, page, lines, matchType, query, pageSize);
+  const needle = query.trim().toLowerCase();
+  const searched = needle ? rows.filter(row => `${row.developer_name ?? ""} ${row.developer_domain ?? ""}`.toLowerCase().includes(needle)) : rows;
+  // Paged like the live endpoint, so the change tabs page in a local run.
   return {
     event,
     page,
-    page_size,
-    total: rows.length,
-    rows: rows.slice(start, start + page_size),
+    page_size: pageSize,
+    total: searched.length,
+    rows: searched.slice((page - 1) * pageSize, page * pageSize),
   };
 }
 
@@ -2400,6 +2401,8 @@ function matchTypeEvents(
   page: number,
   lines: string[],
   matchType: MatchTypeFilter,
+  query = "",
+  pageSize = PAGE_SIZE,
 ): DeveloperEventsPage {
   const all: DeveloperEvent[] = [
     ...rows.map((d): DeveloperEvent => ({ ...d, ...MT_OWN })),
@@ -2407,13 +2410,13 @@ function matchTypeEvents(
     // developer-events rows carry them too (crawler #348).
     ...(event === "added" && carries(MT_ADDED_EVENT.matched_lines, lines) ? [MT_ADDED_EVENT] : []),
   ];
-  const split = mtSplit(all, matchType);
+  const split = mtSplit(mtSearch(all, query, row => [row.developer_name, row.developer_domain, row.ipd_partner, row.ipd_platform]), matchType);
   return {
     event,
     page,
-    page_size: PAGE_SIZE,
+    page_size: pageSize,
     total: split.rows.length,
-    rows: split.rows.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE),
+    rows: split.rows.slice((page - 1) * pageSize, page * pageSize),
     match_type_counts: split.counts,
   };
 }
