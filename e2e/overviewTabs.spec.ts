@@ -436,37 +436,24 @@ test.describe("a quiet tab says what is quiet", () => {
 });
 
 test.describe("one row per distinct seat line", () => {
-  test("the copies fold into one row with its partners; each partner opens its own ads.txt", async ({ page }) => {
-    const errors = watchErrors(page);
-    await open(page, { ...FULL, realShapes: true });
-    const card = page
-      .locator("button[aria-expanded='true'][aria-label*='seat lines']")
-      .first()
-      .locator("xpath=ancestor::div[contains(@class,'report-row')][1]");
-    const all = rows(page);
-    await expect(all.first()).toBeVisible();
-    let found = false;
-    for (let i = 0; i < (await all.count()) && !found; i++) {
-      const row = all.nth(i);
-      if ((await row.getAttribute("aria-expanded")) !== "true") {
-        const box = await row.boundingBox();
-        await row.click({ position: { x: (box?.width ?? 100) - 24, y: 20 } });
-      }
-      await expect(card.locator("[data-line-text]").first()).toBeVisible();
-      found = (await card.locator("[data-line-via-more]").count()) > 0;
-    }
-    expect(found).toBe(true);
-    const list = card.locator("ul:has([data-line-via-more])").first();
-    const items = list.locator(":scope > li");
-    const texts = await items.locator("[data-line-text]").allInnerTexts();
-    expect(new Set(texts).size).toBe(texts.length);
-    expect((await items.locator("[data-line-no]").allInnerTexts()).map(Number)).toEqual(texts.map((_, i) => i + 1));
-    const via = list.locator("[data-line-via]").filter({ visible: true }).filter({ has: page.locator("[data-line-via-more]") }).first();
-    await expect(via).toContainText("Matches via northfold-tv.com, failarmy.tv");
-    for (const p of ["northfold-tv.com", "failarmy.tv"])
-      await expect(via.locator(`a[href^="https://${p}/ads.txt"]`)).toHaveCount(1);
-    await via.locator("[data-line-via-more]").click();
-    await expect(list.locator('[data-line-via] a[href^="https://example-partner.tv/ads.txt"]').filter({ visible: true }).first()).toBeVisible();
+  for (const width of [1440, 390]) test(`${width}px: partner copies fold into one clean line and every source remains in Open file`, async ({ page }) => {
+    await page.setViewportSize({width,height:844});
+    const errors=watchErrors(page);
+    const partners=['northfold-tv.com','failarmy.tv','example-partner.tv'];
+    const seat={ssp_domain:'madeupssp.com',publisher_id:'S-4410',relationship:'DIRECT',cert_id:''};
+    const base=mockMatchedDevelopers(1).rows[0];
+    const row={...base,developer_id:990101,name:'Alder Media',domain:'alder.example',match_type:'ipd',ipd_partner:partners[0],
+      matched_lines:partners.map(ipd_partner=>({...seat,match_type:'ipd',ipd_partner,found_in:'ads.txt'})),
+      line_count:1,added_lines:[],removed_lines:[],cert_changed_lines:[],lines_added:0,lines_removed:0,lines_cert_changed:0};
+    await open(page,FULL,'',()=>page.route('**/matched-developers?*',route=>route.fulfill({json:{page:1,page_size:25,total:1,rows:[row],match_type_counts:{all:1,own:0,ipd:1}}})));
+    await rows(page).first().click();
+    const list=page.locator('[data-seat-lines]').first();
+    await expect(list.locator(':scope > li')).toHaveCount(1);
+    await expect(list.locator('[data-line-via],.line-ipd-badge')).toHaveCount(0);
+    await list.getByRole('button',{name:/choose a source file/}).click();
+    const dialog=page.getByRole('dialog',{name:'Open source file'});await expect(dialog).toBeVisible();
+    for(const partner of partners)await expect(dialog.getByRole('link',{name:`${partner}/ads.txt`,exact:true})).toHaveAttribute('href',new RegExp(`^https://`+partner.replaceAll('.','\\.')+`/ads.txt`));
+    const box=(await dialog.boundingBox())!;expect(box.x).toBeGreaterThanOrEqual(15);expect(box.x+box.width).toBeLessThanOrEqual(width-15);
     expect(errors).toEqual([]);
   });
 });
@@ -526,7 +513,11 @@ test.describe("only partner copies fold (review of #75)", () => {
     await expect(items.nth(1).locator("[data-line-host]")).toHaveText("at cdn.alder.example");
     await items.nth(2).locator('[data-line-text]').click();
     await expect(page.locator('[data-line-actions] a').first()).toHaveAttribute("href", /\/app-ads\.txt(?:#|$)/);
-    await expect(items.nth(3).locator("[data-line-via]").filter({ visible: true })).toContainText("Matches via northfold-tv.com, failarmy.tv");
+    await items.nth(3).locator('[data-line-text]').click();
+    await expect(items.nth(3).locator('[data-line-via]')).toHaveCount(0);
+    await items.nth(3).getByRole('button',{name:/choose a source file/}).click();
+    const dialog=page.getByRole('dialog',{name:'Open source file'});
+    for(const partner of ['northfold-tv.com','failarmy.tv'])await expect(dialog.getByRole('link',{name:`${partner}/ads.txt`,exact:true})).toBeVisible();
     expect(errors).toEqual([]);
   });
 });

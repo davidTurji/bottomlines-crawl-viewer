@@ -3072,6 +3072,7 @@ export function SeatLineRow({
       line={line}
       selectionLabel={`Line ${n}`}
       publisherDomain={fileDomain}
+      sourceDomains={inOwn ? undefined : partners}
       foundIn={foundIn}
       gone={gone}
       className={rowClass}
