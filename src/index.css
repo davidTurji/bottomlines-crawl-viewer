@@ -1543,6 +1543,7 @@ a.line-source-reference:hover { color:hsl(var(--primary)); text-decoration-color
 .filter-option-heading { display:flex; align-items:center; gap:7px; padding:7px 9px; font-size:11px; font-weight:500; color:hsl(var(--muted-foreground)); }
 .filter-option-heading > span { display:inline-flex; align-items:center; justify-content:center; width:17px; height:17px; border:1px solid hsl(var(--border)); border-radius:4px; font-size:10px; }
 .filter-option { align-items:flex-start; gap:8px; padding:9px; }
+.filter-option + .filter-option { border-top:1px solid #e5e7eb; border-top-left-radius:0; border-top-right-radius:0; }
 .filter-option-check { margin-top:3px; }
 .filter-option-label { display:block; font-size:12px; font-weight:500; line-height:18px; }
 .filter-option-description { display:block; margin-top:2px; font-size:11px; font-weight:400; line-height:16px; color:hsl(var(--muted-foreground)); }
