@@ -1,5 +1,6 @@
 import { Children, Fragment, isValidElement, type ReactNode, createContext, useContext, useEffect, useRef, useState, useId } from "react";
-import { Check, ChevronDown, Search, SlidersHorizontal, type LucideIcon } from "lucide-react";
+import * as DropdownMenuPrimitive from "@radix-ui/react-dropdown-menu";
+import { ArrowRight, Check, ChevronDown, Search, SlidersHorizontal, type LucideIcon } from "lucide-react";
 
 import {
   DropdownMenu,
@@ -152,6 +153,12 @@ export interface FilterOption<T extends string> {
   value: T;
   label: string;
   count?: number;
+  /** Said in place of the bare count, with its unit ("243 publishers",
+   *  "29 apps"), so a menu whose choices count different things says so
+   *  on every one of them, one look for all. */
+  countLabel?: string;
+  /** The choice opens the other list (an arrow after its count). */
+  leads?: boolean;
   description?: string;
   group?: string;
 }
@@ -242,9 +249,135 @@ export function FilterSelect<T extends string>({
                 <span className="filter-option-label">{o.label}</span>
                 {o.description && <span id={`${descriptionId}-${encodeURIComponent(o.value)}`} className="filter-option-description">{o.description}</span>}
               </span>
-              {o.count != null && <span className="filter-option-count">{o.count.toLocaleString()}</span>}
+              {o.countLabel
+                ? <span data-leads={o.leads || undefined} className="filter-option-count filter-option-unit">{o.countLabel}{o.leads && <ArrowRight aria-hidden className="h-3 w-3" />}</span>
+                : o.count != null && <span className="filter-option-count">{o.count.toLocaleString()}</span>}
             </DropdownMenuItem>)}
           </DropdownMenuGroup>)}
+        </DropdownMenuContent>
+      </DropdownMenu>
+    </>
+  );
+}
+
+/**
+ * The same picker with TICK BOXES (Found in, David 2026-11-01): any of the
+ * choices at once, the list keeping a row that has any of them. The first
+ * item, ``allLabel``, clears every tick and closes the menu; none ticked,
+ * or every one, is all. The trigger names the ticked ones joined by " + ",
+ * and the menu stays open while ticking, its last line saying how many
+ * rows that keeps.
+ */
+export function FilterMultiSelect<T extends string>({
+  value,
+  onChange,
+  options,
+  allLabel,
+  allDescription,
+  allCount,
+  noun,
+  leading,
+  ariaLabel,
+  testId,
+  icon: Icon,
+  menuLabel,
+  widthClass = "sm:max-w-[240px]",
+}: {
+  value: T[];
+  onChange: (v: T[]) => void;
+  options: FilterOption<T>[];
+  allLabel: string;
+  allDescription?: string;
+  allCount?: number;
+  /** What the rows are ("publishers"), for the menu's last line. */
+  noun: string;
+  leading?: string;
+  ariaLabel?: string;
+  testId?: string;
+  icon?: LucideIcon;
+  menuLabel?: string;
+  widthClass?: string;
+}) {
+  const [open, setOpen] = useState(false);
+  const closePanel = useContext(FilterPanelClose);
+  const descriptionId = useId();
+  const on = new Set(value);
+  const ticked = options.filter((o) => on.has(o.value));
+  const every = ticked.length === 0 || ticked.length === options.length;
+  const label = every ? allLabel : ticked.map((o) => o.label).join(" + ");
+  const kept = every ? allCount : ticked.reduce((n, o) => n + (o.count ?? 0), 0);
+  const toggle = (v: T) => onChange(on.has(v) ? value.filter((x) => x !== v) : [...value, v]);
+  return (
+    <>
+      <div className="list-toolbar-divider" />
+      {/* Not modal: ticking keeps it open, so a click on anything else (the
+          next filter, a row) must both close it and land, never be eaten
+          by the open menu. */}
+      <DropdownMenu open={open} onOpenChange={setOpen} modal={false}>
+        <DropdownMenuTrigger asChild>
+          <button
+            type="button"
+            aria-label={ariaLabel}
+            data-testid={testId}
+            className={cn(
+              "list-toolbar-select flex items-center gap-1.5 whitespace-nowrap px-3 text-xs font-medium text-slate-900 transition-colors hover:bg-slate-50",
+              widthClass,
+            )}
+          >
+            {Icon && <Icon aria-hidden className="h-3.5 w-3.5 flex-none text-slate-500" />}
+            {leading && <span className="flex-shrink-0 font-normal text-slate-500">{leading}</span>}
+            <span className="truncate">{label}</span>
+            <ChevronDown aria-hidden className="ml-auto h-3 w-3 flex-shrink-0 opacity-40 sm:ml-0" />
+          </button>
+        </DropdownMenuTrigger>
+        <DropdownMenuContent align="end" collisionPadding={16} className="filter-select-menu border-border bg-white p-1.5">
+          <DropdownMenuGroup aria-label={menuLabel ?? leading ?? "Options"}>
+            <DropdownMenuLabel className="filter-option-heading">
+              <span aria-hidden>1</span>{menuLabel ?? leading ?? "Options"}
+            </DropdownMenuLabel>
+            <DropdownMenuItem
+              aria-label={allLabel}
+              aria-describedby={allDescription ? `${descriptionId}-all` : undefined}
+              textValue={allLabel}
+              // Clearing is one decision, like any single choice: the
+              // menu (and a phone's filter panel) closes on it.
+              onSelect={() => { onChange([]); closePanel?.(); }}
+              className="filter-option cursor-pointer"
+            >
+              <Check aria-hidden className={cn("filter-option-check h-3.5 w-3.5 flex-shrink-0", every ? "opacity-100" : "opacity-0")} />
+              <span className="min-w-0 flex-1">
+                <span className="filter-option-label">{allLabel}</span>
+                {allDescription && <span id={`${descriptionId}-all`} className="filter-option-description">{allDescription}</span>}
+              </span>
+              {allCount != null && <span className="filter-option-count">{allCount.toLocaleString()}</span>}
+            </DropdownMenuItem>
+            {options.map((o) => (
+              <DropdownMenuPrimitive.CheckboxItem
+                key={o.value}
+                checked={!every && on.has(o.value)}
+                aria-label={o.label}
+                aria-describedby={o.description ? `${descriptionId}-${encodeURIComponent(o.value)}` : undefined}
+                textValue={o.label}
+                // Ticking keeps the menu open: the reader may tick another.
+                onSelect={(e) => { e.preventDefault(); toggle(o.value); }}
+                className="filter-option relative flex cursor-pointer select-none rounded-sm text-sm outline-none transition-colors focus:bg-accent focus:text-accent-foreground"
+              >
+                <span aria-hidden data-tick={!every && on.has(o.value) ? "on" : "off"} className="filter-option-tick">
+                  <Check className="h-2.5 w-2.5" />
+                </span>
+                <span className="min-w-0 flex-1">
+                  <span className="filter-option-label">{o.label}</span>
+                  {o.description && <span id={`${descriptionId}-${encodeURIComponent(o.value)}`} className="filter-option-description">{o.description}</span>}
+                </span>
+                {o.count != null && <span className="filter-option-count">{o.count.toLocaleString()}</span>}
+              </DropdownMenuPrimitive.CheckboxItem>
+            ))}
+          </DropdownMenuGroup>
+          {kept != null && (
+            <div data-filter-kept className="filter-option-kept">
+              Showing {kept.toLocaleString()} {noun}
+            </div>
+          )}
         </DropdownMenuContent>
       </DropdownMenu>
     </>

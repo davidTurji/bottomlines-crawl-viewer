@@ -187,7 +187,8 @@ export type Scenario = {
    *  Default false: today's API (no Platform switch). */
   appPlatform?: boolean;
   /** true: a crawler with the Found in filter on the matched PUBLISHERS
-   *  lists (2026-10-27): ``?found_in=ads_txt|app_ads_txt|both`` on
+   *  lists (2026-10-27): ``?found_in=ads_txt|app_ads_txt|both``, or
+   *  several comma-separated (2026-11-01), on
    *  matched-developers and developer-events, echoed, with
    *  ``found_in_counts``. Default false: today's API (no switch). */
   foundIn?: boolean;
@@ -207,7 +208,7 @@ function readAll<T>(readPage: (page: number) => { rows: T[]; total: number }): T
 /** An app's platform, as the platform crawler names it: from its store. */
 export function fakeAppPlatform(a: { store?: string | null }): "ctv" | "mobile" | "web" | null {
   const store = String(a.store ?? "").toLowerCase();
-  if (["ios", "android", "apple", "google"].includes(store)) return "mobile";
+  if (["ios", "android", "apple", "google", "mobile"].includes(store)) return "mobile";
   if (["roku", "samsung", "vizio", "firetv", "amazon", "lg", "tvos", "ctv"].includes(store)) return "ctv";
   if (store === "web") return "web";
   return null;
@@ -225,11 +226,13 @@ export function fakeFoundIn(row: Record<string, unknown>): "ads_txt" | "app_ads_
   return ads && app ? "both" : ads ? "ads_txt" : app ? "app_ads_txt" : null;
 }
 
-/** Counts of a full list per choice, and the list kept by the asked one. */
+/** Counts of a full list per choice, and the list kept by the asked one
+ *  (or ones: ``found_in=ads_txt,both`` keeps a row of either, 2026-11-01). */
 function split<T>(all: T[], of: (r: T) => string | null, keys: string[], asked: string | null) {
   const counts: Record<string, number> = { all: all.length };
   for (const k of keys) counts[k] = all.filter((r) => of(r) === k).length;
-  return { counts, kept: asked ? all.filter((r) => of(r) === asked) : all };
+  const want = asked ? new Set(asked.split(",")) : null;
+  return { counts, kept: want ? all.filter((r) => want.has(of(r) ?? "")) : all };
 }
 
 /** Which rows of a full list each watch filter keeps (by position, so a
@@ -763,6 +766,9 @@ export async function installFakeApi(page: Page, scenario: Scenario = {}): Promi
             all = f.kept;
             extra.platform_counts = f.counts;
             extra.platform = pf ?? "all";
+            // Each app carries its platform (crawler, 2026-11-01).
+            const word = { ctv: "CTV", mobile: "Mobile", web: "Web" } as const;
+            all = all.map((a) => { const p = fakeAppPlatform(a); return { ...a, platform: p ? word[p] : "" }; });
           }
           r = { ...r, ...extra, rows: all.slice((page_ - 1) * 25, page_ * 25), total: all.length } as typeof r;
         }

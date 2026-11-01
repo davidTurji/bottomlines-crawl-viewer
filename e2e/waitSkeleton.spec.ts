@@ -199,7 +199,8 @@ test("the Found in switch (publishers) and the Platform switch (apps)", async ({
   await lands(page, rows(page));
   let release = await hold(page, (u) => u.pathname.endsWith("/matched-developers") && u.searchParams.has("found_in"));
   await page.getByTestId("found-in").click();
-  await page.getByRole("menuitem").nth(1).click();
+  await page.getByRole("menuitemcheckbox").first().click();
+  await page.keyboard.press("Escape");
   await waits(page, rows(page));
   release();
   await lands(page, rows(page));

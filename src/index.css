@@ -1281,6 +1281,12 @@ section:has(> .line-action-group) { overflow: clip; }
 .store-badge[data-platform="vizio"] { background:#606138; }
 .store-badge[data-inactive] { filter:saturate(.45); }
 .ipd-badge { background:#244b72; color:#fff; }
+/* The app's platform (2026-11-01): filled like IPD, one colour a platform. */
+.platform-badge { display:inline-flex; flex:none; align-items:center; gap:4px; min-height:20px; padding:1px 7px 1px 6px; border-radius:4px; font-family:var(--font-sans); font-size:10px; font-weight:600; line-height:1.4; letter-spacing:.01em; white-space:nowrap; color:#fff; background:#53616e; }
+.platform-badge[data-app-platform="ctv"] { background:#5b2a9e; }
+.platform-badge[data-app-platform="mobile"] { background:#0b6e80; }
+.platform-badge[data-app-platform="web"] { background:#5b6470; }
+.platform-badge[data-inactive] { filter:saturate(.45); }
 .line-action-group { container-type:inline-size; }
 .line-inline-actions { position:relative; z-index:2; display:flex; flex:none; flex-wrap:wrap; align-items:center; align-self:center; justify-content:flex-end; gap:6px; padding:0; background:transparent; }
 .line-inline-actions .line-control { min-height:30px; font-size:11px; }
@@ -1559,6 +1565,11 @@ a.line-source-reference:hover { color:hsl(var(--primary)); text-decoration-color
 .filter-option-label { display:block; font-size:12px; font-weight:500; line-height:18px; }
 .filter-option-description { display:block; margin-top:2px; font-size:11px; font-weight:400; line-height:16px; color:hsl(var(--muted-foreground)); }
 .filter-option-count { flex:none; padding-left:6px; margin-top:2px; font-size:11px; font-variant-numeric:tabular-nums; color:hsl(var(--muted-foreground)); }
+.filter-option-unit { display:inline-flex; align-items:center; gap:4px; color:hsl(var(--foreground)); font-weight:500; }
+.filter-option-tick { display:inline-flex; flex:none; align-items:center; justify-content:center; width:14px; height:14px; margin-top:2px; border:1px solid hsl(var(--border)); border-radius:3px; background:#fff; color:transparent; }
+.filter-option-tick[data-tick="on"] { border-color:hsl(var(--primary)); background:hsl(var(--primary)); color:hsl(var(--primary-foreground)); }
+.filter-option-kept { margin-top:4px; padding:8px 9px 4px; border-top:1px solid #e5e7eb; font-size:11px; font-variant-numeric:tabular-nums; color:hsl(var(--muted-foreground)); }
+.file-tag { display:inline-flex; flex:none; align-items:center; min-height:18px; padding:0 6px; border:1px solid hsl(var(--border)); border-radius:4px; background:#f8fafc; color:#475569; font-size:10px; font-weight:600; line-height:16px; white-space:nowrap; }
 @media(prefers-reduced-motion:reduce) { .report-description-reveal { transition:none; } }
 
 /* Download acts immediately; its separate info control only describes scope. */

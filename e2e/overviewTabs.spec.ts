@@ -875,11 +875,12 @@ test.describe("Found in (publishers) and Platform (apps)", () => {
     const sw = page.getByTestId("found-in");
     await expect(sw).toBeVisible();
     await sw.click();
-    const option = page.getByRole("menuitem").nth(1);
+    const option = page.getByRole("menuitemcheckbox").first();
     const word = (await option.innerText()).trim().split(/\s+/)[0];
     const asked = word === "ads.txt" ? "ads_txt" : word === "app-ads.txt" ? "app_ads_txt" : "both";
     const n = Number((await option.innerText()).replace(/[^\d]/g, ""));
     await option.click();
+    await page.keyboard.press("Escape");
     await expect(sw).toContainText(word);
     await settled(page);
     expect(calls.some((c) => c.path.endsWith("/matched-developers") && c.query.includes(`found_in=${asked}`))).toBe(true);
@@ -898,11 +899,138 @@ test.describe("Found in (publishers) and Platform (apps)", () => {
     expect(errors).toEqual([]);
   });
 
-  test("Platform on the apps list only: counts in the pills, the whole list filtered by the server", async ({ page }) => {
+  test("Found in ticks several files: ads.txt + Both keeps every publisher with an ads.txt, each row saying its file", async ({ page }) => {
+    const errors = watchErrors(page);
+    const calls = await open(page, { ...WATCH, foundIn: true });
+    const sw = page.getByTestId("found-in");
+    await expect(sw).toBeVisible();
+    await sw.click();
+    const tick = (name: string) => page.getByRole("menuitemcheckbox", { name: new RegExp(`^${name.replace(".", "\\.")}(?:\\s|$)`) });
+    const count = async (name: string) => Number((await tick(name).innerText()).replace(/[^\d]/g, ""));
+    const ads = await count("ads.txt");
+    const both = await count("Both");
+    await tick("ads.txt").click();
+    await tick("Both").click();
+    // The menu stays open while ticking, and says what the ticks keep.
+    await expect(page.locator("[data-filter-kept]")).toHaveText(`Showing ${(ads + both).toLocaleString()} web publishers`);
+    await page.keyboard.press("Escape");
+    await expect(sw).toContainText("ads.txt + Both");
+    await settled(page);
+    expect(calls.some((c) => c.path.endsWith("/matched-developers") && c.query.includes("found_in=ads_txt,both"))).toBe(true);
+    // Every row says its file, and only the two ticked.
+    const tags = await page.locator("[data-file-tag]").evaluateAll((els) => els.map((el) => el.getAttribute("data-file-tag")));
+    expect(tags.length).toBeGreaterThan(0);
+    expect(tags.every((t) => t === "ads.txt" || t === "both")).toBe(true);
+    // All files clears every tick.
+    await sw.click();
+    await page.getByRole("menuitem", { name: /^All files/ }).click();
+    await page.keyboard.press("Escape");
+    await expect(sw).toContainText("All files");
+    expect(errors).toEqual([]);
+  });
+
+  test("Web on the apps list's Platform is not an app: it opens Matched publishers on ads.txt + Both", async ({ page }) => {
+    const errors = watchErrors(page);
+    const calls = await open(page, { ...FULL, appPlatform: true, foundIn: true });
+    await expect(rows(page).first()).toBeVisible();
+    await toApps(page);
+    const sw = page.getByTestId("platform");
+    await expect(sw).toBeVisible();
+    await sw.click();
+    const web = page.getByRole("menuitem", { name: /^Web(?:\s|$)/ });
+    await expect(web).toContainText(/\d[\d,]* publishers/);
+    const n = Number((await web.innerText()).match(/([\d,]+) publishers/)![1].replace(/,/g, ""));
+    // CTV and Mobile are the app platforms; Web counts publishers, not apps.
+    await expect(page.getByRole("menuitem", { name: /^Mobile(?:\s|$)/ })).toBeVisible();
+    await web.click();
+    const foundIn = page.getByTestId("found-in");
+    await expect(foundIn).toContainText("ads.txt + Both");
+    // Platform stands on the publishers list too, saying Web.
+    await expect(page.getByTestId("platform")).toContainText("Web");
+    await settled(page);
+    expect(calls.some((c) => c.path.endsWith("/matched-developers") && c.query.includes("found_in=ads_txt,both"))).toBe(true);
+    await expect(page.locator("main[data-report-main]")).toContainText(`of ${n.toLocaleString()}`);
+    const tags = await page.locator("[data-file-tag]").evaluateAll((els) => els.map((el) => el.getAttribute("data-file-tag")));
+    expect(tags.every((t) => t === "ads.txt" || t === "both")).toBe(true);
+    // Back on the apps, their Platform is as the reader left it, never Web.
+    await toApps(page);
+    await expect(page.getByTestId("platform")).toContainText("All");
+    expect(errors).toEqual([]);
+  });
+
+  test("every app wears its platform badge, CTV or Mobile, the one its Platform filter keeps it by", async ({ page }) => {
+    const errors = watchErrors(page);
+    await open(page, { ...FULL, appPlatform: true });
+    await toApps(page);
+    await expect(rows(page).first()).toBeVisible();
+    const cards = page.locator(".matched-app-title");
+    const n = await cards.count();
+    expect(n).toBeGreaterThan(0);
+    const badges = await cards.evaluateAll((els) => els.map((el) => el.querySelector("[data-app-platform]")?.textContent?.trim() ?? null));
+    expect(badges.every((b) => b === "CTV" || b === "Mobile")).toBe(true);
+    // Filtered to CTV, every app says CTV.
+    await chooseFilter(page, "platform", "CTV");
+    await settled(page);
+    const ctv = await page.locator(".matched-app-title [data-app-platform]").allTextContents();
+    expect(ctv.length).toBeGreaterThan(0);
+    expect(ctv.every((t) => t.trim() === "CTV")).toBe(true);
+    // A publisher never wears one.
+    await page.getByRole("button", { name: /Matched publishers/ }).first().click();
+    await expect(rows(page).first()).toBeVisible();
+    await expect(page.locator("[data-app-platform]")).toHaveCount(0);
+    expect(errors).toEqual([]);
+  });
+
+  test("an API that cannot ask for several files: no Web choice", async ({ page }) => {
+    const errors = watchErrors(page);
+    await open(page, { ...FULL, appPlatform: true });
+    await toApps(page);
+    const sw = page.getByTestId("platform");
+    await expect(sw).toBeVisible();
+    await sw.click();
+    await expect(page.getByRole("menuitem", { name: /^Mobile(?:\s|$)/ })).toBeVisible();
+    await expect(page.getByRole("menuitem", { name: /^Web(?:\s|$)/ })).toHaveCount(0);
+    expect(errors).toEqual([]);
+  });
+
+  test("Platform on the publishers list: CTV opens Matched apps on CTV, Web keeps the publishers on ads.txt + Both", async ({ page }) => {
+    const errors = watchErrors(page);
+    const calls = await open(page, { ...FULL, appPlatform: true, foundIn: true });
+    await expect(rows(page).first()).toBeVisible();
+    const sw = page.getByTestId("platform");
+    await expect(sw).toContainText("All");
+    await sw.click();
+    // CTV and Mobile count apps and lead to them; Web counts publishers.
+    const ctv = page.getByRole("menuitem", { name: /^CTV(?:\s|$)/ });
+    await expect(ctv).toContainText(/\d[\d,]* apps/);
+    const web = page.getByRole("menuitem", { name: /^Web(?:\s|$)/ });
+    await expect(web).not.toContainText("apps");
+    await web.click();
+    await expect(page.getByTestId("found-in")).toContainText("ads.txt + Both");
+    await expect(sw).toContainText("Web");
+    await settled(page);
+    expect(calls.some((c) => c.path.endsWith("/matched-developers") && c.query.includes("found_in=ads_txt,both"))).toBe(true);
+    // CTV: the apps list, on CTV, every app wearing its CTV badge.
+    await chooseFilter(page, "platform", "CTV");
+    await expect(page.getByTestId("search-apps").or(page.getByPlaceholder("Search apps"))).toBeVisible();
+    await expect(page.getByTestId("platform")).toContainText("CTV");
+    await settled(page);
+    expect(calls.some((c) => c.path.endsWith("/matched-apps") && c.query.includes("platform=ctv"))).toBe(true);
+    const badges = await page.locator(".matched-app-title [data-app-platform]").allTextContents();
+    expect(badges.length).toBeGreaterThan(0);
+    expect(badges.every((t) => t.trim() === "CTV")).toBe(true);
+    // Picking All on the publishers list again clears Web.
+    await page.getByRole("button", { name: /Matched publishers/ }).first().click();
+    await expect(page.getByTestId("platform")).toContainText("Web");
+    await chooseFilter(page, "platform", "All");
+    await expect(page.getByTestId("found-in")).toContainText("All files");
+    expect(errors).toEqual([]);
+  });
+
+  test("Platform on the apps list: counts in the pills, the whole list filtered by the server", async ({ page }) => {
     const errors = watchErrors(page);
     const calls = await open(page, { ...FULL, appPlatform: true });
     await expect(rows(page).first()).toBeVisible();
-    await expect(page.getByTestId("platform")).toHaveCount(0);
     await toApps(page);
     const sw = page.getByTestId("platform");
     await expect(sw).toBeVisible();
