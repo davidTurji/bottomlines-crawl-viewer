@@ -47,6 +47,37 @@ export interface ReportFeatures {
   trial: boolean;
   /** The report carries the Schain builder, so the rail lists Schain. */
   hasSchain: boolean;
+  /** The filters the list on screen has in its bar, in bar order. */
+  listFilters: ListFilter[];
+}
+
+export type ListFilter = "platform" | "found-in" | "match-type";
+
+const FILTER_NAME: Record<ListFilter, string> = {
+  platform: "Platform",
+  "found-in": "Found in",
+  "match-type": "Match type",
+};
+
+/** What the filters step says: only the filters on screen (rule 2). */
+function filtersBody(filters: ListFilter[]) {
+  const rest = filters.filter((f) => f !== "platform");
+  const names = rest.map((f, i) => (
+    <span key={f}>
+      {i > 0 && (i === rest.length - 1 ? " and " : ", ")}
+      <strong>{FILTER_NAME[f]}</strong>
+    </span>
+  ));
+  return (
+    <p>
+      {filters.includes("platform") && (
+        <>
+          <strong>Platform</strong>: CTV or Mobile apps, or Web publishers.{rest.length > 0 && " "}
+        </>
+      )}
+      {rest.length > 0 && <>{names} {filters.includes("platform") ? (rest.length > 1 ? "narrow it." : "narrows it.") : (rest.length > 1 ? "narrow the list." : "narrows the list.")}</>}
+    </p>
+  );
 }
 
 /** Every step this report can show, in reading order. */
@@ -108,20 +139,41 @@ export function reportTourSteps(f: ReportFeatures): ReportTourStep[] {
         </p>
       ),
     },
+    // The list, in three small steps (David, 2026-11-01). One highlight of
+    // the whole list was taller than the screen, so its card covered the
+    // list's own heading; each step now points at one thing.
     {
       id: "matched-list",
       page: "",
-      anchor: "overview-list",
-      // The whole list is taller than a phone, so a highlight of it covers
-      // the screen and points at nothing. On a phone, its heading.
-      mobileAnchor: "overview-list-head",
+      anchor: "overview-first-row",
       eyebrow: "Overview",
       title: "Every match",
       body: (
         <p>
-          <strong>Click a row</strong> to see its exact lines. The <strong>tabs</strong> show what moved this week.
+          <strong>Click a row</strong> for its exact lines. Its tag says the <strong>file</strong>, or the app&apos;s <strong>platform</strong>.
         </p>
       ),
+    },
+    {
+      id: "list-tabs",
+      page: "",
+      anchor: "list-tabs",
+      mobileAnchor: "list-tabs-mobile",
+      eyebrow: "Overview",
+      title: "By status",
+      body: (
+        <p>
+          <strong>Added</strong>, <strong>Removed</strong>, <strong>Changed</strong> and more: the rows behind this week&apos;s changes.
+        </p>
+      ),
+    },
+    f.listFilters.length > 0 && {
+      id: "list-filters",
+      page: "",
+      anchor: "list-filters",
+      eyebrow: "Overview",
+      title: "Filter the list",
+      body: filtersBody(f.listFilters),
     },
     f.hasLineFilter && {
       id: "line-filter",

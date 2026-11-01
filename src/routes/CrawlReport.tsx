@@ -1685,12 +1685,12 @@ function StatusControls({ tab, setTab, counts, off, inactive }: {
   const selectedExtra = extra.find(option => option.value === tab);
   useEffect(() => { if (!["all", "added", "removed", "changed"].includes(tab)) setExpanded(true); }, [tab]);
   return <>
-    <label className="report-mobile-status"><span>Status</span>
+    <label className="report-mobile-status" data-tour="list-tabs-mobile"><span>Status</span>
       <select aria-label="Matched status" value={tab} onChange={event => setTab(event.target.value as DrillTab)}>
         {[...primary, ...extra].map(option => <option key={option.value} value={option.value}>{option.label}</option>)}
       </select>
     </label>
-    <Tabs value={tab} onValueChange={value => setTab(value as DrillTab)} className="report-desktop-status max-w-full">
+    <Tabs value={tab} onValueChange={value => setTab(value as DrillTab)} className="report-desktop-status max-w-full" data-tour="list-tabs">
       <TabsList aria-label="Matched statuses" className="status-track h-auto max-w-full justify-start">
         {primary.map(option => <TabsTrigger key={option.value} value={option.value}>{option.label}</TabsTrigger>)}
         {extra.length > 0 && <span id={moreId} hidden={!expanded} className="status-extra-inline">
@@ -2742,7 +2742,7 @@ function DrilldownList({
             ) : (
               <div className="space-y-3">
                 {rows.map((r, i) => (
-                  <Settle key={r.developer_id} index={i}>
+                  <Settle key={r.developer_id} index={i} tour={i === 0 ? "overview-first-row" : undefined}>
                     <PublisherCard
                       row={r}
                       token={token}
@@ -4011,7 +4011,7 @@ function MatchedAppsList({
           ) : (
             <div className="space-y-3">
               {rows.map((a, i) => (
-                <Settle key={keyOf(a)} index={i}>
+                <Settle key={keyOf(a)} index={i} tour={i === 0 ? "overview-first-row" : undefined}>
                   <MatchedAppCard
                     app={a}
                     lineFilter={lines}

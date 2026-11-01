@@ -78,7 +78,7 @@ export function FilterGroup({ children }: { children: ReactNode }) {
     setOpen(false);
     requestAnimationFrame(() => root.current?.querySelector<HTMLButtonElement>('button')?.focus({ preventScroll: true }));
   };
-  return <FilterPanelClose.Provider value={closeAfterChoice}><div ref={root} className="list-toolbar-filters" data-open={open}>
+  return <FilterPanelClose.Provider value={closeAfterChoice}><div ref={root} className="list-toolbar-filters" data-open={open} data-tour="list-filters">
     <button type="button" aria-label="List filters" aria-expanded={open} onClick={() => setOpen(!open)}><SlidersHorizontal aria-hidden className="h-3.5 w-3.5" /><span>Filters</span></button>
     <div className="list-toolbar-filter-panel" role="group" aria-label="Filter options">{children}</div>
   </div></FilterPanelClose.Provider>;

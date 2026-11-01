@@ -9,7 +9,8 @@
  * top; the walkthrough is short enough that resuming part-way is not worth
  * a second choice.
  *
- * A quiet outlined control keeps help available beside the account menu.
+ * A quiet outlined control keeps help available beside the account menu,
+ * compact: the compass right beside its words (2026-11-01).
  */
 
 import { Compass } from "lucide-react";
@@ -23,12 +24,12 @@ export function WalkthroughButton() {
       type="button"
       data-tour="walkthrough-button"
       onClick={introduce}
-      className="inline-flex h-9 items-center gap-2 rounded-lg border border-border bg-white py-1 pl-1 pr-3.5 text-[13px] font-medium text-primary transition-colors hover:bg-muted/50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50"
+      // Compact (David, 2026-11-01): the icon sits right beside its words,
+      // no padded box around it, so the button is as wide as what it says.
+      className="walkthrough-button inline-flex h-9 items-center gap-1.5 rounded-lg border border-border bg-white px-3 text-[12.5px] font-medium text-primary transition-colors hover:bg-muted/50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50"
       title="A short tour of this report, page by page"
     >
-      <span className="flex h-7 w-7 items-center justify-center text-primary">
-        <Compass className="h-3.5 w-3.5" />
-      </span>
+      <Compass aria-hidden className="h-3.5 w-3.5 flex-none" />
       <span className="hidden sm:inline">How this works</span><span className="sm:hidden">Guide</span>
     </button>
   );

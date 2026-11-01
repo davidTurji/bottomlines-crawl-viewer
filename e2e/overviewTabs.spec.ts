@@ -1061,6 +1061,46 @@ test.describe("Found in (publishers) and Platform (apps)", () => {
     expect(errors).toEqual([]);
   });
 
+  test("the walkthrough points at the list's first row, its statuses and its filters, one at a time", async ({ page }) => {
+    const errors = watchErrors(page);
+    let said = "";
+    const titles = async (scenario: Parameters<typeof open>[1]) => {
+      said = "";
+      await open(page, scenario);
+      await expect(rows(page).first()).toBeVisible();
+      await settled(page);
+      await page.locator('[data-tour="walkthrough-button"]').click();
+      await page.getByRole("button", { name: /^(Continue|Show me around|Start tour)/ }).click();
+      const seen: string[] = [];
+      for (let i = 0; i < 20; i++) {
+        const card = page.locator('[role="dialog"]').last();
+        await expect(card).toBeVisible();
+        const title = (await card.locator("h2").first().innerText().catch(() => "")).trim();
+        seen.push(title);
+        if (title === "Filter the list") said = (await card.innerText()).replace(/\s+/g, " ");
+        const next = card.getByRole("button", { name: /^(Next|Finish|Done)/ }).last();
+        const label = (await next.innerText()).trim();
+        await next.click();
+        if (!label.startsWith("Next")) break;
+      }
+      return seen;
+    };
+    const full = await titles({ ...FULL, appPlatform: true, foundIn: true });
+    const at = (t: string) => full.indexOf(t);
+    expect(at("Every match")).toBeGreaterThan(-1);
+    expect(at("By status")).toBe(at("Every match") + 1);
+    expect(at("Filter the list")).toBe(at("By status") + 1);
+    expect(said).toContain("Platform: CTV or Mobile apps, or Web publishers.");
+    expect(said).toContain("Found in and Match type narrow it.");
+    // Only Match type in the bar: the step names it alone, never Platform.
+    const bare = await titles({ ...FULL, realShapes: true });
+    expect(bare).toContain("Every match");
+    expect(bare).toContain("Filter the list");
+    expect(said).toContain("Match type narrows the list.");
+    expect(said).not.toContain("Platform");
+    expect(errors).toEqual([]);
+  });
+
   test("a keyboard pick that opens the other list hands focus to that list's Platform", async ({ page }) => {
     const errors = watchErrors(page);
     await open(page, { ...FULL, appPlatform: true, foundIn: true });

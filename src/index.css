@@ -777,6 +777,14 @@ All colors MUST be HSL.
   animation-delay: var(--bl-delay, 0ms);
 }
 
+/* On the dark rail a pending page's row is a pale bar, not the light grey
+   of the page's own skeletons (2026-11-01). */
+.nav-skeleton {
+  background-color: hsl(0 0% 100% / 0.14);
+  background-image: linear-gradient(90deg, transparent 0%, transparent 35%, hsl(0 0% 100% / 0.22) 50%, transparent 65%, transparent 100%);
+  background-size: 200% 100%;
+}
+
 /* The skeleton must never be the thing that makes the page feel unwell.
    Under reduced motion it stays, still, as a calm grey plan of the page. */
 @media (prefers-reduced-motion: reduce) {
