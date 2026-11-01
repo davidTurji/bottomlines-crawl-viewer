@@ -272,6 +272,7 @@ export function FilterMultiSelect<T extends string>({
   value,
   onChange,
   options,
+  choices,
   allLabel,
   allDescription,
   allCount,
@@ -286,6 +287,9 @@ export function FilterMultiSelect<T extends string>({
   value: T[];
   onChange: (v: T[]) => void;
   options: FilterOption<T>[];
+  /** Every value there is, shown or not (a choice with no rows is hidden):
+   *  "all" means all of THESE ticked, never just the visible ones. */
+  choices?: readonly T[];
   allLabel: string;
   allDescription?: string;
   allCount?: number;
@@ -303,7 +307,7 @@ export function FilterMultiSelect<T extends string>({
   const descriptionId = useId();
   const on = new Set(value);
   const ticked = options.filter((o) => on.has(o.value));
-  const every = ticked.length === 0 || ticked.length === options.length;
+  const every = value.length === 0 || (choices ?? options.map((o) => o.value)).every((c) => on.has(c));
   const label = every ? allLabel : ticked.map((o) => o.label).join(" + ");
   const kept = every ? allCount : ticked.reduce((n, o) => n + (o.count ?? 0), 0);
   const toggle = (v: T) => onChange(on.has(v) ? value.filter((x) => x !== v) : [...value, v]);

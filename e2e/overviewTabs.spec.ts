@@ -865,7 +865,11 @@ test.describe("Found in (publishers) and Platform (apps)", () => {
     await toApps(page);
     await expect(rows(page).first()).toBeVisible();
     await expect(page.getByTestId("platform")).toHaveCount(0);
-    expect(calls.filter((c) => /[?&](found_in|platform)=/.test(c.query))).toEqual([]);
+    // Only the one capability read (does it take two files at once?); no
+    // list is ever asked for a file or a platform.
+    const probe = (c: { path: string; query: string }) =>
+      c.path.endsWith("/matched-developers") && /page_size=1(&|$)/.test(c.query) && c.query.includes("found_in=ads_txt,both");
+    expect(calls.filter((c) => /[?&](found_in|platform)=/.test(c.query) && !probe(c))).toEqual([]);
     expect(errors).toEqual([]);
   });
 
@@ -1019,11 +1023,59 @@ test.describe("Found in (publishers) and Platform (apps)", () => {
     const badges = await page.locator(".matched-app-title [data-app-platform]").allTextContents();
     expect(badges.length).toBeGreaterThan(0);
     expect(badges.every((t) => t.trim() === "CTV")).toBe(true);
-    // Picking All on the publishers list again clears Web.
+    // ONE Platform choice for the page: CTV replaced Web, so the publishers
+    // list is all of them again.
     await page.getByRole("button", { name: /Matched publishers/ }).first().click();
-    await expect(page.getByTestId("platform")).toContainText("Web");
+    await expect(page.getByTestId("platform")).toContainText("All");
+    await expect(page.getByTestId("found-in")).toContainText("All files");
+    // All on the publishers list clears any file choice.
+    await chooseFilter(page, "found-in", "Both");
+    await expect(page.getByTestId("found-in")).toContainText("Both");
     await chooseFilter(page, "platform", "All");
     await expect(page.getByTestId("found-in")).toContainText("All files");
+    expect(errors).toEqual([]);
+  });
+
+  test("a crawler that takes one file at a time: no Web anywhere, Found in one choice, never a comma list", async ({ page }) => {
+    const errors = watchErrors(page);
+    const calls = await open(page, { ...FULL, appPlatform: true, foundIn: "single" });
+    await expect(rows(page).first()).toBeVisible();
+    await settled(page);
+    await page.getByTestId("platform").click();
+    await expect(page.getByRole("menuitem", { name: /^CTV(?:\s|$)/ })).toBeVisible();
+    await expect(page.getByRole("menuitem", { name: /^Web(?:\s|$)/ })).toHaveCount(0);
+    await page.keyboard.press("Escape");
+    await page.getByTestId("found-in").click();
+    await expect(page.getByRole("menuitemcheckbox")).toHaveCount(0);
+    await page.getByRole("menuitem", { name: /^Both(?:\s|$)/ }).click();
+    await expect(page.getByTestId("found-in")).toContainText("Both");
+    await settled(page);
+    await toApps(page);
+    await page.getByTestId("platform").click();
+    await expect(page.getByRole("menuitem", { name: /^Mobile(?:\s|$)/ })).toBeVisible();
+    await expect(page.getByRole("menuitem", { name: /^Web(?:\s|$)/ })).toHaveCount(0);
+    await page.keyboard.press("Escape");
+    // Only the capability read ever carried a comma.
+    const commas = calls.filter((c) => /found_in=[^&]*,/.test(c.query));
+    expect(commas.every((c) => c.path.endsWith("/matched-developers") && /page_size=1(&|$)/.test(c.query))).toBe(true);
+    expect(errors).toEqual([]);
+  });
+
+  test("a keyboard pick that opens the other list hands focus to that list's Platform", async ({ page }) => {
+    const errors = watchErrors(page);
+    await open(page, { ...FULL, appPlatform: true, foundIn: true });
+    await toApps(page);
+    const sw = page.getByTestId("platform");
+    await expect(sw).toBeVisible();
+    await sw.focus();
+    await page.keyboard.press("Enter");
+    const web = page.getByRole("menuitem", { name: /^Web(?:\s|$)/ });
+    await expect(web).toBeVisible();
+    await web.focus();
+    await page.keyboard.press("Enter");
+    await expect(page.getByPlaceholder("Search publishers")).toBeVisible();
+    await expect(page.getByTestId("platform")).toBeFocused();
+    await expect(page.getByTestId("platform")).toContainText("Web");
     expect(errors).toEqual([]);
   });
 
