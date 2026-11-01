@@ -18,6 +18,29 @@
          place it still did. -->
     <title>PathFinder, weekly report</title>
     <meta name="description" content="Your weekly ads.txt and app-ads.txt report." />
+    <!-- Link preview (WhatsApp, Slack, iMessage...). These crawlers never
+         run JavaScript, so the tags live here in the shell nginx serves for
+         every report URL, /crawl-report/{token} and /{slug}/{short_id}
+         alike. Same text and image for every customer: nothing from a
+         report ever reaches a preview.
+         The image sits under /assets/, which nginx caches as immutable for a
+         year, and WhatsApp caches previews by image URL: a new image is a
+         new file name (bump -v1), never an overwrite. Keep it under 300 KB
+         or WhatsApp shows no image at all. e2e/linkPreview.spec.ts pins all
+         of this. -->
+    <meta property="og:type" content="website" />
+    <meta property="og:title" content="Pathfinder | Your weekly report" />
+    <meta
+      property="og:description"
+      content="Your latest inventory insights, changes, and discoveries."
+    />
+    <meta
+      property="og:image"
+      content="https://pathfinder.bottomlines.ai/assets/images/link-preview-weekly-report-v1.png"
+    />
+    <meta property="og:image:type" content="image/png" />
+    <meta property="og:image:width" content="800" />
+    <meta property="og:image:height" content="800" />
     <link
       href="https://fonts.googleapis.com/css2?family=DM+Mono:wght@300;400;500&family=JetBrains+Mono:wght@400;500&display=swap"
       rel="stylesheet"
