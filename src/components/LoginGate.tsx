@@ -11,10 +11,7 @@ import {
   releaseDataRequests,
 } from "@/lib/api";
 import { useReportScope } from "@/lib/reportScope";
-import {
-  EXPIRED_LINK_MESSAGE,
-  ReportNoticeCard,
-} from "@/components/ReportNoticeCard";
+import { ExpiredLinkScreen } from "@/components/ReportNoticeCard";
 import { type LinkSignin, peekLinkSignin } from "@/lib/linkSignin";
 
 /** Remember who signed in, for the account menu (keyed by token). */
@@ -52,7 +49,9 @@ function rememberUser(token: string, username: string) {
  * A revoked or expired report used to reach the form and be told the
  * username and password did not match, which sent the reader off to
  * retype a password that could never work. It now gets the same
- * expired-link card the readable scope route shows.
+ * expired-link screen the readable scope route shows. So does a crawl
+ * that was deleted: the deletion turns its logins off (2026-11-02), and
+ * before that its login still worked and opened an empty report.
  *
  * MOCK mode never 401s, so the gate is invisible there by construction.
  */
@@ -98,7 +97,7 @@ export default function LoginGate({ children }: { children: React.ReactNode }) {
   }, [dead]);
 
   if (dead && !MOCK) {
-    return <ReportNoticeCard message={EXPIRED_LINK_MESSAGE} />;
+    return <ExpiredLinkScreen />;
   }
 
   if (locked && !MOCK) {
