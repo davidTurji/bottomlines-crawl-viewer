@@ -300,6 +300,13 @@ async function crawl(page: Page, vp: string): Promise<Run> {
     const trigger = page.getByRole("button", { name: "List filters", exact: true }).first();
     if (await trigger.isVisible() && await trigger.getAttribute("aria-expanded") !== "true") await click(trigger);
   };
+  // A pick that opens the other list says so for a second, then moves
+  // (David, 2026-11-02): let it, then walk back to the list being walked.
+  const backTo = async (view: "publishers" | "apps") => {
+    await expect(page.locator("[data-list-moving]")).toHaveCount(0, { timeout: 5000 });
+    if (!(await page.getByPlaceholder(view === "apps" ? "Search apps" : "Search publishers").count()))
+      await click(page.getByRole("button", { name: view === "apps" ? /Matched apps/ : /Matched publishers/ }).first());
+  };
   /* ── The Overview: both lists, every tab, every pill, every row. ── */
   for (const view of ["publishers", "apps"] as const) {
     await step(`view ${view}`, () => click(page.getByRole("button", { name: view === "apps" ? /Matched apps/ : /Matched publishers/ }).first()));
@@ -340,6 +347,7 @@ async function crawl(page: Page, vp: string): Promise<Run> {
             await click(sw);
             await click(page.getByRole("menuitem", { name: new RegExp(`^${word.replace(/[.]/g, "\\.")}(?:\\s|$)`) }));
           });
+          await step(`${view} / ${tab} / ${id} ${word} / back to ${view}`, () => backTo(view));
           if (run.failures.length) return run;
           await openAll(view, OVERVIEW_ROWS, 2);
         }

@@ -15,7 +15,7 @@ import {
   skeletonRowCount,
 } from "@/components/Skeleton";
 import { expectedRows, knownKey, type Landed } from "@/lib/expectedRows";
-import { useCallback, useEffect, useId, useRef, useState, type ReactNode } from "react";
+import { useCallback, useEffect, useId, useLayoutEffect, useRef, useState, type ReactNode } from "react";
 import { BEAT_PAUSE_MS, CountUp, landsAfterMs, payoffStyle } from "@/components/CountUp";
 import { LineFilter } from "@/components/LineFilter";
 import {
@@ -226,39 +226,76 @@ export default function CrawlReport() {
   // splits by them.
   const [foundIn, setFoundIn] = useState<FoundInFilter>("all");
   const [platform, setPlatform] = useState<PlatformFilter>("all");
+  /**
+   * MOVING BETWEEN THE LISTS (David, 2026-11-02): a filter pick that opens
+   * the other list says so first, in the walkthrough's card ("Moving to
+   * Matched apps", and why), and holds MOVE_PAUSE_MS so the reader sees
+   * where they are going; then the pick applies and the list moves. Any
+   * other way of choosing a list (its card, a Popular choice) or another
+   * pick in the meantime cancels it.
+   */
+  const [moving, setMoving] = useState<Moving | null>(null);
+  const moveTimer = useRef<number | null>(null);
+  const cancelMove = useCallback(() => {
+    if (moveTimer.current != null) window.clearTimeout(moveTimer.current);
+    moveTimer.current = null;
+    setMoving(null);
+  }, []);
+  useEffect(() => cancelMove, [cancelMove]);
   /** Shows a list; the tab stays (owner rule: tabs survive the publishers
    *  / apps switch), unless a tab is asked for. */
   const showView = (view: ListView, tab?: DrillTab) => {
+    cancelMove();
     if (tab) setDrillTab(tab);
     setMatchedView(view);
   };
-  const pickView = useCallback((view: ListView) => preserveReportViewport(listRef.current, () => setMatchedView(view)), []);
+  const pickView = useCallback((view: ListView) => {
+    cancelMove();
+    preserveReportViewport(listRef.current, () => setMatchedView(view));
+  }, [cancelMove]);
+  const moveTo = useCallback((to: ListView, why: string, picked: string, focus: string, apply: () => void) => {
+    cancelMove();
+    setMoving({ to, why, picked });
+    moveTimer.current = window.setTimeout(() => {
+      moveTimer.current = null;
+      apply();
+      preserveReportViewport(listRef.current, () => setMatchedView(to));
+      setMoving(null);
+      focusPlatformOf(listRef.current, focus);
+    }, MOVE_PAUSE_MS);
+  }, [cancelMove]);
   /**
    * PLATFORM, ONE CHOICE FOR THE PAGE (David, 2026-11-01). It stands on both
    * lists and the last pick is what both say: CTV / Mobile filter the apps
    * (an app's platform, never a publisher's) and open them; Web is not an
    * app, it is the web publishers (Found in ads.txt + Both) and opens them;
    * All clears every platform and file choice. The tab, Match type and seat
-   * lines stay. A pick that changes the list hands focus to the new list's
-   * Platform, so a keyboard reader is not dropped at the top of the page.
+   * lines stay. A pick that changes the list says so first (moveTo), then
+   * hands focus to the new list's Platform, so a keyboard reader is not
+   * dropped at the top of the page.
    */
   const matchedViewRef = useRef(matchedView);
   matchedViewRef.current = matchedView;
   const pickPlatform = useCallback((next: PlatformFilter) => {
     const here = matchedViewRef.current;
     const view: ListView = next === "web" ? "publishers" : next === "all" ? here : "apps";
-    setPlatform(next === "ctv" || next === "mobile" ? next : "all");
-    // All on the publishers list clears any file choice; on the apps list
-    // it leaves the publishers' own ticks alone unless they were Web.
-    setFoundIn((was) =>
-      next === "web" ? WEB_PUBLISHERS
-        : was === WEB_PUBLISHERS || (next === "all" && here === "publishers") ? "all"
-        : was);
-    if (view !== here) {
-      pickView(view);
-      focusPlatformOf(listRef.current);
+    const apply = () => {
+      setPlatform(next === "ctv" || next === "mobile" ? next : "all");
+      // All on the publishers list clears any file choice; on the apps list
+      // it leaves the publishers' own ticks alone unless they were Web.
+      setFoundIn((was) =>
+        next === "web" ? WEB_PUBLISHERS
+          : was === WEB_PUBLISHERS || (next === "all" && here === "publishers") ? "all"
+          : was);
+    };
+    if (view === here) {
+      cancelMove();
+      apply();
+    } else {
+      const key = next as "ctv" | "mobile" | "web";
+      moveTo(view, MOVE_WHY[key], `Platform: ${key === "ctv" ? "CTV" : key === "mobile" ? "Mobile" : "Web"}`, "platform", apply);
     }
-  }, [pickView]);
+  }, [cancelMove, moveTo]);
   /**
    * FOUND IN FROM THE APPS LIST (David, 2026-11-02): the filter stands on
    * both lists, but a file is a publisher's, so on the apps list a choice
@@ -266,12 +303,13 @@ export default function CrawlReport() {
    * own Platform stays as the reader left it.
    */
   const pickFoundIn = useCallback((next: FoundInFilter) => {
-    setFoundIn(next);
-    if (matchedViewRef.current !== "publishers") {
-      pickView("publishers");
-      focusPlatformOf(listRef.current, "found-in");
+    if (matchedViewRef.current === "publishers") {
+      cancelMove();
+      setFoundIn(next);
+      return;
     }
-  }, [pickView]);
+    moveTo("publishers", moveWhyOfFile(next), `Found in: ${FILE_WORD[next] ?? "All files"}`, "found-in", () => setFoundIn(next));
+  }, [cancelMove, moveTo]);
   // Whether the crawler takes several files in one found_in (crawler PR):
   // asked once per report. Until it says yes, no Web choice and no tick
   // boxes ask it for two, so an older crawler never refuses the list.
@@ -658,6 +696,7 @@ export default function CrawlReport() {
             <SplitStat
               tone="ok"
               number={added}
+              sign="+"
               label="Lines added"
               delta={prevAdded != null ? computeDelta(added, prevAdded) : null}
               note={filtered ? "under the selected lines" : undefined}
@@ -667,6 +706,7 @@ export default function CrawlReport() {
             <SplitStat
               tone="critical"
               number={removed}
+              sign="−"
               label="Lines removed"
               delta={
                 prevRemoved != null ? computeDelta(removed, prevRemoved) : null
@@ -786,7 +826,8 @@ export default function CrawlReport() {
           card-per-row lists in the same grammar as bottomlines-app's
           HierarchyCard: colored disc, generous padding, right-aligned stats,
           tinted expansion. Publishers are green, apps are pink. */}
-      <div data-tour="overview-list" ref={listRef} className="scroll-mt-6">
+      <div data-tour="overview-list" ref={listRef} data-moving={moving ? moving.to : undefined} className="relative scroll-mt-6">
+        {moving && <MovingCard moving={moving} list={listRef.current} />}
         <ListHead
           inactive={listTab === "inactive"}
           title={VIEW_TITLE[matchedView].title}
@@ -1016,9 +1057,13 @@ export function SplitStat({
   className,
   hintClassName,
   delayMs = 0,
+  sign,
 }: {
   number: number;
   label: string;
+  /** "+" or "−" stuck to the figure, its size and colour (lines added,
+   *  lines removed: David, 2026-11-02); only above zero. */
+  sign?: "+" | "−";
   hint?: string;
   /** One short muted line under the label saying what the number counts,
    *  for a label that cannot say it alone. */
@@ -1048,6 +1093,17 @@ export function SplitStat({
     <>
       <div className="report-stat-label text-[12px] font-medium text-slate-600">{label}</div>
       <div className="flex items-baseline gap-1">
+        {sign && number > 0 && (
+          <span
+            data-figure-sign
+            className={cn(
+              "report-figure -mr-1 text-3xl font-medium leading-none tabular-nums tracking-tight sm:text-4xl",
+              numberCls,
+            )}
+          >
+            {sign}
+          </span>
+        )}
         {prefix && (
           <span
             className={cn(
@@ -1493,6 +1549,51 @@ export type ListView = "publishers" | "apps";
 // Both files match a publisher (demo of #75: "whose ads.txt" left out
 // app-ads.txt, the Found in switch's other half); an app matches by its
 // app-ads.txt, or by an inventory partner's ads.txt it names (IPD).
+/** A move to the other list, said before it happens (MovingCard). */
+type Moving = { to: ListView; why: string; picked: string };
+/** How long the move's card holds before the list moves (David,
+ *  2026-11-02: "delay it a second"). */
+const MOVE_PAUSE_MS = 1000;
+/** Why a Platform pick opens the other list, in one line. */
+const MOVE_WHY = {
+  ctv: "CTV is an app platform, so its matches are apps.",
+  mobile: "Mobile is an app platform, so its matches are apps.",
+  web: "Web is publishers: the ones with your line in ads.txt.",
+} as const;
+/** A single Found in choice as its menu says it. */
+const FILE_WORD: Partial<Record<FoundInFilter, string>> = { all: "All files", ads_txt: "ads.txt", app_ads_txt: "app-ads.txt", both: "Both" };
+/** Why a Found in pick on the apps list opens the publishers. */
+function moveWhyOfFile(next: FoundInFilter): string {
+  const files = foundInFiles(next);
+  const said = files.length === 0 ? "either file"
+    : files.map((f) => (f === "both" ? "both files" : f === "ads_txt" ? "ads.txt" : "app-ads.txt")).join(" or ");
+  return `A file belongs to a publisher, so this shows the publishers found in ${said}.`;
+}
+
+/**
+ * The move's card: the walkthrough's card (the pick as its eyebrow, then
+ * where it goes and why) just under the list's search bar, with a thin bar
+ * filling over the pause. Announced politely; never in the way of a click.
+ */
+function MovingCard({ moving, list }: { moving: Moving; list: HTMLElement | null }) {
+  const [top, setTop] = useState<number | null>(null);
+  useLayoutEffect(() => {
+    const bar = list?.querySelector<HTMLElement>("[data-list-toolbar]");
+    if (!list || !bar) { setTop(96); return; }
+    setTop(bar.getBoundingClientRect().bottom - list.getBoundingClientRect().top + 14);
+  }, [list]);
+  return (
+    <div data-list-moving={moving.to} role="status" aria-live="polite" className="list-moving" style={{ top: top ?? 96 }}>
+      <div className="list-moving-card animate-tour-card-in motion-reduce:animate-none">
+        <p className="mb-0.5 text-[11px] font-semibold text-primary">{moving.picked}</p>
+        <h2 className="text-[14px] font-semibold leading-snug text-slate-900">Moving to {VIEW_TITLE[moving.to].title}</h2>
+        <p className="mt-1 text-[12.5px] leading-snug text-slate-500">{moving.why}</p>
+        <div aria-hidden className="list-moving-bar"><span style={{ animationDuration: `${MOVE_PAUSE_MS}ms` }} /></div>
+      </div>
+    </div>
+  );
+}
+
 const VIEW_TITLE: Record<ListView, { title: string; blurb: string }> = {
   publishers: {
     title: "Matched publishers",
@@ -2327,6 +2428,25 @@ export function CountSkeleton() {
   );
 }
 
+/** A filter's place while its counts are on the way: the skeleton's tone,
+ *  a trigger's size, so nothing moves when the real filter lands. */
+function FilterSkeleton({ width = "w-20" }: { width?: string }) {
+  return (
+    <>
+      <div className="list-toolbar-divider" />
+      <span aria-hidden data-filter-skeleton className="list-toolbar-select flex items-center px-3">
+        <Skeleton className={cn("h-3 rounded-md", width)} />
+      </span>
+    </>
+  );
+}
+
+/** The three filters' places on a list's first load (Platform, Found in,
+ *  Match type), until it says how it splits. */
+function FilterSkeletons() {
+  return <><FilterSkeleton width="w-16" /><FilterSkeleton width="w-24" /><FilterSkeleton width="w-20" /></>;
+}
+
 function DrilldownList({
   token,
   lines,
@@ -2644,7 +2764,9 @@ function DrilldownList({
             placeholder="Search publishers"
             label="Search matched publishers"
             actions={!loading && settled > 0 && !error && rows.length > 0 && !trial && !caps ? <ExportListButton run={exportList} noun="publishers" status={rowsTab} query={query} filtered={lines.length > 0 || rowsMatchType !== "all" || foundIn !== "all"} /> : null}
-            filters={<>
+            // A first load: the filters' places as skeletons (David,
+            // 2026-11-02: every wait on the Overview is a skeleton).
+            filters={loading && settled === 0 && !foundInCounts && !typeCounts ? <FilterSkeletons /> : <>
               {/* PLATFORM, first on both lists so it stands in one place. */}
               {(foundInCounts || appCounts) && <FilterSelect
                 value={foundIn === WEB_PUBLISHERS ? "web" : "all"}
@@ -3700,11 +3822,14 @@ function MatchedAppsList({
   // the way their list reads it, for the Found in that opens them; null,
   // no Found in on this list (an API without the split).
   const [publisherFiles, setPublisherFiles] = useState<FoundInCounts | null>(null);
+  // While it is read, Found in keeps its place as a skeleton.
+  const [filesPending, setFilesPending] = useState(false);
   const platformShown = platformCounts != null;
   useEffect(() => {
     // Never last tab's numbers under this tab: none until this one lands.
     setWebPublishers(null);
     setPublisherFiles(null);
+    setFilesPending(tab !== "inactive");
     if (tab === "inactive") return;
     let cancelled = false;
     const watch = isScopeTab(tab) ? WATCH_CHANGE[tab] : undefined;
@@ -3725,8 +3850,9 @@ function MatchedAppsList({
         setWebPublishers(web && r.total > 0 ? r.total : null);
         const files = tabOk ? splitOf(r.found_in_counts, r.found_in, asked) : null;
         setPublisherFiles(files && files.all > 0 ? files : null);
+        setFilesPending(false);
       })
-      .catch(() => { if (!cancelled) { setWebPublishers(null); setPublisherFiles(null); } });
+      .catch(() => { if (!cancelled) { setWebPublishers(null); setPublisherFiles(null); setFilesPending(false); } });
     return () => { cancelled = true; };
   }, [token, tab, lines, matchType, foundInMulti, platformShown]);
   // The watch tabs (crawler #361), as on the publishers list.
@@ -3956,7 +4082,10 @@ function MatchedAppsList({
             placeholder="Search apps"
             label="Search matched apps"
             actions={!loading && settled > 0 && !failed && rows.length > 0 && !trial && !caps && !unsupportedChange ? <ExportListButton run={exportList} noun="apps" status={rowsTab} query={query} filtered={lines.length > 0 || rowsMatchType !== "all" || platform !== "all"} /> : null}
-            filters={<>
+            // A first load: the filters' places as skeletons until the list
+            // itself says how it splits (a quicker side read never shows one
+            // filter alone, the others popping in after).
+            filters={loading && settled === 0 && !platformCounts && !typeCounts ? <FilterSkeletons /> : <>
               {/* PLATFORM: an app is CTV or Mobile, by its store. Web is not
                   an app (David, 2026-11-01): its choice says how many
                   publishers it opens and opens them, never filters apps. */}
@@ -3978,6 +4107,7 @@ function MatchedAppsList({
               {/* FOUND IN HERE TOO (David, 2026-11-02): a file is a
                   publisher's, never an app's, so it filters no app: every
                   choice says how many publishers it opens and opens them. */}
+              {!publisherFiles && filesPending && <FilterSkeleton width="w-24" />}
               {publisherFiles && <FilterSelect value={"all" as FoundInFilter} onChange={onFoundIn} leading="Found in" icon={FileText} ariaLabel="Found in" testId="found-in" info={FILTER_INFO.foundInOnApps}
                 options={([
                   { value: "all", label: "All files", description: "Opens every matched publisher." },

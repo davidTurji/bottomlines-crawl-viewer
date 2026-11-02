@@ -10,7 +10,7 @@
  * a second choice.
  *
  * A quiet outlined control keeps help available beside the account menu,
- * compact: the compass right beside its words (2026-11-01).
+ * compact: the compass tight to its words (2026-11-01, 2026-11-02).
  */
 
 import { Compass } from "lucide-react";
@@ -24,9 +24,11 @@ export function WalkthroughButton() {
       type="button"
       data-tour="walkthrough-button"
       onClick={introduce}
-      // Compact (David, 2026-11-01): the icon sits right beside its words,
-      // no padded box around it, so the button is as wide as what it says.
-      className="walkthrough-button inline-flex h-9 items-center gap-1.5 rounded-lg border border-border bg-white px-3 text-[12.5px] font-medium text-primary transition-colors hover:bg-muted/50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50"
+      // Compact (David, 2026-11-01, tighter 2026-11-02): the compass tight
+      // to its words, set like the Download button's text (12px, semibold),
+      // so the button is no wider or taller than what it says. A phone
+      // keeps its 40px tap height (index.css).
+      className="walkthrough-button inline-flex h-8 items-center gap-1 rounded-lg border border-border bg-white px-2.5 text-[12px] font-semibold text-primary transition-colors hover:bg-muted/50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50"
       title="A short tour of this report, page by page"
     >
       <Compass aria-hidden className="h-3.5 w-3.5 flex-none" />

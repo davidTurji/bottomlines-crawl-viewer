@@ -259,3 +259,53 @@ test.describe("the skeleton draws the rows the list will land with (re-review of
     release();
   });
 });
+
+test("a list's first load holds its filters' places as skeletons, never a bar that grows", async ({ page }) => {
+  const errors = watchErrors(page);
+  await page.setViewportSize({ width: 1600, height: 900 });
+  await open(page);
+  await lands(page, rows(page));
+  const release = await hold(page, (u) => u.pathname.endsWith("/matched-apps"));
+  await page.getByRole("button", { name: /Matched apps/ }).first().click();
+  await waits(page, rows(page));
+  // Platform, Found in and Match type, as skeletons where they will stand.
+  await expect(page.locator("[data-filter-skeleton]")).toHaveCount(3);
+  release();
+  await lands(page, rows(page));
+  await expect(page.locator("[data-filter-skeleton]")).toHaveCount(0);
+  await expect(page.getByTestId("platform")).toBeVisible();
+  await expect(page.getByTestId("match-type")).toBeVisible();
+  expect(errors).toEqual([]);
+});
+
+test("a filter pick that opens the other list says so for a second, then moves; a card click cancels it", async ({ page }) => {
+  const errors = watchErrors(page);
+  await page.setViewportSize({ width: 1600, height: 900 });
+  await open(page);
+  await lands(page, rows(page));
+  // Platform CTV on the publishers list: the walkthrough's card first.
+  await page.getByTestId("platform").click();
+  await page.getByRole("menuitem", { name: /^CTV(?:\s|$)/ }).click();
+  const card = page.locator("[data-list-moving]");
+  await expect(card).toBeVisible();
+  await expect(card).toHaveAttribute("role", "status");
+  await expect(card).toContainText("Platform: CTV");
+  await expect(card).toContainText("Moving to Matched apps");
+  // Still the publishers for the pause, dimmed behind the card.
+  await expect(page.getByRole("textbox", { name: "Search matched publishers" })).toBeVisible();
+  await expect(page.locator('[data-tour="overview-list"]')).toHaveAttribute("data-moving", "apps");
+  // Then the apps, on CTV, and the card gone.
+  await expect(page.getByRole("textbox", { name: "Search matched apps" })).toBeVisible({ timeout: 4000 });
+  await expect(card).toHaveCount(0);
+  await expect(page.getByTestId("platform")).toContainText("CTV");
+  // Web from the apps list, cancelled by a click on the apps card.
+  await lands(page, rows(page));
+  await page.getByTestId("platform").click();
+  await page.getByRole("menuitem", { name: /^Web(?:\s|$)/ }).click();
+  await expect(card).toContainText("Moving to Matched publishers");
+  await page.getByRole("button", { name: /Matched apps/ }).first().click();
+  await expect(card).toHaveCount(0);
+  await page.waitForTimeout(1500);
+  await expect(page.getByRole("textbox", { name: "Search matched apps" })).toBeVisible();
+  expect(errors).toEqual([]);
+});
