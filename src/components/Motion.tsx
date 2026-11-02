@@ -205,12 +205,15 @@ export function glideTo(el: HTMLElement | null, offset = 24, durationMs = 320) {
 export function Settle({
   index,
   children,
+  tour,
 }: {
   index: number;
   children: ReactNode;
+  /** A walkthrough anchor on this row (the list's first row). */
+  tour?: string;
 }) {
   return (
-    <div data-row-in className="bl-row-in" style={{ "--bl-row-delay": `${Math.min(index, 6) * 35}ms` } as CSSProperties}>
+    <div data-row-in data-tour={tour} className="bl-row-in" style={{ "--bl-row-delay": `${Math.min(index, 6) * 35}ms` } as CSSProperties}>
       {children}
     </div>
   );

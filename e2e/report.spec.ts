@@ -96,6 +96,33 @@ test.describe("the rail lists only what the report has", () => {
     await expect(rail(page).getByRole("link", { name: "Discovery" })).toBeVisible();
   });
 
+  test("every optional page holds its place from the first moment, then becomes its link", async ({ page }) => {
+    // David, 2026-11-01: the pages never pop into the rail late; while a
+    // page is being asked about, its row is a skeleton in its own place.
+    let release!: () => void;
+    const held = new Promise<void>((r) => (release = r));
+    await page.addInitScript(() => {
+      localStorage.setItem("pf_report_walkthrough_v1", JSON.stringify({ status: "completed", stepId: null, open: false }));
+    });
+    await installFakeApi(page, { sellers: "page", schain: "ok", discovery: true });
+    await page.route(/\/(discovered-lines|schain|sellers-fix)(\?|$)/, async (route) => {
+      await held;
+      await route.fallback();
+    });
+    await page.goto(BASE);
+    const pending = rail(page).locator("[data-nav-pending]");
+    await expect(pending).toHaveCount(3);
+    expect(await pending.evaluateAll((els) => els.map((e) => e.getAttribute("data-nav-pending"))))
+      .toEqual(["Discovery", "Sellers.json", "Schain"]);
+    // Never a link before it is known; the always-there pages are links at once.
+    await expect(rail(page).getByRole("link", { name: "Discovery" })).toHaveCount(0);
+    await expect(rail(page).getByRole("link", { name: "Declarations" })).toBeVisible();
+    release();
+    await expect(pending).toHaveCount(0);
+    for (const name of ["Discovery", "Sellers.json", "Schain"])
+      await expect(rail(page).getByRole("link", { name })).toBeVisible();
+  });
+
   test("none of them", async ({ page }) => {
     await open(page, { sellers: "none", schain: "none", discovery: false });
     await expectOverview(page);

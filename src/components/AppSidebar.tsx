@@ -14,7 +14,8 @@ import {
 } from "@/components/ui/sidebar";
 import { refinedPathfinderLogo } from "@/lib/brand";
 import { useReportScope } from "@/lib/reportScope";
-import { useSellersPage } from "@/lib/useSellersPage";
+import { useSellersPageState } from "@/lib/useSellersPage";
+import { Skeleton } from "@/components/Skeleton";
 
 /**
  * The report rail, trimmed from bottomlines-app's AppSidebar.
@@ -33,14 +34,17 @@ export function AppSidebar() {
 
   // Does this crawl have discovered lines at all? One cheap probe (a single
   // row, we only read `total`) decides whether the rail carries the
-  // "Discovered lines" entry. Default false so the entry never flashes in
-  // and out: it appears once, when we know there is something behind it.
-  // Any failure (401 before login, dead token, offline) leaves it hidden,
-  // which is the honest default for a section we cannot prove exists.
-  const [hasDiscovered, setHasDiscovered] = useState(false);
+  // "Discovered lines" entry. EVERY ENTRY'S PLACE FROM THE FIRST MOMENT
+  // (David, 2026-11-01): while a probe has not answered (null) the rail
+  // holds the entry's place with a skeleton row, so the pages never pop in
+  // late; an answer turns it into the link, or takes it away. Any failure
+  // (401 before login, dead token, offline) takes it away, the honest
+  // default for a section we cannot prove exists.
+  const [hasDiscovered, setHasDiscovered] = useState<boolean | null>(null);
   useEffect(() => {
     if (!token) return;
     let alive = true;
+    setHasDiscovered(null);
     api
       .discoveredLines(token, { page: 1, page_size: 1 })
       .then((p) => {
@@ -57,11 +61,12 @@ export function AppSidebar() {
 
   // Does this report carry the schain export? Only when the customer has
   // it switched on and their sellers.json names at least one SDK we can
-  // check (status "ok"). Hidden by default, like Discovery.
-  const [hasSchain, setHasSchain] = useState(false);
+  // check (status "ok"). A skeleton until it answers, like Discovery.
+  const [hasSchain, setHasSchain] = useState<boolean | null>(null);
   useEffect(() => {
     if (!token) return;
     let alive = true;
+    setHasSchain(null);
     api
       .schain(token)
       .then((o) => {
@@ -77,7 +82,7 @@ export function AppSidebar() {
 
   // Does this report carry the sellers.json page? The same probe the
   // Discovery badges link with (lib/useSellersPage).
-  const hasSellers = useSellersPage(token);
+  const hasSellers = useSellersPageState(token);
 
   const handleMobileNavClick = () => {
     if (isMobile && openMobile) setOpenMobile(false);
@@ -90,7 +95,11 @@ export function AppSidebar() {
   // the reader started.
   // `tour` names each link for the walkthrough, which points at the page it
   // is about to open before it opens it (see ReportTour's page change).
-  const items: { to: string; label: string; tour: string; end?: boolean }[] = [
+  type Entry = { to: string; label: string; tour: string; end?: boolean; pending?: boolean };
+  /** An optional page: its link once known, a skeleton row until then. */
+  const optional = (known: boolean | null, entry: Entry): Entry[] =>
+    known === null ? [{ ...entry, pending: true }] : known ? [entry] : [];
+  const items: Entry[] = [
     { to: basePath, label: "Overview", tour: "nav-overview", end: true },
     // Listed ONLY when this crawl actually discovered something (David,
     // 2026-09-04: "only when you actually discover lines you show it").
@@ -98,20 +107,14 @@ export function AppSidebar() {
     // leading to an explanatory empty page is noise on a customer-facing
     // report. The route itself stays registered, so a direct link still
     // resolves; this only governs the rail.
-    ...(hasDiscovered
-      ? [{ to: `${basePath}/discovery`, label: "Discovery", tour: "nav-discovery" }]
-      : []),
-    ...(hasSellers
-      ? [{ to: `${basePath}/sellers`, label: "Sellers.json", tour: "nav-sellers" }]
-      : []),
+    ...optional(hasDiscovered, { to: `${basePath}/discovery`, label: "Discovery", tour: "nav-discovery" }),
+    ...optional(hasSellers, { to: `${basePath}/sellers`, label: "Sellers.json", tour: "nav-sellers" }),
     // Always listed (David, 2026-09-15: "by default on any crawl"). The
     // page is scoped to the customer's own domains, so "nobody names you"
     // is itself the answer a customer came for, and it is said plainly on
     // the page rather than hidden behind a missing entry.
     { to: `${basePath}/declarations`, label: "Declarations", tour: "nav-declarations" },
-    ...(hasSchain
-      ? [{ to: `${basePath}/schain`, label: "Schain", tour: "nav-schain" }]
-      : []),
+    ...optional(hasSchain, { to: `${basePath}/schain`, label: "Schain", tour: "nav-schain" }),
   ];
 
   return (
@@ -152,7 +155,15 @@ export function AppSidebar() {
           <SidebarGroup className="px-2.5 py-3" data-tour="report-nav">
             <SidebarGroupContent>
               <SidebarMenu className="gap-0.5">
-                {items.map((item) => (
+                {items.map((item) => item.pending ? (
+                  // Its place, held: the row's height, a bar the label's
+                  // width, never a link until the page is known to exist.
+                  <SidebarMenuItem key={item.to} aria-hidden data-nav-pending={item.label}>
+                    <div className="flex h-9 items-center px-3">
+                      <Skeleton className="nav-skeleton h-3 rounded" style={{ width: `${Math.max(3, item.label.length) * 0.5}rem` }} />
+                    </div>
+                  </SidebarMenuItem>
+                ) : (
                   <SidebarMenuItem key={item.to}>
                     <SidebarMenuButton
                       asChild

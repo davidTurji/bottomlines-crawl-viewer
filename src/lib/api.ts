@@ -364,8 +364,8 @@ export const api = {
     foundIn: FoundInFilter = "all",
   ) => {
     if (MOCK) {
-      const { mockDeveloperEvents } = await import("./mockData");
-      const r = mockDeveloperEvents(event, page, lines ?? [], mockMatchType(matchType), q, pageSize);
+      const { mockDeveloperEvents, mockFoundIn } = await import("./mockData");
+      const r = mockFoundIn((pg, size) => mockDeveloperEvents(event, pg, lines ?? [], mockMatchType(matchType), q, size), page, pageSize, foundIn, event === "changed" ? "cert_changed_lines" : `${event}_lines`);
       return trialMock()
         ? {
             ...r,
@@ -505,8 +505,8 @@ export const api = {
     foundIn: FoundInFilter = "all",
   ) => {
     if (MOCK) {
-      const { mockMatchedDevelopers, mockWatchView } = await import("./mockData");
-      const r = mockWatchView(p => mockMatchedDevelopers(p, q, lines ?? [], mockMatchType(matchType)), page, pageSize, change, lines);
+      const { mockMatchedDevelopers, mockWatchView, mockFoundIn } = await import("./mockData");
+      const r = mockFoundIn((pg, size) => mockWatchView(p => mockMatchedDevelopers(p, q, lines ?? [], mockMatchType(matchType)), pg, size, change, lines), page, pageSize, foundIn, change ? `${change}_lines` : undefined);
       return trialMock()
         ? {
             ...r,
@@ -564,8 +564,8 @@ export const api = {
     platform: PlatformFilter = "all",
   ) => {
     if (MOCK) {
-      const { mockMatchedApps, mockWatchView } = await import("./mockData");
-      const r = mockWatchView(p => mockMatchedApps(p, q, lines ?? [], mockMatchType(matchType), change ?? null), page, pageSize, change, lines);
+      const { mockMatchedApps, mockWatchView, mockPlatform } = await import("./mockData");
+      const r = mockPlatform((pg, size) => mockWatchView(p => mockMatchedApps(p, q, lines ?? [], mockMatchType(matchType), change ?? null), pg, size, change, lines), page, pageSize, platform);
       return trialMock()
         ? { ...r, page: 1, ...cutRows(r.rows, TRIAL_CAPS_MOCK.apps, r.total) }
         : r;
@@ -1799,6 +1799,11 @@ export type MatchedDeveloper = MatchTypeFields & {
   /** The declared hosts among this publisher's lines (may be empty).
    *  Absent on reports frozen before 2026-10-21. */
   file_hosts?: string[];
+  /** Where ALL of its matched lines were found, frozen at the bake
+   *  ("ads.txt" / "app-ads.txt" / "both"; a line through an inventory
+   *  partner is in the partner's ads.txt). The Found in filter reads it;
+   *  absent on reports baked before 2026-10-27. */
+  found_in_all?: string | null;
 };
 
 export type MatchedDevelopersPage = MatchTypeMeta & {
@@ -1871,6 +1876,11 @@ export type MatchedBundlesPage = {
 export type MatchedApp = MatchTypeFields & {
   /** The store's name as the Excel prints it (crawler #370). */
   store_label?: string | null;
+  /** THE APP'S PLATFORM (crawler, 2026-11-01): "CTV" / "Mobile" by its
+   *  store, "Web" for a website row, "" for a store the crawler's map does
+   *  not know; the rule its Platform filter keeps it by. Absent on an API
+   *  from before it: then read off the store here (``appPlatformOf``). */
+  platform?: string | null;
   /** Which file credited the app, in the Excel's words (crawler #370). */
   file_used?: string | null;
   store: string;
@@ -1921,15 +1931,47 @@ export type MatchedApp = MatchTypeFields & {
 /** The change filter of the matched apps list (query param ``change``). */
 export type AppChange = "added" | "removed" | "changed" | WatchChange;
 
-/** All / CTV / Mobile / Web: the matched APPS list's Platform switch (an
- *  app's platform comes from its store). */
+/** The API's ``platform`` on matched-apps: CTV / Mobile by the app's
+ *  store, Web the website rows. The page's Platform filter stands on both
+ *  lists (David, 2026-11-01): CTV / Mobile filter the apps (and from the
+ *  publishers list open them), Web opens the web publishers (Found in
+ *  ads.txt + Both), never a filter of apps. */
 export type PlatformFilter = "all" | "ctv" | "mobile" | "web";
 export type PlatformCounts = { all: number; ctv: number; mobile: number; web: number; unknown?: number };
 
-/** All / ads.txt / app-ads.txt / Both: the matched PUBLISHERS list's
- *  "Found in" switch (which file of theirs carries the seat lines). */
-export type FoundInFilter = "all" | "ads_txt" | "app_ads_txt" | "both";
+/** The files a publisher's seat lines were found in, as the matched
+ *  PUBLISHERS list's "Found in" filter names them. */
+export type FoundInFile = "ads_txt" | "app_ads_txt" | "both";
+export const FOUND_IN_FILES: readonly FoundInFile[] = ["ads_txt", "app_ads_txt", "both"];
+/** "Found in": every file ("all"), or one or more files ticked, in this
+ *  order, comma-separated: the crawler's ``found_in`` (2026-11-01, several
+ *  at once) and its echo, spelled the same, so a page compares them. */
+export type FoundInFilter =
+  | "all"
+  | "ads_txt"
+  | "app_ads_txt"
+  | "both"
+  | "ads_txt,app_ads_txt"
+  | "ads_txt,both"
+  | "app_ads_txt,both";
 export type FoundInCounts = { all: number; ads_txt: number; app_ads_txt: number; both: number };
+/** WEB PUBLISHERS (David, 2026-11-01): a publisher with an ads.txt, alone
+ *  or with app-ads.txt. Web is not an app, so the apps list's Platform
+ *  "Web" opens the publishers list on this. */
+export const WEB_PUBLISHERS: FoundInFilter = "ads_txt,both";
+
+/** The files a Found in choice ticks; none for "all". */
+export function foundInFiles(f: FoundInFilter): FoundInFile[] {
+  return f === "all" ? [] : FOUND_IN_FILES.filter((k) => f.split(",").includes(k));
+}
+
+/** The Found in choice for these files: "all" when none or every one is
+ *  ticked (every file is all of them). */
+export function foundInOf(files: Iterable<FoundInFile>): FoundInFilter {
+  const on = new Set(files);
+  const kept = FOUND_IN_FILES.filter((k) => on.has(k));
+  return kept.length === 0 || kept.length === FOUND_IN_FILES.length ? "all" : (kept.join(",") as FoundInFilter);
+}
 
 export type MatchedAppsPage = MatchTypeMeta & {
   /** Present on a trial report: this list was cut (see ``TrialSlice``). */

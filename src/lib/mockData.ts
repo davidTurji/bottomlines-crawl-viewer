@@ -41,6 +41,9 @@ import type {
   MatchedApp,
   MatchedAppsPage,
   AppChange,
+  FoundInFile,
+  FoundInFilter,
+  PlatformFilter,
   ChatFrame,
   DeclarationRow,
   DeclarationRowsPayload,
@@ -1560,6 +1563,95 @@ export function mockWatchView<P extends { rows: { developer_id?: number | null }
     }))])),
   }));
   return { ...first, page, page_size: pageSize, total: kept.length, change_counts: counts, ...(watch ? { change: watch } : {}), rows } as P;
+}
+
+// ─────────────────────────────────────────────────────────────────
+// Found in (publishers) and Platform (apps), the crawler's two list
+// filters, so a local run shows them (2026-11-01)
+// ─────────────────────────────────────────────────────────────────
+
+/** The files a row's lines were found in, the crawler's rule: a line
+ *  through an inventory partner is in the partner's ads.txt. */
+export function mockFilesOf(lines: readonly MatchedSeatLine[] | null | undefined): FoundInFile | null {
+  let bits = 0;
+  for (const l of lines ?? []) {
+    const word = String(l?.found_in ?? "").toLowerCase();
+    bits |= word === "both" ? 3 : word === "ads.txt" ? 1 : word === "app-ads.txt" ? 2 : l?.match_type === "ipd" ? 1 : 0;
+  }
+  return bits === 3 ? "both" : bits === 1 ? "ads_txt" : bits === 2 ? "app_ads_txt" : null;
+}
+
+const FILE_WORD: Record<FoundInFile, string> = { ads_txt: "ads.txt", app_ads_txt: "app-ads.txt", both: "both" };
+
+type MockList = { rows: object[]; total: number; page: number; page_size: number };
+
+/** ``found_in`` on a publishers list: the whole list read, each row's files
+ *  decided (on a change tab from ``tabLines``, the lines that moved there;
+ *  on the list from its frozen ``found_in_all``, stamped here from its
+ *  lines), counted per file, kept when its file is ticked, then paged. */
+export function mockFoundIn<P extends MockList>(
+  read: (page: number, pageSize: number) => P,
+  page: number,
+  pageSize: number,
+  foundIn: FoundInFilter,
+  tabLines?: string,
+): P {
+  const whole = read(1, 1_000_000);
+  const rows = (whole.rows as Record<string, unknown>[]).map((row) => {
+    if (tabLines) return { row, file: mockFilesOf(row[tabLines] as MatchedSeatLine[]) };
+    const file = mockFilesOf(row.matched_lines as MatchedSeatLine[]);
+    return { row: file && !row.found_in_all ? { ...row, found_in_all: FILE_WORD[file] } : row, file };
+  });
+  const counts = { all: rows.length, ads_txt: 0, app_ads_txt: 0, both: 0, unknown: 0 };
+  for (const r of rows) counts[r.file ?? "unknown"] += 1;
+  const asked = foundIn === "all" ? null : new Set(foundIn.split(","));
+  const kept = asked ? rows.filter((r) => r.file && asked.has(r.file)) : rows;
+  return {
+    ...whole,
+    page,
+    page_size: pageSize,
+    total: kept.length,
+    rows: kept.slice((page - 1) * pageSize, page * pageSize).map((r) => r.row),
+    found_in_counts: counts,
+    ...(asked ? { found_in: foundIn } : {}),
+  };
+}
+
+/** An app's platform by its store, the crawler's map (domain/platforms.py). */
+export function mockAppPlatform(store: unknown): "ctv" | "mobile" | "web" | null {
+  const s = String(store ?? "").toLowerCase();
+  // "mobile" and "ctv": this fixture's own generic stores.
+  if (s === "ios" || s === "android" || s === "mobile") return "mobile";
+  if (["googleplay", "tvos", "roku", "firetv", "samsung", "lg", "vizio", "ctv"].includes(s)) return "ctv";
+  return s === "website" ? "web" : null;
+}
+
+/** ``platform`` on the apps list, the same way as ``mockFoundIn``; each
+ *  row carries its platform, as the crawler serves it (2026-11-01). */
+export function mockPlatform<P extends MockList>(
+  read: (page: number, pageSize: number) => P,
+  page: number,
+  pageSize: number,
+  platform: PlatformFilter,
+): P {
+  const whole = read(1, 1_000_000);
+  const label = { ctv: "CTV", mobile: "Mobile", web: "Web" } as const;
+  const rows = (whole.rows as { store?: unknown }[]).map((row) => {
+    const on = mockAppPlatform(row.store);
+    return { row: { ...row, platform: on ? label[on] : "" }, on };
+  });
+  const counts = { all: rows.length, ctv: 0, mobile: 0, web: 0, unknown: 0 };
+  for (const r of rows) counts[r.on ?? "unknown"] += 1;
+  const kept = platform === "all" ? rows : rows.filter((r) => r.on === platform);
+  return {
+    ...whole,
+    page,
+    page_size: pageSize,
+    total: kept.length,
+    rows: kept.slice((page - 1) * pageSize, page * pageSize).map((r) => r.row),
+    platform_counts: counts,
+    ...(platform === "all" ? {} : { platform }),
+  };
 }
 
 const MATCHED_DEVS = buildMatchedDevs();
