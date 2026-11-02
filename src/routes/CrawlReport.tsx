@@ -1,6 +1,6 @@
 import { requestReportDownload } from "@/lib/reportDownload";
 import { ReportButton } from "@/components/ReportButton";
-import { appPlatformOf, PlatformBadge, StoreBadge } from "@/components/StoreBadge";
+import { appPlatformOf, PlatformBadge, storeHint } from "@/components/StoreBadge";
 import { FilterBar, FilterGroup, FilterMultiSelect, FilterSearch, FilterSelect } from "@/components/FilterBar";
 import InactiveSection, { type InactiveCards } from "@/components/InactiveSection";
 import LockedTail from "@/components/LockedTail";
@@ -78,7 +78,7 @@ import { Card } from "@/components/ui/card";
 import InlineAskAI from "@/components/InlineAskAI";
 import { PageShell } from "@/components/PageShell";
 import { formatWeek } from "@/components/WeekLine";
-import { appFileLine, cn, fileHostsLabel, lineHostLabel, scopeReasonText, storeName } from "@/lib/utils";
+import { appFileLine, cn, fileHostsLabel, foundInLabel, lineHostLabel, scopeReasonText, storeName } from "@/lib/utils";
 import {
   addedDates,
   certDates,
@@ -2192,16 +2192,17 @@ type Row = {
 const ROW_LINES_CAP = 5_000;
 const EVENT_LINES_CAP = 200;
 
-/** The quiet tag saying a publisher's file, beside its domain. */
-function FileTag({ files }: { files: FileWord }) {
-  const both = files === "both";
+/**
+ * Which file a publisher's lines are in, said in words after its domain
+ * ("x.com, Found in ads.txt"): a detail, so the line's own quiet text and
+ * never a badge (David, 2026-11-02), worded by ``foundInLabel`` exactly as
+ * Sellers.json and Schain say it. On a phone it takes its own line, so a
+ * long domain is never cut to make room for it.
+ */
+function FileHint({ files, after }: { files: FileWord; after: boolean }) {
   return (
-    <span
-      data-file-tag={files}
-      title={both ? "Your lines were found in ads.txt and app-ads.txt" : `Your lines were found in ${files}`}
-      className="file-tag"
-    >
-      {both ? "Both" : files}
+    <span data-file-tag={files} className="file-hint flex-none whitespace-nowrap">
+      {after && <span className="file-hint-comma">, </span>}{foundInLabel(files)}
     </span>
   );
 }
@@ -2628,10 +2629,11 @@ function DrilldownList({
                 onChange={onPlatform}
                 leading="Platform" icon={MonitorSmartphone} ariaLabel="Platform" testId="platform"
                 options={[
-                  // Every choice says what it counts, in one look; the arrow
-                  // marks the ones that open the apps list.
+                  // Every choice says what it counts and wears the arrow, in
+                  // one look (David, 2026-11-02); CTV and Mobile say "apps",
+                  // the list they open.
                   { value: "all" as const, label: "All", description: "Every matched publisher.",
-                    countLabel: foundInCounts ? `${foundInCounts.all.toLocaleString()} publishers` : undefined },
+                    countLabel: foundInCounts ? `${foundInCounts.all.toLocaleString()} publishers` : undefined, leads: true },
                   ...(["ctv", "mobile"] as const).filter((p) => (appCounts?.[p] ?? 0) > 0).map((p) => ({
                     value: p,
                     label: p === "ctv" ? "CTV" : "Mobile",
@@ -2647,6 +2649,7 @@ function DrilldownList({
                     label: "Web",
                     description: "Web publishers: found in ads.txt + Both.",
                     countLabel: `${(foundInCounts.ads_txt + foundInCounts.both).toLocaleString()} publishers`,
+                    leads: true,
                   }] : []),
                 ]} />}
               {/* FOUND IN, TICK BOXES (David, 2026-11-01): any of the three
@@ -2966,16 +2969,19 @@ function PublisherCard({
             {inactive && <InactiveChip />}
           </div>
           {((row.developer_domain && row.developer_name) || (!inactive && row.files)) && (
-            <div className="flex min-w-0 items-center gap-2 text-xs text-slate-500">
+            <div className="publisher-subline flex min-w-0 items-center text-xs text-slate-500">
               {row.developer_domain && row.developer_name && (
+                // In a sentence with the file, no hover arrow: it holds its
+                // width and would stand the comma a blank away.
                 <PublisherDomainLink
                   domain={row.developer_domain}
                   onHoverChange={setSiteHover}
+                  arrow={Boolean(inactive) || !row.files}
                 />
               )}
               {/* WHICH FILE (David, 2026-11-01): ads.txt, app-ads.txt or
-                  Both, what Found in keeps it by; a file, never a platform. */}
-              {!inactive && row.files && <FileTag files={row.files} />}
+                  both, what Found in keeps it by; a file, never a platform. */}
+              {!inactive && row.files && <FileHint files={row.files} after={Boolean(row.developer_domain && row.developer_name)} />}
             </div>
           )}
           {/* WHERE ITS FILES ARE (2026-10-21): the declared hosts whose
@@ -3925,7 +3931,7 @@ function MatchedAppsList({
                   { value: "ctv", label: "CTV", description: "Connected TV apps and channels." },
                   { value: "mobile", label: "Mobile", description: "Mobile apps, iOS and Android." },
                 ] as const).filter(o => o.value === "all" || o.value === platform || (platformCounts[o.value] ?? 0) > 0)
-                  .map(o => ({ ...o, countLabel: `${(platformCounts[o.value] ?? 0).toLocaleString()} apps` })),
+                  .map(o => ({ ...o, countLabel: `${(platformCounts[o.value] ?? 0).toLocaleString()} apps`, leads: true })),
                 ...(webPublishers != null && foundInMulti ? [{
                   value: "web" as const,
                   label: "Web",
@@ -4108,6 +4114,7 @@ function MatchedAppCard({
   // `file_used`, the Excel's File used), else ours.
   const fileLine =
     typeof app.file_used === "string" && app.file_used.trim() ? app.file_used.trim() : appFileLine(app.file_host, app.file_source);
+  const store = storeHint(app);
   return (
     <div
       className={cn(
@@ -4157,18 +4164,22 @@ function MatchedAppCard({
             <span className="truncate text-base font-semibold tracking-tight text-slate-900">
               {app.app_name}
             </span>
+            {/* The badges are the facts a reader scans by: the platform,
+                and IPD. The store is the platform's detail, in words on the
+                line below (David, 2026-11-02: not everything a badge). */}
             <PlatformBadge row={app} inactive={Boolean(inactive)} />
-            <StoreBadge row={app} inactive={Boolean(inactive)} />
             {!inactive && <IpdChip row={app} subject={appSubject(app)} others={otherPartners(app, app.matched_lines)} />}
             {inactive && <InactiveChip />}
           </div>
           {/* A trial withholds an inactive app's publisher (the crawler
               sends ""): no "publisher:" with nothing after it. */}
-          {(!inactive || app.owner_domain) && (
+          {(!inactive || app.owner_domain || store) && (
             // Inactive, it wraps on a phone: whether the publisher is still
             // live is the point of the line and must not be cut off.
             <div className={cn("text-xs text-slate-500", inactive ? "break-words sm:truncate" : "truncate")}>
-              publisher:{" "}
+              {store && <span data-store-hint data-platform={String(app.store ?? "").trim().toLowerCase()}>On <span className="text-slate-600">{store}</span></span>}
+              {store && (!inactive || app.owner_domain) && ", "}
+              {(!inactive || app.owner_domain) && "publisher: "}
               {app.owner_domain ? (
                 <PublisherDomainLink domain={app.owner_domain} className="text-slate-600" arrow={false} />
               ) : null}

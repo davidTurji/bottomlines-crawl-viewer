@@ -150,7 +150,7 @@ export function reportTourSteps(f: ReportFeatures): ReportTourStep[] {
       title: "Every match",
       body: (
         <p>
-          <strong>Click a row</strong> for its exact lines. Its tag says the <strong>file</strong>, or the app&apos;s <strong>platform</strong>.
+          <strong>Click a row</strong> for its exact lines. Under a publisher&apos;s name, the <strong>file</strong> it was found in; beside an app&apos;s, its <strong>platform</strong>.
         </p>
       ),
     },

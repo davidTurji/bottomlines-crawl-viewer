@@ -28,7 +28,7 @@ for (const width of [1440, 1280, 960, 390, 320]) {
       }
       const bounds = await toolbar.evaluate(root => {
         const outer=root.getBoundingClientRect();
-        const controls=[...root.querySelectorAll('input,button,p')].filter(e=>e.getClientRects().length).map(e=>e.getBoundingClientRect());
+        const controls=[...root.querySelectorAll('input,button,p')].filter(e=>e.getClientRects().length&&e.checkVisibility({visibilityProperty:true})).map(e=>e.getBoundingClientRect());
         return { inside:controls.every(e=>e.left>=outer.left-1&&e.right<=outer.right+1), centers:controls.map(e=>e.top+e.height/2) };
       });
       expect(bounds.inside,view).toBe(true);

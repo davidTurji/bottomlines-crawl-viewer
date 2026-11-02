@@ -635,10 +635,16 @@ test.describe("store names (parity audit of #75, crawler #370's map)", () => {
     await toApps(page);
     await expect(rows(page)).toHaveCount(apps.length);
     const list = page.locator("[data-list-rows]");
-    for (const name of ["Apple TV", "Google TV", "LG", "zeebox", "Roku Channel Store", "Website"])
-      await expect(list.getByText(name, { exact: true }).first()).toBeVisible();
+    // Each app's store in words under its name ("On Apple TV", David
+    // 2026-11-02: a detail, not a badge).
+    for (const name of ["Apple TV", "Google TV", "LG", "zeebox", "Roku Channel Store"])
+      await expect(list.locator("[data-store-hint]").getByText(name, { exact: true }).first()).toBeVisible();
     for (const code of ["tvos", "googleplay", "Google Play", "Roku"]) await expect(list.getByText(code, { exact: true })).toHaveCount(0);
+    // A website: the globe and the Web badge, no store line of its own.
     await expect(list.locator("[data-website-icon]")).toHaveCount(1);
+    const site = list.locator(".report-row").filter({ has: page.locator("[data-website-icon]") });
+    await expect(site.locator('[data-app-platform="web"]')).toHaveText("Web");
+    await expect(site.locator("[data-store-hint]")).toHaveCount(0);
     // The CSV says the same names.
     const d = page.waitForEvent("download");
     await page.getByRole("button", { name: "Download", exact: true }).click();
@@ -852,6 +858,9 @@ test.describe("the rows roll in", () => {
 });
 
 test.describe("Found in (publishers) and Platform (apps)", () => {
+  // Wide enough for every filter to stand in the bar (it folds by measured
+  // room: see "the filters stand in the bar when they fit" for narrow).
+  test.use({ viewport: { width: 1600, height: 900 } });
   test("today's API: neither switch, no such request, and no platform label on any publisher", async ({ page }) => {
     const errors = watchErrors(page);
     const calls = await open(page, { ...FULL, realShapes: true });
@@ -925,6 +934,10 @@ test.describe("Found in (publishers) and Platform (apps)", () => {
     const tags = await page.locator("[data-file-tag]").evaluateAll((els) => els.map((el) => el.getAttribute("data-file-tag")));
     expect(tags.length).toBeGreaterThan(0);
     expect(tags.every((t) => t === "ads.txt" || t === "both")).toBe(true);
+    // Said in words under the name, as Sellers.json says a file: a detail,
+    // never a badge (David, 2026-11-02).
+    const words = await page.locator("[data-file-tag]").allTextContents();
+    expect(words.every((w) => /Found in (ads\.txt|ads\.txt \+ app-ads\.txt)$/.test(w.trim()))).toBe(true);
     // All files clears every tick.
     await sw.click();
     await page.getByRole("menuitem", { name: /^All files/ }).click();
@@ -943,6 +956,9 @@ test.describe("Found in (publishers) and Platform (apps)", () => {
     await sw.click();
     const web = page.getByRole("menuitem", { name: /^Web(?:\s|$)/ });
     await expect(web).toContainText(/\d[\d,]* publishers/);
+    // Every choice wears the arrow after its count, one look for all four.
+    const choices = page.getByRole("menuitem");
+    expect(await choices.evaluateAll((els) => els.length > 1 && els.every((el) => el.querySelector("[data-leads]")))).toBe(true);
     const n = Number((await web.innerText()).match(/([\d,]+) publishers/)![1].replace(/,/g, ""));
     // CTV and Mobile are the app platforms; Web counts publishers, not apps.
     await expect(page.getByRole("menuitem", { name: /^Mobile(?:\s|$)/ })).toBeVisible();
@@ -972,6 +988,12 @@ test.describe("Found in (publishers) and Platform (apps)", () => {
     expect(n).toBeGreaterThan(0);
     const badges = await cards.evaluateAll((els) => els.map((el) => el.querySelector("[data-app-platform]")?.textContent?.trim() ?? null));
     expect(badges.every((b) => b === "CTV" || b === "Mobile")).toBe(true);
+    // The platform is the badge; the store is its detail, in words on the
+    // line under the name ("On Roku"), never a second badge.
+    await expect(page.locator(".matched-app-title [data-store-badge]")).toHaveCount(0);
+    const stores = await page.locator("[data-store-hint]").allTextContents();
+    expect(stores.length).toBeGreaterThan(0);
+    expect(stores.every((t) => /^On \S/.test(t))).toBe(true);
     // Filtered to CTV, every app says CTV.
     await chooseFilter(page, "platform", "CTV");
     await settled(page);
@@ -982,6 +1004,36 @@ test.describe("Found in (publishers) and Platform (apps)", () => {
     await page.getByRole("button", { name: /Matched publishers/ }).first().click();
     await expect(rows(page).first()).toBeVisible();
     await expect(page.locator("[data-app-platform]")).toHaveCount(0);
+    expect(errors).toEqual([]);
+  });
+
+  test("the filters stand in the bar when they fit, and fold behind one Filters button when they do not", async ({ page }) => {
+    const errors = watchErrors(page);
+    await page.setViewportSize({ width: 1460, height: 1000 });
+    await open(page, { ...FULL, appPlatform: true, foundIn: true });
+    await expect(rows(page).first()).toBeVisible();
+    const fold = page.getByRole("button", { name: "List filters", exact: true }).first();
+    const platform = page.getByTestId("platform");
+    await expect(platform).toBeVisible();
+    await expect(page.getByTestId("found-in")).toBeVisible();
+    await expect(page.getByTestId("match-type")).toBeVisible();
+    await expect(fold).toBeHidden();
+    // Too narrow for them all beside the search: one button, its arrow.
+    await page.setViewportSize({ width: 900, height: 1000 });
+    await expect(fold).toBeVisible();
+    await expect(platform).toBeHidden();
+    await expect(fold.locator(".list-toolbar-filters-chevron")).toBeVisible();
+    // The search keeps its room, its placeholder whole.
+    expect(await page.getByRole("textbox", { name: "Search matched publishers" }).evaluate((el) => el.closest(".list-toolbar-search")!.getBoundingClientRect().width)).toBeGreaterThanOrEqual(180);
+    // A filter on is counted on the folded button.
+    await chooseFilter(page, "match-type", "IPD");
+    await settled(page);
+    await expect(fold.locator("[data-filters-on]")).toHaveText("1");
+    // Wide again: every filter back in the bar, the choice kept.
+    await page.setViewportSize({ width: 1460, height: 1000 });
+    await expect(fold).toBeHidden();
+    await expect(page.getByTestId("match-type")).toBeVisible();
+    await expect(page.getByTestId("match-type")).toContainText("IPD");
     expect(errors).toEqual([]);
   });
 
@@ -1009,6 +1061,8 @@ test.describe("Found in (publishers) and Platform (apps)", () => {
     await expect(ctv).toContainText(/\d[\d,]* apps/);
     const web = page.getByRole("menuitem", { name: /^Web(?:\s|$)/ });
     await expect(web).not.toContainText("apps");
+    // All four wear the arrow after their count, Web and All too.
+    expect(await page.getByRole("menuitem").evaluateAll((els) => els.length > 1 && els.every((el) => el.querySelector("[data-leads]")))).toBe(true);
     await web.click();
     await expect(page.getByTestId("found-in")).toContainText("ads.txt + Both");
     await expect(sw).toContainText("Web");

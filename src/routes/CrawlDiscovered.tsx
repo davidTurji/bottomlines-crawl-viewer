@@ -399,6 +399,7 @@ export default function CrawlDiscovered() {
               options={SORT_OPTIONS}
               leading="Sort"
               ariaLabel="Sort discovered lines"
+              narrows={false}
             />
             </FilterGroup>
 

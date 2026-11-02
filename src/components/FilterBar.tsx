@@ -1,4 +1,4 @@
-import { Children, Fragment, isValidElement, type ReactNode, createContext, useContext, useEffect, useRef, useState, useId } from "react";
+import { Children, Fragment, isValidElement, type ReactNode, createContext, useCallback, useContext, useEffect, useLayoutEffect, useRef, useState, useId } from "react";
 import * as DropdownMenuPrimitive from "@radix-ui/react-dropdown-menu";
 import { ArrowRight, Check, ChevronDown, Search, SlidersHorizontal, type LucideIcon } from "lucide-react";
 
@@ -51,11 +51,89 @@ function hasFilterControls(nodes: ReactNode): boolean {
 }
 
 const FilterPanelClose = createContext<(() => void) | null>(null);
+const FilterApplied = createContext<((id: string, on: boolean) => void) | null>(null);
 
-/** A visibly divided section within the connected toolbar. */
+/** Tells the group whether this filter narrows the list now, for the
+ *  folded Filters button's count. */
+function useFilterApplied(on: boolean) {
+  const report = useContext(FilterApplied);
+  const id = useId();
+  useEffect(() => { report?.(id, on); }, [report, id, on]);
+  useEffect(() => () => report?.(id, false), [report, id]);
+}
+
+/** The room the search keeps beside filters laid out in the bar: its icon
+ *  and placeholder whole. With less, the filters fold. */
+const SEARCH_ROOM = 180;
+
+/** The width of the filters laid out as a row: their first visible
+ *  trigger's left to their last one's right. */
+function rowWidthOf(row: HTMLElement): number {
+  const boxes = [...row.children].filter((el) => el.getClientRects().length > 0).map((el) => el.getBoundingClientRect());
+  return boxes.length ? Math.max(...boxes.map((b) => b.right)) - Math.min(...boxes.map((b) => b.left)) : 0;
+}
+
+/**
+ * A visibly divided section within the connected toolbar.
+ *
+ * EVERY FILTER IN THE BAR WHEN THEY FIT, ONE FILTERS BUTTON WHEN THEY DO
+ * NOT (David, 2026-11-02). Measured, never a fixed breakpoint: the bar
+ * holds a different set of filters on each list (and their labels grow,
+ * "ads.txt + Both"), so it folds exactly when the row would squeeze the
+ * search below SEARCH_ROOM. Folded and shut, the row is still laid out,
+ * unseen, so its width stays known and the bar unfolds the moment there
+ * is room again.
+ */
 export function FilterGroup({ children }: { children: ReactNode }) {
   const [open, setOpen] = useState(false);
+  const [fold, setFold] = useState(false);
+  const [applied, setApplied] = useState<ReadonlySet<string>>(() => new Set());
   const root = useRef<HTMLDivElement>(null);
+  const panel = useRef<HTMLDivElement>(null);
+  const rowWidth = useRef(0);
+  const shown = hasFilterControls(children);
+  const report = useCallback((id: string, on: boolean) => setApplied((prev) => {
+    if (prev.has(id) === on) return prev;
+    const next = new Set(prev);
+    if (on) next.add(id); else next.delete(id);
+    return next;
+  }), []);
+  const measure = useCallback(() => {
+    const group = root.current;
+    const row = panel.current;
+    const query = group?.parentElement;
+    if (!group || !row || !query) return;
+    // Read while the filters lie in a row (in the bar, or folded away);
+    // an open fold is a column, so it keeps the last reading.
+    if (group.dataset.fold !== "true" || group.dataset.open !== "true") rowWidth.current = rowWidthOf(row);
+    let room = query.clientWidth;
+    for (const el of query.children) {
+      if (el !== group && !el.classList.contains("list-toolbar-search")) room -= el.getBoundingClientRect().width;
+    }
+    setFold(rowWidth.current + SEARCH_ROOM > room);
+  }, []);
+  // After every render (a label may have grown) and on every resize. The
+  // search box's width never depends on what the group holds, so folding
+  // cannot feed back into the reading.
+  useLayoutEffect(measure);
+  useEffect(() => {
+    const query = root.current?.parentElement;
+    if (!shown || !query) return;
+    const watch = new ResizeObserver(() => measure());
+    watch.observe(query);
+    void document.fonts?.ready.then(measure);
+    return () => watch.disconnect();
+  }, [shown, measure]);
+  useEffect(() => {
+    if (!fold) { setOpen(false); return; }
+    // Folded under the reader's focus (a choice grew a label past the
+    // room): the focus moves to the Filters button, never left on a
+    // trigger no one can see.
+    const frame = requestAnimationFrame(() => {
+      if (panel.current?.contains(document.activeElement)) root.current?.querySelector<HTMLButtonElement>(":scope > button")?.focus({ preventScroll: true });
+    });
+    return () => cancelAnimationFrame(frame);
+  }, [fold]);
   useEffect(() => {
     if (!open) return;
     const outside = (event: PointerEvent) => {
@@ -72,16 +150,22 @@ export function FilterGroup({ children }: { children: ReactNode }) {
     document.addEventListener('keydown', escape);
     return () => { document.removeEventListener('pointerdown', outside); document.removeEventListener('keydown', escape); };
   }, [open]);
-  if (!hasFilterControls(children)) return null;
+  if (!shown) return null;
   const closeAfterChoice = () => {
     if (!open) return;
     setOpen(false);
     requestAnimationFrame(() => root.current?.querySelector<HTMLButtonElement>('button')?.focus({ preventScroll: true }));
   };
-  return <FilterPanelClose.Provider value={closeAfterChoice}><div ref={root} className="list-toolbar-filters" data-open={open} data-tour="list-filters">
-    <button type="button" aria-label="List filters" aria-expanded={open} onClick={() => setOpen(!open)}><SlidersHorizontal aria-hidden className="h-3.5 w-3.5" /><span>Filters</span></button>
-    <div className="list-toolbar-filter-panel" role="group" aria-label="Filter options">{children}</div>
-  </div></FilterPanelClose.Provider>;
+  const on = applied.size;
+  return <FilterApplied.Provider value={report}><FilterPanelClose.Provider value={closeAfterChoice}><div ref={root} className="list-toolbar-filters" data-fold={fold} data-open={open} data-tour="list-filters">
+    <button type="button" aria-label="List filters" aria-expanded={open} title={on ? `${on} filter${on === 1 ? "" : "s"} on` : undefined} onClick={() => setOpen(!open)}>
+      <SlidersHorizontal aria-hidden className="h-3.5 w-3.5" />
+      <span>Filters</span>
+      {on > 0 && <span data-filters-on className="list-toolbar-filters-on">{on}</span>}
+      <ChevronDown aria-hidden className="list-toolbar-filters-chevron h-3 w-3" />
+    </button>
+    <div ref={panel} className="list-toolbar-filter-panel" role="group" aria-label="Filter options">{children}</div>
+  </div></FilterPanelClose.Provider></FilterApplied.Provider>;
 }
 
 /** Borderless search input that fills the bar. */
@@ -157,7 +241,8 @@ export interface FilterOption<T extends string> {
    *  "29 apps"), so a menu whose choices count different things says so
    *  on every one of them, one look for all. */
   countLabel?: string;
-  /** The choice opens the other list (an arrow after its count). */
+  /** An arrow after its count: the choice takes the reader to those rows
+   *  (Platform's, every choice alike, some on the other list). */
   leads?: boolean;
   description?: string;
   group?: string;
@@ -183,6 +268,7 @@ export function FilterSelect<T extends string>({
   icon: Icon,
   menuLabel,
   widthClass = "sm:max-w-[220px]",
+  narrows = true,
 }: {
   value: T;
   onChange: (v: T) => void;
@@ -193,10 +279,15 @@ export function FilterSelect<T extends string>({
   icon?: LucideIcon;
   menuLabel?: string;
   widthClass?: string;
+  /** False for a choice that orders the list rather than narrowing it (a
+   *  sort): never counted on the folded Filters button. */
+  narrows?: boolean;
 }) {
   const [open, setOpen] = useState(false);
   const closePanel = useContext(FilterPanelClose);
   const selected = options.find((o) => o.value === value);
+  // The first choice is the list unfiltered (All); a sort never narrows.
+  useFilterApplied(narrows && options.length > 0 && value !== options[0].value);
   const descriptionId = useId();
   const groups = new Map<string, FilterOption<T>[]>();
   for (const option of options) {
@@ -311,6 +402,7 @@ export function FilterMultiSelect<T extends string>({
   const label = every ? allLabel : ticked.map((o) => o.label).join(" + ");
   const kept = every ? allCount : ticked.reduce((n, o) => n + (o.count ?? 0), 0);
   const toggle = (v: T) => onChange(on.has(v) ? value.filter((x) => x !== v) : [...value, v]);
+  useFilterApplied(!every);
   return (
     <>
       <div className="list-toolbar-divider" />
