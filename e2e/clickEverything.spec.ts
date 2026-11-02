@@ -342,6 +342,12 @@ async function crawl(page: Page, vp: string): Promise<Run> {
         await page.getByRole("menu").press("Escape");
         await expect(page.getByRole("menu")).toHaveCount(0);
         for (const word of [...words.slice(1), words[0]]) {
+          // A choice that opens the other list pauses on its card (1.5 s,
+          // David 2026-11-02): walked under All matched, once per list; the
+          // moves have their own tests. Every other choice, under every tab.
+          const moves = (view === "publishers" && id === "platform" && /^(CTV|Mobile)$/.test(word))
+            || (view === "apps" && (id === "found-in" || (id === "platform" && word === "Web")));
+          if (moves && tab !== "All matched") continue;
           await step(`${view} / ${tab} / ${id} ${word}`, async () => {
             await showFilters();
             await click(sw);
