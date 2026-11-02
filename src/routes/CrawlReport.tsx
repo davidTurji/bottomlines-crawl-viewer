@@ -3268,6 +3268,7 @@ function PublisherCard({
                   removed={row.removed_lines}
                   certChanged={row.cert_changed_lines}
                   matched={row.matched_lines}
+                  counts={{ added: row.added, removed: row.removed, cert: row.cert_changed }}
                   // Own lines open the publisher's file; each partner's
                   // lines open that partner's ads.txt.
                   publisherDomain={row.developer_domain}
@@ -3501,16 +3502,25 @@ export function SeatLineRow({
  * white list of the lines. Used full width on its own for a single-kind change,
  * and as a tile in the side-by-side grid for a mixed one. The header count is
  * the honest total; a long list prints the first few and tails the rest.
+ *
+ * THE COUNT IS THE ROW'S CHANGE COLUMN (David, 2026-11-02): a change counts
+ * once per file it happened in, so a seat removed from ads.txt and app-ads.txt
+ * is 2, listed once as "was found in ads.txt + app-ads.txt". The window used
+ * to count its rows (1) under a Change of -2.
  */
 function ChangeWindow({
   kind,
   lines,
+  total,
   publisherDomain,
   rowPartner,
   certRead,
 }: {
   kind: ChangeKind;
   lines: MatchedSeatLine[];
+  /** The row's own count of this kind, as its Change column says it; the
+   *  rows listed when the row has none. */
+  total?: number;
   publisherDomain?: string | null;
   rowPartner?: string | null;
   /** A cert window: whose old certs to read (the row's own, on open). */
@@ -3545,12 +3555,13 @@ function ChangeWindow({
           {s.title}
         </span>
         <span
+          data-window-count
           className={cn(
             "font-mono text-[11px] font-semibold tabular-nums",
             s.text,
           )}
         >
-          {groups.length}
+          {typeof total === "number" && total > 0 ? total : groups.length}
         </span>
       </div>
       {/* Why a removal carries two dates, said once where the dates are. */}
@@ -3605,6 +3616,7 @@ function ChangeExpansion({
   removed,
   certChanged,
   matched,
+  counts,
   publisherDomain,
   rowPartner,
   certRead,
@@ -3613,6 +3625,8 @@ function ChangeExpansion({
   removed: MatchedSeatLine[];
   certChanged: MatchedSeatLine[];
   matched: MatchedSeatLine[];
+  /** The row's Change column, which each window's count says. */
+  counts?: Partial<Record<ChangeKind, number>>;
   /** Whose files the source controls should open. */
   publisherDomain?: string | null;
   /** An IPD row's partner, for lines from a report that does not say
@@ -3643,6 +3657,7 @@ function ChangeExpansion({
       <ChangeWindow
         kind={sections[0].kind}
         lines={sections[0].lines}
+        total={counts?.[sections[0].kind]}
         publisherDomain={publisherDomain}
         rowPartner={rowPartner}
         certRead={sections[0].kind === "cert" ? certRead : undefined}
@@ -3663,6 +3678,7 @@ function ChangeExpansion({
           <ChangeWindow
             kind={sec.kind}
             lines={sec.lines}
+            total={counts?.[sec.kind]}
             publisherDomain={publisherDomain}
             rowPartner={rowPartner}
             certRead={sec.kind === "cert" ? certRead : undefined}
@@ -4536,6 +4552,7 @@ function MatchedAppCard({
                   removed={app.removed_lines ?? []}
                   certChanged={app.cert_changed_lines ?? []}
                   matched={lines}
+                  counts={{ added, removed, cert: certChanged }}
                   // Own lines open the publisher's file; each partner's
                   // lines open that partner's ads.txt.
                   publisherDomain={app.owner_domain}

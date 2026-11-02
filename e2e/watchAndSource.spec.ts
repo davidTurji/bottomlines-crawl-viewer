@@ -73,6 +73,34 @@ test('Overview places source filenames beside dates, including both files and re
   await expect(removed.locator('[data-line-source] a')).toHaveAttribute('href', /^https:\/\/[^#]+\/ads\.txt$/);
 });
 
+test('a line removed from both files counts 2, in the Change column and its window alike, listed once', async ({ page }) => {
+  // SmartLine TV, report 2a804514 (David, 2026-11-02): one seat gone from
+  // ads.txt and app-ads.txt is 2 removed lines, one per file; the window
+  // lists it once, naming both files it was in, and says the same 2.
+  await page.addInitScript(doneTour);
+  await installFakeApi(page, {});
+  await page.route('**/matched-developers?*', async route => {
+    const data = structuredClone(mockMatchedDevelopers(1));
+    const row = data.rows[0];
+    const line = { ...row.removed_lines![0], found_in: 'both' };
+    row.added_lines = [];
+    row.cert_changed_lines = [];
+    row.removed_lines = [line];
+    row.lines_added = 0;
+    row.lines_cert_changed = 0;
+    row.lines_removed = 2;
+    await route.fulfill({ json: data });
+  });
+  await page.goto(BASE);
+  const card = page.locator('.report-row').first();
+  await expect(card.getByText('-2', { exact: true })).toBeVisible();
+  await card.locator('.report-expand-control').click();
+  const window = card.locator('section').filter({ has: page.locator('[data-line-tone="removed"]') });
+  await expect(window.locator('[data-window-count]')).toHaveText('2');
+  await expect(window.locator('.line-entry')).toHaveCount(1);
+  await expect(window.locator('[data-line-source]')).toHaveText(', was found in ads.txt + app-ads.txt');
+});
+
 for (const width of [1440, 390]) {
   test(`${width}px: watch statuses stay available when Apps mounts directly on Inactive`, async ({ page }) => {
     await page.setViewportSize({width,height:900});await page.addInitScript(doneTour);
