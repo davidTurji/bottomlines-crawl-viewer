@@ -5,8 +5,8 @@
 # This is a TEMPLATE: nginx:alpine's stock entrypoint runs every file in
 # /etc/nginx/templates/*.template through envsubst at container start
 # (see docker-entrypoint.sh, which derives CRAWLER_API_HOST from
-# CRAWLER_API_URL first). Only ${CRAWLER_API_URL} and ${CRAWLER_API_HOST}
-# are substituted — every other $var below is nginx's own.
+# CRAWLER_API_URL, and CORE_API_HOST from CORE_API_URL, first). Only those
+# four are substituted; every other $var below is nginx's own.
 #
 # Port 8080 is Cloud Run's requirement (its ingress sends traffic there;
 # the default 80 is closed).
@@ -44,6 +44,49 @@ server {
         # frames, and nginx's default response buffering would hold them
         # back until the buffer fills. Harmless for plain JSON responses.
         proxy_buffering off;
+    }
+
+    # THE MAILED WORKBOOK LINK on our own domain (David, 2026-11-02): a
+    # report mail too big to attach carries
+    # https://pathfinder.bottomlines.ai/crawler/report-files/<token>, and
+    # this hands exactly that path to core-api, which checks the signed,
+    # 24-hour token and streams the file. Nothing else of core-api is
+    # reachable here: only this prefix, only GET (HEAD rides along), and
+    # none of the reader's credentials travel (the viewer's session cookie
+    # and any Authorization stay behind; the token is the only grant).
+    location ^~ /crawler/report-files/ {
+        limit_except GET { deny all; }
+        proxy_pass ${CORE_API_URL}/crawler/report-files/;
+        proxy_set_header Host ${CORE_API_HOST};
+        proxy_set_header Cookie "";
+        proxy_set_header Authorization "";
+        # HTTP/1.1 upstream, so core-api's body comes chunked with its own
+        # end marker: a stream cut short upstream reaches the reader as a
+        # FAILED download, never as a finished, truncated file (core-api
+        # reads the whole file first for exactly that reason).
+        proxy_http_version 1.1;
+        proxy_set_header Connection "";
+        # The hop to core-api is TLS the browser would have verified.
+        proxy_ssl_server_name on;
+        proxy_ssl_verify on;
+        proxy_ssl_trusted_certificate /etc/ssl/certs/ca-certificates.crt;
+        proxy_ssl_verify_depth 3;
+        # A whole report zip streams for minutes: never buffered to disk
+        # here. The Cloud Run request limit (deploy.yml, --timeout) is the
+        # same hour as core-api's.
+        proxy_buffering off;
+        proxy_request_buffering off;
+        proxy_read_timeout 3600s;
+        proxy_send_timeout 3600s;
+        # This origin carries the viewer's session: core-api never sets a
+        # cookie on it, and its answers are files or JSON, never a page
+        # that could run script here.
+        proxy_hide_header Set-Cookie;
+        add_header X-Content-Type-Options "nosniff" always;
+        add_header Content-Security-Policy "default-src 'none'; sandbox" always;
+        add_header X-Robots-Tag "noindex, nofollow" always;
+        add_header Referrer-Policy "no-referrer" always;
+        add_header Cache-Control "no-store" always;
     }
 
     # Long-cache immutable Vite chunks (they have hashed filenames).
