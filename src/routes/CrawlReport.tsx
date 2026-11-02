@@ -171,18 +171,26 @@ function useFoundInMulti(token: string): boolean {
   return ok;
 }
 
+/** Each filter's ⓘ line (David, 2026-11-02): which list it is for, short. */
+const FILTER_INFO = {
+  platform: "Apps: CTV or Mobile. Web: publishers with your line in ads.txt.",
+  foundIn: "Publishers only. The file your line is in.",
+  foundInOnApps: "Publishers only. Picking a file opens Matched publishers.",
+  matchType: "Publishers and apps. Own file, or via an inventory partner (IPD).",
+} as const;
+
 /** A Platform pick opened the other list: its menu and trigger went with
  *  the old list, so focus lands on the new list's Platform once it stands
  *  (or its Filters button on a narrow screen). Never taken from somewhere
  *  the reader has since moved to. */
-function focusPlatformOf(root: HTMLElement | null) {
+function focusPlatformOf(root: HTMLElement | null, filter = "platform") {
   if (!root) return;
   const started = Date.now();
   const tick = () => {
     const active = document.activeElement;
     if (active && active !== document.body && root.contains(active)) return;
     if (active && active !== document.body && !active.closest("[role=menu]")) return;
-    const platform = root.querySelector<HTMLElement>('[data-testid="platform"]');
+    const platform = root.querySelector<HTMLElement>(`[data-testid="${filter}"]`);
     const target = platform && platform.offsetParent !== null
       ? platform
       : root.querySelector<HTMLElement>('button[aria-label="List filters"]');
@@ -249,6 +257,19 @@ export default function CrawlReport() {
     if (view !== here) {
       pickView(view);
       focusPlatformOf(listRef.current);
+    }
+  }, [pickView]);
+  /**
+   * FOUND IN FROM THE APPS LIST (David, 2026-11-02): the filter stands on
+   * both lists, but a file is a publisher's, so on the apps list a choice
+   * opens Matched publishers on it (focus on their Found in). The apps'
+   * own Platform stays as the reader left it.
+   */
+  const pickFoundIn = useCallback((next: FoundInFilter) => {
+    setFoundIn(next);
+    if (matchedViewRef.current !== "publishers") {
+      pickView("publishers");
+      focusPlatformOf(listRef.current, "found-in");
     }
   }, [pickView]);
   // Whether the crawler takes several files in one found_in (crawler PR):
@@ -804,6 +825,7 @@ export default function CrawlReport() {
             setPlatform={setPlatform}
             foundInMulti={foundInMulti}
             onPlatform={pickPlatform}
+            onFoundIn={pickFoundIn}
             searchReset={searchReset}
             known={knownFor("apps")}
           />
@@ -2627,7 +2649,7 @@ function DrilldownList({
               {(foundInCounts || appCounts) && <FilterSelect
                 value={foundIn === WEB_PUBLISHERS ? "web" : "all"}
                 onChange={onPlatform}
-                leading="Platform" icon={MonitorSmartphone} ariaLabel="Platform" testId="platform"
+                leading="Platform" icon={MonitorSmartphone} ariaLabel="Platform" testId="platform" info={FILTER_INFO.platform}
                 options={[
                   // Every choice says what it counts and wears the arrow, in
                   // one look (David, 2026-11-02); CTV and Mobile say "apps",
@@ -2655,7 +2677,7 @@ function DrilldownList({
               {/* FOUND IN, TICK BOXES (David, 2026-11-01): any of the three
                   files at once; ads.txt + Both are the web publishers, what
                   Platform's Web picks. */}
-              {foundInCounts && (foundInMulti ? <FilterMultiSelect value={foundInFiles(foundIn)} onChange={(files) => setFoundIn(foundInOf(files))} leading="Found in" icon={FileText} ariaLabel="Found in" testId="found-in"
+              {foundInCounts && (foundInMulti ? <FilterMultiSelect value={foundInFiles(foundIn)} onChange={(files) => setFoundIn(foundInOf(files))} leading="Found in" icon={FileText} ariaLabel="Found in" testId="found-in" info={FILTER_INFO.foundIn}
                 noun={foundIn === WEB_PUBLISHERS ? "web publishers" : "publishers"}
                 allLabel="All files" allDescription="Publishers matched in either file." allCount={foundInCounts.all}
                 choices={FOUND_IN_FILES}
@@ -2665,13 +2687,13 @@ function DrilldownList({
                   { value: "both", label: "Both", description: "Matching lines in both files." },
                 ] as const).filter(o => foundInFiles(foundIn).includes(o.value) || (foundInCounts[o.value] ?? 0) > 0).map(o => ({ ...o, count: foundInCounts[o.value] }))} />
                 // An API that takes one file at a time: one choice, as before.
-                : <FilterSelect value={foundIn} onChange={setFoundIn} leading="Found in" icon={FileText} ariaLabel="Found in" testId="found-in" options={([
+                : <FilterSelect value={foundIn} onChange={setFoundIn} leading="Found in" icon={FileText} ariaLabel="Found in" testId="found-in" info={FILTER_INFO.foundIn} options={([
                   { value: "all", label: "All files", description: "Publishers matched in either source file." },
                   { value: "ads_txt", label: "ads.txt", description: "Publishers with matching lines in ads.txt." },
                   { value: "app_ads_txt", label: "app-ads.txt", description: "Publishers with matching lines in app-ads.txt." },
                   { value: "both", label: "Both", description: "Publishers with matching lines in both files." },
                 ] as const).filter(o => o.value === "all" || o.value === foundIn || (foundInCounts[o.value] ?? 0) > 0).map(o => ({ ...o, count: foundInCounts[o.value] }))} />)}
-              {typeCounts && <FilterSelect value={matchType} onChange={setMatchType} leading="Match type" icon={SlidersHorizontal} menuLabel="Filter by match type" ariaLabel="Match type" testId="match-type" options={[
+              {typeCounts && <FilterSelect value={matchType} onChange={setMatchType} leading="Match type" icon={SlidersHorizontal} menuLabel="Filter by match type" ariaLabel="Match type" testId="match-type" info={FILTER_INFO.matchType} options={[
                 { value: "all", label: "All", description: "Publisher files and inventory partners", count: typeCounts.all }, { value: "own", label: "Own", description: "In the publisher’s own file", count: typeCounts.own }, { value: "ipd", label: "IPD", description: "Via a declared inventory partner", count: typeCounts.ipd },
               ]} />}
             </>}
@@ -3633,6 +3655,7 @@ function MatchedAppsList({
   setPlatform,
   foundInMulti,
   onPlatform,
+  onFoundIn,
   searchReset,
   known,
 }: {
@@ -3656,6 +3679,8 @@ function MatchedAppsList({
   foundInMulti: boolean;
   /** The page's one Platform pick (Web opens the publishers list). */
   onPlatform: (next: PlatformFilter) => void;
+  /** A Found in pick here: it opens the publishers list on that file. */
+  onFoundIn: (next: FoundInFilter) => void;
   /** Bumped by a Popular choice: the search clears. */
   searchReset: number;
   /** Counts the page read for the Popular choices (expectedRows). */
@@ -3671,27 +3696,37 @@ function MatchedAppsList({
   // cannot ask for several files at once (it refuses, or does not echo),
   // or none to open.
   const [webPublishers, setWebPublishers] = useState<number | null>(null);
-  // Asked only once the list says it splits by platform: no Platform
-  // switch, no Web choice, and no request for one.
+  // FOUND IN HERE (David, 2026-11-02): the publishers' split by file, read
+  // the way their list reads it, for the Found in that opens them; null,
+  // no Found in on this list (an API without the split).
+  const [publisherFiles, setPublisherFiles] = useState<FoundInCounts | null>(null);
   const platformShown = platformCounts != null;
   useEffect(() => {
-    // Never last tab's number under this tab: none until this one lands.
+    // Never last tab's numbers under this tab: none until this one lands.
     setWebPublishers(null);
-    if (tab === "inactive" || !foundInMulti || !platformShown) return;
+    setPublisherFiles(null);
+    if (tab === "inactive") return;
     let cancelled = false;
     const watch = isScopeTab(tab) ? WATCH_CHANGE[tab] : undefined;
-    const read: Promise<{ total: number; found_in?: string | null; change?: string | null }> =
+    // One read: on Web (when the API takes two files and this list has a
+    // Platform to offer it on), which also carries the split by file.
+    const asked: FoundInFilter = foundInMulti && platformShown ? WEB_PUBLISHERS : "all";
+    const read: Promise<{ total: number; found_in?: string | null; change?: string | null; found_in_counts?: FoundInCounts | null }> =
       tab === "all" || isScopeTab(tab)
-        ? api.matchedDevelopers(token, 1, "", lines, matchType, 1, watch, WEB_PUBLISHERS)
-        : api.developerEvents(token, tab, 1, "", lines, matchType, 1, WEB_PUBLISHERS);
+        ? api.matchedDevelopers(token, 1, "", lines, matchType, 1, watch, asked)
+        : api.developerEvents(token, tab, 1, "", lines, matchType, 1, asked);
     read
       .then((r) => {
-        // This tab's count only: a watch tab the API did not filter by
+        if (cancelled) return;
+        // This tab's numbers only: a watch tab the API did not filter by
         // (no echo) would be the whole list's.
-        const ok = r.found_in === WEB_PUBLISHERS && (!watch || r.change === watch);
-        if (!cancelled) setWebPublishers(ok && r.total > 0 ? r.total : null);
+        const tabOk = !watch || r.change === watch;
+        const web = asked === WEB_PUBLISHERS && r.found_in === WEB_PUBLISHERS && tabOk;
+        setWebPublishers(web && r.total > 0 ? r.total : null);
+        const files = tabOk ? splitOf(r.found_in_counts, r.found_in, asked) : null;
+        setPublisherFiles(files && files.all > 0 ? files : null);
       })
-      .catch(() => { if (!cancelled) setWebPublishers(null); });
+      .catch(() => { if (!cancelled) { setWebPublishers(null); setPublisherFiles(null); } });
     return () => { cancelled = true; };
   }, [token, tab, lines, matchType, foundInMulti, platformShown]);
   // The watch tabs (crawler #361), as on the publishers list.
@@ -3925,7 +3960,7 @@ function MatchedAppsList({
               {/* PLATFORM: an app is CTV or Mobile, by its store. Web is not
                   an app (David, 2026-11-01): its choice says how many
                   publishers it opens and opens them, never filters apps. */}
-              {platformCounts && <FilterSelect value={platform} onChange={onPlatform} leading="Platform" icon={MonitorSmartphone} ariaLabel="Platform" testId="platform" options={[
+              {platformCounts && <FilterSelect value={platform} onChange={onPlatform} leading="Platform" icon={MonitorSmartphone} ariaLabel="Platform" testId="platform" info={FILTER_INFO.platform} options={[
                 ...([
                   { value: "all", label: "All", description: "Every app in this report." },
                   { value: "ctv", label: "CTV", description: "Connected TV apps and channels." },
@@ -3940,7 +3975,18 @@ function MatchedAppsList({
                   leads: true,
                 }] : []),
               ]} />}
-              {typeCounts && <FilterSelect value={matchType} onChange={setMatchType} leading="Match type" icon={SlidersHorizontal} menuLabel="Filter by match type" ariaLabel="Match type" testId="match-type" options={[
+              {/* FOUND IN HERE TOO (David, 2026-11-02): a file is a
+                  publisher's, never an app's, so it filters no app: every
+                  choice says how many publishers it opens and opens them. */}
+              {publisherFiles && <FilterSelect value={"all" as FoundInFilter} onChange={onFoundIn} leading="Found in" icon={FileText} ariaLabel="Found in" testId="found-in" info={FILTER_INFO.foundInOnApps}
+                options={([
+                  { value: "all", label: "All files", description: "Opens every matched publisher." },
+                  { value: "ads_txt", label: "ads.txt", description: "Opens the publishers with matching lines in ads.txt." },
+                  { value: "app_ads_txt", label: "app-ads.txt", description: "Opens the publishers with matching lines in app-ads.txt." },
+                  { value: "both", label: "Both", description: "Opens the publishers with matching lines in both files." },
+                ] as const).filter((o) => o.value === "all" || publisherFiles[o.value] > 0)
+                  .map((o) => ({ ...o, value: o.value as FoundInFilter, countLabel: `${publisherFiles[o.value].toLocaleString()} publishers`, leads: true }))} />}
+              {typeCounts && <FilterSelect value={matchType} onChange={setMatchType} leading="Match type" icon={SlidersHorizontal} menuLabel="Filter by match type" ariaLabel="Match type" testId="match-type" info={FILTER_INFO.matchType} options={[
                 { value: "all", label: "All", description: "Publisher files and inventory partners" }, { value: "own", label: "Own", description: "In the publisher’s own file" }, { value: "ipd", label: "IPD", description: "Via a declared inventory partner" },
               ].map(o => ({...o, value: o.value as typeof matchType, count: tab === "all" || isScopeTab(tab) ? typeCounts[o.value as keyof typeof typeCounts] : undefined}))} />}
             </>}

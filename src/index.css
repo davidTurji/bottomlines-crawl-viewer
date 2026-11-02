@@ -1204,13 +1204,13 @@ button:hover > .report-expand-control, button:focus-visible > .report-expand-con
 .list-toolbar [data-export-list] { height:40px; border:0; border-radius:6px; padding-inline:10px; background:transparent; }
 .list-toolbar [data-list-count] > span { flex-wrap:nowrap; gap:10px; }
 /* The filters fold by measured room (FilterGroup, 2026-11-02), not by a
-   breakpoint: data-fold says which. Unfolded, or folded and shut, they lie
-   in a row; folded and shut the row is clipped away unseen, still laid
-   out so its width can be read. */
+   breakpoint: data-fold says which. Unfolded they lie in a row; folded and
+   shut they take no room, except for the instant FilterGroup lays them
+   out unseen (data-measure) to read the row's width. */
 .list-toolbar-filters[data-fold="false"] > button { display:none; }
-.list-toolbar-filters:not([data-fold="true"][data-open="true"]) .list-toolbar-filter-panel { display:flex; flex-direction:row; gap:8px; position:static; width:auto; padding:0; border:0; border-radius:0; box-shadow:none; background:transparent; }
-.list-toolbar-filters:not([data-fold="true"][data-open="true"]) .list-toolbar-filter-panel .list-toolbar-select { width:auto; height:40px; max-width:190px; border:1px solid hsl(var(--border)); border-radius:8px; }
-.list-toolbar-filters[data-fold="true"]:not([data-open="true"]) .list-toolbar-filter-panel { position:absolute; left:0; top:0; height:0; overflow:hidden; visibility:hidden; pointer-events:none; }
+.list-toolbar-filters:is([data-fold="false"],[data-measure]) .list-toolbar-filter-panel { display:flex; flex-direction:row; gap:8px; position:static; width:auto; padding:0; border:0; border-radius:0; box-shadow:none; background:transparent; }
+.list-toolbar-filters:is([data-fold="false"],[data-measure]) .list-toolbar-filter-panel .list-toolbar-select { width:auto; height:40px; max-width:190px; border:1px solid hsl(var(--border)); border-radius:8px; }
+.list-toolbar-filters[data-fold="true"][data-measure] .list-toolbar-filter-panel { position:absolute; left:0; top:0; height:0; overflow:hidden; visibility:hidden; pointer-events:none; }
 @container (max-width:999px) {
  .list-toolbar [data-page-number],.list-toolbar [data-page-gap] { display:none; }
  .list-toolbar .list-toolbar-page-position { display:block; }
@@ -1251,9 +1251,9 @@ section:has(> .line-action-group) { overflow: clip; }
 .list-toolbar nav[aria-label="Pages"] [aria-current="page"] { background:#e7ece6; color:#173a2e; }
 .list-toolbar [data-list-pager] { gap:12px; }
 .list-toolbar-filter-panel .list-toolbar-select { background:transparent; }
-.list-toolbar-filters:not([data-fold="true"][data-open="true"]) .list-toolbar-filter-panel { gap:0; }
-.list-toolbar-filters:not([data-fold="true"][data-open="true"]) .list-toolbar-filter-panel .list-toolbar-select { height:34px; padding-inline:10px; border:0; border-radius:5px; }
-.list-toolbar-filters:not([data-fold="true"][data-open="true"]) .list-toolbar-filter-panel .list-toolbar-select:hover { background:#f3f5f1; }
+.list-toolbar-filters:is([data-fold="false"],[data-measure]) .list-toolbar-filter-panel { gap:0; }
+.list-toolbar-filters:is([data-fold="false"],[data-measure]) .list-toolbar-filter-panel .list-toolbar-select { height:34px; padding-inline:10px; border:0; border-radius:5px; }
+.list-toolbar-filters:is([data-fold="false"],[data-measure]) .list-toolbar-filter-panel .list-toolbar-select:hover { background:#f3f5f1; }
 @container (max-width:650px) {
  .list-toolbar { gap:6px; }
  .list-toolbar-query { min-width:115px; }
@@ -1272,9 +1272,9 @@ section:has(> .line-action-group) { overflow: clip; }
 .list-toolbar [data-export-list], .list-toolbar > .list-toolbar-action { border:1px solid hsl(var(--border)); border-radius:7px; background:white; }
 .list-toolbar nav[aria-label="Pages"] { border:1px solid hsl(var(--border)); border-radius:8px; padding:3px; background:white; }
 .list-toolbar nav[aria-label="Pages"] [aria-current="page"] { background:hsl(var(--primary)); color:white; }
-.list-toolbar-filters:not([data-fold="true"][data-open="true"]) .list-toolbar-filter-panel .list-toolbar-select { height:38px; border-radius:0; }
-.list-toolbar-filters:not([data-fold="true"][data-open="true"]) .list-toolbar-filter-panel .list-toolbar-select + .list-toolbar-divider + .list-toolbar-select { border-left:1px solid hsl(var(--border)); }
-.list-toolbar-filters:not([data-fold="true"][data-open="true"]) .list-toolbar-filter-panel .list-toolbar-select:last-child { border-radius:0 7px 7px 0; }
+.list-toolbar-filters:is([data-fold="false"],[data-measure]) .list-toolbar-filter-panel .list-toolbar-select { height:38px; border-radius:0; }
+.list-toolbar-filters:is([data-fold="false"],[data-measure]) .list-toolbar-filter-panel .list-toolbar-select + .list-toolbar-divider + .list-toolbar-select { border-left:1px solid hsl(var(--border)); }
+.list-toolbar-filters:is([data-fold="false"],[data-measure]) .list-toolbar-filter-panel .list-toolbar-select:last-child { border-radius:0 7px 7px 0; }
 .store-badge, .ipd-badge { display:inline-flex; flex:none; align-items:center; min-height:20px; padding:1px 6px; border:1px solid transparent; border-radius:4px; font-family:var(--font-sans); font-size:10px; font-weight:600; line-height:1.4; letter-spacing:.01em; white-space:nowrap; }
 /* Shared filled platform badges; IPD keeps its navy identity. */
 .store-badge { background:#53616e; color:#fff; }
@@ -1618,3 +1618,13 @@ a.line-source-reference:hover { color:hsl(var(--primary)); text-decoration-color
  .publisher-subline > .file-hint { flex-basis:100%; }
  .publisher-subline .file-hint-comma { display:none; }
 }
+/* A filter's ⓘ (2026-11-02): a small mark in its trigger; on hover one
+   short line saying which list it is for. On a touch screen its menu says
+   the line under the heading instead. */
+.filter-info-mark { display:inline-flex; flex:none; align-items:center; margin-left:-2px; color:#94a3b8; cursor:help; transition:color 120ms; }
+.filter-info-mark:hover { color:hsl(var(--primary)); }
+.filter-info-bubble { position:fixed; z-index:60; width:max-content; max-width:220px; padding:7px 10px; border:1px solid hsl(var(--border)); border-radius:7px; background:white; color:hsl(var(--muted-foreground)); font-size:11.5px; line-height:1.45; box-shadow:0 4px 14px rgb(15 35 25 / .09); pointer-events:none; animation:filter-info-in 120ms ease-out; }
+@keyframes filter-info-in { from { opacity:0; transform:translateY(-2px); } to { opacity:1; transform:none; } }
+@media (prefers-reduced-motion:reduce) { .filter-info-bubble { animation:none; } }
+.filter-menu-info { display:none; margin:0 0 4px; padding:0 9px 6px; color:hsl(var(--muted-foreground)); font-size:11.5px; line-height:1.45; }
+@media (hover:none) { .filter-info-mark { display:none; } .filter-menu-info { display:block; } }

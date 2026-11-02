@@ -1,6 +1,7 @@
 import { Children, Fragment, isValidElement, type ReactNode, createContext, useCallback, useContext, useEffect, useLayoutEffect, useRef, useState, useId } from "react";
 import * as DropdownMenuPrimitive from "@radix-ui/react-dropdown-menu";
-import { ArrowRight, Check, ChevronDown, Search, SlidersHorizontal, type LucideIcon } from "lucide-react";
+import { createPortal } from "react-dom";
+import { ArrowRight, Check, ChevronDown, Info, Search, SlidersHorizontal, type LucideIcon } from "lucide-react";
 
 import {
   DropdownMenu,
@@ -80,9 +81,8 @@ function rowWidthOf(row: HTMLElement): number {
  * NOT (David, 2026-11-02). Measured, never a fixed breakpoint: the bar
  * holds a different set of filters on each list (and their labels grow,
  * "ads.txt + Both"), so it folds exactly when the row would squeeze the
- * search below SEARCH_ROOM. Folded and shut, the row is still laid out,
- * unseen, so its width stays known and the bar unfolds the moment there
- * is room again.
+ * search below SEARCH_ROOM. Folded and shut, the row is read by laying it
+ * out for an instant, so the bar unfolds the moment there is room again.
  */
 export function FilterGroup({ children }: { children: ReactNode }) {
   const [open, setOpen] = useState(false);
@@ -103,9 +103,16 @@ export function FilterGroup({ children }: { children: ReactNode }) {
     const row = panel.current;
     const query = group?.parentElement;
     if (!group || !row || !query) return;
-    // Read while the filters lie in a row (in the bar, or folded away);
-    // an open fold is a column, so it keeps the last reading.
-    if (group.dataset.fold !== "true" || group.dataset.open !== "true") rowWidth.current = rowWidthOf(row);
+    // Read as a row. Folded and shut the filters take no room at all, so
+    // for one synchronous reading they lie out as a row, unseen (nothing
+    // paints in between), and are put away again. An open fold is a
+    // column: it keeps the last reading.
+    if (group.dataset.fold !== "true" || group.dataset.open !== "true") {
+      const away = group.dataset.fold === "true";
+      if (away) group.dataset.measure = "";
+      rowWidth.current = rowWidthOf(row);
+      if (away) delete group.dataset.measure;
+    }
     let room = query.clientWidth;
     for (const el of query.children) {
       if (el !== group && !el.classList.contains("list-toolbar-search")) room -= el.getBoundingClientRect().width;
@@ -233,6 +240,37 @@ export function FilterAction({
   );
 }
 
+/**
+ * THE FILTER'S ⓘ (David, 2026-11-02): a small mark inside the trigger, and
+ * on hover one short line saying which list the filter is for. The line
+ * floats over the page (a portal), never inside the trigger's text; the
+ * trigger carries it as its description, and on a touch screen, where
+ * nothing hovers, its menu says it under the heading.
+ */
+function FilterInfo({ text }: { text: string }) {
+  const mark = useRef<HTMLSpanElement>(null);
+  const [at, setAt] = useState<{ left: number; top: number } | null>(null);
+  useEffect(() => {
+    if (!at) return;
+    const hide = () => setAt(null);
+    window.addEventListener("scroll", hide, true);
+    window.addEventListener("resize", hide);
+    return () => { window.removeEventListener("scroll", hide, true); window.removeEventListener("resize", hide); };
+  }, [at]);
+  const show = () => {
+    const r = mark.current?.getBoundingClientRect();
+    if (r) setAt({ left: Math.min(Math.max(12, r.left + r.width / 2 - 110), window.innerWidth - 232), top: r.bottom + 8 });
+  };
+  return (
+    <>
+      <span ref={mark} aria-hidden data-filter-info className="filter-info-mark" onMouseEnter={show} onMouseLeave={() => setAt(null)}>
+        <Info className="h-3 w-3" />
+      </span>
+      {at && createPortal(<span role="tooltip" className="filter-info-bubble" style={{ left: at.left, top: at.top }}>{text}</span>, document.body)}
+    </>
+  );
+}
+
 export interface FilterOption<T extends string> {
   value: T;
   label: string;
@@ -269,6 +307,7 @@ export function FilterSelect<T extends string>({
   menuLabel,
   widthClass = "sm:max-w-[220px]",
   narrows = true,
+  info,
 }: {
   value: T;
   onChange: (v: T) => void;
@@ -282,6 +321,8 @@ export function FilterSelect<T extends string>({
   /** False for a choice that orders the list rather than narrowing it (a
    *  sort): never counted on the folded Filters button. */
   narrows?: boolean;
+  /** One short line on which list the filter is for (its ⓘ). */
+  info?: string;
 }) {
   const [open, setOpen] = useState(false);
   const closePanel = useContext(FilterPanelClose);
@@ -302,6 +343,7 @@ export function FilterSelect<T extends string>({
           <button
             type="button"
             aria-label={ariaLabel}
+            aria-description={info}
             data-testid={testId}
             className={cn(
               "list-toolbar-select flex items-center gap-1.5 whitespace-nowrap px-3 text-xs font-medium text-slate-900 transition-colors hover:bg-slate-50",
@@ -314,6 +356,7 @@ export function FilterSelect<T extends string>({
                 {leading}
               </span>
             )}
+            {info && <FilterInfo text={info} />}
             <span className="truncate">{selected?.label ?? ""}</span>
             <ChevronDown
               aria-hidden
@@ -331,6 +374,7 @@ export function FilterSelect<T extends string>({
             <DropdownMenuLabel className="filter-option-heading">
               <span aria-hidden>{index + 1}</span>{group}
             </DropdownMenuLabel>
+            {index === 0 && info && <p className="filter-menu-info">{info}</p>}
             {choices.map(o => <DropdownMenuItem key={o.value} aria-label={o.label}
               aria-describedby={o.description ? `${descriptionId}-${encodeURIComponent(o.value)}` : undefined}
               textValue={o.label} onSelect={() => { onChange(o.value); closePanel?.(); }}
@@ -374,6 +418,7 @@ export function FilterMultiSelect<T extends string>({
   icon: Icon,
   menuLabel,
   widthClass = "sm:max-w-[240px]",
+  info,
 }: {
   value: T[];
   onChange: (v: T[]) => void;
@@ -392,6 +437,8 @@ export function FilterMultiSelect<T extends string>({
   icon?: LucideIcon;
   menuLabel?: string;
   widthClass?: string;
+  /** One short line on which list the filter is for (its ⓘ). */
+  info?: string;
 }) {
   const [open, setOpen] = useState(false);
   const closePanel = useContext(FilterPanelClose);
@@ -414,6 +461,7 @@ export function FilterMultiSelect<T extends string>({
           <button
             type="button"
             aria-label={ariaLabel}
+            aria-description={info}
             data-testid={testId}
             className={cn(
               "list-toolbar-select flex items-center gap-1.5 whitespace-nowrap px-3 text-xs font-medium text-slate-900 transition-colors hover:bg-slate-50",
@@ -422,6 +470,7 @@ export function FilterMultiSelect<T extends string>({
           >
             {Icon && <Icon aria-hidden className="h-3.5 w-3.5 flex-none text-slate-500" />}
             {leading && <span className="flex-shrink-0 font-normal text-slate-500">{leading}</span>}
+            {info && <FilterInfo text={info} />}
             <span className="truncate">{label}</span>
             <ChevronDown aria-hidden className="ml-auto h-3 w-3 flex-shrink-0 opacity-40 sm:ml-0" />
           </button>
@@ -431,6 +480,7 @@ export function FilterMultiSelect<T extends string>({
             <DropdownMenuLabel className="filter-option-heading">
               <span aria-hidden>1</span>{menuLabel ?? leading ?? "Options"}
             </DropdownMenuLabel>
+            {info && <p className="filter-menu-info">{info}</p>}
             <DropdownMenuItem
               aria-label={allLabel}
               aria-describedby={allDescription ? `${descriptionId}-all` : undefined}

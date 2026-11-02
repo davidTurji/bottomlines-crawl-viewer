@@ -195,6 +195,8 @@ test("the publishers / apps tiles, and a watch tab", async ({ page }) => {
 
 test("the Found in switch (publishers) and the Platform switch (apps)", async ({ page }) => {
   const errors = watchErrors(page);
+  // Wide enough for every filter to stand in the bar (it folds by room).
+  await page.setViewportSize({ width: 1600, height: 900 });
   await open(page);
   await lands(page, rows(page));
   let release = await hold(page, (u) => u.pathname.endsWith("/matched-developers") && u.searchParams.has("found_in"));

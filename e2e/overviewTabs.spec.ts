@@ -905,10 +905,12 @@ test.describe("Found in (publishers) and Platform (apps)", () => {
     await expect
       .poll(() => calls.some((c) => c.path.endsWith("/matched-developers") && c.query.includes("change=started_watching") && c.query.includes(`found_in=${asked}`)))
       .toBe(true);
-    // Apps have no Found in switch.
+    // On the apps list Found in stands too (David, 2026-11-02) but filters
+    // no app: it reads All files, and no apps request carries a file.
     await toApps(page);
     await expect(rows(page).first()).toBeVisible();
-    await expect(page.getByTestId("found-in")).toHaveCount(0);
+    await expect(page.getByTestId("found-in")).toContainText("All files");
+    expect(calls.some((c) => c.path.endsWith("/matched-apps") && c.query.includes("found_in="))).toBe(false);
     expect(errors).toEqual([]);
   });
 
@@ -1034,6 +1036,59 @@ test.describe("Found in (publishers) and Platform (apps)", () => {
     await expect(fold).toBeHidden();
     await expect(page.getByTestId("match-type")).toBeVisible();
     await expect(page.getByTestId("match-type")).toContainText("IPD");
+    expect(errors).toEqual([]);
+  });
+
+  test("Found in stands on the apps list too: every file opens Matched publishers on it", async ({ page }) => {
+    const errors = watchErrors(page);
+    const calls = await open(page, { ...FULL, appPlatform: true, foundIn: true });
+    await expect(rows(page).first()).toBeVisible();
+    await toApps(page);
+    const sw = page.getByTestId("found-in");
+    await expect(sw).toBeVisible();
+    // A file filters no app: the trigger says All files, and every choice
+    // counts the publishers it opens, with the arrow.
+    await expect(sw).toContainText("All files");
+    await sw.click();
+    const choices = page.getByRole("menuitem");
+    expect(await choices.evaluateAll((els) => els.length > 1 && els.every((el) => /\d[\d,]* publishers/.test(el.textContent ?? "") && el.querySelector("[data-leads]")))).toBe(true);
+    const ads = page.getByRole("menuitem", { name: /^ads\.txt(?:\s|$)/ });
+    const n = Number((await ads.innerText()).match(/([\d,]+) publishers/)![1].replace(/,/g, ""));
+    await ads.click();
+    // On the publishers list, on ads.txt, focus on its Found in.
+    await expect(page.getByRole("textbox", { name: "Search matched publishers" })).toBeVisible();
+    await expect(page.getByTestId("found-in")).toContainText("ads.txt");
+    await expect(page.getByTestId("found-in")).toBeFocused();
+    await settled(page);
+    expect(calls.some((c) => c.path.endsWith("/matched-developers") && /(?:^|&)found_in=ads_txt(?:&|$)/.test(c.query))).toBe(true);
+    await expect(page.locator("main[data-report-main]")).toContainText(`of ${n.toLocaleString()}`);
+    expect(errors).toEqual([]);
+  });
+
+  test("each filter's small ⓘ says, on hover, which list it is for", async ({ page }) => {
+    const errors = watchErrors(page);
+    await open(page, { ...FULL, appPlatform: true, foundIn: true });
+    await expect(rows(page).first()).toBeVisible();
+    const said = async (id: string) => {
+      const trigger = page.getByTestId(id);
+      await trigger.locator("[data-filter-info]").hover();
+      const tip = page.getByRole("tooltip");
+      await expect(tip).toBeVisible();
+      const text = (await tip.innerText()).trim();
+      // The same line rides on the trigger for a screen reader, and never
+      // in the trigger's own text.
+      await expect(trigger).toHaveAttribute("aria-description", text);
+      expect((await trigger.innerText()).includes(text)).toBe(false);
+      await page.mouse.move(0, 0);
+      await expect(tip).toHaveCount(0);
+      return text;
+    };
+    expect(await said("platform")).toMatch(/^Apps: CTV or Mobile\. Web: publishers/);
+    expect(await said("found-in")).toMatch(/^Publishers only\./);
+    expect(await said("match-type")).toMatch(/^Publishers and apps\./);
+    await toApps(page);
+    await expect(rows(page).first()).toBeVisible();
+    expect(await said("found-in")).toBe("Publishers only. Picking a file opens Matched publishers.");
     expect(errors).toEqual([]);
   });
 
