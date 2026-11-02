@@ -29,4 +29,17 @@ CRAWLER_API_HOST="$(printf '%s' "$CRAWLER_API_URL" | sed -E 's#^[a-zA-Z][a-zA-Z0
 export CRAWLER_API_URL CRAWLER_API_HOST
 echo "viewer: proxying /api/ -> $CRAWLER_API_URL (Host: $CRAWLER_API_HOST)"
 
+# The mailed workbook links (/crawler/report-files/) go to core-api, the
+# service that signs them. The same dead-port default: until CORE_API_URL
+# is set on the service those links answer 502 here, and the mails keep
+# pointing at core-api's own address, so nothing a customer holds breaks.
+if [ -z "${CORE_API_URL:-}" ]; then
+  echo "WARNING: CORE_API_URL is not set; /crawler/report-files/ will answer 502" >&2
+  CORE_API_URL="http://127.0.0.1:9"
+fi
+CORE_API_URL="${CORE_API_URL%/}"
+CORE_API_HOST="$(printf '%s' "$CORE_API_URL" | sed -E 's#^[a-zA-Z][a-zA-Z0-9+.-]*://##; s#/.*$##; s#:[0-9]+$##')"
+export CORE_API_URL CORE_API_HOST
+echo "viewer: proxying /crawler/report-files/ -> $CORE_API_URL (Host: $CORE_API_HOST)"
+
 exec /docker-entrypoint.sh "$@"

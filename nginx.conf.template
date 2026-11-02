@@ -46,6 +46,32 @@ server {
         proxy_buffering off;
     }
 
+    # THE MAILED WORKBOOK LINK on our own domain (David, 2026-11-02): a
+    # report mail too big to attach carries
+    # https://pathfinder.bottomlines.ai/crawler/report-files/<token>, and
+    # this hands exactly that path to core-api, which checks the signed,
+    # 24-hour token and streams the file. Nothing else of core-api is
+    # reachable here: only this prefix, only GET (HEAD rides along), and
+    # none of the reader's credentials travel (the viewer's session cookie
+    # and any Authorization stay behind; the token is the only grant).
+    location ^~ /crawler/report-files/ {
+        limit_except GET { deny all; }
+        proxy_pass ${CORE_API_URL}/crawler/report-files/;
+        proxy_set_header Host ${CORE_API_HOST};
+        proxy_set_header Cookie "";
+        proxy_set_header Authorization "";
+        proxy_ssl_server_name on;
+        # A whole report zip streams for minutes: never buffered to disk
+        # here, and never cut off by the 60 s default.
+        proxy_buffering off;
+        proxy_request_buffering off;
+        proxy_read_timeout 900s;
+        proxy_send_timeout 900s;
+        add_header X-Robots-Tag "noindex, nofollow" always;
+        add_header Referrer-Policy "no-referrer" always;
+        add_header Cache-Control "no-store" always;
+    }
+
     # Long-cache immutable Vite chunks (they have hashed filenames).
     location /assets/ {
         add_header Cache-Control "public, max-age=31536000, immutable";
