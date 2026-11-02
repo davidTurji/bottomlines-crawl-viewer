@@ -61,12 +61,15 @@ test('Overview places source filenames beside dates, including both files and re
   await page.goto(BASE);
   await page.locator('.report-expand-control').first().click();
   const added = page.locator('[data-line-tone="added"] .line-entry').first();
-  await expect(added.locator('[data-line-dates]')).toContainText('found in ads.txt + app-ads.txt');
+  await expect(added.locator('[data-line-dates]')).toContainText(', found in ads.txt + app-ads.txt');
+  // A line still in the file is found; only a removed one WAS found.
+  await expect(added.locator('[data-line-dates]')).not.toContainText('was found in');
   await expect(added.locator('[data-line-source] a')).toHaveCount(2);
   await expect(added.locator('[data-line-source] a').first()).toHaveAttribute('href', /\/ads\.txt#/);
   await expect(added.locator('[data-line-source] a').last()).toHaveAttribute('href', /\/app-ads\.txt#/);
   const removed = page.locator('[data-line-tone="removed"] .line-entry').first();
-  await expect(removed.locator('[data-line-source]')).toContainText('found in ads.txt');
+  // A removed line names the file it was in when last seen (David, 2026-11-02).
+  await expect(removed.locator('[data-line-source]')).toHaveText(', was found in ads.txt');
   await expect(removed.locator('[data-line-source] a')).toHaveAttribute('href', /^https:\/\/[^#]+\/ads\.txt$/);
 });
 

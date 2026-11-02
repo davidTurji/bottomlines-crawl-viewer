@@ -1937,6 +1937,7 @@ function eventRow(d: DeveloperEvent, event?: string, seats?: string[]): Row {
   const moved = Array.isArray(raw) ? (raw as MatchedSeatLine[]) : null;
   return {
     files: moved && rowFilesOf(moved, moved.length < EVENT_LINES_CAP, null, seats),
+    ...(event === "removed" ? { filesPast: true } : {}),
     developer_id: d.developer_id,
     developer_name: d.developer_name,
     developer_domain: d.developer_domain,
@@ -2366,6 +2367,9 @@ type Row = {
    *  its matched lines; on a change tab, the lines that moved there. The
    *  Found in filter keeps the row by it. Null when the row cannot say. */
   files?: FileWord | null;
+  /** Set on the Removed tab: ``files`` are where the removed lines were, so
+   *  the row says "Was found in" (David, 2026-11-02). */
+  filesPast?: boolean;
   /** Set on a watch tab: which tab, under which line filter, and the
    *  row's lines of the kind when the crawler sends them with the row. */
   scope?: WatchMark;
@@ -2383,10 +2387,10 @@ const EVENT_LINES_CAP = 200;
  * Sellers.json and Schain say it. On a phone it takes its own line, so a
  * long domain is never cut to make room for it.
  */
-function FileHint({ files, after }: { files: FileWord; after: boolean }) {
+function FileHint({ files, after, past }: { files: FileWord; after: boolean; past?: boolean }) {
   return (
     <span data-file-tag={files} className="file-hint flex-none whitespace-nowrap">
-      {after && <span className="file-hint-comma">, </span>}{foundInLabel(files)}
+      {after && <span className="file-hint-comma">, </span>}{foundInLabel(files, past)}
     </span>
   );
 }
@@ -3195,7 +3199,7 @@ function PublisherCard({
               )}
               {/* WHICH FILE (David, 2026-11-01): ads.txt, app-ads.txt or
                   both, what Found in keeps it by; a file, never a platform. */}
-              {!inactive && row.files && <FileHint files={row.files} after={Boolean(row.developer_domain && row.developer_name)} />}
+              {!inactive && row.files && <FileHint files={row.files} after={Boolean(row.developer_domain && row.developer_name)} past={row.filesPast} />}
             </div>
           )}
           {/* WHERE ITS FILES ARE (2026-10-21): the declared hosts whose
@@ -3422,6 +3426,9 @@ export function SeatLineRow({
   const foundIn = inOwn ? line.found_in : "ads.txt";
   const sourceKind = fileLabelOf(foundIn);
   const sourceFiles = ["ads.txt", "app-ads.txt", "both"].includes(sourceKind) ? filesOf(sourceKind) : [];
+  // A removed line names the files it was in when last seen (David,
+  // 2026-11-02), the way ``foundInLabel`` says it.
+  const sourceLead = change === "removed" ? (dates ? ", was found in " : "Was found in ") : dates ? ", found in " : "Found in ";
   const text = (
     <div className="min-w-0 flex-1">
       {label ?? (
@@ -3447,7 +3454,7 @@ export function SeatLineRow({
       {unchecked && <RowNote data-line-unchecked>{unchecked}</RowNote>}
       <RowNote data-line-dates title={dateTitle(line.date_source)}>
           {dates}
-          {sourceFiles.length > 0 && <span data-line-source>{dates ? ", found in " : "Found in "}{sourceFiles.map((file, index) => (
+          {sourceFiles.length > 0 && <span data-line-source>{sourceLead}{sourceFiles.map((file, index) => (
             <span key={file}>{index > 0 && " + "}{linkable(fileDomain) ? (
               <a href={fileUrl(fileDomain, file, gone ? null : line)} target="_blank" rel="noopener noreferrer"
                 onClick={event => event.stopPropagation()} onKeyDown={event => event.stopPropagation()}

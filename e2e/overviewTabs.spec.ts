@@ -948,6 +948,26 @@ test.describe("Found in (publishers) and Platform (apps)", () => {
     expect(errors).toEqual([]);
   });
 
+  test("the Removed tab's rows say the files their removed lines WAS found in; every other tab says Found in", async ({ page }) => {
+    const errors = watchErrors(page);
+    await open(page, { ...FULL, foundIn: true });
+    const words = async () => (await page.locator("[data-file-tag]").allTextContents()).map((w) => w.replace(/^,\s*/, "").trim());
+    await tab(page, "Removed").click();
+    await settled(page);
+    await expect(rows(page).first()).toBeVisible();
+    const removed = await words();
+    expect(removed.length).toBeGreaterThan(0);
+    expect(removed.every((w) => /^Was found in (ads\.txt|app-ads\.txt|ads\.txt \+ app-ads\.txt)$/.test(w))).toBe(true);
+    for (const name of ["Added", "Changed", "All matched"]) {
+      await tab(page, name).click();
+      await settled(page);
+      await expect(rows(page).first()).toBeVisible();
+      const now = await words();
+      expect(now.every((w) => /^Found in (ads\.txt|app-ads\.txt|ads\.txt \+ app-ads\.txt)$/.test(w))).toBe(true);
+    }
+    expect(errors).toEqual([]);
+  });
+
   test("Web on the apps list's Platform is not an app: it opens Matched publishers on ads.txt + Both", async ({ page }) => {
     const errors = watchErrors(page);
     const calls = await open(page, { ...FULL, appPlatform: true, foundIn: true });

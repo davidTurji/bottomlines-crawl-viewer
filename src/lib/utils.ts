@@ -57,11 +57,15 @@ export function storeName(row: { store?: string | null; store_label?: unknown } 
  * "both" is the deduped case: ads.txt and app-ads.txt agreeing is one
  * fact wearing one row, so it reads as the pair rather than as a word the
  * reader has to expand.
+ *
+ * ``past`` (David, 2026-11-02): a removed line names the files it WAS in
+ * when last seen, so it says "Was found in". Not "Removed from": a file
+ * that stopped being served lost no line, it went away whole.
  */
-export function foundInLabel(found: string | null | undefined): string | null {
+export function foundInLabel(found: string | null | undefined, past = false): string | null {
   const raw = (found ?? "").trim();
   if (!raw) return null;
-  return `Found in ${raw === "both" ? "ads.txt + app-ads.txt" : raw}`;
+  return `${past ? "Was found" : "Found"} in ${raw === "both" ? "ads.txt + app-ads.txt" : raw}`;
 }
 
 /* ── WHICH FILE (2026-10-21) ──────────────────────────────────────────
