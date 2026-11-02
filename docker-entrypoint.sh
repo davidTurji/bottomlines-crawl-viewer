@@ -1,6 +1,6 @@
 #!/bin/sh
-# Container entrypoint: derive the proxy Host header from CRAWLER_API_URL,
-# then hand off to nginx:alpine's stock entrypoint, whose template step
+# Container entrypoint: derive the proxy Host headers from CRAWLER_API_URL
+# and CORE_API_URL, then hand off to nginx:alpine's stock entrypoint, whose template step
 # (20-envsubst-on-templates.sh) substitutes both variables into
 # /etc/nginx/templates/default.conf.template.
 #
@@ -33,10 +33,22 @@ echo "viewer: proxying /api/ -> $CRAWLER_API_URL (Host: $CRAWLER_API_HOST)"
 # service that signs them. The same dead-port default: until CORE_API_URL
 # is set on the service those links answer 502 here, and the mails keep
 # pointing at core-api's own address, so nothing a customer holds breaks.
-if [ -z "${CORE_API_URL:-}" ]; then
-  echo "WARNING: CORE_API_URL is not set; /crawler/report-files/ will answer 502" >&2
-  CORE_API_URL="http://127.0.0.1:9"
-fi
+# A value that is not a plain http(s) URL would stop nginx from starting
+# and take the whole viewer down with it: it gets the dead port instead.
+case "${CORE_API_URL:-}" in
+  "")
+    echo "WARNING: CORE_API_URL is not set; /crawler/report-files/ will answer 502" >&2
+    CORE_API_URL="http://127.0.0.1:9" ;;
+  http://*|https://*)
+    case "$CORE_API_URL" in
+      *[!A-Za-z0-9.:/_-]*)
+        echo "WARNING: CORE_API_URL has characters nginx cannot take; /crawler/report-files/ will answer 502" >&2
+        CORE_API_URL="http://127.0.0.1:9" ;;
+    esac ;;
+  *)
+    echo "WARNING: CORE_API_URL is not an http(s) URL; /crawler/report-files/ will answer 502" >&2
+    CORE_API_URL="http://127.0.0.1:9" ;;
+esac
 CORE_API_URL="${CORE_API_URL%/}"
 CORE_API_HOST="$(printf '%s' "$CORE_API_URL" | sed -E 's#^[a-zA-Z][a-zA-Z0-9+.-]*://##; s#/.*$##; s#:[0-9]+$##')"
 export CORE_API_URL CORE_API_HOST

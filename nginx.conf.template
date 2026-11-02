@@ -5,8 +5,8 @@
 # This is a TEMPLATE: nginx:alpine's stock entrypoint runs every file in
 # /etc/nginx/templates/*.template through envsubst at container start
 # (see docker-entrypoint.sh, which derives CRAWLER_API_HOST from
-# CRAWLER_API_URL first). Only ${CRAWLER_API_URL} and ${CRAWLER_API_HOST}
-# are substituted — every other $var below is nginx's own.
+# CRAWLER_API_URL, and CORE_API_HOST from CORE_API_URL, first). Only those
+# four are substituted; every other $var below is nginx's own.
 #
 # Port 8080 is Cloud Run's requirement (its ingress sends traffic there;
 # the default 80 is closed).
@@ -60,13 +60,30 @@ server {
         proxy_set_header Host ${CORE_API_HOST};
         proxy_set_header Cookie "";
         proxy_set_header Authorization "";
+        # HTTP/1.1 upstream, so core-api's body comes chunked with its own
+        # end marker: a stream cut short upstream reaches the reader as a
+        # FAILED download, never as a finished, truncated file (core-api
+        # reads the whole file first for exactly that reason).
+        proxy_http_version 1.1;
+        proxy_set_header Connection "";
+        # The hop to core-api is TLS the browser would have verified.
         proxy_ssl_server_name on;
+        proxy_ssl_verify on;
+        proxy_ssl_trusted_certificate /etc/ssl/certs/ca-certificates.crt;
+        proxy_ssl_verify_depth 3;
         # A whole report zip streams for minutes: never buffered to disk
-        # here, and never cut off by the 60 s default.
+        # here. The Cloud Run request limit (deploy.yml, --timeout) is the
+        # same hour as core-api's.
         proxy_buffering off;
         proxy_request_buffering off;
-        proxy_read_timeout 900s;
-        proxy_send_timeout 900s;
+        proxy_read_timeout 3600s;
+        proxy_send_timeout 3600s;
+        # This origin carries the viewer's session: core-api never sets a
+        # cookie on it, and its answers are files or JSON, never a page
+        # that could run script here.
+        proxy_hide_header Set-Cookie;
+        add_header X-Content-Type-Options "nosniff" always;
+        add_header Content-Security-Policy "default-src 'none'; sandbox" always;
         add_header X-Robots-Tag "noindex, nofollow" always;
         add_header Referrer-Policy "no-referrer" always;
         add_header Cache-Control "no-store" always;
