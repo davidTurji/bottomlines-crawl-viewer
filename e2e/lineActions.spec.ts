@@ -102,6 +102,9 @@ test('KPI comparisons from zero show the amount without an invented percentage',
     await expect(delta).toContainText('vs 0 last week');
     await expect(delta).not.toContainText('%');
   }
+  // Each figure wears its sign (David, 2026-11-02): + added, − removed.
+  await expect(page.getByRole('button', { name: /Lines added/ }).locator('[data-figure-sign]')).toHaveText('+');
+  await expect(page.getByRole('button', { name: /Lines removed/ }).locator('[data-figure-sign]')).toHaveText('−');
 });
 
 for (const width of [1440, 390]) {

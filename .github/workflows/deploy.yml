@@ -64,11 +64,15 @@ jobs:
         with:
           project_id: ${{ secrets.GCP_PROJECT_ID }}
 
+      # --timeout: a mailed report zip streams through this service
+      # (/crawler/report-files/, nginx.conf.template) and can take many
+      # minutes on a slow line; the hour matches core-api's.
       - name: Deploy to Cloud Run
         run: |
           gcloud run deploy "$SERVICE" \
             --source . \
             --region="${{ secrets.GCP_REGION }}" \
+            --timeout=3600 \
             --quiet
 
       # A customer link must keep working across the swap, so prove the

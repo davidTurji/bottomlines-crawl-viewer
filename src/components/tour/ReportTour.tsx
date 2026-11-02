@@ -89,6 +89,11 @@ function useReportFeatures(enabled: boolean): ReportFeatures | null {
         canExport: !!exportInfo && exportInfo.format !== "none",
         trial: !!summary?.trial,
         hasSchain,
+        // The bar draws a filter only when the list says how it splits:
+        // the step names the ones on screen, and there is none without.
+        listFilters: (["platform", "found-in", "match-type"] as const).filter(
+          (id) => document.querySelector(`[data-tour="list-filters"] [data-testid="${id}"]`) !== null,
+        ),
       });
     });
     return () => {

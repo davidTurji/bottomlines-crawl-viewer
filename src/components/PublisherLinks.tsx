@@ -153,13 +153,18 @@ export function PublisherDomainLink({
       title={`Open ${host(domain)} in a new tab`}
       className={cn(
         NESTED,
-        "group/domain inline-flex max-w-full items-center gap-0.5 truncate rounded-sm underline-offset-2 transition-colors hover:text-primary hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40",
+        // -ml-0.5 here, pl-0.5 on the words: the clipping box starts 2px
+        // left of the text, so a leading p or j keeps its stem (David,
+        // 2026-11-02: "p00" read as a cut-off letter), and the text stands
+        // where it did. The 2px go back on the max width, or a parent sized
+        // to the link would cut it short.
+        "group/domain -ml-0.5 inline-flex max-w-[calc(100%+2px)] items-center gap-0.5 truncate rounded-sm underline-offset-2 transition-colors hover:text-primary hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40",
         active && "text-primary underline",
         shown && cn("group/shown", SHOWN_TEXT, SHOWN_BOX),
         className,
       )}
     >
-      <span className="truncate">{label ?? domain}</span>
+      <span className="truncate pl-0.5">{label ?? domain}</span>
       {arrow && (
         <ArrowUpRight
           aria-hidden
