@@ -9,7 +9,7 @@ import { api, ApiError } from "@/lib/api";
 import { ReportScopeContext, useReportScope } from "@/lib/reportScope";
 import { isReservedFirstSegment } from "@/lib/reservedPaths";
 import {
-  EXPIRED_LINK_MESSAGE,
+  ExpiredLinkScreen,
   ReportNoticeCard,
 } from "@/components/ReportNoticeCard";
 
@@ -138,10 +138,10 @@ export function ReadableReportScope() {
     };
   }, [slug, shortId, reserved, attempt]);
 
-  if (reserved) return <ReportNoticeCard message={EXPIRED_LINK_MESSAGE} />;
+  if (reserved) return <ExpiredLinkScreen />;
   if (state.status === "resolving") return <ResolvingScreen />;
   if (state.status === "missing") {
-    return <ReportNoticeCard message={EXPIRED_LINK_MESSAGE} />;
+    return <ExpiredLinkScreen />;
   }
   if (state.status === "timeout") {
     return (

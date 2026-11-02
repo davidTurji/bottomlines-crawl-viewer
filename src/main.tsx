@@ -8,10 +8,7 @@ import {
   ReportSubpathRedirect,
   TokenReportScope,
 } from "./components/ReportScopeRoutes";
-import {
-  EXPIRED_LINK_MESSAGE,
-  ReportNoticeCard,
-} from "./components/ReportNoticeCard";
+import { ExpiredLinkScreen } from "./components/ReportNoticeCard";
 import CrawlReport from "./routes/CrawlReport";
 import CrawlDiscovered from "./routes/CrawlDiscovered";
 import CrawlDeclarations from "./routes/CrawlDeclarations";
@@ -92,8 +89,8 @@ const tree = (
 
       {/* Anything else — a one-segment path, or a reserved first segment
           the router was handed because no real file matched — gets the
-          same honest dead-end card rather than a blank screen. */}
-      <Route path="*" element={<ReportNoticeCard message={EXPIRED_LINK_MESSAGE} />} />
+          same expired-link screen rather than a blank screen. */}
+      <Route path="*" element={<ExpiredLinkScreen />} />
     </Routes>
   </BrowserRouter>
 );

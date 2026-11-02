@@ -14,7 +14,7 @@ import { mockDiscoveredLinePlacements, mockDiscoveredLines, mockInactiveBlock } 
 import { PAGE_SIZE } from "../src/lib/paging";
 import { DECLARED_HOST, declaredHostApp, installFakeApi, TOKEN, type Scenario } from "./fakeApi";
 
-const EXPIRED = "This report link is not valid or has expired.";
+const EXPIRED = "The report behind this link is no longer available.";
 /** The page error boundary's card: a page threw while rendering. */
 const CRASHED = "This page could not be shown";
 const BASE = `/crawl-report/${TOKEN}`;
