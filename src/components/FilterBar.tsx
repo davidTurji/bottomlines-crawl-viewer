@@ -67,6 +67,15 @@ function useFilterApplied(on: boolean) {
  *  and placeholder whole. With less, the filters fold. */
 const SEARCH_ROOM = 180;
 
+/** The search box's room once its list has landed (pager and Download in
+ *  place), by the bar's width: the room the filters really have. A load
+ *  frees those places for a moment; read then, the filters would unfold
+ *  only to fold again as the rows land (2026-11-02 review). */
+const landedRoom = new Map<number, number>();
+/** On a first load, what the pager, count and Download will take beyond
+ *  the count's skeleton: the room the decision holds back until they land. */
+const FIRST_LOAD_RESERVE = 340;
+
 /** The width of the filters laid out as a row: their first visible
  *  trigger's left to their last one's right. */
 function rowWidthOf(row: HTMLElement): number {
@@ -84,7 +93,14 @@ function rowWidthOf(row: HTMLElement): number {
  * search below SEARCH_ROOM. Folded and shut, the row is read by laying it
  * out for an instant, so the bar unfolds the moment there is room again.
  */
-export function FilterGroup({ children }: { children: ReactNode }) {
+export function FilterGroup({ children, settling }: {
+  children: ReactNode;
+  /** Set by a list: true while its rows load (pager and Download not in
+   *  place), false once landed. Left out, the bar is always as it stands. */
+  settling?: boolean;
+}) {
+  const settlingNow = useRef(settling);
+  settlingNow.current = settling;
   const [open, setOpen] = useState(false);
   const [fold, setFold] = useState(false);
   const [applied, setApplied] = useState<ReadonlySet<string>>(() => new Set());
@@ -116,6 +132,13 @@ export function FilterGroup({ children }: { children: ReactNode }) {
     let room = query.clientWidth;
     for (const el of query.children) {
       if (el !== group && !el.classList.contains("list-toolbar-search")) room -= el.getBoundingClientRect().width;
+    }
+    // A list's bar: the room it has once landed, never the moment's.
+    if (settlingNow.current !== undefined) {
+      const key = Math.round(query.parentElement?.clientWidth ?? 0);
+      const landed = landedRoom.get(key);
+      if (!settlingNow.current) landedRoom.set(key, Math.min(landed ?? Infinity, room));
+      else room = landed ?? room - FIRST_LOAD_RESERVE;
     }
     setFold(rowWidth.current + SEARCH_ROOM > room);
   }, []);
@@ -263,7 +286,7 @@ function FilterInfo({ text }: { text: string }) {
   };
   return (
     <>
-      <span ref={mark} aria-hidden data-filter-info className="filter-info-mark" onMouseEnter={show} onMouseLeave={() => setAt(null)}>
+      <span ref={mark} aria-hidden data-filter-info className="filter-info-mark" onMouseEnter={show} onMouseLeave={() => setAt(null)} onPointerDown={() => setAt(null)}>
         <Info className="h-3 w-3" />
       </span>
       {at && createPortal(<span role="tooltip" className="filter-info-bubble" style={{ left: at.left, top: at.top }}>{text}</span>, document.body)}

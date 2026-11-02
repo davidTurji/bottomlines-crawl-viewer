@@ -191,9 +191,15 @@ function focusPlatformOf(root: HTMLElement | null, filter = "platform") {
     if (active && active !== document.body && root.contains(active)) return;
     if (active && active !== document.body && !active.closest("[role=menu]")) return;
     const platform = root.querySelector<HTMLElement>(`[data-testid="${filter}"]`);
-    const target = platform && platform.offsetParent !== null
-      ? platform
-      : root.querySelector<HTMLElement>('button[aria-label="List filters"]');
+    const visible = (el: HTMLElement | null) => (el && el.offsetParent !== null ? el : null);
+    // The filter; else its folded button; and only once the list has
+    // landed with no filter bar at all (Inactive), the status the reader
+    // is on.
+    const landedBare = !root.querySelector('[data-filter-skeleton], [aria-busy="true"], .list-toolbar-filters');
+    const target = visible(platform)
+      ?? visible(root.querySelector<HTMLElement>('button[aria-label="List filters"]'))
+      ?? (landedBare ? visible(root.querySelector<HTMLElement>('[role="tab"][aria-selected="true"]'))
+        ?? visible(root.querySelector<HTMLElement>('select[aria-label="Matched status"]')) : null);
     if (target && target.offsetParent !== null) target.focus({ preventScroll: true });
     else if (Date.now() - started < 4000) window.setTimeout(tick, 80);
   };
@@ -235,7 +241,12 @@ export default function CrawlReport() {
    * pick in the meantime cancels it.
    */
   const [moving, setMoving] = useState<Moving | null>(null);
+  // The pending move: its timer, and how long it still has to wait (a
+  // hand on the card holds it, David 2026-11-02).
   const moveTimer = useRef<number | null>(null);
+  const moveLeft = useRef({ ms: 0, since: 0, finish: () => {} });
+  const movingNow = useRef(false);
+  movingNow.current = moving != null;
   const cancelMove = useCallback(() => {
     if (moveTimer.current != null) window.clearTimeout(moveTimer.current);
     moveTimer.current = null;
@@ -255,15 +266,36 @@ export default function CrawlReport() {
   }, [cancelMove]);
   const moveTo = useCallback((to: ListView, why: string, picked: string, focus: string, apply: () => void) => {
     cancelMove();
-    setMoving({ to, why, picked });
-    moveTimer.current = window.setTimeout(() => {
+    setMoving({ to, why, picked, held: false });
+    const finish = () => {
       moveTimer.current = null;
-      apply();
-      preserveReportViewport(listRef.current, () => setMatchedView(to));
-      setMoving(null);
+      // The pick and the move in one commit: the new list's first read is
+      // already under the pick, never one under the old filter first.
+      preserveReportViewport(listRef.current, () => {
+        apply();
+        setMatchedView(to);
+        setMoving(null);
+      });
       focusPlatformOf(listRef.current, focus);
-    }, MOVE_PAUSE_MS);
+    };
+    moveLeft.current = { ms: MOVE_PAUSE_MS, since: Date.now(), finish };
+    moveTimer.current = window.setTimeout(finish, MOVE_PAUSE_MS);
   }, [cancelMove]);
+  /** A pointer on the card holds the move (the bar stops); off it, the
+   *  move takes the time it had left. */
+  const holdMove = useCallback((held: boolean) => {
+    if (held) {
+      if (moveTimer.current == null) return;
+      window.clearTimeout(moveTimer.current);
+      moveTimer.current = null;
+      moveLeft.current.ms = Math.max(0, moveLeft.current.ms - (Date.now() - moveLeft.current.since));
+    } else {
+      if (moveTimer.current != null || !movingNow.current) return;
+      moveLeft.current.since = Date.now();
+      moveTimer.current = window.setTimeout(moveLeft.current.finish, moveLeft.current.ms);
+    }
+    setMoving((m) => (m ? { ...m, held } : m));
+  }, []);
   /**
    * PLATFORM, ONE CHOICE FOR THE PAGE (David, 2026-11-01). It stands on both
    * lists and the last pick is what both say: CTV / Mobile filter the apps
@@ -302,6 +334,9 @@ export default function CrawlReport() {
    * opens Matched publishers on it (focus on their Found in). The apps'
    * own Platform stays as the reader left it.
    */
+  // Any other choice in the pause is the reader moving on: the move is off.
+  const chooseFoundIn = useCallback((next: FoundInFilter) => { cancelMove(); setFoundIn(next); }, [cancelMove]);
+  const chooseMatchType = useCallback((next: MatchTypeFilter) => { cancelMove(); setMatchType(next); }, [cancelMove]);
   const pickFoundIn = useCallback((next: FoundInFilter) => {
     if (matchedViewRef.current === "publishers") {
       cancelMove();
@@ -320,12 +355,14 @@ export default function CrawlReport() {
   const [openFirst, setOpenFirst] = useState(0);
   const listRef = useRef<HTMLDivElement>(null);
   const showLinesOf = (tab: "added" | "removed") => {
+    cancelMove();
     setDrillTab(tab);
     setOpenFirst((n) => n + 1);
     glideTo(listRef.current);
   };
   /** The quiet line's "See them": the Inactive tab, on a list that has rows. */
   const showInactive = (counts: InactiveCounts) => {
+    cancelMove();
     setDrillTab("inactive");
     if (!counts[matchedView]) setMatchedView(matchedView === "publishers" ? "apps" : "publishers");
     glideTo(listRef.current);
@@ -826,8 +863,16 @@ export default function CrawlReport() {
           card-per-row lists in the same grammar as bottomlines-app's
           HierarchyCard: colored disc, generous padding, right-aligned stats,
           tinted expansion. Publishers are green, apps are pink. */}
-      <div data-tour="overview-list" ref={listRef} data-moving={moving ? moving.to : undefined} className="relative scroll-mt-6">
-        {moving && <MovingCard moving={moving} list={listRef.current} />}
+      <div data-tour="overview-list" ref={listRef} data-moving={moving ? moving.to : undefined} className="relative scroll-mt-6"
+        // A click or typing in the list during the pause: the reader moved
+        // on, the move is off (a menu choice lives outside, in its portal).
+        onPointerDownCapture={moving ? (event) => { if (!(event.target as Element).closest?.(".list-moving-card")) cancelMove(); } : undefined}
+        onInputCapture={moving ? cancelMove : undefined}>
+        {/* Always here, so a screen reader hears the move when it is said. */}
+        <p role="status" aria-live="polite" data-list-moving-said className="sr-only">
+          {moving ? `Moving to ${VIEW_TITLE[moving.to].title}. ${moving.why}` : ""}
+        </p>
+        {moving && <MovingCard moving={moving} list={listRef.current} onHold={holdMove} />}
         <ListHead
           inactive={listTab === "inactive"}
           title={VIEW_TITLE[matchedView].title}
@@ -843,9 +888,9 @@ export default function CrawlReport() {
             setTab={pickStatus}
             openFirst={openFirst}
             matchType={matchType}
-            setMatchType={setMatchType}
+            setMatchType={chooseMatchType}
             foundIn={foundIn}
-            setFoundIn={setFoundIn}
+            setFoundIn={chooseFoundIn}
             foundInMulti={foundInMulti}
             onPlatform={pickPlatform}
             searchReset={searchReset}
@@ -861,7 +906,7 @@ export default function CrawlReport() {
             setTab={pickStatus}
             openFirst={openFirst}
             matchType={matchType}
-            setMatchType={setMatchType}
+            setMatchType={chooseMatchType}
             platform={platform}
             setPlatform={setPlatform}
             foundInMulti={foundInMulti}
@@ -1550,10 +1595,10 @@ export type ListView = "publishers" | "apps";
 // app-ads.txt, the Found in switch's other half); an app matches by its
 // app-ads.txt, or by an inventory partner's ads.txt it names (IPD).
 /** A move to the other list, said before it happens (MovingCard). */
-type Moving = { to: ListView; why: string; picked: string };
+type Moving = { to: ListView; why: string; picked: string; held: boolean };
 /** How long the move's card holds before the list moves (David,
- *  2026-11-02: "delay it a second"). */
-const MOVE_PAUSE_MS = 1000;
+ *  2026-11-02: "a second and a half"); a pointer on it holds it longer. */
+const MOVE_PAUSE_MS = 1500;
 /** Why a Platform pick opens the other list, in one line. */
 const MOVE_WHY = {
   ctv: "CTV is an app platform, so its matches are apps.",
@@ -1573,18 +1618,34 @@ function moveWhyOfFile(next: FoundInFilter): string {
 /**
  * The move's card: the walkthrough's card (the pick as its eyebrow, then
  * where it goes and why) just under the list's search bar, with a thin bar
- * filling over the pause. Announced politely; never in the way of a click.
+ * filling over the pause; a pointer on it (hover or finger) holds the pause
+ * and the bar. Never in the way of a click around it; a screen reader hears
+ * it from the list's own status line.
  */
-function MovingCard({ moving, list }: { moving: Moving; list: HTMLElement | null }) {
+function MovingCard({ moving, list, onHold }: { moving: Moving; list: HTMLElement | null; onHold: (held: boolean) => void }) {
   const [top, setTop] = useState<number | null>(null);
+  // Where the mouse was first seen on the card: it holds once it moves.
+  const firstAt = useRef<{ x: number; y: number } | null>(null);
   useLayoutEffect(() => {
     const bar = list?.querySelector<HTMLElement>("[data-list-toolbar]");
     if (!list || !bar) { setTop(96); return; }
     setTop(bar.getBoundingClientRect().bottom - list.getBoundingClientRect().top + 14);
   }, [list]);
   return (
-    <div data-list-moving={moving.to} role="status" aria-live="polite" className="list-moving" style={{ top: top ?? 96 }}>
-      <div className="list-moving-card animate-tour-card-in motion-reduce:animate-none">
+    <div data-list-moving={moving.to} data-held={moving.held || undefined} aria-hidden className="list-moving" style={{ top: top ?? 96 }}>
+      {/* A mouse moving over it, or a finger on it, holds the move. Never
+          just a pointer it appeared under (the menu's choice was there):
+          only real movement or a press counts. */}
+      <div className="list-moving-card animate-tour-card-in motion-reduce:animate-none"
+        onPointerMove={(e) => {
+          if (e.pointerType !== "mouse" || moving.held) return;
+          const from = firstAt.current;
+          if (!from) firstAt.current = { x: e.clientX, y: e.clientY };
+          else if (Math.abs(e.clientX - from.x) + Math.abs(e.clientY - from.y) > 2) onHold(true);
+        }}
+        onPointerDown={(e) => { if (e.pointerType !== "mouse") onHold(true); }}
+        onPointerUp={(e) => { if (e.pointerType !== "mouse") onHold(false); }}
+        onPointerLeave={() => { firstAt.current = null; onHold(false); }} onPointerCancel={() => onHold(false)}>
         <p className="mb-0.5 text-[11px] font-semibold text-primary">{moving.picked}</p>
         <h2 className="text-[14px] font-semibold leading-snug text-slate-900">Moving to {VIEW_TITLE[moving.to].title}</h2>
         <p className="mt-1 text-[12.5px] leading-snug text-slate-500">{moving.why}</p>
@@ -2386,6 +2447,7 @@ export function ListSearchRow({
   right,
   filters,
   actions,
+  loading,
 }: {
   query: string;
   setQuery: (next: string) => void;
@@ -2396,11 +2458,13 @@ export function ListSearchRow({
   right: ReactNode;
   filters?: ReactNode;
   actions?: ReactNode;
+  /** The rows are loading: the filters keep the fold they have landed with. */
+  loading?: boolean;
 }) {
   return (
     <FilterBar actions={actions}>
       <FilterSearch value={query} onChange={setQuery} placeholder={placeholder} ariaLabel={label} />
-      {filters && <FilterGroup>{filters}</FilterGroup>}
+      {filters && <FilterGroup settling={loading}>{filters}</FilterGroup>}
       {right && <div data-list-count className="list-toolbar-results">{right}</div>}
     </FilterBar>
   );
@@ -2444,7 +2508,7 @@ function FilterSkeleton({ width = "w-20" }: { width?: string }) {
 /** The three filters' places on a list's first load (Platform, Found in,
  *  Match type), until it says how it splits. */
 function FilterSkeletons() {
-  return <><FilterSkeleton width="w-16" /><FilterSkeleton width="w-24" /><FilterSkeleton width="w-20" /></>;
+  return <><FilterSkeleton width="w-24" /><FilterSkeleton width="w-32" /><FilterSkeleton width="w-28" /></>;
 }
 
 function DrilldownList({
@@ -2521,10 +2585,13 @@ function DrilldownList({
   // filter unfiltered (an API without it: those tabs are not offered).
   const [changeCounts, setChangeCounts] = useState<ChangeCounts | null>(null);
   const [watchOff, setWatchOff] = useState(false);
-  // Inactive can be the first view mounted; read status capabilities without
-  // requiring a detour through All matched. Older reports still omit them.
+  // Inactive, or a change tab (its events carry no status counts), can be
+  // the first view mounted: a list card or a filter's move opens the list
+  // on the tab the page is on. Read status capabilities without requiring
+  // a detour through All matched, so the extra statuses never vanish.
+  // Older reports still omit them.
   useEffect(() => {
-    if (tab !== "inactive" || changeCounts !== null || watchOff) return;
+    if (tab === "all" || isScopeTab(tab) || changeCounts !== null || watchOff) return;
     let cancelled = false;
     api.matchedDevelopers(token, 1, "", lines, matchType, 1)
       .then(result => { if (!cancelled && result.change_counts) setChangeCounts(result.change_counts); })
@@ -2762,6 +2829,7 @@ function DrilldownList({
             query={query}
             setQuery={setQuery}
             placeholder="Search publishers"
+            loading={loading}
             label="Search matched publishers"
             actions={!loading && settled > 0 && !error && rows.length > 0 && !trial && !caps ? <ExportListButton run={exportList} noun="publishers" status={rowsTab} query={query} filtered={lines.length > 0 || rowsMatchType !== "all" || foundIn !== "all"} /> : null}
             // A first load: the filters' places as skeletons (David,
@@ -2772,6 +2840,8 @@ function DrilldownList({
                 value={foundIn === WEB_PUBLISHERS ? "web" : "all"}
                 onChange={onPlatform}
                 leading="Platform" icon={MonitorSmartphone} ariaLabel="Platform" testId="platform" info={FILTER_INFO.platform}
+                // Its Web is Found in's ads.txt + Both, counted there.
+                narrows={false}
                 options={[
                   // Every choice says what it counts and wears the arrow, in
                   // one look (David, 2026-11-02); CTV and Mobile say "apps",
@@ -3822,15 +3892,22 @@ function MatchedAppsList({
   // the way their list reads it, for the Found in that opens them; null,
   // no Found in on this list (an API without the split).
   const [publisherFiles, setPublisherFiles] = useState<FoundInCounts | null>(null);
-  // While it is read, Found in keeps its place as a skeleton.
+  // While it is read, Found in keeps its place as a skeleton, unless the
+  // API has shown it has no split to give (no place to keep).
   const [filesPending, setFilesPending] = useState(false);
+  const hadFiles = useRef<boolean | null>(null);
+  // How many reads have landed on this list (the skeleton's cue too).
+  const [settled, setSettled] = useState(0);
   const platformShown = platformCounts != null;
+  // Read once the list has landed: it then says whether it has a Platform
+  // (so the one read asks the right thing, never twice).
+  const listLanded = settled > 0;
   useEffect(() => {
     // Never last tab's numbers under this tab: none until this one lands.
     setWebPublishers(null);
     setPublisherFiles(null);
-    setFilesPending(tab !== "inactive");
-    if (tab === "inactive") return;
+    setFilesPending(tab !== "inactive" && listLanded);
+    if (tab === "inactive" || !listLanded) return;
     let cancelled = false;
     const watch = isScopeTab(tab) ? WATCH_CHANGE[tab] : undefined;
     // One read: on Web (when the API takes two files and this list has a
@@ -3849,17 +3926,20 @@ function MatchedAppsList({
         const web = asked === WEB_PUBLISHERS && r.found_in === WEB_PUBLISHERS && tabOk;
         setWebPublishers(web && r.total > 0 ? r.total : null);
         const files = tabOk ? splitOf(r.found_in_counts, r.found_in, asked) : null;
+        hadFiles.current = r.found_in_counts != null;
         setPublisherFiles(files && files.all > 0 ? files : null);
         setFilesPending(false);
       })
       .catch(() => { if (!cancelled) { setWebPublishers(null); setPublisherFiles(null); setFilesPending(false); } });
     return () => { cancelled = true; };
-  }, [token, tab, lines, matchType, foundInMulti, platformShown]);
+  }, [token, tab, lines, matchType, foundInMulti, platformShown, listLanded]);
   // The watch tabs (crawler #361), as on the publishers list.
   const [changeCounts, setChangeCounts] = useState<ChangeCounts | null>(null);
   const [watchOff, setWatchOff] = useState(false);
+  // As on the publishers list: a first mount on Inactive or a change tab
+  // still learns which statuses there are.
   useEffect(() => {
-    if (tab !== "inactive" || changeCounts !== null || watchOff) return;
+    if (tab === "all" || isScopeTab(tab) || changeCounts !== null || watchOff) return;
     let cancelled = false;
     api.matchedApps(token, 1, "", lines, matchType, undefined, 1, platform)
       .then(result => { if (!cancelled && result.change_counts) setChangeCounts(result.change_counts); })
@@ -3886,7 +3966,6 @@ function MatchedAppsList({
 
   const keyOf = (a: AppRow) => `${a.store}:${a.bundle_id}`;
   const appCache = usePageCache<unknown>();
-  const [settled, setSettled] = useState(0);
   // The size of the list last read, for the skeleton's row count.
   const [landed, setLanded] = useState<Landed | null>(null);
   // The tab the rows on screen were read for, and whether the server
@@ -4080,6 +4159,7 @@ function MatchedAppsList({
             query={query}
             setQuery={setQuery}
             placeholder="Search apps"
+            loading={loading}
             label="Search matched apps"
             actions={!loading && settled > 0 && !failed && rows.length > 0 && !trial && !caps && !unsupportedChange ? <ExportListButton run={exportList} noun="apps" status={rowsTab} query={query} filtered={lines.length > 0 || rowsMatchType !== "all" || platform !== "all"} /> : null}
             // A first load: the filters' places as skeletons until the list
@@ -4107,7 +4187,7 @@ function MatchedAppsList({
               {/* FOUND IN HERE TOO (David, 2026-11-02): a file is a
                   publisher's, never an app's, so it filters no app: every
                   choice says how many publishers it opens and opens them. */}
-              {!publisherFiles && filesPending && <FilterSkeleton width="w-24" />}
+              {!publisherFiles && filesPending && hadFiles.current !== false && <FilterSkeleton width="w-32" />}
               {publisherFiles && <FilterSelect value={"all" as FoundInFilter} onChange={onFoundIn} leading="Found in" icon={FileText} ariaLabel="Found in" testId="found-in" info={FILTER_INFO.foundInOnApps}
                 options={([
                   { value: "all", label: "All files", description: "Opens every matched publisher." },
@@ -4352,19 +4432,30 @@ function MatchedAppCard({
           {(!inactive || app.owner_domain || store) && (
             // Inactive, it wraps on a phone: whether the publisher is still
             // live is the point of the line and must not be cut off.
-            <div className={cn("text-xs text-slate-500", inactive ? "break-words sm:truncate" : "truncate")}>
-              {store && <span data-store-hint data-platform={String(app.store ?? "").trim().toLowerCase()}>On <span className="text-slate-600">{store}</span></span>}
-              {store && (!inactive || app.owner_domain) && ", "}
-              {(!inactive || app.owner_domain) && "publisher: "}
-              {app.owner_domain ? (
-                <PublisherDomainLink domain={app.owner_domain} className="text-slate-600" arrow={false} />
-              ) : null}
-              {app.owner_name ? (
-                <span className="app-owner-name text-slate-400">, {app.owner_name}</span>
-              ) : null}
-              {inactive && inactive.publisherLive != null && (
-                <span className={inactive.publisherLive ? "text-slate-500" : "text-critical"}>
-                  , {inactive.publisherLive ? "still live" : "inactive too"}
+            // On a phone the store takes its own line under the publisher's
+            // (index.css .app-subline): one line would cut the publisher's
+            // domain away whole, a link not being cut part way.
+            <div data-wrap={inactive ? "" : undefined} className={cn("app-subline text-xs text-slate-500", inactive ? "break-words sm:truncate" : "truncate")}>
+              {store && (
+                <span data-store-hint data-platform={String(app.store ?? "").trim().toLowerCase()} className="app-store-hint">
+                  On <span className="text-slate-600">{store}</span>
+                  {(!inactive || app.owner_domain) && <span className="app-store-comma">, </span>}
+                </span>
+              )}
+              {(!inactive || app.owner_domain) && (
+                <span className="app-owner">
+                  publisher:{" "}
+                  {app.owner_domain ? (
+                    <PublisherDomainLink domain={app.owner_domain} className="text-slate-600" arrow={false} />
+                  ) : null}
+                  {app.owner_name ? (
+                    <span className="app-owner-name text-slate-400">, {app.owner_name}</span>
+                  ) : null}
+                  {inactive && inactive.publisherLive != null && (
+                    <span className={inactive.publisherLive ? "text-slate-500" : "text-critical"}>
+                      , {inactive.publisherLive ? "still live" : "inactive too"}
+                    </span>
+                  )}
                 </span>
               )}
             </div>

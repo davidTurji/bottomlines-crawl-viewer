@@ -1092,6 +1092,22 @@ test.describe("Found in (publishers) and Platform (apps)", () => {
     expect(errors).toEqual([]);
   });
 
+  test("a list opened straight onto a change tab still offers every status", async ({ page }) => {
+    const errors = watchErrors(page);
+    await open(page, WATCH);
+    await expect(rows(page).first()).toBeVisible();
+    await tab(page, "Added").click();
+    await settled(page);
+    // Each list mounts on Added, whose events carry no status counts: the
+    // extra statuses are still offered, with no detour through All matched.
+    await toApps(page);
+    await expect(page.getByTestId("status-toggle")).toBeVisible();
+    await page.getByRole("button", { name: /Matched publishers/ }).first().click();
+    await expect(tab(page, "Added")).toHaveAttribute("aria-selected", "true");
+    await expect(page.getByTestId("status-toggle")).toBeVisible();
+    expect(errors).toEqual([]);
+  });
+
   test("an API that cannot ask for several files: no Web choice", async ({ page }) => {
     const errors = watchErrors(page);
     await open(page, { ...FULL, appPlatform: true });

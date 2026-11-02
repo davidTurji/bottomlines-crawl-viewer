@@ -288,9 +288,11 @@ test("a filter pick that opens the other list says so for a second, then moves; 
   await page.getByRole("menuitem", { name: /^CTV(?:\s|$)/ }).click();
   const card = page.locator("[data-list-moving]");
   await expect(card).toBeVisible();
-  await expect(card).toHaveAttribute("role", "status");
   await expect(card).toContainText("Platform: CTV");
   await expect(card).toContainText("Moving to Matched apps");
+  // A screen reader hears it from the list's own, always-there status line.
+  await expect(page.locator("[data-list-moving-said]")).toHaveAttribute("role", "status");
+  await expect(page.locator("[data-list-moving-said]")).toContainText("Moving to Matched apps.");
   // Still the publishers for the pause, dimmed behind the card.
   await expect(page.getByRole("textbox", { name: "Search matched publishers" })).toBeVisible();
   await expect(page.locator('[data-tour="overview-list"]')).toHaveAttribute("data-moving", "apps");
@@ -307,5 +309,72 @@ test("a filter pick that opens the other list says so for a second, then moves; 
   await expect(card).toHaveCount(0);
   await page.waitForTimeout(1500);
   await expect(page.getByRole("textbox", { name: "Search matched apps" })).toBeVisible();
+  // Typing in the list during the pause is moving on too: no move, no pick.
+  await page.getByTestId("platform").click();
+  await page.getByRole("menuitem", { name: /^Web(?:\s|$)/ }).click();
+  await expect(card).toBeVisible();
+  await page.getByRole("textbox", { name: "Search matched apps" }).fill("a");
+  await expect(card).toHaveCount(0);
+  await page.waitForTimeout(1500);
+  await expect(page.getByRole("textbox", { name: "Search matched apps" })).toBeVisible();
+  await expect(page.getByTestId("platform")).toContainText("CTV");
+  expect(errors).toEqual([]);
+});
+
+test("at a laptop width the filters keep their fold while a list reloads, never popping in and out", async ({ page }) => {
+  const errors = watchErrors(page);
+  await page.setViewportSize({ width: 1280, height: 900 });
+  await open(page);
+  await lands(page, rows(page));
+  const group = page.locator('[data-tour="overview-list"] .list-toolbar-filters');
+  const before = await group.getAttribute("data-fold");
+  // Every fold state the bar shows while a search reloads the list.
+  await page.evaluate(() => {
+    const seen = new Set<string>();
+    (window as unknown as { __folds: Set<string> }).__folds = seen;
+    const el = document.querySelector('[data-tour="overview-list"] .list-toolbar-filters')!;
+    seen.add(el.getAttribute("data-fold")!);
+    new MutationObserver(() => seen.add(el.getAttribute("data-fold")!)).observe(el, { attributes: true, attributeFilter: ["data-fold"] });
+  });
+  const release = await hold(page, (u) => u.pathname.endsWith("/matched-developers") && u.searchParams.get("q") === "a");
+  await page.getByRole("textbox", { name: "Search matched publishers" }).fill("a");
+  await waits(page, rows(page));
+  await expect(group).toHaveAttribute("data-fold", before!);
+  release();
+  await expect(page.locator('[role="status"][aria-busy="true"]')).toHaveCount(0);
+  expect([...(await page.evaluate(() => [...(window as unknown as { __folds: Set<string> }).__folds]))]).toEqual([before]);
+  // Folded, Platform Web is one pick: counted once on the Filters button.
+  if (before === "true") {
+    await page.getByRole("textbox", { name: "Search matched publishers" }).fill("");
+    await lands(page, rows(page));
+    await page.getByRole("button", { name: "List filters", exact: true }).click();
+    await page.getByTestId("platform").click();
+    await page.getByRole("menuitem", { name: /^Web(?:\s|$)/ }).click();
+    await lands(page, rows(page));
+    await expect(page.locator("[data-filters-on]")).toHaveText("1");
+  }
+  expect(errors).toEqual([]);
+});
+
+test("the move's card holds while a mouse rests on it, and goes on its way once the mouse leaves", async ({ page }) => {
+  const errors = watchErrors(page);
+  await page.setViewportSize({ width: 1600, height: 900 });
+  await open(page);
+  await lands(page, rows(page));
+  await page.getByTestId("platform").click();
+  await page.getByRole("menuitem", { name: /^CTV(?:\s|$)/ }).click();
+  const card = page.locator(".list-moving-card");
+  await expect(card).toBeVisible();
+  const box = (await card.boundingBox())!;
+  await page.mouse.move(box.x + 20, box.y + 20, { steps: 3 });
+  await page.mouse.move(box.x + 60, box.y + 30, { steps: 3 });
+  await expect(page.locator("[data-list-moving][data-held]")).toHaveCount(1);
+  // Held well past its 1.5 s: still the publishers, the card still up.
+  await page.waitForTimeout(2600);
+  await expect(page.getByRole("textbox", { name: "Search matched publishers" })).toBeVisible();
+  await expect(card).toBeVisible();
+  // The mouse leaves: the move goes on, in what time it had left.
+  await page.mouse.move(5, 5, { steps: 3 });
+  await expect(page.getByRole("textbox", { name: "Search matched apps" })).toBeVisible({ timeout: 3000 });
   expect(errors).toEqual([]);
 });
