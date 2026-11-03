@@ -1384,7 +1384,7 @@ function ListingWindow({
       )}
       {held > 0 && row.listingsCut && held < total && (
         <p data-window-stored className="border-t border-border px-3 py-1 text-[10px] text-slate-500">
-          This report stored {held.toLocaleString()} of these {total.toLocaleString()} lines. Newer reports list every one.
+          This report stored {held.toLocaleString()} of these {total.toLocaleString()} lines.
         </p>
       )}
       {fold.folds && (

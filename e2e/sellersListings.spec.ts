@@ -125,7 +125,7 @@ test("an older report that stored 50 of 300 says so, and lists the 50 it has", a
   await open(page, fixture([{ seller_id: "add-old", relationship: "DIRECT", publishers_total: 300, publishers: pubs(50) }]));
   const ev = await evidenceOf(page, "add-old");
   await expect(ev.locator("[data-window-stored]")).toHaveText(
-    "This report stored 50 of these 300 lines. Newer reports list every one.",
+    "This report stored 50 of these 300 lines.",
   );
   const toggle = ev.locator("[data-window-toggle]");
   await expect(toggle).toHaveText("Show all 50 stored lines");
