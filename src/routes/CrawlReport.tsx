@@ -5,7 +5,7 @@ import { FilterBar, FilterGroup, FilterMultiSelect, FilterSearch, FilterSelect }
 import InactiveSection, { type InactiveCards } from "@/components/InactiveSection";
 import LockedTail from "@/components/LockedTail";
 import { MiniStat } from "@/components/MiniStat";
-import { Collapse, Settle, glideTo, preserveReportViewport, toggleWithoutJump } from "@/components/Motion";
+import { Collapse, Settle, glideTo, prefersReducedMotion, preserveReportViewport, toggleWithoutJump } from "@/components/Motion";
 import TrialBanner from "@/components/TrialBanner";
 import {
   OverviewSkeleton,
@@ -3318,6 +3318,53 @@ const CHANGE_LINES_SLACK = 2;
 const CHANGE_LINES_STEP = 200;
 
 /**
+ * ONE MOTION BOTH WAYS (David, 2026-11-02: closing was "very violent"). The
+ * list's height eases between its first lines and the whole list, the card
+ * expansion's own time and curve (200 ms, ease out), opening and closing
+ * alike; closing scrolls the list back to its top on the way. Returns a stop
+ * that leaves the list at its natural height.
+ */
+const CHANGE_LINES_MOTION_MS = 200;
+
+function easeListHeight(
+  el: HTMLElement,
+  from: number,
+  to: number,
+  done: () => void,
+  /** Closing: stay at the end height until the caller lets go, so the rest
+   *  of the list never shows for a frame before it is taken away. */
+  holdEnd = false,
+): () => void {
+  const top = el.scrollTop;
+  const start = performance.now();
+  let frame = 0;
+  const clear = () => {
+    el.style.height = "";
+    el.style.overflow = "";
+  };
+  el.style.overflow = "hidden";
+  el.style.height = `${from}px`;
+  const step = (now: number) => {
+    // A frame's time can precede the start by a little: never step backwards.
+    const t = Math.min(1, Math.max(0, (now - start) / CHANGE_LINES_MOTION_MS));
+    const k = 1 - Math.pow(1 - t, 3);
+    el.style.height = `${from + (to - from) * k}px`;
+    if (to < from) el.scrollTop = top * (1 - k);
+    if (t < 1) {
+      frame = requestAnimationFrame(step);
+      return;
+    }
+    if (!holdEnd) clear();
+    done();
+  };
+  frame = requestAnimationFrame(step);
+  return () => {
+    cancelAnimationFrame(frame);
+    clear();
+  };
+}
+
+/**
  * Per-kind window styling, written as whole literal class strings so Tailwind
  * keeps them: `added` wears the green ok/publisher tone, `removed` the muted
  * red critical tone, `cert` the amber warn tone the suite uses for a rotation.
@@ -3560,6 +3607,10 @@ function ChangeWindow({
     return () => { alive.current = false; };
   }, []);
   const listId = useId();
+  const stopMotion = useRef<(() => void) | null>(null);
+  // The list's height before it opened, eased from once the whole list is drawn.
+  const openedFrom = useRef<number | null>(null);
+  useEffect(() => () => stopMotion.current?.(), []);
   const source = whole ?? lines;
   // THE CERT, OLD TO NEW (David, 2026-10-27), read for this row only.
   // Lines that say their old cert themselves (crawler #370) need no read.
@@ -3587,13 +3638,48 @@ function ChangeWindow({
     seen.observe(el);
     return () => seen.disconnect();
   }, [open, drawn, groups.length]);
-  const toggle = () => {
-    if (open) {
-      setOpen(false);
-      setDrawn(CHANGE_LINES_STEP);
-      scroller.current?.scrollTo?.({ top: 0 });
+  // Opening: the whole list is drawn, then its height eases up from where
+  // the first lines left it, before the browser paints.
+  useLayoutEffect(() => {
+    const el = scroller.current;
+    const from = openedFrom.current;
+    openedFrom.current = null;
+    if (el && !open) {
+      // Closed: the first lines are drawn, so the held height lets go.
+      el.style.height = "";
+      el.style.overflow = "";
       return;
     }
+    if (!open || !el || from === null) return;
+    const to = el.getBoundingClientRect().height;
+    if (to <= from) return;
+    stopMotion.current?.();
+    stopMotion.current = easeListHeight(el, from, to, () => { stopMotion.current = null; });
+  }, [open]);
+  const toggle = () => {
+    const el = scroller.current;
+    const still = prefersReducedMotion();
+    if (open) {
+      const finish = () => {
+        stopMotion.current = null;
+        if (el) el.scrollTop = 0;
+        setOpen(false);
+        setDrawn(CHANGE_LINES_STEP);
+      };
+      // Closing: the height eases down to the first lines, then the rest go.
+      const firstRows = el ? (Array.from(el.querySelector("ul")?.children ?? []) as HTMLElement[]).slice(0, CHANGE_LINES_OPEN) : [];
+      const to = firstRows.reduce((h, r) => h + r.offsetHeight, 0);
+      stopMotion.current?.();
+      if (!el || still || !to) {
+        finish();
+        return;
+      }
+      stopMotion.current = easeListHeight(el, el.getBoundingClientRect().height, to, finish, true);
+      return;
+    }
+    stopMotion.current?.();
+    stopMotion.current = null;
+    if (el && !still) openedFrom.current = el.getBoundingClientRect().height;
     setOpen(true);
     // A cut row reads the rest each time it opens until it has them, so a
     // failed read is tried again on the next open.

@@ -175,7 +175,8 @@ test('a longer window opens on its first 5 lines; Show all opens every one in it
   await toggle.click();
   await expect(window.locator('.line-entry')).toHaveCount(22);
   await expect(toggle).toHaveText('Show the first 5');
-  expect(await window.locator('[data-window-lines]').evaluate(el => getComputedStyle(el).overflowY)).toBe('auto');
+  // Once the opening motion settles, the window scrolls on its own.
+  await expect.poll(() => window.locator('[data-window-lines]').evaluate(el => getComputedStyle(el).overflowY)).toBe('auto');
   // The last line is reachable by scrolling the window.
   await window.locator('.line-entry').last().scrollIntoViewIfNeeded();
   await expect(window.locator('.line-entry').last()).toBeInViewport();
@@ -279,4 +280,38 @@ test('a failed read of the rest says so, and opening the list again tries again'
   await expect(window.locator('[data-window-load-failed]')).toHaveCount(0);
   await window.locator('[data-window-lines]').evaluate(el => { el.scrollTop = el.scrollHeight; });
   await expect(window.locator('.line-entry')).toHaveCount(300);
+});
+
+test('Show all and Show the first 5 are one smooth motion both ways, never a jump', async ({ page }) => {
+  const lines = Array.from({ length: 22 }, (_, i) => removedLine(i));
+  const { window } = await openRemoved(page, lines, 22);
+  const list = window.locator('[data-window-lines]');
+  // Click the toggle and read the list's height every frame for a while.
+  const heightsAfterClick = () => window.evaluate(async (w) => {
+    const el = w.querySelector('[data-window-lines]') as HTMLElement;
+    const hs: number[] = [];
+    (w.querySelector('[data-window-toggle]') as HTMLButtonElement).click();
+    const t0 = performance.now();
+    await new Promise<void>((done) => {
+      const tick = () => { hs.push(el.getBoundingClientRect().height); if (performance.now() - t0 < 360) requestAnimationFrame(tick); else done(); };
+      requestAnimationFrame(tick);
+    });
+    return hs;
+  });
+  const closed = await list.evaluate(el => el.getBoundingClientRect().height);
+  const opening = await heightsAfterClick();
+  await expect(window.locator('.line-entry')).toHaveCount(22);
+  const open = await list.evaluate(el => el.getBoundingClientRect().height);
+  expect(open).toBeGreaterThan(closed + 50);
+  expect(opening.some(h => h > closed + 2 && h < open - 2)).toBe(true);
+  expect(opening.every((h, i) => i === 0 || h >= opening[i - 1] - 0.5)).toBe(true);
+  // Scrolled down, closing eases back to the first lines and the top.
+  await list.evaluate(el => { el.scrollTop = el.scrollHeight; });
+  const closing = await heightsAfterClick();
+  await expect(window.locator('.line-entry')).toHaveCount(5);
+  expect(closing.some(h => h > closed + 2 && h < open - 2)).toBe(true);
+  expect(closing.every((h, i) => i === 0 || h <= closing[i - 1] + 0.5)).toBe(true);
+  expect(await list.evaluate(el => Math.round(el.getBoundingClientRect().height))).toBe(Math.round(closed));
+  expect(await list.evaluate(el => el.scrollTop)).toBe(0);
+  await expect(window.locator('[data-window-toggle]')).toHaveText('Show all 22 lines');
 });
