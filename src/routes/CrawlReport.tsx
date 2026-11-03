@@ -29,6 +29,7 @@ import { usePageCache } from "@/lib/pageCache";
 import { useLineFilter } from "@/lib/lineFilter";
 import { Link } from "react-router-dom";
 import { ChevronDown, ChevronRight, Download, FileText, Globe, MonitorSmartphone, SlidersHorizontal, Smartphone, Tv } from "lucide-react";
+import { FOLD_OPEN, FOLD_SLACK, FOLD_STEP, easeListHeight } from "@/components/FoldedList";
 import {
   type TrialCaps, type TrialSlice,
   api,
@@ -3304,65 +3305,10 @@ function PublisherCard({
 /** One change kind a card's expansion can show. */
 type ChangeKind = "added" | "removed" | "cert";
 
-/**
- * EVERY LINE, ONE CLICK AWAY (David, 2026-11-02: "we should be able to show
- * all removed lines"). A window opens on its first lines; "Show all" opens
- * the whole list inside the window, which scrolls on its own so a long list
- * never pushes the page away, and draws the lines a step at a time as the
- * reader scrolls, so thousands stay quick. Nothing is ever cut.
- */
-const CHANGE_LINES_OPEN = 5;
-/** A window shows every line when folding would hide this few or fewer. */
-const CHANGE_LINES_SLACK = 2;
-/** Lines drawn at a time inside an opened window. */
-const CHANGE_LINES_STEP = 200;
-
-/**
- * ONE MOTION BOTH WAYS (David, 2026-11-02: closing was "very violent"). The
- * list's height eases between its first lines and the whole list, the card
- * expansion's own time and curve (200 ms, ease out), opening and closing
- * alike; closing scrolls the list back to its top on the way. Returns a stop
- * that leaves the list at its natural height.
- */
-const CHANGE_LINES_MOTION_MS = 200;
-
-function easeListHeight(
-  el: HTMLElement,
-  from: number,
-  to: number,
-  done: () => void,
-  /** Closing: stay at the end height until the caller lets go, so the rest
-   *  of the list never shows for a frame before it is taken away. */
-  holdEnd = false,
-): () => void {
-  const top = el.scrollTop;
-  const start = performance.now();
-  let frame = 0;
-  const clear = () => {
-    el.style.height = "";
-    el.style.overflow = "";
-  };
-  el.style.overflow = "hidden";
-  el.style.height = `${from}px`;
-  const step = (now: number) => {
-    // A frame's time can precede the start by a little: never step backwards.
-    const t = Math.min(1, Math.max(0, (now - start) / CHANGE_LINES_MOTION_MS));
-    const k = 1 - Math.pow(1 - t, 3);
-    el.style.height = `${from + (to - from) * k}px`;
-    if (to < from) el.scrollTop = top * (1 - k);
-    if (t < 1) {
-      frame = requestAnimationFrame(step);
-      return;
-    }
-    if (!holdEnd) clear();
-    done();
-  };
-  frame = requestAnimationFrame(step);
-  return () => {
-    cancelAnimationFrame(frame);
-    clear();
-  };
-}
+/** Every line, one click away; one motion both ways (``FoldedList``). */
+const CHANGE_LINES_OPEN = FOLD_OPEN;
+const CHANGE_LINES_SLACK = FOLD_SLACK;
+const CHANGE_LINES_STEP = FOLD_STEP;
 
 /**
  * Per-kind window styling, written as whole literal class strings so Tailwind
