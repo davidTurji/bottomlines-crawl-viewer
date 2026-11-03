@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import ts from 'typescript';
 const compiled = ts.transpileModule(fs.readFileSync(new URL('../src/lib/changeLines.ts', import.meta.url), 'utf8'), { compilerOptions: { module: ts.ModuleKind.ESNext, target: ts.ScriptTarget.ES2022 } }).outputText;
-const { foldChangeEvents } = await import('data:text/javascript;base64,' + Buffer.from(compiled).toString('base64'));
+const { foldChangeEvents, withKeptLines, changeLineKey } = await import('data:text/javascript;base64,' + Buffer.from(compiled).toString('base64'));
 
 const ev = (extra = {}) => ({
   developer_id: 7, event: 'removed', ssp_domain: 'ssp.madeupmedia.com', publisher_id: '3199392', relationship: 'DIRECT',
@@ -60,4 +60,28 @@ test('every event is kept: 450 seats in both files are 450 lines', () => {
   const lines = foldChangeEvents(events);
   assert.equal(lines.length, 450);
   assert.ok(lines.every((l) => l.found_in === 'both'));
+});
+
+test("the publisher's own file is one place whether a line says its domain or nothing", () => {
+  const a = changeLineKey({ ssp_domain: 'SSP.madeupmedia.com', publisher_id: 'AB1', relationship: 'direct', host: 'smartline.madeupmedia.com' }, 'smartline.madeupmedia.com');
+  const b = changeLineKey({ ssp_domain: 'ssp.madeupmedia.com', publisher_id: 'ab1', relationship: 'DIRECT', host: null }, 'smartline.madeupmedia.com');
+  assert.equal(a, b);
+  assert.notEqual(a, changeLineKey({ ssp_domain: 'ssp.madeupmedia.com', publisher_id: 'ab1', relationship: 'DIRECT', host: 'apps.madeupmedia.com' }, 'smartline.madeupmedia.com'));
+});
+
+test('the whole list keeps the held lines exactly (their certs), adds the rest, and never drops one', () => {
+  const held = [{ ssp_domain: 'ssp.madeupmedia.com', publisher_id: 'p0', relationship: 'DIRECT', cert_id: 'cert-0', found_in: 'ads.txt', host: null },
+                { ssp_domain: 'ssp.madeupmedia.com', publisher_id: 'gone', relationship: 'DIRECT', found_in: 'ads.txt', host: null }];
+  const loaded = foldChangeEvents([ev({ publisher_id: 'p0' }), ev({ publisher_id: 'p1' })], { publisherDomain: 'smartline.madeupmedia.com' });
+  const whole = withKeptLines(loaded, held, 'smartline.madeupmedia.com');
+  assert.deepEqual(whole.map((l) => [l.publisher_id, l.cert_id]), [['p0', 'cert-0'], ['p1', undefined], ['gone', undefined]]);
+  assert.equal(whole[0], held[0], 'the held line itself, unchanged');
+});
+
+test("a cert window's lines say their old cert when the event does", () => {
+  const [line] = foldChangeEvents([ev({ event: 'changed', old_cert_id: 'old1', new_cert_id: 'new1' })], { cert: true });
+  assert.equal(line.old_cert_id, 'old1');
+  assert.equal(line.cert_id, 'new1');
+  const [plain] = foldChangeEvents([ev({ old_cert_id: 'old1', new_cert_id: 'new1' })]);
+  assert.equal(plain.old_cert_id, undefined);
 });

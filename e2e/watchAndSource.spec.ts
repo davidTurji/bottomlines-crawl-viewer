@@ -230,3 +230,53 @@ test('a report frozen before every line was kept (exactly 200): Show all reads t
   expect(asked.length).toBeGreaterThan(0);
   expect(asked.every(u => u.searchParams.get('event') === 'removed' && u.searchParams.get('developer_id') === String(developerId()))).toBe(true);
 });
+
+const oldEvents = () => {
+  const events: Record<string, unknown>[] = Array.from({ length: 300 }, (_, i) => ({
+    developer_id: 0, event: 'removed', ssp_domain: 'ssp.madeupmedia.com', publisher_id: `p${i}`, relationship: 'DIRECT',
+    file_kind: 'ads_txt', host: null, matched_seat: true, last_seen_at: '2026-10-20T17:32:00Z', not_found_at: '2026-11-01T19:12:00Z',
+  }));
+  for (let i = 280; i < 300; i++) events.push({ ...events[i], file_kind: 'app_ads_txt' });
+  return events;
+};
+
+const serveEvents = (page: import('@playwright/test').Page, events: Record<string, unknown>[], failFirst = false) => {
+  let calls = 0;
+  return () => page.route('**/line-events?*', async route => {
+    calls++;
+    if (failFirst && calls === 1) return route.fulfill({ status: 500, body: 'boom' });
+    const url = new URL(route.request().url());
+    const p = Number(url.searchParams.get('page') ?? 1);
+    const size = Number(url.searchParams.get('page_size') ?? 50);
+    await route.fulfill({ json: { page: p, page_size: size, total: events.length, rows: events.slice((p - 1) * size, p * size) } });
+  });
+};
+
+test("an old report whose partners' copies came after the 200 cut is still read whole", async ({ page }) => {
+  const partners = Array.from({ length: 3 }, (_, i) => ({ ...removedLine(900 + i), match_type: 'ipd', ipd_partner: `partner${i}.madeupmedia.com` }));
+  const kept = [...Array.from({ length: 200 }, (_, i) => removedLine(i)), ...partners] as ReturnType<typeof removedLine>[];
+  const events = oldEvents();
+  for (const l of partners) events.push({ ...events[0], publisher_id: l.publisher_id, match_type: 'ipd', ipd_partner: l.ipd_partner });
+  const { window } = await openRemoved(page, kept, 323, serveEvents(page, events));
+  const toggle = window.locator('[data-window-toggle]');
+  await expect(toggle).toHaveText('Show all lines');
+  await toggle.click();
+  await expect(window.locator('[data-window-more]')).toHaveText('Showing 200 of 303 lines, scroll for more');
+  await window.locator('[data-window-lines]').evaluate(el => { el.scrollTop = el.scrollHeight; });
+  await expect(window.locator('.line-entry')).toHaveCount(303);
+});
+
+test('a failed read of the rest says so, and opening the list again tries again', async ({ page }) => {
+  const kept = Array.from({ length: 200 }, (_, i) => removedLine(i));
+  const { window } = await openRemoved(page, kept, 320, serveEvents(page, oldEvents(), true));
+  const toggle = window.locator('[data-window-toggle]');
+  await toggle.click();
+  await expect(window.locator('[data-window-load-failed]')).toContainText('Could not load the lines past the first 200');
+  await expect(window.locator('.line-entry')).toHaveCount(200);
+  await toggle.click();
+  await expect(toggle).toHaveText('Show all lines');
+  await toggle.click();
+  await expect(window.locator('[data-window-load-failed]')).toHaveCount(0);
+  await window.locator('[data-window-lines]').evaluate(el => { el.scrollTop = el.scrollHeight; });
+  await expect(window.locator('.line-entry')).toHaveCount(300);
+});

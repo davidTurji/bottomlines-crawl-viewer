@@ -29,20 +29,38 @@ const DATED = [
 /** Why a removed line left: kept on a "both" line only when its two files agree. */
 const REMOVAL = ["removal_reason", "removal_detail"] as const;
 
-/** A change's line events (any order, any page) as the window's lines. */
-export function foldChangeEvents(events: readonly LineEvent[]): MatchedSeatLine[] {
+/** One window line's identity: its seat, and where it sits (an own copy's
+ *  file host, the publisher's own file whether it says its domain or
+ *  nothing; an inventory partner's copy, that partner). */
+export function changeLineKey(
+  l: { ssp_domain?: unknown; publisher_id?: unknown; relationship?: unknown; host?: unknown; match_type?: unknown; ipd_partner?: unknown },
+  publisherDomain?: string | null,
+): string {
+  const seat = [
+    String(l.ssp_domain ?? "").trim().toLowerCase(),
+    String(l.publisher_id ?? "").trim().toLowerCase(),
+    String(l.relationship ?? "").trim().toUpperCase(),
+  ].join("|");
+  if (l.match_type === "ipd" || (typeof l.ipd_partner === "string" && l.ipd_partner.trim())) {
+    return `${seat}|ipd|${String(l.ipd_partner ?? "").trim().toLowerCase()}`;
+  }
+  const host = String(l.host ?? "").trim().toLowerCase();
+  const own = String(publisherDomain ?? "").trim().toLowerCase();
+  return `${seat}|own|${host && host !== own ? host : ""}`;
+}
+
+/** A change's line events (any order, any page) as the window's lines.
+ *  ``cert``: a cert window's lines, each saying its old cert too. */
+export function foldChangeEvents(
+  events: readonly LineEvent[],
+  { cert = false, publisherDomain }: { cert?: boolean; publisherDomain?: string | null } = {},
+): MatchedSeatLine[] {
   const out = new Map<string, MatchedSeatLine>();
   for (const e of events) {
     if (!e || typeof e !== "object" || e.matched_seat === false) continue;
     const ipd = e.match_type === "ipd";
     const file = e.file_kind === "app_ads_txt" ? "app-ads.txt" : "ads.txt";
-    const seat = [
-      String(e.ssp_domain ?? "").trim().toLowerCase(),
-      String(e.publisher_id ?? "").trim().toLowerCase(),
-      String(e.relationship ?? "").trim().toUpperCase(),
-    ].join("|");
-    const host = String(e.host ?? "").trim().toLowerCase();
-    const key = ipd ? `${seat}|ipd|${String(e.ipd_partner ?? "").trim().toLowerCase()}` : `${seat}|own|${host}`;
+    const key = changeLineKey(e, publisherDomain);
     const have = out.get(key);
     if (have) {
       if (!ipd && have.found_in !== file) have.found_in = "both";
@@ -59,6 +77,7 @@ export function foldChangeEvents(events: readonly LineEvent[]): MatchedSeatLine[
       found_in: ipd ? "ads.txt" : file,
       host: e.host ?? null,
       ...(ipd ? { match_type: "ipd" as const, ipd_partner: e.ipd_partner ?? null } : {}),
+      ...(cert && typeof e.old_cert_id === "string" ? { old_cert_id: e.old_cert_id } : {}),
     };
     const source = e as Record<string, unknown>;
     const target = line as Record<string, unknown>;
@@ -66,4 +85,29 @@ export function foldChangeEvents(events: readonly LineEvent[]): MatchedSeatLine[
     out.set(key, line);
   }
   return [...out.values()];
+}
+
+/**
+ * The whole list, with the lines the row already held kept exactly as they
+ * were: they carry what line events never did (the cert the crawler read
+ * from the book, an inventory partner's platform), and a line the reader
+ * was looking at must not change under them. A held line the events lack
+ * is kept too: the whole list is never shorter than what was shown.
+ */
+export function withKeptLines(
+  loaded: readonly MatchedSeatLine[],
+  kept: readonly MatchedSeatLine[],
+  publisherDomain?: string | null,
+): MatchedSeatLine[] {
+  const held = new Map<string, MatchedSeatLine>();
+  for (const l of kept) if (l && typeof l === "object") held.set(changeLineKey(l, publisherDomain), l);
+  const out: MatchedSeatLine[] = [];
+  const used = new Set<string>();
+  for (const l of loaded) {
+    const k = changeLineKey(l, publisherDomain);
+    out.push(held.get(k) ?? l);
+    used.add(k);
+  }
+  for (const [k, l] of held) if (!used.has(k)) out.push(l);
+  return out;
 }

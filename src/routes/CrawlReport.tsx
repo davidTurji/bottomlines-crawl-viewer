@@ -66,7 +66,7 @@ import {
   WEB_PUBLISHERS,
 } from "../lib/api";
 import { rowFilesOf, type FileWord } from "@/lib/rowFiles";
-import { foldChangeEvents } from "@/lib/changeLines";
+import { foldChangeEvents, withKeptLines } from "@/lib/changeLines";
 import { inactiveCountsOf, inactiveDay, inactiveTotal, reasonText } from "@/lib/inactive";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import {
@@ -3271,8 +3271,9 @@ function PublisherCard({
                   matched={row.matched_lines}
                   counts={{ added: row.added, removed: row.removed, cert: row.cert_changed }}
                   loadAll={{
-                    added: () => allChangeLines(token, row.developer_id, "added"),
-                    removed: () => allChangeLines(token, row.developer_id, "removed"),
+                    added: () => allChangeLines(token, row.developer_id, "added", row.developer_domain),
+                    removed: () => allChangeLines(token, row.developer_id, "removed", row.developer_domain),
+                    cert: () => allChangeLines(token, row.developer_id, "cert", row.developer_domain),
                   }}
                   // Own lines open the publisher's file; each partner's
                   // lines open that partner's ads.txt.
@@ -3552,18 +3553,25 @@ function ChangeWindow({
   const [loading, setLoading] = useState(false);
   const [loadFailed, setLoadFailed] = useState(false);
   const alive = useRef(true);
-  useEffect(() => () => { alive.current = false; }, []);
+  // Set on every mount: React's development double mount runs the cleanup
+  // once, and a flag left false would drop the answer (review, 2026-11-02).
+  useEffect(() => {
+    alive.current = true;
+    return () => { alive.current = false; };
+  }, []);
+  const listId = useId();
   const source = whole ?? lines;
   // THE CERT, OLD TO NEW (David, 2026-10-27), read for this row only.
   // Lines that say their old cert themselves (crawler #370) need no read.
   const certs = useRowCerts(kind === "cert" && !hasOldCerts(source) ? certRead : undefined);
   // One row per distinct line, its partners beside it (2026-10-27).
   const groups = groupSeatLines(withOldCerts(source, certs, publisherDomain), rowPartner);
-  // A row frozen before 2026-10-28 kept its first 200 lines: exactly 200,
-  // counting fewer changes per file than the row's own count, was cut.
+  // A row frozen before 2026-10-28 kept its first 200 own lines (its
+  // inventory partners' copies were added after the cut): exactly 200 own
+  // lines, counting fewer changes per file than the row's own count, was cut.
   const cut =
-    Boolean(loadAll) && whole === null && !loadFailed &&
-    lines.length === EVENT_LINES_CAP && typeof total === "number" && perFileCount(lines) < total;
+    Boolean(loadAll) && whole === null &&
+    ownLineCount(lines) === EVENT_LINES_CAP && typeof total === "number" && perFileCount(lines) < total;
   const folds = cut || groups.length > CHANGE_LINES_OPEN + CHANGE_LINES_SLACK;
   const shown = !folds ? groups : groups.slice(0, open ? drawn : CHANGE_LINES_OPEN);
   const scroller = useRef<HTMLDivElement | null>(null);
@@ -3587,15 +3595,18 @@ function ChangeWindow({
       return;
     }
     setOpen(true);
+    // A cut row reads the rest each time it opens until it has them, so a
+    // failed read is tried again on the next open.
     if (cut && loadAll && !loading) {
       setLoading(true);
+      setLoadFailed(false);
       loadAll()
         .then((all) => {
-          // Never fewer than the row kept: a short answer is not the whole.
-          if (alive.current) all.length >= lines.length ? setWhole(all) : setLoadFailed(true);
+          // The held lines stay as they were, and none is ever dropped.
+          if (alive.current) setWhole(withKeptLines(all, lines, publisherDomain));
         })
-        .catch(() => alive.current && setLoadFailed(true))
-        .finally(() => alive.current && setLoading(false));
+        .catch(() => { if (alive.current) setLoadFailed(true); })
+        .finally(() => { if (alive.current) setLoading(false); });
     }
   };
   return (
@@ -3637,6 +3648,7 @@ function ChangeWindow({
       <LineActionGroup tone={kind}>
       <div
         ref={scroller}
+        id={listId}
         data-window-lines
         className={cn(open && folds && "max-h-[32rem] overflow-y-auto overscroll-contain")}
       >
@@ -3668,13 +3680,13 @@ function ChangeWindow({
         </button>
       )}
       {open && loading && (
-        <p data-window-loading className="border-t border-border px-3 py-1.5 text-[11px] text-slate-500">
+        <p role="status" data-window-loading className="border-t border-border px-3 py-1.5 text-[11px] text-slate-500">
           Loading every line
         </p>
       )}
       {open && loadFailed && (
-        <p data-window-load-failed className="border-t border-border px-3 py-1.5 text-[11px] text-slate-500">
-          Could not load the lines past the first {lines.length.toLocaleString()}. Try again later, or download the report.
+        <p role="status" data-window-load-failed className="border-t border-border px-3 py-1.5 text-[11px] text-slate-500">
+          Could not load the lines past the first {lines.length.toLocaleString()}. Close and open the list to try again, or download the report.
         </p>
       )}
       </div>
@@ -3684,6 +3696,7 @@ function ChangeWindow({
           type="button"
           data-window-toggle
           aria-expanded={open}
+          aria-controls={listId}
           onClick={toggle}
           className="flex w-full items-center justify-center gap-1 border-t border-border px-3 py-1.5 text-[11px] font-medium text-slate-600 hover:bg-muted/60 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-primary/30"
         >
@@ -3699,23 +3712,41 @@ function ChangeWindow({
   );
 }
 
+/** A window's own lines: not an inventory partner's copy. */
+function ownLineCount(lines: readonly MatchedSeatLine[]): number {
+  return lines.filter((l) => l && l.match_type !== "ipd" && !l.ipd_partner).length;
+}
+
 /** A window's lines counted the way its row counts them: once per file, a
  *  line in ads.txt and app-ads.txt twice, each partner's copy once. */
 function perFileCount(lines: readonly MatchedSeatLine[]): number {
   return lines.reduce((n, l) => n + (String(l?.found_in ?? "").toLowerCase() === "both" ? 2 : 1), 0);
 }
 
-/** Every line event of one publisher's added or removed lines, every page,
- *  folded into the window's lines (``lib/changeLines``). */
-async function allChangeLines(token: string, developerId: number, event: "added" | "removed"): Promise<MatchedSeatLine[]> {
+/** Every line event of one publisher's change of a kind, every page,
+ *  folded into the window's lines (``lib/changeLines``). A cert change is
+ *  stored as "changed", which the endpoint's event filter does not take:
+ *  the publisher's events are read whole and kept by kind. */
+async function allChangeLines(
+  token: string,
+  developerId: number,
+  kind: ChangeKind,
+  publisherDomain?: string | null,
+): Promise<MatchedSeatLine[]> {
   const rows: LineEvent[] = [];
   for (let page = 1; page <= 10_000; page++) {
-    const r = await api.lineEvents(token, { event, developer_id: developerId, page, page_size: 500 });
+    const r = await api.lineEvents(token, {
+      ...(kind === "cert" ? {} : { event: kind }),
+      developer_id: developerId,
+      page,
+      page_size: 500,
+    });
     const got = Array.isArray(r.rows) ? r.rows : [];
     rows.push(...got);
     if (!got.length || rows.length >= (r.total ?? 0)) break;
   }
-  return foldChangeEvents(rows);
+  const mine = kind === "cert" ? rows.filter((e) => e && (e.event === "changed" || e.event === "cert_changed")) : rows;
+  return foldChangeEvents(mine, { cert: kind === "cert", publisherDomain });
 }
 
 /**
