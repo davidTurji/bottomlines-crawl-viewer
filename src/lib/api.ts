@@ -955,10 +955,14 @@ export const api = {
         const { version: _drop, ...rest } = file;
         file = rest as typeof file;
       }
+      // `?many=1`: one seller listed by 1,240 publishers; `?stored=50`: the
+      // lists as a report baked before 2026-11-03 kept them.
+      let sightings = q.has("many") ? m.withManyListings(m.mockSellerSightings) : m.mockSellerSightings;
+      if (q.has("stored")) sightings = m.storedAsBefore(sightings, Number(q.get("stored")) || 50);
       return {
         domain: m.MOCK_SELLERS_DOMAIN,
         file,
-        sightings: m.mockSellerSightings,
+        sightings,
         file_checks: m.mockCompletedChecks,
         checked_at: m.MOCK_CHECKED_AT,
         file_url: `https://${m.MOCK_SELLERS_DOMAIN}/sellers.json`,

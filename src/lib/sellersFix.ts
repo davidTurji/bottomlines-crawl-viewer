@@ -115,6 +115,11 @@ export type SellerRow = {
   listings: Listing[];
   /** How many lines name it in all; ``listings`` may be the first of them. */
   listingsTotal?: number;
+  /** ``listings`` holds fewer lines than ``listingsTotal``: a report baked
+   *  before 2026-11-03 kept the first 50 publishers of each relationship
+   *  (or a customer past the crawler's whole-list cap). Every list of a
+   *  newer report is whole, and the page says when one is not. */
+  listingsCut?: boolean;
   /** A duplicate ID's other entries, which the fix takes out of the file
    *  (the kept one is ``current``). */
   dropped?: Seller[];
@@ -194,6 +199,8 @@ type Seen = {
   rN: number;
   names: Map<string, string>;
   listings: Listing[];
+  /** A sighting listed fewer publishers than its whole count. */
+  cut: boolean;
 };
 
 export function suggest(file: SellersFile, sightings: Sighting[], ownDomain: string, checks?: FileCheck[]): SellerRow[] {
@@ -204,7 +211,7 @@ export function suggest(file: SellersFile, sightings: Sighting[], ownDomain: str
     const id = String(s.seller_id).trim().toLowerCase();
     let e = seen.get(id);
     if (!e) {
-      e = { direct: new Set(), reseller: new Set(), dN: 0, rN: 0, names: new Map(), listings: [] };
+      e = { direct: new Set(), reseller: new Set(), dN: 0, rN: 0, names: new Map(), listings: [], cut: false };
       seen.set(id, e);
     }
     // A seller's own file proves it is seen, and is listed as such, but
@@ -216,13 +223,17 @@ export function suggest(file: SellersFile, sightings: Sighting[], ownDomain: str
       if (s.relationship === "DIRECT") e.dN += total;
       else e.rN += total;
     }
+    let listed = 0;
     for (const p of s.publishers) {
       const d = norm(p.domain);
       if (!d) continue;
       if (!p.own_file) (s.relationship === "DIRECT" ? e.direct : e.reseller).add(d);
       e.listings.push({ relationship: s.relationship, publisher: d, found_in: p.found_in, ...(p.own_file ? { own: true } : {}) });
+      listed += 1;
       if (p.name && !p.own_file) e.names.set(d, p.name);
     }
+    // Fewer listed than counted: the page says the list is not whole.
+    if (listed < total) e.cut = true;
   }
 
   const rows: SellerRow[] = [];
@@ -403,6 +414,7 @@ export function suggest(file: SellersFile, sightings: Sighting[], ownDomain: str
         reseller,
         listings: e?.listings ?? [],
         listingsTotal: dN + rN,
+        ...(e?.cut ? { listingsCut: true } : {}),
       });
       continue;
     }
@@ -423,6 +435,7 @@ export function suggest(file: SellersFile, sightings: Sighting[], ownDomain: str
       reseller,
       listings: e?.listings ?? [],
       listingsTotal: dN + rN,
+      ...(e?.cut ? { listingsCut: true } : {}),
       ...(dropped.length ? { dropped } : {}),
       ...(ask.length ? { ask } : {}),
       ...(check ? { check } : {}),
@@ -456,6 +469,7 @@ export function suggest(file: SellersFile, sightings: Sighting[], ownDomain: str
       reseller,
       listings: e.listings,
       listingsTotal: dN + rN,
+      ...(e.cut ? { listingsCut: true } : {}),
       ask: ["name", "domain", "seller_type"],
     });
   }
