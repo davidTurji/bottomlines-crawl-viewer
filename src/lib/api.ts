@@ -1516,7 +1516,10 @@ export type DeveloperEvent = MatchTypeFields & {
   developer_name: string | null;
   developer_domain: string | null;
   developer_platform: string | null;
-  matched_lines_prev: number;
+  /** Last week's report's own count of the publisher; null when that
+   *  report could not be read (crawler, 2026-11-02): the card then shows
+   *  no Last week rather than a guessed one. */
+  matched_lines_prev: number | null;
   matched_lines_current: number;
   lines_added: number;
   lines_removed: number;

@@ -5,7 +5,7 @@ import { FilterBar, FilterGroup, FilterMultiSelect, FilterSearch, FilterSelect }
 import InactiveSection, { type InactiveCards } from "@/components/InactiveSection";
 import LockedTail from "@/components/LockedTail";
 import { MiniStat } from "@/components/MiniStat";
-import { Collapse, Settle, glideTo, preserveReportViewport, toggleWithoutJump } from "@/components/Motion";
+import { Collapse, Settle, glideTo, prefersReducedMotion, preserveReportViewport, toggleWithoutJump } from "@/components/Motion";
 import TrialBanner from "@/components/TrialBanner";
 import {
   OverviewSkeleton,
@@ -66,6 +66,7 @@ import {
   WEB_PUBLISHERS,
 } from "../lib/api";
 import { rowFilesOf, type FileWord } from "@/lib/rowFiles";
+import { foldChangeEvents, withKeptLines } from "@/lib/changeLines";
 import { inactiveCountsOf, inactiveDay, inactiveTotal, reasonText } from "@/lib/inactive";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import {
@@ -1937,6 +1938,7 @@ function eventRow(d: DeveloperEvent, event?: string, seats?: string[]): Row {
   const moved = Array.isArray(raw) ? (raw as MatchedSeatLine[]) : null;
   return {
     files: moved && rowFilesOf(moved, moved.length < EVENT_LINES_CAP, null, seats),
+    ...(event === "removed" ? { filesRemoved: true } : {}),
     developer_id: d.developer_id,
     developer_name: d.developer_name,
     developer_domain: d.developer_domain,
@@ -2366,6 +2368,9 @@ type Row = {
    *  its matched lines; on a change tab, the lines that moved there. The
    *  Found in filter keeps the row by it. Null when the row cannot say. */
   files?: FileWord | null;
+  /** Set on the Removed tab: ``files`` are the files its lines were removed
+   *  from, and the row says so (David, 2026-11-02). */
+  filesRemoved?: boolean;
   /** Set on a watch tab: which tab, under which line filter, and the
    *  row's lines of the kind when the crawler sends them with the row. */
   scope?: WatchMark;
@@ -2383,10 +2388,10 @@ const EVENT_LINES_CAP = 200;
  * Sellers.json and Schain say it. On a phone it takes its own line, so a
  * long domain is never cut to make room for it.
  */
-function FileHint({ files, after }: { files: FileWord; after: boolean }) {
+function FileHint({ files, after, removed }: { files: FileWord; after: boolean; removed?: boolean }) {
   return (
     <span data-file-tag={files} className="file-hint flex-none whitespace-nowrap">
-      {after && <span className="file-hint-comma">, </span>}{foundInLabel(files)}
+      {after && <span className="file-hint-comma">, </span>}{foundInLabel(files, removed)}
     </span>
   );
 }
@@ -3195,7 +3200,7 @@ function PublisherCard({
               )}
               {/* WHICH FILE (David, 2026-11-01): ads.txt, app-ads.txt or
                   both, what Found in keeps it by; a file, never a platform. */}
-              {!inactive && row.files && <FileHint files={row.files} after={Boolean(row.developer_domain && row.developer_name)} />}
+              {!inactive && row.files && <FileHint files={row.files} after={Boolean(row.developer_domain && row.developer_name)} removed={row.filesRemoved} />}
             </div>
           )}
           {/* WHERE ITS FILES ARE (2026-10-21): the declared hosts whose
@@ -3264,6 +3269,12 @@ function PublisherCard({
                   removed={row.removed_lines}
                   certChanged={row.cert_changed_lines}
                   matched={row.matched_lines}
+                  counts={{ added: row.added, removed: row.removed, cert: row.cert_changed }}
+                  loadAll={{
+                    added: () => allChangeLines(token, row.developer_id, "added", row.developer_domain),
+                    removed: () => allChangeLines(token, row.developer_id, "removed", row.developer_domain),
+                    cert: () => allChangeLines(token, row.developer_id, "cert", row.developer_domain),
+                  }}
                   // Own lines open the publisher's file; each partner's
                   // lines open that partner's ads.txt.
                   publisherDomain={row.developer_domain}
@@ -3293,8 +3304,65 @@ function PublisherCard({
 /** One change kind a card's expansion can show. */
 type ChangeKind = "added" | "removed" | "cert";
 
-/** How many lines a window prints before it tails the rest as "plus N more". */
-const CHANGE_LINE_CAP = 8;
+/**
+ * EVERY LINE, ONE CLICK AWAY (David, 2026-11-02: "we should be able to show
+ * all removed lines"). A window opens on its first lines; "Show all" opens
+ * the whole list inside the window, which scrolls on its own so a long list
+ * never pushes the page away, and draws the lines a step at a time as the
+ * reader scrolls, so thousands stay quick. Nothing is ever cut.
+ */
+const CHANGE_LINES_OPEN = 5;
+/** A window shows every line when folding would hide this few or fewer. */
+const CHANGE_LINES_SLACK = 2;
+/** Lines drawn at a time inside an opened window. */
+const CHANGE_LINES_STEP = 200;
+
+/**
+ * ONE MOTION BOTH WAYS (David, 2026-11-02: closing was "very violent"). The
+ * list's height eases between its first lines and the whole list, the card
+ * expansion's own time and curve (200 ms, ease out), opening and closing
+ * alike; closing scrolls the list back to its top on the way. Returns a stop
+ * that leaves the list at its natural height.
+ */
+const CHANGE_LINES_MOTION_MS = 200;
+
+function easeListHeight(
+  el: HTMLElement,
+  from: number,
+  to: number,
+  done: () => void,
+  /** Closing: stay at the end height until the caller lets go, so the rest
+   *  of the list never shows for a frame before it is taken away. */
+  holdEnd = false,
+): () => void {
+  const top = el.scrollTop;
+  const start = performance.now();
+  let frame = 0;
+  const clear = () => {
+    el.style.height = "";
+    el.style.overflow = "";
+  };
+  el.style.overflow = "hidden";
+  el.style.height = `${from}px`;
+  const step = (now: number) => {
+    // A frame's time can precede the start by a little: never step backwards.
+    const t = Math.min(1, Math.max(0, (now - start) / CHANGE_LINES_MOTION_MS));
+    const k = 1 - Math.pow(1 - t, 3);
+    el.style.height = `${from + (to - from) * k}px`;
+    if (to < from) el.scrollTop = top * (1 - k);
+    if (t < 1) {
+      frame = requestAnimationFrame(step);
+      return;
+    }
+    if (!holdEnd) clear();
+    done();
+  };
+  frame = requestAnimationFrame(step);
+  return () => {
+    cancelAnimationFrame(frame);
+    clear();
+  };
+}
 
 /**
  * Per-kind window styling, written as whole literal class strings so Tailwind
@@ -3422,6 +3490,9 @@ export function SeatLineRow({
   const foundIn = inOwn ? line.found_in : "ads.txt";
   const sourceKind = fileLabelOf(foundIn);
   const sourceFiles = ["ads.txt", "app-ads.txt", "both"].includes(sourceKind) ? filesOf(sourceKind) : [];
+  // A removed line names the files it was removed from (David,
+  // 2026-11-02), the way ``foundInLabel`` says it: counted once per file.
+  const sourceLead = change === "removed" ? (dates ? ", removed from " : "Removed from ") : dates ? ", found in " : "Found in ";
   const text = (
     <div className="min-w-0 flex-1">
       {label ?? (
@@ -3447,7 +3518,7 @@ export function SeatLineRow({
       {unchecked && <RowNote data-line-unchecked>{unchecked}</RowNote>}
       <RowNote data-line-dates title={dateTitle(line.date_source)}>
           {dates}
-          {sourceFiles.length > 0 && <span data-line-source>{dates ? ", found in " : "Found in "}{sourceFiles.map((file, index) => (
+          {sourceFiles.length > 0 && <span data-line-source>{sourceLead}{sourceFiles.map((file, index) => (
             <span key={file}>{index > 0 && " + "}{linkable(fileDomain) ? (
               <a href={fileUrl(fileDomain, file, gone ? null : line)} target="_blank" rel="noopener noreferrer"
                 onClick={event => event.stopPropagation()} onKeyDown={event => event.stopPropagation()}
@@ -3494,29 +3565,136 @@ export function SeatLineRow({
  * white list of the lines. Used full width on its own for a single-kind change,
  * and as a tile in the side-by-side grid for a mixed one. The header count is
  * the honest total; a long list prints the first few and tails the rest.
+ *
+ * THE COUNT IS THE ROW'S CHANGE COLUMN (David, 2026-11-02): a change counts
+ * once per file it happened in, so a seat removed from ads.txt and app-ads.txt
+ * is 2, listed once as "removed from ads.txt + app-ads.txt". The window used
+ * to count its rows (1) under a Change of -2.
  */
 function ChangeWindow({
   kind,
   lines,
+  total,
   publisherDomain,
   rowPartner,
   certRead,
+  loadAll,
 }: {
   kind: ChangeKind;
   lines: MatchedSeatLine[];
+  /** The row's own count of this kind, as its Change column says it; the
+   *  rows listed when the row has none. */
+  total?: number;
   publisherDomain?: string | null;
   rowPartner?: string | null;
   /** A cert window: whose old certs to read (the row's own, on open). */
   certRead?: CertRead;
+  /** Every line of this change from the report's line events, for a row
+   *  frozen before 2026-10-28 that kept only its first 200. */
+  loadAll?: () => Promise<MatchedSeatLine[]>;
 }) {
   const s = CHANGE_WINDOW[kind];
+  const [open, setOpen] = useState(false);
+  const [drawn, setDrawn] = useState(CHANGE_LINES_STEP);
+  const [whole, setWhole] = useState<MatchedSeatLine[] | null>(null);
+  const [loading, setLoading] = useState(false);
+  const [loadFailed, setLoadFailed] = useState(false);
+  const alive = useRef(true);
+  // Set on every mount: React's development double mount runs the cleanup
+  // once, and a flag left false would drop the answer (review, 2026-11-02).
+  useEffect(() => {
+    alive.current = true;
+    return () => { alive.current = false; };
+  }, []);
+  const listId = useId();
+  const stopMotion = useRef<(() => void) | null>(null);
+  // The list's height before it opened, eased from once the whole list is drawn.
+  const openedFrom = useRef<number | null>(null);
+  useEffect(() => () => stopMotion.current?.(), []);
+  const source = whole ?? lines;
   // THE CERT, OLD TO NEW (David, 2026-10-27), read for this row only.
   // Lines that say their old cert themselves (crawler #370) need no read.
-  const certs = useRowCerts(kind === "cert" && !hasOldCerts(lines) ? certRead : undefined);
+  const certs = useRowCerts(kind === "cert" && !hasOldCerts(source) ? certRead : undefined);
   // One row per distinct line, its partners beside it (2026-10-27).
-  const groups = groupSeatLines(withOldCerts(lines, certs, publisherDomain), rowPartner);
-  const shown = groups.slice(0, CHANGE_LINE_CAP);
-  const extra = groups.length - shown.length;
+  const groups = groupSeatLines(withOldCerts(source, certs, publisherDomain), rowPartner);
+  // A row frozen before 2026-10-28 kept its first 200 own lines (its
+  // inventory partners' copies were added after the cut): exactly 200 own
+  // lines, counting fewer changes per file than the row's own count, was cut.
+  const cut =
+    Boolean(loadAll) && whole === null &&
+    ownLineCount(lines) === EVENT_LINES_CAP && typeof total === "number" && perFileCount(lines) < total;
+  const folds = cut || groups.length > CHANGE_LINES_OPEN + CHANGE_LINES_SLACK;
+  const shown = !folds ? groups : groups.slice(0, open ? drawn : CHANGE_LINES_OPEN);
+  const scroller = useRef<HTMLDivElement | null>(null);
+  const more = useRef<HTMLButtonElement | null>(null);
+  // Draw the next step as the reader nears the end of what is drawn.
+  useEffect(() => {
+    const el = more.current;
+    if (!open || !el || drawn >= groups.length || typeof IntersectionObserver === "undefined") return;
+    const seen = new IntersectionObserver(
+      (entries) => entries.some((e) => e.isIntersecting) && setDrawn((d) => d + CHANGE_LINES_STEP),
+      { root: scroller.current, rootMargin: "400px 0px" },
+    );
+    seen.observe(el);
+    return () => seen.disconnect();
+  }, [open, drawn, groups.length]);
+  // Opening: the whole list is drawn, then its height eases up from where
+  // the first lines left it, before the browser paints.
+  useLayoutEffect(() => {
+    const el = scroller.current;
+    const from = openedFrom.current;
+    openedFrom.current = null;
+    if (el && !open) {
+      // Closed: the first lines are drawn, so the held height lets go.
+      el.style.height = "";
+      el.style.overflow = "";
+      return;
+    }
+    if (!open || !el || from === null) return;
+    const to = el.getBoundingClientRect().height;
+    if (to <= from) return;
+    stopMotion.current?.();
+    stopMotion.current = easeListHeight(el, from, to, () => { stopMotion.current = null; });
+  }, [open]);
+  const toggle = () => {
+    const el = scroller.current;
+    const still = prefersReducedMotion();
+    if (open) {
+      const finish = () => {
+        stopMotion.current = null;
+        if (el) el.scrollTop = 0;
+        setOpen(false);
+        setDrawn(CHANGE_LINES_STEP);
+      };
+      // Closing: the height eases down to the first lines, then the rest go.
+      const firstRows = el ? (Array.from(el.querySelector("ul")?.children ?? []) as HTMLElement[]).slice(0, CHANGE_LINES_OPEN) : [];
+      const to = firstRows.reduce((h, r) => h + r.offsetHeight, 0);
+      stopMotion.current?.();
+      if (!el || still || !to) {
+        finish();
+        return;
+      }
+      stopMotion.current = easeListHeight(el, el.getBoundingClientRect().height, to, finish, true);
+      return;
+    }
+    stopMotion.current?.();
+    stopMotion.current = null;
+    if (el && !still) openedFrom.current = el.getBoundingClientRect().height;
+    setOpen(true);
+    // A cut row reads the rest each time it opens until it has them, so a
+    // failed read is tried again on the next open.
+    if (cut && loadAll && !loading) {
+      setLoading(true);
+      setLoadFailed(false);
+      loadAll()
+        .then((all) => {
+          // The held lines stay as they were, and none is ever dropped.
+          if (alive.current) setWhole(withKeptLines(all, lines, publisherDomain));
+        })
+        .catch(() => { if (alive.current) setLoadFailed(true); })
+        .finally(() => { if (alive.current) setLoading(false); });
+    }
+  };
   return (
     <section
       className={cn(
@@ -3538,12 +3716,13 @@ function ChangeWindow({
           {s.title}
         </span>
         <span
+          data-window-count
           className={cn(
             "font-mono text-[11px] font-semibold tabular-nums",
             s.text,
           )}
         >
-          {groups.length}
+          {typeof total === "number" && total > 0 ? total : groups.length}
         </span>
       </div>
       {/* Why a removal carries two dates, said once where the dates are. */}
@@ -3553,6 +3732,12 @@ function ChangeWindow({
         </p>
       )}
       <LineActionGroup tone={kind}>
+      <div
+        ref={scroller}
+        id={listId}
+        data-window-lines
+        className={cn(open && folds && "max-h-[32rem] overflow-y-auto overscroll-contain")}
+      >
       <ul className="bl-lines-in divide-y divide-border">
         {shown.map((g, i) => (
           <SeatLineRow
@@ -3561,7 +3746,7 @@ function ChangeWindow({
             partners={g.partners}
             own={g.own}
             n={i + 1}
-            digits={gutterDigits(shown.length)}
+            digits={gutterDigits(groups.length)}
             muted={s.muted}
             gone={kind === "removed"}
             publisherDomain={publisherDomain}
@@ -3569,14 +3754,85 @@ function ChangeWindow({
           />
         ))}
       </ul>
-      </LineActionGroup>
-      {extra > 0 && (
-        <p className="border-t border-border px-3 py-1 text-[10px] text-slate-500">
-          Plus {extra} more.
+      {open && drawn < groups.length && (
+        <button
+          ref={more}
+          type="button"
+          data-window-more
+          onClick={() => setDrawn((d) => d + CHANGE_LINES_STEP)}
+          className="w-full border-t border-border px-3 py-1.5 text-[11px] text-slate-500 hover:bg-muted/60"
+        >
+          Showing {drawn.toLocaleString()} of {groups.length.toLocaleString()} lines, scroll for more
+        </button>
+      )}
+      {open && loading && (
+        <p role="status" data-window-loading className="border-t border-border px-3 py-1.5 text-[11px] text-slate-500">
+          Loading every line
         </p>
+      )}
+      {open && loadFailed && (
+        <p role="status" data-window-load-failed className="border-t border-border px-3 py-1.5 text-[11px] text-slate-500">
+          Could not load the lines past the first {lines.length.toLocaleString()}. Close and open the list to try again, or download the report.
+        </p>
+      )}
+      </div>
+      </LineActionGroup>
+      {folds && (
+        <button
+          type="button"
+          data-window-toggle
+          aria-expanded={open}
+          aria-controls={listId}
+          onClick={toggle}
+          className="flex w-full items-center justify-center gap-1 border-t border-border px-3 py-1.5 text-[11px] font-medium text-slate-600 hover:bg-muted/60 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-primary/30"
+        >
+          <ChevronDown aria-hidden className={cn("h-3.5 w-3.5 transition-transform", open && "rotate-180")} />
+          {open
+            ? `Show the first ${CHANGE_LINES_OPEN}`
+            : cut
+              ? "Show all lines"
+              : `Show all ${groups.length.toLocaleString()} lines`}
+        </button>
       )}
     </section>
   );
+}
+
+/** A window's own lines: not an inventory partner's copy. */
+function ownLineCount(lines: readonly MatchedSeatLine[]): number {
+  return lines.filter((l) => l && l.match_type !== "ipd" && !l.ipd_partner).length;
+}
+
+/** A window's lines counted the way its row counts them: once per file, a
+ *  line in ads.txt and app-ads.txt twice, each partner's copy once. */
+function perFileCount(lines: readonly MatchedSeatLine[]): number {
+  return lines.reduce((n, l) => n + (String(l?.found_in ?? "").toLowerCase() === "both" ? 2 : 1), 0);
+}
+
+/** Every line event of one publisher's change of a kind, every page,
+ *  folded into the window's lines (``lib/changeLines``). A cert change is
+ *  stored as "changed", which the endpoint's event filter does not take:
+ *  the publisher's events are read whole and kept by kind. */
+async function allChangeLines(
+  token: string,
+  developerId: number,
+  kind: ChangeKind,
+  publisherDomain?: string | null,
+): Promise<MatchedSeatLine[]> {
+  const rows: LineEvent[] = [];
+  for (let page = 1; page <= 10_000; page++) {
+    const r = await api.lineEvents(token, {
+      ...(kind === "cert" ? {} : { event: kind }),
+      developer_id: developerId,
+      page,
+      page_size: 500,
+    });
+    const got = Array.isArray(r.rows) ? r.rows : [];
+    rows.push(...got);
+    if (!got.length || rows.length >= (r.total ?? 0)) break;
+  }
+  const mine = kind === "cert" ? rows.filter((e) => e && (e.event === "changed" || e.event === "cert_changed")) : rows;
+  return foldChangeEvents(mine, { cert: kind === "cert", publisherDomain });
 }
 
 /**
@@ -3598,6 +3854,8 @@ function ChangeExpansion({
   removed,
   certChanged,
   matched,
+  counts,
+  loadAll,
   publisherDomain,
   rowPartner,
   certRead,
@@ -3606,6 +3864,10 @@ function ChangeExpansion({
   removed: MatchedSeatLine[];
   certChanged: MatchedSeatLine[];
   matched: MatchedSeatLine[];
+  /** The row's Change column, which each window's count says. */
+  counts?: Partial<Record<ChangeKind, number>>;
+  /** Every line of a kind, for a row frozen when it kept only 200. */
+  loadAll?: Partial<Record<ChangeKind, () => Promise<MatchedSeatLine[]>>>;
   /** Whose files the source controls should open. */
   publisherDomain?: string | null;
   /** An IPD row's partner, for lines from a report that does not say
@@ -3636,6 +3898,8 @@ function ChangeExpansion({
       <ChangeWindow
         kind={sections[0].kind}
         lines={sections[0].lines}
+        total={counts?.[sections[0].kind]}
+        loadAll={loadAll?.[sections[0].kind]}
         publisherDomain={publisherDomain}
         rowPartner={rowPartner}
         certRead={sections[0].kind === "cert" ? certRead : undefined}
@@ -3656,6 +3920,8 @@ function ChangeExpansion({
           <ChangeWindow
             kind={sec.kind}
             lines={sec.lines}
+            total={counts?.[sec.kind]}
+            loadAll={loadAll?.[sec.kind]}
             publisherDomain={publisherDomain}
             rowPartner={rowPartner}
             certRead={sec.kind === "cert" ? certRead : undefined}
@@ -4529,6 +4795,7 @@ function MatchedAppCard({
                   removed={app.removed_lines ?? []}
                   certChanged={app.cert_changed_lines ?? []}
                   matched={lines}
+                  counts={{ added, removed, cert: certChanged }}
                   // Own lines open the publisher's file; each partner's
                   // lines open that partner's ads.txt.
                   publisherDomain={app.owner_domain}
