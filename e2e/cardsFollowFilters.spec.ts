@@ -110,6 +110,9 @@ test("a list filter whose re-read fails keeps the report: whole figures, said no
 });
 
 test("every card note and the filter line stay on one line, phone to desktop", async ({ page }) => {
+  // Four widths and three picks: past the default budget on the demo's
+  // full-size fixture.
+  test.setTimeout(120_000);
   for (const width of [320, 390, 768, 1440]) {
     await page.setViewportSize({ width, height: 900 });
     if (width === 320) {
