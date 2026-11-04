@@ -30,6 +30,15 @@ import { inconclusiveItem, inconclusiveSentence } from "../src/components/MatchT
 import { installFakeApi, TOKEN, type Calls, type Scenario } from "./fakeApi";
 
 const BASE = `/crawl-report/${TOKEN}`;
+/** Every row of a paged fixture list. */
+const all = <T,>(read: (p: number) => { rows: T[]; total: number }) => {
+  const out: T[] = [];
+  for (let p = 1; ; p++) {
+    const r = read(p);
+    out.push(...r.rows);
+    if (!r.rows.length || out.length >= r.total) return out;
+  }
+};
 const CONTRACT_ROW_KEYS = [
   "match_type",
   "ipd_partner",
@@ -290,13 +299,16 @@ test.describe("match type on a report that has it", () => {
     await open(page, { matchType: true });
     await chooseFilter(page, "match-type", "IPD");
     await expect(card(page, "Samsung TV Plus")).toHaveCount(1);
-    await expect(page.locator("[data-ipd-where]")).toHaveText([PUBLISHER_WHERE]);
-    await expect(page.locator("[data-ipd-chip]")).toHaveAttribute(
+    // The demo has an IPD match in volume (one in eight): the worked example
+    // leads the list, the rest follow it.
+    await expect(page.locator("[data-ipd-where]").first()).toHaveText(PUBLISHER_WHERE);
+    await expect(page.locator("[data-ipd-chip]").first()).toHaveAttribute(
       "title",
       `${PUBLISHER_WHERE}. Declared in Samsung TV Plus's app-ads.txt`,
     );
     await expect(page.locator("[data-ipd-inconclusive]")).toHaveText(PUBLISHER_NOTE);
-    await expect(page.locator("[data-list-count] p")).toHaveText("1 publisher");
+    await expect(page.locator("[data-list-count]")).toContainText(
+      all((p) => mockMatchedDevelopers(p, "", [], "ipd")).length.toLocaleString());
     const closed = page.getByRole("button", { name: "Show the seat lines of Samsung TV Plus" });
     if (await closed.count()) await closed.click();
     // No sellers.json facts on a matching page (David, 2026-10-27).
@@ -367,8 +379,7 @@ test.describe("match type on a report that has it", () => {
     await page.getByRole("tab", { name: "Added" }).click();
     await chooseFilter(page, "match-type", "IPD");
     await expect(card(page, "Samsung TV Plus")).toHaveCount(1);
-    await expect(page.locator("[data-ipd-chip]")).toHaveCount(1);
-    await expect(page.locator("[data-ipd-where]")).toHaveText([PUBLISHER_WHERE]);
+    await expect(page.locator("[data-ipd-where]").first()).toHaveText(PUBLISHER_WHERE);
     await expect
       .poll(() => calls.some((c) => c.path.endsWith("/developer-events") && c.query.includes("match_type=ipd")))
       .toBe(true);

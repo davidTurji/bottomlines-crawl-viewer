@@ -157,6 +157,34 @@ export const mockSellerSightings: Sighting[] = [
   { seller_id: "500347", relationship: "RESELLER", publishers: pubs(["quokkaplay-games.com", "brambleloop-apps.com", "fernhollow-team.it", "velvetmoth-network.com", "silvergull-media.tv"]) },
 ];
 
+/** `?many=1`: Emberquay Media (300210) listed RESELLER by 1,240 publishers,
+ *  every one stored, as a report baked from 2026-11-03 holds them: the
+ *  window opens on 5 and "Show all" opens every line (David, 2026-11-03).
+ *  Sub-domains of madeupmedia.com only: they belong to nobody. */
+export function withManyListings(sightings: Sighting[]): Sighting[] {
+  const files = ["ads.txt", "app-ads.txt", "ads.txt + app-ads.txt"];
+  const many = Array.from({ length: 1240 }, (_, i) => ({
+    domain: `publisher-${String(i + 1).padStart(4, "0")}.madeupmedia.com`,
+    name: null,
+    found_in: files[i % 3],
+  }));
+  return sightings.map((s) =>
+    s.seller_id === "300210" && s.relationship === "RESELLER"
+      ? { ...s, publishers: many, publishers_total: many.length }
+      : s,
+  );
+}
+
+/** `?stored=50`: the same evidence as a report baked before 2026-11-03 kept
+ *  it, the first 50 publishers of each relationship beside the whole count. */
+export function storedAsBefore(sightings: Sighting[], per = 50): Sighting[] {
+  return sightings.map((s) => ({
+    ...s,
+    publishers_total: Math.max(Number(s.publishers_total ?? 0), s.publishers.length),
+    publishers: s.publishers.slice(0, per),
+  }));
+}
+
 /** When the mock file was "read". */
 export const MOCK_CHECKED_AT = "2026-10-05T03:12:00+00:00";
 

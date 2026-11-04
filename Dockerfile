@@ -62,7 +62,8 @@ ENV NGINX_ENVSUBST_TEMPLATE_SUFFIX=".template" \
 # Dead port default rather than empty: envsubst would turn an empty value
 # into `proxy_pass /;` (invalid nginx) and crash-loop the container. See
 # docker-entrypoint.sh, which also logs a warning when unset.
-ENV CRAWLER_API_URL="" CRAWLER_API_HOST="localhost"
+ENV CRAWLER_API_URL="" CRAWLER_API_HOST="localhost" \
+    CORE_API_URL="" CORE_API_HOST="localhost"
 
 EXPOSE 8080
 ENTRYPOINT ["/usr/local/bin/viewer-entrypoint.sh"]

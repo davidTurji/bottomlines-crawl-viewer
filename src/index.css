@@ -777,6 +777,14 @@ All colors MUST be HSL.
   animation-delay: var(--bl-delay, 0ms);
 }
 
+/* On the dark rail a pending page's row is a pale bar, not the light grey
+   of the page's own skeletons (2026-11-01). */
+.nav-skeleton {
+  background-color: hsl(0 0% 100% / 0.14);
+  background-image: linear-gradient(90deg, transparent 0%, transparent 35%, hsl(0 0% 100% / 0.22) 50%, transparent 65%, transparent 100%);
+  background-size: 200% 100%;
+}
+
 /* The skeleton must never be the thing that makes the page feel unwell.
    Under reduced motion it stays, still, as a calm grey plan of the page. */
 @media (prefers-reduced-motion: reduce) {
@@ -1195,11 +1203,14 @@ button:hover > .report-expand-control, button:focus-visible > .report-expand-con
 .list-toolbar nav[aria-label="Pages"] { flex:none; height:40px; gap:0; border:1px solid hsl(var(--border)); border-radius:8px; padding:3px; background:white; }
 .list-toolbar [data-export-list] { height:40px; border:0; border-radius:6px; padding-inline:10px; background:transparent; }
 .list-toolbar [data-list-count] > span { flex-wrap:nowrap; gap:10px; }
-@container (min-width:1000px) {
- .list-toolbar-filters > button { display:none; }
- .list-toolbar-filter-panel,.list-toolbar-filters[data-open="true"] .list-toolbar-filter-panel { display:flex; flex-direction:row; gap:8px; position:static; width:auto; padding:0; border:0; border-radius:0; box-shadow:none; background:transparent; }
- .list-toolbar-filter-panel .list-toolbar-select { width:auto; height:40px; max-width:190px; border:1px solid hsl(var(--border)); border-radius:8px; }
-}
+/* The filters fold by measured room (FilterGroup, 2026-11-02), not by a
+   breakpoint: data-fold says which. Unfolded they lie in a row; folded and
+   shut they take no room, except for the instant FilterGroup lays them
+   out unseen (data-measure) to read the row's width. */
+.list-toolbar-filters[data-fold="false"] > button { display:none; }
+.list-toolbar-filters:is([data-fold="false"],[data-measure]) .list-toolbar-filter-panel { display:flex; flex-direction:row; gap:8px; position:static; width:auto; padding:0; border:0; border-radius:0; box-shadow:none; background:transparent; }
+.list-toolbar-filters:is([data-fold="false"],[data-measure]) .list-toolbar-filter-panel .list-toolbar-select { width:auto; height:40px; max-width:190px; border:1px solid hsl(var(--border)); border-radius:8px; }
+.list-toolbar-filters[data-fold="true"][data-measure] .list-toolbar-filter-panel { position:absolute; left:0; top:0; height:0; overflow:hidden; visibility:hidden; pointer-events:none; }
 @container (max-width:999px) {
  .list-toolbar [data-page-number],.list-toolbar [data-page-gap] { display:none; }
  .list-toolbar .list-toolbar-page-position { display:block; }
@@ -1240,11 +1251,9 @@ section:has(> .line-action-group) { overflow: clip; }
 .list-toolbar nav[aria-label="Pages"] [aria-current="page"] { background:#e7ece6; color:#173a2e; }
 .list-toolbar [data-list-pager] { gap:12px; }
 .list-toolbar-filter-panel .list-toolbar-select { background:transparent; }
-@container (min-width:1000px) {
- .list-toolbar-filter-panel,.list-toolbar-filters[data-open="true"] .list-toolbar-filter-panel { gap:0; }
- .list-toolbar-filter-panel .list-toolbar-select { height:34px; padding-inline:10px; border:0; border-radius:5px; }
- .list-toolbar-filter-panel .list-toolbar-select:hover { background:#f3f5f1; }
-}
+.list-toolbar-filters:is([data-fold="false"],[data-measure]) .list-toolbar-filter-panel { gap:0; }
+.list-toolbar-filters:is([data-fold="false"],[data-measure]) .list-toolbar-filter-panel .list-toolbar-select { height:34px; padding-inline:10px; border:0; border-radius:5px; }
+.list-toolbar-filters:is([data-fold="false"],[data-measure]) .list-toolbar-filter-panel .list-toolbar-select:hover { background:#f3f5f1; }
 @container (max-width:650px) {
  .list-toolbar { gap:6px; }
  .list-toolbar-query { min-width:115px; }
@@ -1263,15 +1272,30 @@ section:has(> .line-action-group) { overflow: clip; }
 .list-toolbar [data-export-list], .list-toolbar > .list-toolbar-action { border:1px solid hsl(var(--border)); border-radius:7px; background:white; }
 .list-toolbar nav[aria-label="Pages"] { border:1px solid hsl(var(--border)); border-radius:8px; padding:3px; background:white; }
 .list-toolbar nav[aria-label="Pages"] [aria-current="page"] { background:hsl(var(--primary)); color:white; }
-@container (min-width:1000px) {
- .list-toolbar-filter-panel .list-toolbar-select { height:38px; border-radius:0; }
- .list-toolbar-filter-panel .list-toolbar-select + .list-toolbar-divider + .list-toolbar-select { border-left:1px solid hsl(var(--border)); }
- .list-toolbar-filter-panel .list-toolbar-select:last-child { border-radius:0 7px 7px 0; }
-}
+.list-toolbar-filters:is([data-fold="false"],[data-measure]) .list-toolbar-filter-panel .list-toolbar-select { height:38px; border-radius:0; }
+.list-toolbar-filters:is([data-fold="false"],[data-measure]) .list-toolbar-filter-panel .list-toolbar-select + .list-toolbar-divider + .list-toolbar-select { border-left:1px solid hsl(var(--border)); }
+.list-toolbar-filters:is([data-fold="false"],[data-measure]) .list-toolbar-filter-panel .list-toolbar-select:last-child { border-radius:0 7px 7px 0; }
 .store-badge, .ipd-badge { display:inline-flex; flex:none; align-items:center; min-height:20px; padding:1px 6px; border:1px solid transparent; border-radius:4px; font-family:var(--font-sans); font-size:10px; font-weight:600; line-height:1.4; letter-spacing:.01em; white-space:nowrap; }
-.store-badge { background:#edf0ee; color:#43534b; }
-.store-badge[data-inactive] { color:#67736c; background:#f1f3f1; }
+/* Shared filled platform badges; IPD keeps its navy identity. */
+.store-badge { background:#53616e; color:#fff; }
+.store-badge[data-platform="ios"], .store-badge[data-platform="tvos"] { background:#414957; }
+.store-badge[data-platform="android"] { background:#365b46; }
+.store-badge[data-platform="googleplay"] { background:#397064; }
+.store-badge[data-platform="roku"] { background:#654878; }
+.store-badge[data-platform="firetv"] { background:#805329; }
+.store-badge[data-platform="samsung"] { background:#31636b; }
+.store-badge[data-platform="lg"] { background:#7a4355; }
+.store-badge[data-platform="vizio"] { background:#606138; }
+.store-badge[data-inactive] { filter:saturate(.45); }
 .ipd-badge { background:#244b72; color:#fff; }
+/* The app's platform (2026-11-02): square like IPD but soft, the system's
+   tone wash, hairline and ink, so it reads at a glance without shouting;
+   the filled navy stays IPD's. CTV the special violet, Mobile the app teal
+   (its row's round icon), Web the neutral. */
+.platform-badge { --badge-ink:var(--tone-neutral); --badge-wash:var(--tone-neutral-bg); --badge-line:var(--tone-neutral-border); display:inline-flex; flex:none; align-items:center; min-height:20px; padding:1px 6px; border:1px solid hsl(var(--badge-line)); border-radius:4px; background:hsl(var(--badge-wash)); color:hsl(var(--badge-ink)); font-family:var(--font-sans); font-size:10px; font-weight:600; line-height:1.4; letter-spacing:.01em; white-space:nowrap; }
+.platform-badge[data-app-platform="ctv"] { --badge-ink:var(--tone-special); --badge-wash:var(--tone-special-bg); --badge-line:var(--tone-special-border); }
+.platform-badge[data-app-platform="mobile"] { --badge-ink:var(--tone-app); --badge-wash:var(--tone-app-bg); --badge-line:var(--tone-app-border); }
+.platform-badge[data-inactive] { filter:saturate(.3); opacity:.85; }
 .line-action-group { container-type:inline-size; }
 .line-inline-actions { position:relative; z-index:2; display:flex; flex:none; flex-wrap:wrap; align-items:center; align-self:center; justify-content:flex-end; gap:6px; padding:0; background:transparent; }
 .line-inline-actions .line-control { min-height:30px; font-size:11px; }
@@ -1550,6 +1574,10 @@ a.line-source-reference:hover { color:hsl(var(--primary)); text-decoration-color
 .filter-option-label { display:block; font-size:12px; font-weight:500; line-height:18px; }
 .filter-option-description { display:block; margin-top:2px; font-size:11px; font-weight:400; line-height:16px; color:hsl(var(--muted-foreground)); }
 .filter-option-count { flex:none; padding-left:6px; margin-top:2px; font-size:11px; font-variant-numeric:tabular-nums; color:hsl(var(--muted-foreground)); }
+.filter-option-unit { display:inline-flex; align-items:center; gap:4px; color:hsl(var(--foreground)); font-weight:500; }
+.filter-option-tick { display:inline-flex; flex:none; align-items:center; justify-content:center; width:14px; height:14px; margin-top:2px; border:1px solid hsl(var(--border)); border-radius:3px; background:#fff; color:transparent; }
+.filter-option-tick[data-tick="on"] { border-color:hsl(var(--primary)); background:hsl(var(--primary)); color:hsl(var(--primary-foreground)); }
+.filter-option-kept { margin-top:4px; padding:8px 9px 4px; border-top:1px solid #e5e7eb; font-size:11px; font-variant-numeric:tabular-nums; color:hsl(var(--muted-foreground)); }
 @media(prefers-reduced-motion:reduce) { .report-description-reveal { transition:none; } }
 
 /* Download acts immediately; its separate info control only describes scope. */
@@ -1572,3 +1600,58 @@ a.line-source-reference:hover { color:hsl(var(--primary)); text-decoration-color
 @media(prefers-reduced-motion:reduce) { .seller-setup-step { animation:none; } }
 
 @media(max-width:639px) { .list-toolbar .report-download-action[data-size="sm"] { min-height:36px; } }
+
+/* The folded Filters button (2026-11-02): how many filters are on, and the
+   arrow that opens them, on every width. */
+.list-toolbar-filters > button > .list-toolbar-filters-on { display:inline-grid; place-items:center; min-width:16px; height:16px; padding:0 4px; border-radius:8px; background:hsl(var(--primary)); color:hsl(var(--primary-foreground)); font-size:10px; font-weight:600; line-height:1; font-variant-numeric:tabular-nums; }
+.list-toolbar-filters > button > svg.list-toolbar-filters-chevron { display:block; flex:none; opacity:.45; transition:transform 150ms; }
+.list-toolbar-filters > button[aria-expanded="true"] > svg.list-toolbar-filters-chevron { transform:rotate(180deg); }
+/* Folded and open: one tidy column, each filter a full-width row with its
+   arrow at the right edge. */
+.list-toolbar-filters[data-fold="true"][data-open="true"] .list-toolbar-filter-panel { gap:2px; padding:6px; }
+.list-toolbar-filters[data-fold="true"][data-open="true"] .list-toolbar-filter-panel .list-toolbar-select { height:36px; padding-inline:10px; }
+.list-toolbar-filters[data-fold="true"][data-open="true"] .list-toolbar-filter-panel .list-toolbar-select:hover { background:#f3f5f1; }
+.list-toolbar-filters[data-fold="true"][data-open="true"] .list-toolbar-filter-panel .list-toolbar-select > svg:last-child { margin-left:auto; }
+/* The app's publisher link reads as words in its line: when the line is
+   cut, it is cut inside the domain ("p02.madeupme..."), never the whole
+   domain dropped for an ellipsis (a flex box cannot be cut part way). */
+.app-subline .app-owner a, .app-subline .app-owner a > span { display:inline; }
+/* An app's store, before its publisher; on a phone its own line, under
+   the publisher's (which truncates, never the domain cut away whole). */
+@media (max-width:639px) {
+ .app-subline { display:flex; flex-direction:column; }
+ .app-subline > .app-owner { order:1; min-width:0; }
+ .app-subline:not([data-wrap]) > .app-owner { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+ .app-subline > .app-store-hint { order:2; }
+ .app-subline .app-store-comma { display:none; }
+}
+/* A publisher's file, after its domain; on a phone its own line. */
+@media (max-width:639px) {
+ .publisher-subline { flex-wrap:wrap; }
+ .publisher-subline > .file-hint { flex-basis:100%; }
+ .publisher-subline .file-hint-comma { display:none; }
+}
+/* A filter's ⓘ (2026-11-02): a small mark in its trigger; on hover one
+   short line saying which list it is for. On a touch screen its menu says
+   the line under the heading instead. */
+.filter-info-mark { display:inline-flex; flex:none; align-items:center; margin-left:-2px; color:#94a3b8; cursor:help; transition:color 120ms; }
+.filter-info-mark:hover { color:hsl(var(--primary)); }
+.filter-info-bubble { position:fixed; z-index:60; width:max-content; max-width:220px; padding:7px 10px; border:1px solid hsl(var(--border)); border-radius:7px; background:white; color:hsl(var(--muted-foreground)); font-size:11.5px; line-height:1.45; box-shadow:0 4px 14px rgb(15 35 25 / .09); pointer-events:none; animation:filter-info-in 120ms ease-out; }
+@keyframes filter-info-in { from { opacity:0; transform:translateY(-2px); } to { opacity:1; transform:none; } }
+@media (prefers-reduced-motion:reduce) { .filter-info-bubble { animation:none; } }
+.filter-menu-info { display:none; margin:0 0 4px; padding:0 9px 6px; color:hsl(var(--muted-foreground)); font-size:11.5px; line-height:1.45; }
+@media (hover:none) { .filter-info-mark { display:none; } .filter-menu-info { display:block; } }
+/* Moving between the lists (2026-11-02): the walkthrough's card under the
+   search bar for the pause, the list behind it softly dimmed. */
+.list-moving { position:absolute; left:0; right:0; z-index:25; display:flex; justify-content:center; padding:0 12px; pointer-events:none; }
+.list-moving-card { pointer-events:auto; width:100%; max-width:22rem; padding:16px; border:1px solid rgb(226 232 240 / .8); border-radius:16px; background:white; box-shadow:0 20px 50px -12px rgba(15,23,42,.4); }
+.list-moving-bar { height:3px; margin-top:14px; overflow:hidden; border-radius:2px; background:hsl(var(--primary) / .12); }
+.list-moving-bar > span { display:block; height:100%; background:hsl(var(--primary)); transform-origin:left; animation:list-moving-fill linear forwards; }
+@keyframes list-moving-fill { from { transform:scaleX(0); } to { transform:scaleX(1); } }
+.list-moving[data-held] .list-moving-bar > span { animation-play-state:paused; }
+[data-tour="overview-list"] > :not(.list-moving) { transition:opacity 200ms ease; }
+[data-tour="overview-list"][data-moving] > :not(.list-moving) { opacity:.45; }
+@media (prefers-reduced-motion:reduce) {
+ .list-moving-bar > span { animation:none; transform:none; }
+ [data-tour="overview-list"] > :not(.list-moving) { transition:none; }
+}

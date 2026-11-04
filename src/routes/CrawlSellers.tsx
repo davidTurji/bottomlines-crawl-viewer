@@ -17,6 +17,7 @@ import { useEffect, useId, useMemo, useRef, useState } from "react";
 
 import { EntryDiff, JsonDiff } from "@/components/JsonDiff";
 import { Collapse, Settle, glideTo, toggleWithoutJump } from "@/components/Motion";
+import { FOLD_OPEN, useFoldedList } from "@/components/FoldedList";
 import { ReportButton } from "@/components/ReportButton";
 import { ReportDisclosure } from "@/components/ReportDisclosure";
 import { PageShell } from "@/components/PageShell";
@@ -42,6 +43,7 @@ import {
 } from "@/lib/sellersFix";
 import { cn, foundInLabel } from "@/lib/utils";
 import { checkSellerDraft, draftEdits, sameDraft, type SellerDraft } from "@/lib/sellerDraft";
+import { downloadBlob } from "@/lib/fileDownload";
 
 import { api, type SellersFixPayload, type Summary } from "../lib/api";
 import { SplitStat } from "./CrawlReport";
@@ -260,14 +262,7 @@ export default function CrawlSellers() {
     if (blocked) return;
     if (!data || !exportFile) return;
     const blob = new Blob([exportText], { type: "application/json;charset=utf-8" });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement("a");
-    a.href = url;
-    a.download = `${data.domain}-sellers.json`;
-    document.body.appendChild(a);
-    a.click();
-    a.remove();
-    URL.revokeObjectURL(url);
+    downloadBlob(blob, `${data.domain}-sellers.json`);
   };
 
   /** Only complete, explicitly selected drafts can enter the generated file. */
@@ -1279,6 +1274,12 @@ const WINDOW: Record<GroupKey, { glyph: string; text: string; head: string; bord
  * whole report prints a line (`ssp_domain, publisher_id, RELATIONSHIP`),
  * with the publisher and the file at the right margin. A suggested removal
  * has none, and says so.
+ *
+ * EVERY LINE (David, 2026-11-03): the window opens on its first 5 lines and
+ * "Show all" opens every one in its own scroll, the report's change windows'
+ * fold and motion (``FoldedList``); never "Plus N more". A report baked
+ * before 2026-11-03 stored the first 50 publishers of each relationship, and
+ * the window says how many of the whole it holds.
  */
 function ListingWindow({
   row,
@@ -1293,12 +1294,13 @@ function ListingWindow({
   sellerDomain: string | null;
 }) {
   const w = WINDOW[group];
-  const cap = 6;
-  const shown = row.listings.slice(0, cap);
-  // The whole count, not the list's length: the list may be the first of
-  // many.
+  // The whole count, not the list's length: an older report's list may be
+  // the first of many.
   const total = Math.max(row.listingsTotal ?? 0, row.listings.length);
-  const extra = total - shown.length;
+  const held = row.listings.length;
+  const fold = useFoldedList(held);
+  const shown = row.listings.slice(0, fold.rows);
+  const listId = useId();
   return (
     <section className={cn("overflow-hidden rounded-lg border bg-white shadow-sm", w.border)}>
       <div className={cn("flex items-baseline justify-between gap-2 border-b px-3 py-1.5", w.border, w.head)}>
@@ -1336,6 +1338,12 @@ function ListingWindow({
         </div>
       ) : (
         <LineActionGroup>
+        <div
+          ref={fold.scroller}
+          id={listId}
+          data-window-lines
+          className={cn(fold.open && fold.folds && "max-h-[32rem] overflow-y-auto overscroll-contain")}
+        >
         <ul className="divide-y divide-border">
           {/* Each line opens the publisher's file at it, and the publisher's
               name opens their site, the way every other page's lines do. */}
@@ -1360,9 +1368,42 @@ function ListingWindow({
             </ActionableLine>
           ))}
         </ul>
+        {fold.open && fold.drawn < held && (
+          <button
+            ref={fold.more}
+            type="button"
+            data-window-more
+            onClick={fold.drawMore}
+            className="w-full border-t border-border px-3 py-1.5 text-[11px] text-slate-500 hover:bg-muted/60"
+          >
+            Showing {fold.drawn.toLocaleString()} of {held.toLocaleString()} lines, scroll for more
+          </button>
+        )}
+        </div>
         </LineActionGroup>
       )}
-      {extra > 0 && <p className="border-t border-border px-3 py-1 text-[10px] text-slate-500">Plus {extra.toLocaleString()} more.</p>}
+      {held > 0 && row.listingsCut && held < total && (
+        <p data-window-stored className="border-t border-border px-3 py-1 text-[10px] text-slate-500">
+          This report stored {held.toLocaleString()} of these {total.toLocaleString()} lines.
+        </p>
+      )}
+      {fold.folds && (
+        <button
+          type="button"
+          data-window-toggle
+          aria-expanded={fold.open}
+          aria-controls={listId}
+          onClick={fold.toggle}
+          className="flex w-full items-center justify-center gap-1 border-t border-border px-3 py-1.5 text-[11px] font-medium text-slate-600 hover:bg-muted/60 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-primary/30"
+        >
+          <ChevronDown aria-hidden className={cn("h-3.5 w-3.5 transition-transform", fold.open && "rotate-180")} />
+          {fold.open
+            ? `Show the first ${FOLD_OPEN}`
+            : held < total
+              ? `Show all ${held.toLocaleString()} stored lines`
+              : `Show all ${held.toLocaleString()} lines`}
+        </button>
+      )}
     </section>
   );
 }
@@ -1409,7 +1450,7 @@ function Decision({
         onClick={() => onSet(false)}
         aria-pressed={!on}
         title={`Leave this ${d.action} suggestion out of your downloaded file`}
-        className={!on ? "border-slate-300 bg-slate-100 text-slate-800" : undefined}
+        className={!on ? "border-slate-400 bg-slate-200 text-slate-900 shadow-inner hover:border-slate-400 hover:bg-slate-200" : undefined}
       >
         <X aria-hidden className="h-3.5 w-3.5" strokeWidth={2.5} />
         Skip

@@ -42,10 +42,17 @@ function probe(token: string): Promise<SellersFixPayload | null> {
 }
 
 export function useSellersPage(token: string): boolean {
-  const [has, setHas] = useState(false);
+  return useSellersPageState(token) === true;
+}
+
+/** The same, with null while the probe has not answered: the rail holds
+ *  the entry's place with a skeleton until it knows (David, 2026-11-01). */
+export function useSellersPageState(token: string): boolean | null {
+  const [has, setHas] = useState<boolean | null>(null);
   useEffect(() => {
     if (!token) return;
     let alive = true;
+    setHas(null);
     probe(token).then((d) => {
       if (alive) setHas(!!d?.file || (d?.sightings?.length ?? 0) > 0);
     });

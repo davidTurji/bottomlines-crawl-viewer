@@ -1,11 +1,11 @@
 import { requestReportDownload } from "@/lib/reportDownload";
 import { ReportButton } from "@/components/ReportButton";
-import { StoreBadge } from "@/components/StoreBadge";
-import { FilterBar, FilterGroup, FilterSearch, FilterSelect } from "@/components/FilterBar";
+import { appPlatformOf, PlatformBadge, storeHint } from "@/components/StoreBadge";
+import { FilterBar, FilterGroup, FilterMultiSelect, FilterSearch, FilterSelect } from "@/components/FilterBar";
 import InactiveSection, { type InactiveCards } from "@/components/InactiveSection";
 import LockedTail from "@/components/LockedTail";
 import { MiniStat } from "@/components/MiniStat";
-import { Collapse, Settle, glideTo, preserveReportViewport, toggleWithoutJump } from "@/components/Motion";
+import { Collapse, Settle, glideTo, prefersReducedMotion, preserveReportViewport, toggleWithoutJump } from "@/components/Motion";
 import TrialBanner from "@/components/TrialBanner";
 import {
   OverviewSkeleton,
@@ -15,7 +15,7 @@ import {
   skeletonRowCount,
 } from "@/components/Skeleton";
 import { expectedRows, knownKey, type Landed } from "@/lib/expectedRows";
-import { useCallback, useEffect, useId, useRef, useState, type ReactNode } from "react";
+import { useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { BEAT_PAUSE_MS, CountUp, landsAfterMs, payoffStyle } from "@/components/CountUp";
 import { LineFilter } from "@/components/LineFilter";
 import {
@@ -28,7 +28,8 @@ import { PAGE_SIZE } from "@/lib/paging";
 import { usePageCache } from "@/lib/pageCache";
 import { useLineFilter } from "@/lib/lineFilter";
 import { Link } from "react-router-dom";
-import { ChevronDown, ChevronRight, Download, Globe, SlidersHorizontal, Smartphone } from "lucide-react";
+import { ChevronDown, ChevronRight, Download, FileText, Globe, MonitorSmartphone, RotateCcw, SlidersHorizontal, Smartphone, Tv } from "lucide-react";
+import { FOLD_OPEN, FOLD_SLACK, FOLD_STEP, easeListHeight } from "@/components/FoldedList";
 import {
   type TrialCaps, type TrialSlice,
   api,
@@ -53,6 +54,8 @@ import {
   type FoundInFilter,
   type PlatformCounts,
   type PlatformFilter,
+  type ListFilters,
+  type ListFiltersApplied,
   type MatchedMove,
   type MatchedMoves,
   type InactiveApp,
@@ -60,7 +63,13 @@ import {
   type InactiveKind,
   type InactivePublisher,
   type InactivePublisherLine,
+  FOUND_IN_FILES,
+  foundInFiles,
+  foundInOf,
+  WEB_PUBLISHERS,
 } from "../lib/api";
+import { rowFilesOf, type FileWord } from "@/lib/rowFiles";
+import { foldChangeEvents, withKeptLines } from "@/lib/changeLines";
 import { inactiveCountsOf, inactiveDay, inactiveTotal, reasonText } from "@/lib/inactive";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import {
@@ -73,7 +82,7 @@ import { Card } from "@/components/ui/card";
 import InlineAskAI from "@/components/InlineAskAI";
 import { PageShell } from "@/components/PageShell";
 import { formatWeek } from "@/components/WeekLine";
-import { appFileLine, cn, fileHostsLabel, lineHostLabel, scopeReasonText, storeName } from "@/lib/utils";
+import { appFileLine, cn, fileHostsLabel, foundInLabel, lineHostLabel, scopeReasonText, storeName } from "@/lib/utils";
 import {
   addedDates,
   certDates,
@@ -163,6 +172,57 @@ const OVERVIEW_SUGGESTIONS = [
 // Hidden for the current design review; keep the shortcuts available to revisit.
 const RECOMMENDATIONS_ENABLED = false;
 
+/** Whether the crawler takes several files in one ``found_in`` (crawler
+ *  PR, 2026-11-01), asked once per report with one small read: it echoes
+ *  ``ads_txt,both`` back. False until it answers yes, and on any refusal. */
+function useFoundInMulti(token: string): boolean {
+  const [ok, setOk] = useState(false);
+  useEffect(() => {
+    let cancelled = false;
+    setOk(false);
+    api.matchedDevelopers(token, 1, "", [], "all", 1, undefined, WEB_PUBLISHERS)
+      .then((r) => { if (!cancelled) setOk(r.found_in === WEB_PUBLISHERS); })
+      .catch(() => { if (!cancelled) setOk(false); });
+    return () => { cancelled = true; };
+  }, [token]);
+  return ok;
+}
+
+/** Each filter's ⓘ line (David, 2026-11-02): which list it is for, short. */
+const FILTER_INFO = {
+  platform: "Apps: CTV or Mobile. Web: publishers with your line in ads.txt.",
+  foundIn: "Publishers only. The file your line is in.",
+  foundInOnApps: "Publishers only. Picking a file opens Matched publishers.",
+  matchType: "Publishers and apps. Own file, or via an inventory partner (IPD).",
+} as const;
+
+/** A Platform pick opened the other list: its menu and trigger went with
+ *  the old list, so focus lands on the new list's Platform once it stands
+ *  (or its Filters button on a narrow screen). Never taken from somewhere
+ *  the reader has since moved to. */
+function focusPlatformOf(root: HTMLElement | null, filter = "platform") {
+  if (!root) return;
+  const started = Date.now();
+  const tick = () => {
+    const active = document.activeElement;
+    if (active && active !== document.body && root.contains(active)) return;
+    if (active && active !== document.body && !active.closest("[role=menu]")) return;
+    const platform = root.querySelector<HTMLElement>(`[data-testid="${filter}"]`);
+    const visible = (el: HTMLElement | null) => (el && el.offsetParent !== null ? el : null);
+    // The filter; else its folded button; and only once the list has
+    // landed with no filter bar at all (Inactive), the status the reader
+    // is on.
+    const landedBare = !root.querySelector('[data-filter-skeleton], [aria-busy="true"], .list-toolbar-filters');
+    const target = visible(platform)
+      ?? visible(root.querySelector<HTMLElement>('button[aria-label="List filters"]'))
+      ?? (landedBare ? visible(root.querySelector<HTMLElement>('[role="tab"][aria-selected="true"]'))
+        ?? visible(root.querySelector<HTMLElement>('select[aria-label="Matched status"]')) : null);
+    if (target && target.offsetParent !== null) target.focus({ preventScroll: true });
+    else if (Date.now() - started < 4000) window.setTimeout(tick, 80);
+  };
+  window.setTimeout(tick, 0);
+}
+
 export default function CrawlReport() {
   const { token } = useReportScope();
   const [summary, setSummary] = useState<Summary | null>(null);
@@ -189,25 +249,137 @@ export default function CrawlReport() {
   // splits by them.
   const [foundIn, setFoundIn] = useState<FoundInFilter>("all");
   const [platform, setPlatform] = useState<PlatformFilter>("all");
+  /**
+   * MOVING BETWEEN THE LISTS (David, 2026-11-02): a filter pick that opens
+   * the other list says so first, in the walkthrough's card ("Moving to
+   * Matched apps", and why), and holds MOVE_PAUSE_MS so the reader sees
+   * where they are going; then the pick applies and the list moves. Any
+   * other way of choosing a list (its card, a Popular choice) or another
+   * pick in the meantime cancels it.
+   */
+  const [moving, setMoving] = useState<Moving | null>(null);
+  // The pending move: its timer, and how long it still has to wait (a
+  // hand on the card holds it, David 2026-11-02).
+  const moveTimer = useRef<number | null>(null);
+  const moveLeft = useRef({ ms: 0, since: 0, finish: () => {} });
+  const movingNow = useRef(false);
+  movingNow.current = moving != null;
+  const cancelMove = useCallback(() => {
+    if (moveTimer.current != null) window.clearTimeout(moveTimer.current);
+    moveTimer.current = null;
+    setMoving(null);
+  }, []);
+  useEffect(() => cancelMove, [cancelMove]);
   /** Shows a list; the tab stays (owner rule: tabs survive the publishers
    *  / apps switch), unless a tab is asked for. */
   const showView = (view: ListView, tab?: DrillTab) => {
+    cancelMove();
     if (tab) setDrillTab(tab);
     setMatchedView(view);
   };
-  const pickView = useCallback((view: ListView) => preserveReportViewport(listRef.current, () => setMatchedView(view)), []);
+  const pickView = useCallback((view: ListView) => {
+    cancelMove();
+    preserveReportViewport(listRef.current, () => setMatchedView(view));
+  }, [cancelMove]);
+  const moveTo = useCallback((to: ListView, why: string, picked: string, focus: string, apply: () => void) => {
+    cancelMove();
+    setMoving({ to, why, picked, held: false });
+    const finish = () => {
+      moveTimer.current = null;
+      // The pick and the move in one commit: the new list's first read is
+      // already under the pick, never one under the old filter first.
+      preserveReportViewport(listRef.current, () => {
+        apply();
+        setMatchedView(to);
+        setMoving(null);
+      });
+      focusPlatformOf(listRef.current, focus);
+    };
+    moveLeft.current = { ms: MOVE_PAUSE_MS, since: Date.now(), finish };
+    moveTimer.current = window.setTimeout(finish, MOVE_PAUSE_MS);
+  }, [cancelMove]);
+  /** A pointer on the card holds the move (the bar stops); off it, the
+   *  move takes the time it had left. */
+  const holdMove = useCallback((held: boolean) => {
+    if (held) {
+      if (moveTimer.current == null) return;
+      window.clearTimeout(moveTimer.current);
+      moveTimer.current = null;
+      moveLeft.current.ms = Math.max(0, moveLeft.current.ms - (Date.now() - moveLeft.current.since));
+    } else {
+      if (moveTimer.current != null || !movingNow.current) return;
+      moveLeft.current.since = Date.now();
+      moveTimer.current = window.setTimeout(moveLeft.current.finish, moveLeft.current.ms);
+    }
+    setMoving((m) => (m ? { ...m, held } : m));
+  }, []);
+  /**
+   * PLATFORM, ONE CHOICE FOR THE PAGE (David, 2026-11-01). It stands on both
+   * lists and the last pick is what both say: CTV / Mobile filter the apps
+   * (an app's platform, never a publisher's) and open them; Web is not an
+   * app, it is the web publishers (Found in ads.txt + Both) and opens them;
+   * All clears every platform and file choice. The tab, Match type and seat
+   * lines stay. A pick that changes the list says so first (moveTo), then
+   * hands focus to the new list's Platform, so a keyboard reader is not
+   * dropped at the top of the page.
+   */
+  const matchedViewRef = useRef(matchedView);
+  matchedViewRef.current = matchedView;
+  const pickPlatform = useCallback((next: PlatformFilter) => {
+    const here = matchedViewRef.current;
+    const view: ListView = next === "web" ? "publishers" : next === "all" ? here : "apps";
+    const apply = () => {
+      setPlatform(next === "ctv" || next === "mobile" ? next : "all");
+      // All on the publishers list clears any file choice; on the apps list
+      // it leaves the publishers' own ticks alone unless they were Web.
+      setFoundIn((was) =>
+        next === "web" ? WEB_PUBLISHERS
+          : was === WEB_PUBLISHERS || (next === "all" && here === "publishers") ? "all"
+          : was);
+    };
+    if (view === here) {
+      cancelMove();
+      apply();
+    } else {
+      const key = next as "ctv" | "mobile" | "web";
+      moveTo(view, MOVE_WHY[key], `Platform: ${key === "ctv" ? "CTV" : key === "mobile" ? "Mobile" : "Web"}`, "platform", apply);
+    }
+  }, [cancelMove, moveTo]);
+  /**
+   * FOUND IN FROM THE APPS LIST (David, 2026-11-02): the filter stands on
+   * both lists, but a file is a publisher's, so on the apps list a choice
+   * opens Matched publishers on it (focus on their Found in). The apps'
+   * own Platform stays as the reader left it.
+   */
+  // Any other choice in the pause is the reader moving on: the move is off.
+  const chooseFoundIn = useCallback((next: FoundInFilter) => { cancelMove(); setFoundIn(next); }, [cancelMove]);
+  const chooseMatchType = useCallback((next: MatchTypeFilter) => { cancelMove(); setMatchType(next); }, [cancelMove]);
+  const pickFoundIn = useCallback((next: FoundInFilter) => {
+    if (matchedViewRef.current === "publishers") {
+      cancelMove();
+      setFoundIn(next);
+      return;
+    }
+    moveTo("publishers", moveWhyOfFile(next), `Found in: ${FILE_WORD[next] ?? "All files"}`, "found-in", () => setFoundIn(next));
+  }, [cancelMove, moveTo]);
+  // Whether the crawler takes several files in one found_in (crawler PR):
+  // asked once per report. Until it says yes, no Web choice and no tick
+  // boxes ask it for two, so an older crawler never refuses the list.
+  const foundInMulti = useFoundInMulti(token);
   const pickStatus = useCallback((tab: DrillTab) => preserveReportViewport(listRef.current, () => setDrillTab(tab)), []);
   // Bumped by those two cards: the list opens its first row once it has
   // landed, so the reader sees the lines the card counted, not just names.
   const [openFirst, setOpenFirst] = useState(0);
   const listRef = useRef<HTMLDivElement>(null);
   const showLinesOf = (tab: "added" | "removed") => {
+    cancelMove();
     setDrillTab(tab);
     setOpenFirst((n) => n + 1);
     glideTo(listRef.current);
   };
   /** The quiet line's "See them": the Inactive tab, on a list that has rows. */
   const showInactive = (counts: InactiveCounts) => {
+    cancelMove();
     setDrillTab("inactive");
     if (!counts[matchedView]) setMatchedView(matchedView === "publishers" ? "apps" : "publishers");
     glideTo(listRef.current);
@@ -218,20 +390,31 @@ export default function CrawlReport() {
      it, so the two headline numbers and the rows beneath agree. */
   const { selected: lines, setSelected: setLines } = useLineFilter();
   // Which selection the summary on screen was read under. While it lags
-  // the URL the numbers are last selection's and the cards dim a little;
-  // they never blank, so nothing above the list jumps.
+  // the page's filters the cards show their skeleton, never last
+  // selection's numbers under the new one.
   const linesKey = lines.join(",");
-  const [settledFor, setSettledFor] = useState<string | null>(null);
-  const refreshing = summary != null && settledFor !== linesKey;
+  /* THE CARDS FOLLOW THE LISTS' FILTERS TOO (David, 2026-11-04: "I pick
+     IPD and Matched publishers, Matched apps, Lines added and Lines
+     removed do not change"). Match type, Found in and Platform go with the
+     seat lines to the summary, which re-counts each card the way its own
+     list counts (crawler, viewer_frozen._recount_listed): Matched
+     publishers by Match type and Found in, Matched apps by Match type and
+     Platform, the line cards by Match type and Found in. */
+  const listFilters = useMemo<ListFilters>(() => ({ matchType, foundIn, platform }), [matchType, foundIn, platform]);
+  const filtersKey = `${linesKey}|${matchType}|${foundIn}|${platform}`;
+  const [settledFor, setSettledFor] = useState<{ key: string; lines: string } | null>(null);
+  const refreshing = summary != null && settledFor?.key !== filtersKey;
+  // The seat-line filter's own wait (its button says it is busy).
+  const linesRefreshing = summary != null && settledFor?.lines !== linesKey;
 
   useEffect(() => {
     let cancelled = false;
     api
-      .summary(token, lines)
+      .summary(token, lines, listFilters)
       .then((s) => {
         if (!cancelled) {
           setSummary(s);
-          setSettledFor(linesKey);
+          setSettledFor({ key: filtersKey, lines: linesKey });
         }
       })
       .catch((e: ApiError) => {
@@ -240,7 +423,7 @@ export default function CrawlReport() {
     return () => {
       cancelled = true;
     };
-  }, [token, lines, linesKey]);
+  }, [token, lines, linesKey, listFilters, filtersKey]);
 
   // What Export hands over does not take the line filter either.
   useEffect(() => {
@@ -285,6 +468,25 @@ export default function CrawlReport() {
     if (popular && !targetMatches(POPULAR[popular].target, popularState)) setPopular(null);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [popular, matchedView, drillTab, matchType]);
+  /**
+   * RESET (David, 2026-11-04: "a reset button for all filters, back to all
+   * of it"). One press puts the page back to the whole report: every seat
+   * line, Match type, Found in and Platform at All, the list on All matched
+   * with no search. The list on screen (publishers or apps) stays.
+   */
+  const anyFilter = lines.length > 0 || matchType !== "all" || foundIn !== "all" || platform !== "all";
+  const resetFilters = useCallback(() => {
+    cancelMove();
+    preserveReportViewport(listRef.current, () => {
+      setLines([]);
+      setMatchType("all");
+      setFoundIn("all");
+      setPlatform("all");
+      setDrillTab("all");
+      setPopular(null);
+      setSearchReset((n) => n + 1);
+    });
+  }, [cancelMove, setLines]);
   const pickPopular = (raw: string) => {
     const id = raw as PopularId;
     const t = POPULAR[id].target;
@@ -342,20 +544,28 @@ export default function CrawlReport() {
   const matchedApps = summary.counters.matched.apps;
   // Under a seat-line filter every current figure is a slice while last
   // week's summary is the whole week, so a delta would compare unlike
-  // things ("-97%"). No delta is the honest answer there.
+  // things ("-97%"). No delta is the honest answer there, and the same
+  // under any list filter (Match type, Found in, Platform): each card then
+  // says what it is filtered by instead.
   const filtered = lines.length > 0;
-  const prevMatchedDevs = filtered ? null : (previous?.counters.matched.developers ?? null);
-  const prevMatchedApps = filtered ? null : (previous?.counters.matched.apps ?? null);
+  const listFiltered = matchType !== "all" || foundIn !== "all" || platform !== "all";
+  const cardsFiltered = filtered || listFiltered;
+  const cuts = cardCuts(summary.list_filters ?? null, listFilters, filtered);
+  const prevMatchedDevs = cardsFiltered ? null : (previous?.counters.matched.developers ?? null);
+  const prevMatchedApps = cardsFiltered ? null : (previous?.counters.matched.apps ?? null);
   // Found and lost behind the net, when the report carries them (David,
   // 2026-10-05: "+351" alone hides the 380 we found). Never under a filter.
-  const moves = filtered ? null : (summary.counters.matched_moves ?? null);
+  const moves = cardsFiltered ? null : (summary.counters.matched_moves ?? null);
+  // A report that carries Found / Lost keeps that row's room while a
+  // filter hides it, so the cards never change height.
+  const reserveCorner = (cardsFiltered || refreshing) && summary.previous_job_id !== null && "matched_moves" in summary.counters;
 
   // Last week's OWN added/removed totals, so "+32 lines added" can say
   // whether 32 is a busy week or a quiet one. Comparing this week's added
   // against last week's added is like for like; comparing it against last
   // week's matched inventory would not be.
-  const prevAdded = filtered ? null : (previous?.hero_diff.line_totals.added ?? null);
-  const prevRemoved = filtered ? null : (previous?.hero_diff.line_totals.removed ?? null);
+  const prevAdded = cardsFiltered ? null : (previous?.hero_diff.line_totals.added ?? null);
+  const prevRemoved = cardsFiltered ? null : (previous?.hero_diff.line_totals.removed ?? null);
 
   // Matched growth, week over week, shown on the publisher and app cards.
   // Computed straight from this crawl's matched counters against last week's,
@@ -465,7 +675,11 @@ export default function CrawlReport() {
           {refreshing ? (
             // The figures below are reloading for a new line selection;
             // a sentence about the old one would be wrong for a moment.
-            <div aria-hidden className="mt-3 h-5 w-full max-w-md animate-pulse rounded bg-muted" />
+            // One line of the sentence's own type, so its height is the
+            // sentence's to the pixel and nothing below moves.
+            <p aria-hidden className="mt-3 max-w-3xl text-[15px] leading-snug sm:text-base">
+              <span className="inline-block h-[1em] w-full max-w-md animate-pulse rounded bg-muted align-middle" />
+            </p>
           ) : (
             <WeeklyWin
               publishers={matchedDevs}
@@ -475,6 +689,7 @@ export default function CrawlReport() {
               moves={moves}
               firstCrawl={isFirstCrawl}
               filtered={filtered}
+              listFiltered={listFiltered}
             />
           )}
         </div>
@@ -483,7 +698,7 @@ export default function CrawlReport() {
             seats={summary.watchlist?.seats ?? []}
             selected={lines}
             onChange={setLines}
-            busy={refreshing}
+            busy={linesRefreshing}
           />
           {exportInfo.format !== "none" && (
             <ExportResultsButton
@@ -533,14 +748,24 @@ export default function CrawlReport() {
           page that is merely faded, not one whose numbers are being
           replaced — and the figures under the fade were answers to a
           question the reader had already changed. */}
-      {refreshing ? (
+      {/* A LIST FILTER (Match type, Found in, Platform) RE-COUNTS THE CARDS
+          IN PLACE (2026-11-04): it is picked down in the list, so the cards
+          keep their frame and each figure holds a skeleton of its own size
+          while it is read; the list under the reader's hand never moves. */}
+      {linesRefreshing ? (
         <SkeletonStatCards count={2} />
       ) : (
       <section className="overview-kpis space-y-2.5" aria-label="Weekly performance">
-      <p data-kpi-comparison className="text-xs text-slate-500">
-        {isFirstCrawl ? "First crawl · no prior week to compare" : "Compared with last week"}
-        {filtered && " · selected lines"}
-      </p>
+      {/* Under any filter the line says which, and Reset puts the whole
+          report back in one press (David, 2026-11-04). */}
+      <div data-kpi-comparison className="flex min-h-[18px] flex-wrap items-center gap-x-3 gap-y-1 text-xs text-slate-500">
+        <span>
+          {cardsFiltered
+            ? `Filtered: ${filterWords(listFilters, lines.length).join(", ")}`
+            : isFirstCrawl ? "First crawl, no prior week to compare" : "Compared with last week"}
+        </span>
+        {anyFilter && <ResetFilters onReset={resetFilters} testId="reset-filters-cards" />}
+      </div>
       <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
         <div
           className="report-panel rounded-2xl border border-border bg-white p-5"
@@ -553,7 +778,7 @@ export default function CrawlReport() {
               </div>
             </div>
             <span className="text-xs text-slate-500">
-              {isFirstCrawl ? "baseline" : `${certChanged.toLocaleString()} cert changes`}
+              {isFirstCrawl ? "baseline" : refreshing ? <Skeleton className="inline-block h-3 w-24 rounded-md align-middle" /> : `${certChanged.toLocaleString()} cert changes`}
             </span>
           </div>
           {/* A first crawl has nothing to have changed FROM, so "+0 added,
@@ -578,20 +803,24 @@ export default function CrawlReport() {
             <SplitStat
               tone="ok"
               number={added}
+              sign="+"
               label="Lines added"
               delta={prevAdded != null ? computeDelta(added, prevAdded) : null}
-              note={filtered ? "under the selected lines" : undefined}
+              note={cuts.lines}
+              pending={refreshing}
               active={drillTab === "added"}
               onClick={() => showLinesOf("added")}
             />
             <SplitStat
               tone="critical"
               number={removed}
+              sign="−"
               label="Lines removed"
               delta={
                 prevRemoved != null ? computeDelta(removed, prevRemoved) : null
               }
-              note={filtered ? "under the selected lines" : undefined}
+              note={cuts.lines}
+              pending={refreshing}
               active={drillTab === "removed"}
               onClick={() => showLinesOf("removed")}
             />
@@ -618,7 +847,7 @@ export default function CrawlReport() {
               </div>
             </div>
             <span className="text-xs text-slate-500">
-              <span title="Matched line occurrences: your watched seat lines across publisher ads.txt and app-ads.txt files. A seat line can appear in many files; this is not a count of unique lines.">{summary.counters.matched.lines.toLocaleString()} line occurrences</span>
+              {refreshing ? <Skeleton className="inline-block h-3 w-28 rounded-md align-middle" /> : <span title="Matched line occurrences: your watched seat lines across publisher ads.txt and app-ads.txt files. A seat line can appear in many files; this is not a count of unique lines.">{summary.counters.matched.lines.toLocaleString()} line occurrences</span>}
             </span>
           </div>
           {/* Two tiles that double as the selector for the list below:
@@ -638,7 +867,9 @@ export default function CrawlReport() {
               delta={matchedDevsDelta}
               previous={prevMatchedDevs}
               move={moves?.developers ?? null}
-              note={filtered ? "under the selected lines" : undefined}
+              note={cuts.publishers}
+              pending={refreshing}
+              reserveCorner={reserveCorner}
               active={matchedView === "publishers"}
               // The tab stays (David, 2026-10-07): Added on publishers
               // is Added on apps, never a silent jump back to All matched.
@@ -653,7 +884,9 @@ export default function CrawlReport() {
               delta={matchedAppsDelta}
               previous={prevMatchedApps}
               move={moves?.apps ?? null}
-              note={filtered ? "under the selected lines" : undefined}
+              note={cuts.apps}
+              pending={refreshing}
+              reserveCorner={reserveCorner}
               active={matchedView === "apps"}
               // The tab stays (David, 2026-10-07): Added on publishers
               // is Added on apps, never a silent jump back to All matched.
@@ -673,12 +906,12 @@ export default function CrawlReport() {
       </section>
       )}
 
-      {/* Ask AI, between the KPIs and the drilldown: a pill composer with a
-          sparkle glyph and a rail of questions. Touching either opens the
-          conversation in its own panel rather than growing a thread down
-          the page, which used to push this very table off the screen.
-          Gated off by default: the MVP backend has no chat endpoint. Set
-          VITE_ENABLE_CHAT=true (e.g. alongside VITE_MOCK=true). */}
+      {/* Ask AI, inline, between the KPIs and the drilldown. Same shape
+          bottomlines-app uses on the "Your Bottom Line" page: pill input
+          with a sparkle glyph + horizontal suggestion rail; answers grow
+          in a thread below the composer. The backend has no chat endpoint,
+          so this is available only when both VITE_MOCK=true and
+          VITE_ENABLE_CHAT=true are set for a local demo. */}
       {ENABLE_CHAT && (
         <InlineAskAI
           token={token}
@@ -710,7 +943,16 @@ export default function CrawlReport() {
           card-per-row lists in the same grammar as bottomlines-app's
           HierarchyCard: colored disc, generous padding, right-aligned stats,
           tinted expansion. Publishers are green, apps are pink. */}
-      <div data-tour="overview-list" ref={listRef} className="scroll-mt-6">
+      <div data-tour="overview-list" ref={listRef} data-moving={moving ? moving.to : undefined} className="relative scroll-mt-6"
+        // A click or typing in the list during the pause: the reader moved
+        // on, the move is off (a menu choice lives outside, in its portal).
+        onPointerDownCapture={moving ? (event) => { if (!(event.target as Element).closest?.(".list-moving-card")) cancelMove(); } : undefined}
+        onInputCapture={moving ? cancelMove : undefined}>
+        {/* Always here, so a screen reader hears the move when it is said. */}
+        <p role="status" aria-live="polite" data-list-moving-said className="sr-only">
+          {moving ? `Moving to ${VIEW_TITLE[moving.to].title}. ${moving.why}` : ""}
+        </p>
+        {moving && <MovingCard moving={moving} list={listRef.current} onHold={holdMove} />}
         <ListHead
           inactive={listTab === "inactive"}
           title={VIEW_TITLE[matchedView].title}
@@ -726,11 +968,15 @@ export default function CrawlReport() {
             setTab={pickStatus}
             openFirst={openFirst}
             matchType={matchType}
-            setMatchType={setMatchType}
+            setMatchType={chooseMatchType}
             foundIn={foundIn}
-            setFoundIn={setFoundIn}
+            setFoundIn={chooseFoundIn}
+            foundInMulti={foundInMulti}
+            onPlatform={pickPlatform}
             searchReset={searchReset}
             known={knownFor("publishers")}
+            pageFiltered={anyFilter}
+            onReset={resetFilters}
           />
         ) : (
           <MatchedAppsList
@@ -742,11 +988,16 @@ export default function CrawlReport() {
             setTab={pickStatus}
             openFirst={openFirst}
             matchType={matchType}
-            setMatchType={setMatchType}
+            setMatchType={chooseMatchType}
             platform={platform}
             setPlatform={setPlatform}
+            foundInMulti={foundInMulti}
+            onPlatform={pickPlatform}
+            onFoundIn={pickFoundIn}
             searchReset={searchReset}
             known={knownFor("apps")}
+            pageFiltered={anyFilter}
+            onReset={resetFilters}
           />
         )}
       </div>
@@ -770,6 +1021,7 @@ function WeeklyWin({
   moves,
   firstCrawl,
   filtered,
+  listFiltered = false,
 }: {
   publishers: number;
   apps: number;
@@ -780,6 +1032,8 @@ function WeeklyWin({
   moves: MatchedMoves | null;
   firstCrawl: boolean;
   filtered: boolean;
+  /** Match type, Found in or Platform narrows the cards (2026-11-04). */
+  listFiltered?: boolean;
 }) {
   const fig = (n: number, cls: string) => (
     <span className={cn("font-semibold tabular-nums", cls)}>{n.toLocaleString()}</span>
@@ -793,7 +1047,14 @@ function WeeklyWin({
   const foundApps = moves?.apps?.found ?? null;
 
   let line: ReactNode;
-  if (filtered) {
+  if (listFiltered) {
+    line = (
+      <>
+        {pub(publishers)} {plural(publishers, "publisher", "publishers")} and {app(apps)}{" "}
+        {plural(apps, "app", "apps")} match your filters.
+      </>
+    );
+  } else if (filtered) {
     line = (
       <>
         {pub(publishers)} {plural(publishers, "publisher", "publishers")} and {app(apps)}{" "}
@@ -919,6 +1180,12 @@ const STAT_TONE_TEXT: Record<StatTone, string> = {
   declManager: "text-declManager",
 };
 
+/** A figure's place while it is re-counted: the skeleton's tone at the
+ *  figure's own height (1em of its font), never last filter's number. */
+function PendingFigure() {
+  return <Skeleton className="inline-block h-[1em] w-[3.2ch] rounded-md align-[-0.1em]" />;
+}
+
 export function SplitStat({
   number,
   label,
@@ -935,9 +1202,17 @@ export function SplitStat({
   className,
   hintClassName,
   delayMs = 0,
+  sign,
+  pending = false,
 }: {
   number: number;
   label: string;
+  /** The figure is being re-counted under a new filter: its place holds a
+   *  skeleton of the figure's own size, so nothing on the page moves. */
+  pending?: boolean;
+  /** "+" or "−" stuck to the figure, its size and colour (lines added,
+   *  lines removed: David, 2026-11-02); only above zero. */
+  sign?: "+" | "−";
   hint?: string;
   /** One short muted line under the label saying what the number counts,
    *  for a label that cannot say it alone. */
@@ -966,7 +1241,25 @@ export function SplitStat({
   const body = (
     <>
       <div className="report-stat-label text-[12px] font-medium text-slate-600">{label}</div>
+      {pending ? (
+        <div className="flex items-baseline gap-1">
+          <span aria-hidden className="report-figure report-figure-value text-3xl font-medium leading-none tracking-tight sm:text-4xl">
+            <PendingFigure />
+          </span>
+        </div>
+      ) : (
       <div className="flex items-baseline gap-1">
+        {sign && number > 0 && (
+          <span
+            data-figure-sign
+            className={cn(
+              "report-figure -mr-1 text-3xl font-medium leading-none tabular-nums tracking-tight sm:text-4xl",
+              numberCls,
+            )}
+          >
+            {sign}
+          </span>
+        )}
         {prefix && (
           <span
             className={cn(
@@ -991,6 +1284,7 @@ export function SplitStat({
           <span className="font-display text-lg font-medium tabular-nums text-slate-400 sm:text-xl">{suffix}</span>
         )}
       </div>
+      )}
       {caption && (
         <div className="report-stat-caption text-[11px] leading-[15px] text-slate-500">{caption}</div>
       )}
@@ -1003,7 +1297,7 @@ export function SplitStat({
         // Keep the shared timing interface; figures now appear immediately.
         style={payoffStyle(delayMs + landsAfterMs())}
       >
-        {delta ? (
+        {pending ? null : delta ? (
           <DeltaChip delta={delta} tone={tone} />
         ) : hint ? (
           <span className={hintClassName ?? "text-slate-500"}>{hint}</span>
@@ -1023,6 +1317,7 @@ export function SplitStat({
         type="button"
         onClick={onClick}
         aria-pressed={active}
+        aria-busy={pending || undefined}
         className={cn(
           "report-stat report-kpi-tile group block w-full px-5 py-4 text-left transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring",
           active ? activeGround : "hover:bg-muted/40",
@@ -1060,8 +1355,15 @@ export function MatchedTile({
   active,
   onClick,
   delayMs = 0,
+  pending = false,
+  reserveCorner = false,
 }: {
   tone: "publisher" | "app";
+  /** Being re-counted under a new filter: a skeleton of the figure's size. */
+  pending?: boolean;
+  /** Keep the Found / Lost row's room while it is not shown (a filter
+   *  hides it), so the tile and the list under it never move. */
+  reserveCorner?: boolean;
   /** Found / lost behind the net, when the report has them. */
   move?: MatchedMove | null;
   icon: typeof Globe;
@@ -1097,6 +1399,11 @@ export function MatchedTile({
       <span aria-hidden className="invisible w-0 select-none report-figure text-2xl font-medium tabular-nums sm:text-3xl">
         +
       </span>
+      {pending ? (
+        <span aria-hidden className="report-figure report-figure-value text-3xl font-medium leading-none tracking-tight sm:text-4xl">
+          <PendingFigure />
+        </span>
+      ) : (
       <span
         // Keep the figure keyed to the selected report value.
         key={number}
@@ -1107,6 +1414,7 @@ export function MatchedTile({
       >
         <CountUp value={number} delayMs={delayMs} />
       </span>
+      )}
     </span>
   );
   const labelRow = (
@@ -1115,7 +1423,7 @@ export function MatchedTile({
       {label}
     </span>
   );
-  const moveLine = w ? (
+  const moveLine = pending ? null : w ? (
     <DeltaChip delta={w.delta} tone={tone} previous={w.previous} />
   ) : delta ? (
     <DeltaChip delta={delta} tone={tone} />
@@ -1127,6 +1435,7 @@ export function MatchedTile({
       type="button"
       onClick={onClick}
       aria-pressed={active}
+      aria-busy={pending || undefined}
       className={cn(
         "mtile report-stat report-kpi-tile group block w-full px-5 py-4 text-left transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring",
         active ? activeGround : idleGround,
@@ -1142,7 +1451,8 @@ export function MatchedTile({
       <span key={number} className="report-stat-comparison block min-h-[17px] text-[11px] leading-[17px]" style={payoff}>
         {moveLine}
       </span>
-      {w && move && <FoundLostCorner move={move} style={payoff} />}
+      {w && move && !pending ? <FoundLostCorner move={move} style={payoff} />
+        : reserveCorner ? <FoundLostCorner move={{ found: 0, lost: 0 }} hidden /> : null}
     </button>
   );
 }
@@ -1154,7 +1464,7 @@ function moveText(delta: Delta): string {
 }
 
 /** Words carry direction; restrained green/red values reinforce it. */
-function FoundLostCorner({ move, style }: { move: MatchedMove; style?: React.CSSProperties }) {
+function FoundLostCorner({ move, style, hidden = false }: { move: MatchedMove; style?: React.CSSProperties; hidden?: boolean }) {
   const row = (label: string, n: number) => (
     <span className="inventory-move-row">
       <span>{label}</span>{" "}
@@ -1162,7 +1472,7 @@ function FoundLostCorner({ move, style }: { move: MatchedMove; style?: React.CSS
     </span>
   );
   return (
-    <span data-found-lost className="mtile-corner inventory-movement" style={style}>
+    <span data-found-lost={hidden ? undefined : ""} aria-hidden={hidden || undefined} className={cn("mtile-corner inventory-movement", hidden && "invisible")} style={style}>
       {row("Found", move.found)}
       {row("Lost", move.lost)}
     </span>
@@ -1412,6 +1722,124 @@ export type ListView = "publishers" | "apps";
 // Both files match a publisher (demo of #75: "whose ads.txt" left out
 // app-ads.txt, the Found in switch's other half); an app matches by its
 // app-ads.txt, or by an inventory partner's ads.txt it names (IPD).
+/** A move to the other list, said before it happens (MovingCard). */
+type Moving = { to: ListView; why: string; picked: string; held: boolean };
+/** How long the move's card holds before the list moves (David,
+ *  2026-11-02: "a second and a half"); a pointer on it holds it longer. */
+const MOVE_PAUSE_MS = 1500;
+/** Why a Platform pick opens the other list, in one line. */
+const MOVE_WHY = {
+  ctv: "CTV is an app platform, so its matches are apps.",
+  mobile: "Mobile is an app platform, so its matches are apps.",
+  web: "Web is publishers: the ones with your line in ads.txt.",
+} as const;
+/** A single Found in choice as its menu says it. */
+/** The page's filters in words, for the cards' line: "Match type: IPD,
+ *  Found in: ads.txt + Both, 2 selected lines". */
+function filterWords(f: ListFilters, seatLines: number): string[] {
+  const out: string[] = [];
+  if (f.matchType !== "all") out.push(`Match type: ${MATCH_WORD[f.matchType]}`);
+  if (f.foundIn !== "all") out.push(`Found in: ${filesWord(f.foundIn)}`);
+  if (f.platform !== "all") out.push(`Platform: ${PLATFORM_WORD[f.platform]}`);
+  if (seatLines > 0) out.push(seatLines === 1 ? "1 selected line" : `${seatLines} selected lines`);
+  return out;
+}
+
+const MATCH_WORD: Record<"own" | "ipd", string> = { own: "Own", ipd: "IPD" };
+const PLATFORM_WORD: Record<"ctv" | "mobile" | "web", string> = { ctv: "CTV", mobile: "Mobile", web: "Web" };
+
+/** "ads.txt", "app-ads.txt", "Both", or ticked ones joined: "ads.txt + Both". */
+function filesWord(foundIn: string): string {
+  return foundIn.split(",").filter(Boolean)
+    .map((f) => (f === "ads_txt" ? "ads.txt" : f === "app_ads_txt" ? "app-ads.txt" : "Both")).join(" + ");
+}
+
+/**
+ * EACH CARD SAYS WHAT IT IS FILTERED BY (2026-11-04). A card is re-counted
+ * only under the filters its own list takes: Matched publishers by Match
+ * type and Found in, Matched apps by Match type and Platform, the line
+ * cards by Match type and Found in (crawler, ``_recount_listed``). Read off
+ * what the summary says it APPLIED, never the page's wish: an older API
+ * answers the whole report, and the card then says it is not split. A card
+ * a picked filter does not reach says so ("Not split by platform"), so an
+ * unchanged figure never reads as a filter that did not work.
+ */
+function cardCuts(
+  applied: ListFiltersApplied | null,
+  asked: ListFilters,
+  seatLines: boolean,
+): { publishers?: string; apps?: string; lines?: string } {
+  const mt = applied?.match_type ? MATCH_WORD[applied.match_type] : null;
+  const fi = applied?.found_in ? filesWord(applied.found_in) : null;
+  const pf = applied?.platform ? PLATFORM_WORD[applied.platform] : null;
+  const split = applied?.line_totals !== false;
+  const seat = seatLines ? "selected lines" : null;
+  const askedMt = asked.matchType !== "all";
+  const askedFi = asked.foundIn !== "all";
+  const askedPf = asked.platform !== "all";
+  const note = (on: (string | null)[], off: (string | false)[]): string | undefined => {
+    const by = on.filter((w): w is string => !!w);
+    if (by.length) return `Filtered: ${by.join(", ")}`;
+    const not = off.filter((w): w is string => !!w);
+    return not.length ? `Not split by ${not.join(" or ")}` : undefined;
+  };
+  return {
+    publishers: note([mt, fi, seat], [askedMt && !mt && "match type", askedFi && !fi && "file", askedPf && "platform"]),
+    apps: note([mt, pf, seat], [askedMt && !mt && "match type", askedFi && "file", askedPf && !pf && "platform"]),
+    lines: note(split ? [mt, fi, seat] : [seat], [
+      askedMt && !(mt && split) && "match type", askedFi && !(fi && split) && "file", askedPf && "platform"]),
+  };
+}
+
+const FILE_WORD: Partial<Record<FoundInFilter, string>> = { all: "All files", ads_txt: "ads.txt", app_ads_txt: "app-ads.txt", both: "Both" };
+/** Why a Found in pick on the apps list opens the publishers. */
+function moveWhyOfFile(next: FoundInFilter): string {
+  const files = foundInFiles(next);
+  const said = files.length === 0 ? "either file"
+    : files.map((f) => (f === "both" ? "both files" : f === "ads_txt" ? "ads.txt" : "app-ads.txt")).join(" or ");
+  return `A file belongs to a publisher, so this shows the publishers found in ${said}.`;
+}
+
+/**
+ * The move's card: the walkthrough's card (the pick as its eyebrow, then
+ * where it goes and why) just under the list's search bar, with a thin bar
+ * filling over the pause; a pointer on it (hover or finger) holds the pause
+ * and the bar. Never in the way of a click around it; a screen reader hears
+ * it from the list's own status line.
+ */
+function MovingCard({ moving, list, onHold }: { moving: Moving; list: HTMLElement | null; onHold: (held: boolean) => void }) {
+  const [top, setTop] = useState<number | null>(null);
+  // Where the mouse was first seen on the card: it holds once it moves.
+  const firstAt = useRef<{ x: number; y: number } | null>(null);
+  useLayoutEffect(() => {
+    const bar = list?.querySelector<HTMLElement>("[data-list-toolbar]");
+    if (!list || !bar) { setTop(96); return; }
+    setTop(bar.getBoundingClientRect().bottom - list.getBoundingClientRect().top + 14);
+  }, [list]);
+  return (
+    <div data-list-moving={moving.to} data-held={moving.held || undefined} aria-hidden className="list-moving" style={{ top: top ?? 96 }}>
+      {/* A mouse moving over it, or a finger on it, holds the move. Never
+          just a pointer it appeared under (the menu's choice was there):
+          only real movement or a press counts. */}
+      <div className="list-moving-card animate-tour-card-in motion-reduce:animate-none"
+        onPointerMove={(e) => {
+          if (e.pointerType !== "mouse" || moving.held) return;
+          const from = firstAt.current;
+          if (!from) firstAt.current = { x: e.clientX, y: e.clientY };
+          else if (Math.abs(e.clientX - from.x) + Math.abs(e.clientY - from.y) > 2) onHold(true);
+        }}
+        onPointerDown={(e) => { if (e.pointerType !== "mouse") onHold(true); }}
+        onPointerUp={(e) => { if (e.pointerType !== "mouse") onHold(false); }}
+        onPointerLeave={() => { firstAt.current = null; onHold(false); }} onPointerCancel={() => onHold(false)}>
+        <p className="mb-0.5 text-[11px] font-semibold text-primary">{moving.picked}</p>
+        <h2 className="text-[14px] font-semibold leading-snug text-slate-900">Moving to {VIEW_TITLE[moving.to].title}</h2>
+        <p className="mt-1 text-[12.5px] leading-snug text-slate-500">{moving.why}</p>
+        <div aria-hidden className="list-moving-bar"><span style={{ animationDuration: `${MOVE_PAUSE_MS}ms` }} /></div>
+      </div>
+    </div>
+  );
+}
+
 const VIEW_TITLE: Record<ListView, { title: string; blurb: string }> = {
   publishers: {
     title: "Matched publishers",
@@ -1626,12 +2054,12 @@ function StatusControls({ tab, setTab, counts, off, inactive }: {
   const selectedExtra = extra.find(option => option.value === tab);
   useEffect(() => { if (!["all", "added", "removed", "changed"].includes(tab)) setExpanded(true); }, [tab]);
   return <>
-    <label className="report-mobile-status"><span>Status</span>
+    <label className="report-mobile-status" data-tour="list-tabs-mobile"><span>Status</span>
       <select aria-label="Matched status" value={tab} onChange={event => setTab(event.target.value as DrillTab)}>
         {[...primary, ...extra].map(option => <option key={option.value} value={option.value}>{option.label}</option>)}
       </select>
     </label>
-    <Tabs value={tab} onValueChange={value => setTab(value as DrillTab)} className="report-desktop-status max-w-full">
+    <Tabs value={tab} onValueChange={value => setTab(value as DrillTab)} className="report-desktop-status max-w-full" data-tour="list-tabs">
       <TabsList aria-label="Matched statuses" className="status-track h-auto max-w-full justify-start">
         {primary.map(option => <TabsTrigger key={option.value} value={option.value}>{option.label}</TabsTrigger>)}
         {extra.length > 0 && <span id={moreId} hidden={!expanded} className="status-extra-inline">
@@ -1662,8 +2090,12 @@ function splitOf<C>(counts: C | null | undefined, echoed: string | null | undefi
 /** A matched publisher as the list renders it; on a watch tab it carries
  *  the tab (its lines of the kind are read when the row opens). */
 function developerRow(d: MatchedDeveloper, watch?: { tab: ScopeTab; filter: string[] }): Row {
+  const moved = watch ? watchLinesOf(d, watch.tab) : null;
   return {
-    ...(watch ? { scope: { tab: watch.tab, filter: watch.filter, lines: watchLinesOf(d, watch.tab) } } : {}),
+    ...(watch ? { scope: { tab: watch.tab, filter: watch.filter, lines: moved } } : {}),
+    files: watch
+      ? moved && rowFilesOf(moved, moved.length < EVENT_LINES_CAP)
+      : rowFilesOf(d.matched_lines, (d.matched_lines?.length ?? 0) >= d.line_count && d.line_count < ROW_LINES_CAP, d.found_in_all),
     developer_id: d.developer_id,
     developer_name: d.name,
     developer_domain: d.domain,
@@ -1682,9 +2114,15 @@ function developerRow(d: MatchedDeveloper, watch?: { tab: ScopeTab; filter: stri
   };
 }
 
-/** A publisher on Added, Removed or Changed. */
-function eventRow(d: DeveloperEvent): Row {
+/** A publisher on Added, Removed or Changed (``event``: its tab; ``seats``:
+ *  the page's seat-line filter, which the server decides the row's file
+ *  from on a change tab). */
+function eventRow(d: DeveloperEvent, event?: string, seats?: string[]): Row {
+  const raw = event ? (d as Record<string, unknown>)[event === "changed" ? "cert_changed_lines" : `${event}_lines`] : null;
+  const moved = Array.isArray(raw) ? (raw as MatchedSeatLine[]) : null;
   return {
+    files: moved && rowFilesOf(moved, moved.length < EVENT_LINES_CAP, null, seats),
+    ...(event === "removed" ? { filesRemoved: true } : {}),
     developer_id: d.developer_id,
     developer_name: d.developer_name,
     developer_domain: d.developer_domain,
@@ -2110,10 +2548,37 @@ type Row = {
   /** The declared hosts whose app-ads.txt hold some of this publisher's
    *  lines (2026-10-21); empty on its own file alone or on an older report. */
   file_hosts: string[];
+  /** Where its lines are, the file (never a platform): on the list, all of
+   *  its matched lines; on a change tab, the lines that moved there. The
+   *  Found in filter keeps the row by it. Null when the row cannot say. */
+  files?: FileWord | null;
+  /** Set on the Removed tab: ``files`` are the files its lines were removed
+   *  from, and the row says so (David, 2026-11-02). */
+  filesRemoved?: boolean;
   /** Set on a watch tab: which tab, under which line filter, and the
    *  row's lines of the kind when the crawler sends them with the row. */
   scope?: WatchMark;
 } & MatchTypeFields;
+
+/** The crawler's caps on the lines a frozen row keeps: a list row 5,000
+ *  (``_ROW_LINES_CAP``), a change row 200 (``_EVENT_LINES_CAP``). */
+const ROW_LINES_CAP = 5_000;
+const EVENT_LINES_CAP = 200;
+
+/**
+ * Which file a publisher's lines are in, said in words after its domain
+ * ("x.com, Found in ads.txt"): a detail, so the line's own quiet text and
+ * never a badge (David, 2026-11-02), worded by ``foundInLabel`` exactly as
+ * Sellers.json and Schain say it. On a phone it takes its own line, so a
+ * long domain is never cut to make room for it.
+ */
+function FileHint({ files, after, removed }: { files: FileWord; after: boolean; removed?: boolean }) {
+  return (
+    <span data-file-tag={files} className="file-hint flex-none whitespace-nowrap">
+      {after && <span className="file-hint-comma">, </span>}{foundInLabel(files, removed)}
+    </span>
+  );
+}
 
 /** What marks a row of a watch tab. */
 type WatchMark = { tab: ScopeTab; filter: string[]; lines: MatchedSeatLine[] | null };
@@ -2154,6 +2619,28 @@ function matchTypeFieldsOf(d: MatchTypeFields): MatchTypeFields {
 }
 
 /* Status tabs navigate the list; its search, filters and paging share one bar. */
+/**
+ * RESET (David, 2026-11-04: "a reset button for all filters"). Stands at
+ * the end of the list's status row and on the cards' line, only while
+ * something narrows the report or the list: one press puts the seat lines,
+ * Match type, Found in, Platform, the status and the search back to All.
+ * Outside the filter bar on purpose: a fifth control there folds the
+ * filters behind one button on a laptop screen.
+ */
+function ResetFilters({ onReset, testId = "reset-filters" }: { onReset: () => void; testId?: string }) {
+  return (
+    <button
+      type="button"
+      data-testid={testId}
+      onClick={onReset}
+      className="inline-flex items-center gap-1 rounded text-xs font-medium text-primary underline-offset-2 hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+    >
+      <RotateCcw aria-hidden className="h-3 w-3" />
+      Reset filters
+    </button>
+  );
+}
+
 export function ListTabsRow({ left, right }: { left: ReactNode; right: ReactNode }) {
   return (
     <div className="flex flex-wrap items-center justify-between gap-x-4 gap-y-2">
@@ -2171,6 +2658,7 @@ export function ListSearchRow({
   right,
   filters,
   actions,
+  loading,
 }: {
   query: string;
   setQuery: (next: string) => void;
@@ -2181,11 +2669,13 @@ export function ListSearchRow({
   right: ReactNode;
   filters?: ReactNode;
   actions?: ReactNode;
+  /** The rows are loading: the filters keep the fold they have landed with. */
+  loading?: boolean;
 }) {
   return (
     <FilterBar actions={actions}>
       <FilterSearch value={query} onChange={setQuery} placeholder={placeholder} ariaLabel={label} />
-      {filters && <FilterGroup>{filters}</FilterGroup>}
+      {filters && <FilterGroup settling={loading}>{filters}</FilterGroup>}
       {right && <div data-list-count className="list-toolbar-results">{right}</div>}
     </FilterBar>
   );
@@ -2213,6 +2703,25 @@ export function CountSkeleton() {
   );
 }
 
+/** A filter's place while its counts are on the way: the skeleton's tone,
+ *  a trigger's size, so nothing moves when the real filter lands. */
+function FilterSkeleton({ width = "w-20" }: { width?: string }) {
+  return (
+    <>
+      <div className="list-toolbar-divider" />
+      <span aria-hidden data-filter-skeleton className="list-toolbar-select flex items-center px-3">
+        <Skeleton className={cn("h-3 rounded-md", width)} />
+      </span>
+    </>
+  );
+}
+
+/** The three filters' places on a list's first load (Platform, Found in,
+ *  Match type), until it says how it splits. */
+function FilterSkeletons() {
+  return <><FilterSkeleton width="w-24" /><FilterSkeleton width="w-32" /><FilterSkeleton width="w-28" /></>;
+}
+
 function DrilldownList({
   token,
   lines,
@@ -2225,8 +2734,12 @@ function DrilldownList({
   setMatchType,
   foundIn,
   setFoundIn,
+  foundInMulti,
+  onPlatform,
   searchReset,
   known,
+  pageFiltered = false,
+  onReset,
 }: {
   token: string;
   lines: string[];
@@ -2242,26 +2755,61 @@ function DrilldownList({
   /** All / Own / IPD, owned by the page (survives the view switch). */
   matchType: MatchTypeFilter;
   setMatchType: (next: MatchTypeFilter) => void;
-  /** All / ads.txt / app-ads.txt / Both, the page's too. */
+  /** All files, or ads.txt / app-ads.txt / Both ticked (any of them), the
+   *  page's too. */
   foundIn: FoundInFilter;
   setFoundIn: (next: FoundInFilter) => void;
+  /** Whether the API takes several files in one found_in (the page asks
+   *  once): the tick boxes and Web need it. */
+  foundInMulti: boolean;
+  /** The page's one Platform pick (CTV / Mobile open the apps list). */
+  onPlatform: (next: PlatformFilter) => void;
   /** Bumped by a Popular choice: the search clears. */
   searchReset: number;
   /** Counts the page read for the Popular choices (expectedRows). */
   known?: Record<string, number> | null;
+  /** A page filter narrows the report (seat lines, Match type, Found in,
+   *  Platform): Reset stands in the filters. */
+  pageFiltered?: boolean;
+  /** Puts every filter back to All (the page's, and this list's search). */
+  onReset?: () => void;
 }) {
   const [rows, setRows] = useState<Row[]>([]);
   // The list's split by file (crawler PR): null, no Found in switch.
   const [foundInCounts, setFoundInCounts] = useState<FoundInCounts | null>(null);
+  // PLATFORM ON THE PUBLISHERS LIST (David, 2026-11-01): a publisher has
+  // none, so here CTV and Mobile are the APPS this tab holds on each, read
+  // the way the apps list will read them, and open that list; Web is the
+  // web publishers (ads.txt + Both), this list. Null: an API without the
+  // apps' platform split, so no CTV or Mobile choice.
+  const [appCounts, setAppCounts] = useState<PlatformCounts | null>(null);
+  useEffect(() => {
+    // Never last tab's numbers under this tab: none until these land.
+    setAppCounts(null);
+    if (tab === "inactive") return;
+    let cancelled = false;
+    const change = appChangeOf(tab);
+    api.matchedApps(token, 1, "", lines, matchType, change, 1)
+      .then((r) => {
+        // Counts of this tab only: an API that did not filter by it (no
+        // echo) would count the whole list.
+        if (!cancelled) setAppCounts(!change || r.change === change ? r.platform_counts ?? null : null);
+      })
+      .catch(() => { if (!cancelled) setAppCounts(null); });
+    return () => { cancelled = true; };
+  }, [token, tab, lines, matchType]);
   // THE WATCH TABS (crawler #361): the list's change counts, from the last
   // answer that carried them; and whether the API ever answered a watch
   // filter unfiltered (an API without it: those tabs are not offered).
   const [changeCounts, setChangeCounts] = useState<ChangeCounts | null>(null);
   const [watchOff, setWatchOff] = useState(false);
-  // Inactive can be the first view mounted; read status capabilities without
-  // requiring a detour through All matched. Older reports still omit them.
+  // Inactive, or a change tab (its events carry no status counts), can be
+  // the first view mounted: a list card or a filter's move opens the list
+  // on the tab the page is on. Read status capabilities without requiring
+  // a detour through All matched, so the extra statuses never vanish.
+  // Older reports still omit them.
   useEffect(() => {
-    if (tab !== "inactive" || changeCounts !== null || watchOff) return;
+    if (tab === "all" || isScopeTab(tab) || changeCounts !== null || watchOff) return;
     let cancelled = false;
     api.matchedDevelopers(token, 1, "", lines, matchType, 1)
       .then(result => { if (!cancelled && result.change_counts) setChangeCounts(result.change_counts); })
@@ -2345,7 +2893,7 @@ function DrilldownList({
             foundInCounts: splitOf(r.found_in_counts, r.found_in, foundIn),
             unfiltered: false,
             changeCounts: r.change_counts ?? null,
-            rows: r.rows.map((d) => eventRow(d)),
+            rows: r.rows.map((d) => eventRow(d, event, lines)),
             total: r.total,
             truncated: false,
             trial: r.trial ?? null,
@@ -2491,7 +3039,7 @@ function DrilldownList({
           <StatusControls tab={tab} setTab={setTab} counts={changeCounts} off={watchOff} inactive={!!inactive} />
             </>
           }
-          right={null}
+          right={onReset && (pageFiltered || query !== "" || tab !== "all") ? <ResetFilters onReset={onReset} /> : null}
         />
         {isScopeTab(tab) && <p data-scope-note className="text-[12px] leading-relaxed text-slate-500">{SCOPE_NOTE[tab]}</p>}
         {tab !== "inactive" && (
@@ -2499,14 +3047,63 @@ function DrilldownList({
             query={query}
             setQuery={setQuery}
             placeholder="Search publishers"
+            loading={loading}
             label="Search matched publishers"
             actions={!loading && settled > 0 && !error && rows.length > 0 && !trial && !caps ? <ExportListButton run={exportList} noun="publishers" status={rowsTab} query={query} filtered={lines.length > 0 || rowsMatchType !== "all" || foundIn !== "all"} /> : null}
-            filters={<>
-              {foundInCounts && <FilterSelect value={foundIn} onChange={setFoundIn} leading="Found in" ariaLabel="Found in" testId="found-in" options={[
-                { value: "all", label: "All files", description: "Publishers matched in either source file." }, { value: "ads_txt", label: "ads.txt", description: "Publishers with matching lines in ads.txt." },
-                { value: "app_ads_txt", label: "app-ads.txt", description: "Publishers with matching lines in app-ads.txt." }, { value: "both", label: "Both", description: "Publishers with matching lines in both files." },
-              ].filter(o => o.value === "all" || o.value === foundIn || (foundInCounts[o.value as keyof typeof foundInCounts] ?? 0) > 0).map(o => ({ ...o, count: foundInCounts[o.value as keyof typeof foundInCounts] })) as { value: typeof foundIn; label: string; count: number }[]} />}
-              {typeCounts && <FilterSelect value={matchType} onChange={setMatchType} leading="Match type" icon={SlidersHorizontal} menuLabel="Filter by match type" ariaLabel="Match type" testId="match-type" options={[
+            // A first load: the filters' places as skeletons (David,
+            // 2026-11-02: every wait on the Overview is a skeleton).
+            filters={loading && settled === 0 && !foundInCounts && !typeCounts ? <FilterSkeletons /> : <>
+              {/* PLATFORM, first on both lists so it stands in one place. */}
+              {(foundInCounts || appCounts) && <FilterSelect
+                value={foundIn === WEB_PUBLISHERS ? "web" : "all"}
+                onChange={onPlatform}
+                leading="Platform" icon={MonitorSmartphone} ariaLabel="Platform" testId="platform" info={FILTER_INFO.platform}
+                // Its Web is Found in's ads.txt + Both, counted there.
+                narrows={false}
+                options={[
+                  // Every choice says what it counts and wears the arrow, in
+                  // one look (David, 2026-11-02); CTV and Mobile say "apps",
+                  // the list they open.
+                  { value: "all" as const, label: "All", description: "Every matched publisher.",
+                    countLabel: foundInCounts ? `${foundInCounts.all.toLocaleString()} publishers` : undefined, leads: true },
+                  ...(["ctv", "mobile"] as const).filter((p) => (appCounts?.[p] ?? 0) > 0).map((p) => ({
+                    value: p,
+                    label: p === "ctv" ? "CTV" : "Mobile",
+                    description: `An app platform. Opens Matched apps on ${p === "ctv" ? "CTV" : "Mobile"}.`,
+                    countLabel: `${(appCounts?.[p] ?? 0).toLocaleString()} apps`,
+                    leads: true,
+                  })),
+                  // Web needs two files in one found_in; the chosen Web stays
+                  // listed even when nothing here is web, so the trigger
+                  // always names what is applied.
+                  ...(foundInMulti && foundInCounts && (foundIn === WEB_PUBLISHERS || foundInCounts.ads_txt + foundInCounts.both > 0) ? [{
+                    value: "web" as const,
+                    label: "Web",
+                    description: "Web publishers: found in ads.txt + Both.",
+                    countLabel: `${(foundInCounts.ads_txt + foundInCounts.both).toLocaleString()} publishers`,
+                    leads: true,
+                  }] : []),
+                ]} />}
+              {/* FOUND IN, TICK BOXES (David, 2026-11-01): any of the three
+                  files at once; ads.txt + Both are the web publishers, what
+                  Platform's Web picks. */}
+              {foundInCounts && (foundInMulti ? <FilterMultiSelect value={foundInFiles(foundIn)} onChange={(files) => setFoundIn(foundInOf(files))} leading="Found in" icon={FileText} ariaLabel="Found in" testId="found-in" info={FILTER_INFO.foundIn}
+                noun={foundIn === WEB_PUBLISHERS ? "web publishers" : "publishers"}
+                allLabel="All files" allDescription="Publishers matched in either file." allCount={foundInCounts.all}
+                choices={FOUND_IN_FILES}
+                options={([
+                  { value: "ads_txt", label: "ads.txt", description: "Matching lines in ads.txt only." },
+                  { value: "app_ads_txt", label: "app-ads.txt", description: "Matching lines in app-ads.txt only." },
+                  { value: "both", label: "Both", description: "Matching lines in both files." },
+                ] as const).filter(o => foundInFiles(foundIn).includes(o.value) || (foundInCounts[o.value] ?? 0) > 0).map(o => ({ ...o, count: foundInCounts[o.value] }))} />
+                // An API that takes one file at a time: one choice, as before.
+                : <FilterSelect value={foundIn} onChange={setFoundIn} leading="Found in" icon={FileText} ariaLabel="Found in" testId="found-in" info={FILTER_INFO.foundIn} options={([
+                  { value: "all", label: "All files", description: "Publishers matched in either source file." },
+                  { value: "ads_txt", label: "ads.txt", description: "Publishers with matching lines in ads.txt." },
+                  { value: "app_ads_txt", label: "app-ads.txt", description: "Publishers with matching lines in app-ads.txt." },
+                  { value: "both", label: "Both", description: "Publishers with matching lines in both files." },
+                ] as const).filter(o => o.value === "all" || o.value === foundIn || (foundInCounts[o.value] ?? 0) > 0).map(o => ({ ...o, count: foundInCounts[o.value] }))} />)}
+              {typeCounts && <FilterSelect value={matchType} onChange={setMatchType} leading="Match type" icon={SlidersHorizontal} menuLabel="Filter by match type" ariaLabel="Match type" testId="match-type" info={FILTER_INFO.matchType} options={[
                 { value: "all", label: "All", description: "Publisher files and inventory partners", count: typeCounts.all }, { value: "own", label: "Own", description: "In the publisher’s own file", count: typeCounts.own }, { value: "ipd", label: "IPD", description: "Via a declared inventory partner", count: typeCounts.ipd },
               ]} />}
             </>}
@@ -2580,7 +3177,7 @@ function DrilldownList({
             ) : (
               <div className="space-y-3">
                 {rows.map((r, i) => (
-                  <Settle key={r.developer_id} index={i}>
+                  <Settle key={r.developer_id} index={i} tour={i === 0 ? "overview-first-row" : undefined}>
                     <PublisherCard
                       row={r}
                       token={token}
@@ -2803,12 +3400,20 @@ function PublisherCard({
             {!inactive && <IpdChip row={row} others={otherPartners(row, row.matched_lines)} />}
             {inactive && <InactiveChip />}
           </div>
-          {row.developer_domain && row.developer_name && (
-            <div className="flex min-w-0 text-xs text-slate-500">
-              <PublisherDomainLink
-                domain={row.developer_domain}
-                onHoverChange={setSiteHover}
-              />
+          {((row.developer_domain && row.developer_name) || (!inactive && row.files)) && (
+            <div className="publisher-subline flex min-w-0 items-center text-xs text-slate-500">
+              {row.developer_domain && row.developer_name && (
+                // In a sentence with the file, no hover arrow: it holds its
+                // width and would stand the comma a blank away.
+                <PublisherDomainLink
+                  domain={row.developer_domain}
+                  onHoverChange={setSiteHover}
+                  arrow={Boolean(inactive) || !row.files}
+                />
+              )}
+              {/* WHICH FILE (David, 2026-11-01): ads.txt, app-ads.txt or
+                  both, what Found in keeps it by; a file, never a platform. */}
+              {!inactive && row.files && <FileHint files={row.files} after={Boolean(row.developer_domain && row.developer_name)} removed={row.filesRemoved} />}
             </div>
           )}
           {/* WHERE ITS FILES ARE (2026-10-21): the declared hosts whose
@@ -2877,6 +3482,12 @@ function PublisherCard({
                   removed={row.removed_lines}
                   certChanged={row.cert_changed_lines}
                   matched={row.matched_lines}
+                  counts={{ added: row.added, removed: row.removed, cert: row.cert_changed }}
+                  loadAll={{
+                    added: () => allChangeLines(token, row.developer_id, "added", row.developer_domain),
+                    removed: () => allChangeLines(token, row.developer_id, "removed", row.developer_domain),
+                    cert: () => allChangeLines(token, row.developer_id, "cert", row.developer_domain),
+                  }}
                   // Own lines open the publisher's file; each partner's
                   // lines open that partner's ads.txt.
                   publisherDomain={row.developer_domain}
@@ -2906,8 +3517,10 @@ function PublisherCard({
 /** One change kind a card's expansion can show. */
 type ChangeKind = "added" | "removed" | "cert";
 
-/** How many lines a window prints before it tails the rest as "plus N more". */
-const CHANGE_LINE_CAP = 8;
+/** Every line, one click away; one motion both ways (``FoldedList``). */
+const CHANGE_LINES_OPEN = FOLD_OPEN;
+const CHANGE_LINES_SLACK = FOLD_SLACK;
+const CHANGE_LINES_STEP = FOLD_STEP;
 
 /**
  * Per-kind window styling, written as whole literal class strings so Tailwind
@@ -3035,6 +3648,9 @@ export function SeatLineRow({
   const foundIn = inOwn ? line.found_in : "ads.txt";
   const sourceKind = fileLabelOf(foundIn);
   const sourceFiles = ["ads.txt", "app-ads.txt", "both"].includes(sourceKind) ? filesOf(sourceKind) : [];
+  // A removed line names the files it was removed from (David,
+  // 2026-11-02), the way ``foundInLabel`` says it: counted once per file.
+  const sourceLead = change === "removed" ? (dates ? ", removed from " : "Removed from ") : dates ? ", found in " : "Found in ";
   const text = (
     <div className="min-w-0 flex-1">
       {label ?? (
@@ -3060,7 +3676,7 @@ export function SeatLineRow({
       {unchecked && <RowNote data-line-unchecked>{unchecked}</RowNote>}
       <RowNote data-line-dates title={dateTitle(line.date_source)}>
           {dates}
-          {sourceFiles.length > 0 && <span data-line-source>{dates ? ", found in " : "Found in "}{sourceFiles.map((file, index) => (
+          {sourceFiles.length > 0 && <span data-line-source>{sourceLead}{sourceFiles.map((file, index) => (
             <span key={file}>{index > 0 && " + "}{linkable(fileDomain) ? (
               <a href={fileUrl(fileDomain, file, gone ? null : line)} target="_blank" rel="noopener noreferrer"
                 onClick={event => event.stopPropagation()} onKeyDown={event => event.stopPropagation()}
@@ -3107,29 +3723,136 @@ export function SeatLineRow({
  * white list of the lines. Used full width on its own for a single-kind change,
  * and as a tile in the side-by-side grid for a mixed one. The header count is
  * the honest total; a long list prints the first few and tails the rest.
+ *
+ * THE COUNT IS THE ROW'S CHANGE COLUMN (David, 2026-11-02): a change counts
+ * once per file it happened in, so a seat removed from ads.txt and app-ads.txt
+ * is 2, listed once as "removed from ads.txt + app-ads.txt". The window used
+ * to count its rows (1) under a Change of -2.
  */
 function ChangeWindow({
   kind,
   lines,
+  total,
   publisherDomain,
   rowPartner,
   certRead,
+  loadAll,
 }: {
   kind: ChangeKind;
   lines: MatchedSeatLine[];
+  /** The row's own count of this kind, as its Change column says it; the
+   *  rows listed when the row has none. */
+  total?: number;
   publisherDomain?: string | null;
   rowPartner?: string | null;
   /** A cert window: whose old certs to read (the row's own, on open). */
   certRead?: CertRead;
+  /** Every line of this change from the report's line events, for a row
+   *  frozen before 2026-10-28 that kept only its first 200. */
+  loadAll?: () => Promise<MatchedSeatLine[]>;
 }) {
   const s = CHANGE_WINDOW[kind];
+  const [open, setOpen] = useState(false);
+  const [drawn, setDrawn] = useState(CHANGE_LINES_STEP);
+  const [whole, setWhole] = useState<MatchedSeatLine[] | null>(null);
+  const [loading, setLoading] = useState(false);
+  const [loadFailed, setLoadFailed] = useState(false);
+  const alive = useRef(true);
+  // Set on every mount: React's development double mount runs the cleanup
+  // once, and a flag left false would drop the answer (review, 2026-11-02).
+  useEffect(() => {
+    alive.current = true;
+    return () => { alive.current = false; };
+  }, []);
+  const listId = useId();
+  const stopMotion = useRef<(() => void) | null>(null);
+  // The list's height before it opened, eased from once the whole list is drawn.
+  const openedFrom = useRef<number | null>(null);
+  useEffect(() => () => stopMotion.current?.(), []);
+  const source = whole ?? lines;
   // THE CERT, OLD TO NEW (David, 2026-10-27), read for this row only.
   // Lines that say their old cert themselves (crawler #370) need no read.
-  const certs = useRowCerts(kind === "cert" && !hasOldCerts(lines) ? certRead : undefined);
+  const certs = useRowCerts(kind === "cert" && !hasOldCerts(source) ? certRead : undefined);
   // One row per distinct line, its partners beside it (2026-10-27).
-  const groups = groupSeatLines(withOldCerts(lines, certs, publisherDomain), rowPartner);
-  const shown = groups.slice(0, CHANGE_LINE_CAP);
-  const extra = groups.length - shown.length;
+  const groups = groupSeatLines(withOldCerts(source, certs, publisherDomain), rowPartner);
+  // A row frozen before 2026-10-28 kept its first 200 own lines (its
+  // inventory partners' copies were added after the cut): exactly 200 own
+  // lines, counting fewer changes per file than the row's own count, was cut.
+  const cut =
+    Boolean(loadAll) && whole === null &&
+    ownLineCount(lines) === EVENT_LINES_CAP && typeof total === "number" && perFileCount(lines) < total;
+  const folds = cut || groups.length > CHANGE_LINES_OPEN + CHANGE_LINES_SLACK;
+  const shown = !folds ? groups : groups.slice(0, open ? drawn : CHANGE_LINES_OPEN);
+  const scroller = useRef<HTMLDivElement | null>(null);
+  const more = useRef<HTMLButtonElement | null>(null);
+  // Draw the next step as the reader nears the end of what is drawn.
+  useEffect(() => {
+    const el = more.current;
+    if (!open || !el || drawn >= groups.length || typeof IntersectionObserver === "undefined") return;
+    const seen = new IntersectionObserver(
+      (entries) => entries.some((e) => e.isIntersecting) && setDrawn((d) => d + CHANGE_LINES_STEP),
+      { root: scroller.current, rootMargin: "400px 0px" },
+    );
+    seen.observe(el);
+    return () => seen.disconnect();
+  }, [open, drawn, groups.length]);
+  // Opening: the whole list is drawn, then its height eases up from where
+  // the first lines left it, before the browser paints.
+  useLayoutEffect(() => {
+    const el = scroller.current;
+    const from = openedFrom.current;
+    openedFrom.current = null;
+    if (el && !open) {
+      // Closed: the first lines are drawn, so the held height lets go.
+      el.style.height = "";
+      el.style.overflow = "";
+      return;
+    }
+    if (!open || !el || from === null) return;
+    const to = el.getBoundingClientRect().height;
+    if (to <= from) return;
+    stopMotion.current?.();
+    stopMotion.current = easeListHeight(el, from, to, () => { stopMotion.current = null; });
+  }, [open]);
+  const toggle = () => {
+    const el = scroller.current;
+    const still = prefersReducedMotion();
+    if (open) {
+      const finish = () => {
+        stopMotion.current = null;
+        if (el) el.scrollTop = 0;
+        setOpen(false);
+        setDrawn(CHANGE_LINES_STEP);
+      };
+      // Closing: the height eases down to the first lines, then the rest go.
+      const firstRows = el ? (Array.from(el.querySelector("ul")?.children ?? []) as HTMLElement[]).slice(0, CHANGE_LINES_OPEN) : [];
+      const to = firstRows.reduce((h, r) => h + r.offsetHeight, 0);
+      stopMotion.current?.();
+      if (!el || still || !to) {
+        finish();
+        return;
+      }
+      stopMotion.current = easeListHeight(el, el.getBoundingClientRect().height, to, finish, true);
+      return;
+    }
+    stopMotion.current?.();
+    stopMotion.current = null;
+    if (el && !still) openedFrom.current = el.getBoundingClientRect().height;
+    setOpen(true);
+    // A cut row reads the rest each time it opens until it has them, so a
+    // failed read is tried again on the next open.
+    if (cut && loadAll && !loading) {
+      setLoading(true);
+      setLoadFailed(false);
+      loadAll()
+        .then((all) => {
+          // The held lines stay as they were, and none is ever dropped.
+          if (alive.current) setWhole(withKeptLines(all, lines, publisherDomain));
+        })
+        .catch(() => { if (alive.current) setLoadFailed(true); })
+        .finally(() => { if (alive.current) setLoading(false); });
+    }
+  };
   return (
     <section
       className={cn(
@@ -3151,12 +3874,13 @@ function ChangeWindow({
           {s.title}
         </span>
         <span
+          data-window-count
           className={cn(
             "font-mono text-[11px] font-semibold tabular-nums",
             s.text,
           )}
         >
-          {groups.length}
+          {typeof total === "number" && total > 0 ? total : groups.length}
         </span>
       </div>
       {/* Why a removal carries two dates, said once where the dates are. */}
@@ -3166,6 +3890,12 @@ function ChangeWindow({
         </p>
       )}
       <LineActionGroup tone={kind}>
+      <div
+        ref={scroller}
+        id={listId}
+        data-window-lines
+        className={cn(open && folds && "max-h-[32rem] overflow-y-auto overscroll-contain")}
+      >
       <ul className="bl-lines-in divide-y divide-border">
         {shown.map((g, i) => (
           <SeatLineRow
@@ -3174,7 +3904,7 @@ function ChangeWindow({
             partners={g.partners}
             own={g.own}
             n={i + 1}
-            digits={gutterDigits(shown.length)}
+            digits={gutterDigits(groups.length)}
             muted={s.muted}
             gone={kind === "removed"}
             publisherDomain={publisherDomain}
@@ -3182,14 +3912,85 @@ function ChangeWindow({
           />
         ))}
       </ul>
-      </LineActionGroup>
-      {extra > 0 && (
-        <p className="border-t border-border px-3 py-1 text-[10px] text-slate-500">
-          Plus {extra} more.
+      {open && drawn < groups.length && (
+        <button
+          ref={more}
+          type="button"
+          data-window-more
+          onClick={() => setDrawn((d) => d + CHANGE_LINES_STEP)}
+          className="w-full border-t border-border px-3 py-1.5 text-[11px] text-slate-500 hover:bg-muted/60"
+        >
+          Showing {drawn.toLocaleString()} of {groups.length.toLocaleString()} lines, scroll for more
+        </button>
+      )}
+      {open && loading && (
+        <p role="status" data-window-loading className="border-t border-border px-3 py-1.5 text-[11px] text-slate-500">
+          Loading every line
         </p>
+      )}
+      {open && loadFailed && (
+        <p role="status" data-window-load-failed className="border-t border-border px-3 py-1.5 text-[11px] text-slate-500">
+          Could not load the lines past the first {lines.length.toLocaleString()}. Close and open the list to try again, or download the report.
+        </p>
+      )}
+      </div>
+      </LineActionGroup>
+      {folds && (
+        <button
+          type="button"
+          data-window-toggle
+          aria-expanded={open}
+          aria-controls={listId}
+          onClick={toggle}
+          className="flex w-full items-center justify-center gap-1 border-t border-border px-3 py-1.5 text-[11px] font-medium text-slate-600 hover:bg-muted/60 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-primary/30"
+        >
+          <ChevronDown aria-hidden className={cn("h-3.5 w-3.5 transition-transform", open && "rotate-180")} />
+          {open
+            ? `Show the first ${CHANGE_LINES_OPEN}`
+            : cut
+              ? "Show all lines"
+              : `Show all ${groups.length.toLocaleString()} lines`}
+        </button>
       )}
     </section>
   );
+}
+
+/** A window's own lines: not an inventory partner's copy. */
+function ownLineCount(lines: readonly MatchedSeatLine[]): number {
+  return lines.filter((l) => l && l.match_type !== "ipd" && !l.ipd_partner).length;
+}
+
+/** A window's lines counted the way its row counts them: once per file, a
+ *  line in ads.txt and app-ads.txt twice, each partner's copy once. */
+function perFileCount(lines: readonly MatchedSeatLine[]): number {
+  return lines.reduce((n, l) => n + (String(l?.found_in ?? "").toLowerCase() === "both" ? 2 : 1), 0);
+}
+
+/** Every line event of one publisher's change of a kind, every page,
+ *  folded into the window's lines (``lib/changeLines``). A cert change is
+ *  stored as "changed", which the endpoint's event filter does not take:
+ *  the publisher's events are read whole and kept by kind. */
+async function allChangeLines(
+  token: string,
+  developerId: number,
+  kind: ChangeKind,
+  publisherDomain?: string | null,
+): Promise<MatchedSeatLine[]> {
+  const rows: LineEvent[] = [];
+  for (let page = 1; page <= 10_000; page++) {
+    const r = await api.lineEvents(token, {
+      ...(kind === "cert" ? {} : { event: kind }),
+      developer_id: developerId,
+      page,
+      page_size: 500,
+    });
+    const got = Array.isArray(r.rows) ? r.rows : [];
+    rows.push(...got);
+    if (!got.length || rows.length >= (r.total ?? 0)) break;
+  }
+  const mine = kind === "cert" ? rows.filter((e) => e && (e.event === "changed" || e.event === "cert_changed")) : rows;
+  return foldChangeEvents(mine, { cert: kind === "cert", publisherDomain });
 }
 
 /**
@@ -3211,6 +4012,8 @@ function ChangeExpansion({
   removed,
   certChanged,
   matched,
+  counts,
+  loadAll,
   publisherDomain,
   rowPartner,
   certRead,
@@ -3219,6 +4022,10 @@ function ChangeExpansion({
   removed: MatchedSeatLine[];
   certChanged: MatchedSeatLine[];
   matched: MatchedSeatLine[];
+  /** The row's Change column, which each window's count says. */
+  counts?: Partial<Record<ChangeKind, number>>;
+  /** Every line of a kind, for a row frozen when it kept only 200. */
+  loadAll?: Partial<Record<ChangeKind, () => Promise<MatchedSeatLine[]>>>;
   /** Whose files the source controls should open. */
   publisherDomain?: string | null;
   /** An IPD row's partner, for lines from a report that does not say
@@ -3249,6 +4056,8 @@ function ChangeExpansion({
       <ChangeWindow
         kind={sections[0].kind}
         lines={sections[0].lines}
+        total={counts?.[sections[0].kind]}
+        loadAll={loadAll?.[sections[0].kind]}
         publisherDomain={publisherDomain}
         rowPartner={rowPartner}
         certRead={sections[0].kind === "cert" ? certRead : undefined}
@@ -3269,6 +4078,8 @@ function ChangeExpansion({
           <ChangeWindow
             kind={sec.kind}
             lines={sec.lines}
+            total={counts?.[sec.kind]}
+            loadAll={loadAll?.[sec.kind]}
             publisherDomain={publisherDomain}
             rowPartner={rowPartner}
             certRead={sec.kind === "cert" ? certRead : undefined}
@@ -3458,8 +4269,13 @@ function MatchedAppsList({
   setMatchType,
   platform,
   setPlatform,
+  foundInMulti,
+  onPlatform,
+  onFoundIn,
   searchReset,
   known,
+  pageFiltered = false,
+  onReset,
 }: {
   token: string;
   lines: string[];
@@ -3474,22 +4290,86 @@ function MatchedAppsList({
   /** All / Own / IPD, owned by the page (survives the view switch). */
   matchType: MatchTypeFilter;
   setMatchType: (next: MatchTypeFilter) => void;
-  /** All / CTV / Mobile / Web, the page's too (apps only). */
+  /** All / CTV / Mobile, the page's too (apps only). */
   platform: PlatformFilter;
   setPlatform: (next: PlatformFilter) => void;
+  /** Whether the API takes several files in one found_in: Web needs it. */
+  foundInMulti: boolean;
+  /** The page's one Platform pick (Web opens the publishers list). */
+  onPlatform: (next: PlatformFilter) => void;
+  /** A Found in pick here: it opens the publishers list on that file. */
+  onFoundIn: (next: FoundInFilter) => void;
   /** Bumped by a Popular choice: the search clears. */
   searchReset: number;
   /** Counts the page read for the Popular choices (expectedRows). */
   known?: Record<string, number> | null;
+  /** A page filter narrows the report: Reset stands in the filters. */
+  pageFiltered?: boolean;
+  /** Puts every filter back to All (the page's, and this list's search). */
+  onReset?: () => void;
 }) {
   const [allRows, setAllRows] = useState<AppRow[]>([]);
   // The list's split by platform (crawler PR): null, no Platform switch.
   const [platformCounts, setPlatformCounts] = useState<PlatformCounts | null>(null);
+  // WEB (David, 2026-11-01): web is not an app, so Platform's Web opens the
+  // publishers list on its web publishers (ads.txt alone or with
+  // app-ads.txt), on this tab under these filters. How many it opens, read
+  // the way that list will read them; null, no Web choice: an API that
+  // cannot ask for several files at once (it refuses, or does not echo),
+  // or none to open.
+  const [webPublishers, setWebPublishers] = useState<number | null>(null);
+  // FOUND IN HERE (David, 2026-11-02): the publishers' split by file, read
+  // the way their list reads it, for the Found in that opens them; null,
+  // no Found in on this list (an API without the split).
+  const [publisherFiles, setPublisherFiles] = useState<FoundInCounts | null>(null);
+  // While it is read, Found in keeps its place as a skeleton, unless the
+  // API has shown it has no split to give (no place to keep).
+  const [filesPending, setFilesPending] = useState(false);
+  const hadFiles = useRef<boolean | null>(null);
+  // How many reads have landed on this list (the skeleton's cue too).
+  const [settled, setSettled] = useState(0);
+  const platformShown = platformCounts != null;
+  // Read once the list has landed: it then says whether it has a Platform
+  // (so the one read asks the right thing, never twice).
+  const listLanded = settled > 0;
+  useEffect(() => {
+    // Never last tab's numbers under this tab: none until this one lands.
+    setWebPublishers(null);
+    setPublisherFiles(null);
+    setFilesPending(tab !== "inactive" && listLanded);
+    if (tab === "inactive" || !listLanded) return;
+    let cancelled = false;
+    const watch = isScopeTab(tab) ? WATCH_CHANGE[tab] : undefined;
+    // One read: on Web (when the API takes two files and this list has a
+    // Platform to offer it on), which also carries the split by file.
+    const asked: FoundInFilter = foundInMulti && platformShown ? WEB_PUBLISHERS : "all";
+    const read: Promise<{ total: number; found_in?: string | null; change?: string | null; found_in_counts?: FoundInCounts | null }> =
+      tab === "all" || isScopeTab(tab)
+        ? api.matchedDevelopers(token, 1, "", lines, matchType, 1, watch, asked)
+        : api.developerEvents(token, tab, 1, "", lines, matchType, 1, asked);
+    read
+      .then((r) => {
+        if (cancelled) return;
+        // This tab's numbers only: a watch tab the API did not filter by
+        // (no echo) would be the whole list's.
+        const tabOk = !watch || r.change === watch;
+        const web = asked === WEB_PUBLISHERS && r.found_in === WEB_PUBLISHERS && tabOk;
+        setWebPublishers(web && r.total > 0 ? r.total : null);
+        const files = tabOk ? splitOf(r.found_in_counts, r.found_in, asked) : null;
+        hadFiles.current = r.found_in_counts != null;
+        setPublisherFiles(files && files.all > 0 ? files : null);
+        setFilesPending(false);
+      })
+      .catch(() => { if (!cancelled) { setWebPublishers(null); setPublisherFiles(null); setFilesPending(false); } });
+    return () => { cancelled = true; };
+  }, [token, tab, lines, matchType, foundInMulti, platformShown, listLanded]);
   // The watch tabs (crawler #361), as on the publishers list.
   const [changeCounts, setChangeCounts] = useState<ChangeCounts | null>(null);
   const [watchOff, setWatchOff] = useState(false);
+  // As on the publishers list: a first mount on Inactive or a change tab
+  // still learns which statuses there are.
   useEffect(() => {
-    if (tab !== "inactive" || changeCounts !== null || watchOff) return;
+    if (tab === "all" || isScopeTab(tab) || changeCounts !== null || watchOff) return;
     let cancelled = false;
     api.matchedApps(token, 1, "", lines, matchType, undefined, 1, platform)
       .then(result => { if (!cancelled && result.change_counts) setChangeCounts(result.change_counts); })
@@ -3516,7 +4396,6 @@ function MatchedAppsList({
 
   const keyOf = (a: AppRow) => `${a.store}:${a.bundle_id}`;
   const appCache = usePageCache<unknown>();
-  const [settled, setSettled] = useState(0);
   // The size of the list last read, for the skeleton's row count.
   const [landed, setLanded] = useState<Landed | null>(null);
   // The tab the rows on screen were read for, and whether the server
@@ -3702,7 +4581,7 @@ function MatchedAppsList({
           <StatusControls tab={tab} setTab={setTab} counts={changeCounts} off={watchOff} inactive={!!inactive} />
             </>
           }
-          right={null}
+          right={onReset && (pageFiltered || query !== "" || tab !== "all") ? <ResetFilters onReset={onReset} /> : null}
         />
         {isScopeTab(tab) && <p data-scope-note className="text-[12px] leading-relaxed text-slate-500">{SCOPE_NOTE[tab]}</p>}
         {tab !== "inactive" && (
@@ -3710,13 +4589,44 @@ function MatchedAppsList({
             query={query}
             setQuery={setQuery}
             placeholder="Search apps"
+            loading={loading}
             label="Search matched apps"
             actions={!loading && settled > 0 && !failed && rows.length > 0 && !trial && !caps && !unsupportedChange ? <ExportListButton run={exportList} noun="apps" status={rowsTab} query={query} filtered={lines.length > 0 || rowsMatchType !== "all" || platform !== "all"} /> : null}
-            filters={<>
-              {platformCounts && <FilterSelect value={platform} onChange={setPlatform} leading="Platform" ariaLabel="Platform" testId="platform" options={[
-                { value: "all", label: "All", description: "Every app platform in this report." }, { value: "ctv", label: "CTV", description: "Connected TV apps and channels." }, { value: "mobile", label: "Mobile", description: "Mobile apps, including iOS and Android." }, { value: "web", label: "Web", description: "Apps classified as web by this report." },
-              ].filter(o => o.value === "all" || o.value === platform || (platformCounts[o.value as keyof typeof platformCounts] ?? 0) > 0).map(o => ({ ...o, count: platformCounts[o.value as keyof typeof platformCounts] })) as { value: typeof platform; label: string; count: number }[]} />}
-              {typeCounts && <FilterSelect value={matchType} onChange={setMatchType} leading="Match type" icon={SlidersHorizontal} menuLabel="Filter by match type" ariaLabel="Match type" testId="match-type" options={[
+            // A first load: the filters' places as skeletons until the list
+            // itself says how it splits (a quicker side read never shows one
+            // filter alone, the others popping in after).
+            filters={loading && settled === 0 && !platformCounts && !typeCounts ? <FilterSkeletons /> : <>
+              {/* PLATFORM: an app is CTV or Mobile, by its store. Web is not
+                  an app (David, 2026-11-01): its choice says how many
+                  publishers it opens and opens them, never filters apps. */}
+              {platformCounts && <FilterSelect value={platform} onChange={onPlatform} leading="Platform" icon={MonitorSmartphone} ariaLabel="Platform" testId="platform" info={FILTER_INFO.platform} options={[
+                ...([
+                  { value: "all", label: "All", description: "Every app in this report." },
+                  { value: "ctv", label: "CTV", description: "Connected TV apps and channels." },
+                  { value: "mobile", label: "Mobile", description: "Mobile apps, iOS and Android." },
+                ] as const).filter(o => o.value === "all" || o.value === platform || (platformCounts[o.value] ?? 0) > 0)
+                  .map(o => ({ ...o, countLabel: `${(platformCounts[o.value] ?? 0).toLocaleString()} apps`, leads: true })),
+                ...(webPublishers != null && foundInMulti ? [{
+                  value: "web" as const,
+                  label: "Web",
+                  description: "Web is not an app. Opens the web publishers: found in ads.txt + Both.",
+                  countLabel: `${webPublishers.toLocaleString()} publishers`,
+                  leads: true,
+                }] : []),
+              ]} />}
+              {/* FOUND IN HERE TOO (David, 2026-11-02): a file is a
+                  publisher's, never an app's, so it filters no app: every
+                  choice says how many publishers it opens and opens them. */}
+              {!publisherFiles && filesPending && hadFiles.current !== false && <FilterSkeleton width="w-32" />}
+              {publisherFiles && <FilterSelect value={"all" as FoundInFilter} onChange={onFoundIn} leading="Found in" icon={FileText} ariaLabel="Found in" testId="found-in" info={FILTER_INFO.foundInOnApps}
+                options={([
+                  { value: "all", label: "All files", description: "Opens every matched publisher." },
+                  { value: "ads_txt", label: "ads.txt", description: "Opens the publishers with matching lines in ads.txt." },
+                  { value: "app_ads_txt", label: "app-ads.txt", description: "Opens the publishers with matching lines in app-ads.txt." },
+                  { value: "both", label: "Both", description: "Opens the publishers with matching lines in both files." },
+                ] as const).filter((o) => o.value === "all" || publisherFiles[o.value] > 0)
+                  .map((o) => ({ ...o, value: o.value as FoundInFilter, countLabel: `${publisherFiles[o.value].toLocaleString()} publishers`, leads: true }))} />}
+              {typeCounts && <FilterSelect value={matchType} onChange={setMatchType} leading="Match type" icon={SlidersHorizontal} menuLabel="Filter by match type" ariaLabel="Match type" testId="match-type" info={FILTER_INFO.matchType} options={[
                 { value: "all", label: "All", description: "Publisher files and inventory partners" }, { value: "own", label: "Own", description: "In the publisher’s own file" }, { value: "ipd", label: "IPD", description: "Via a declared inventory partner" },
               ].map(o => ({...o, value: o.value as typeof matchType, count: tab === "all" || isScopeTab(tab) ? typeCounts[o.value as keyof typeof typeCounts] : undefined}))} />}
             </>}
@@ -3793,7 +4703,7 @@ function MatchedAppsList({
           ) : (
             <div className="space-y-3">
               {rows.map((a, i) => (
-                <Settle key={keyOf(a)} index={i}>
+                <Settle key={keyOf(a)} index={i} tour={i === 0 ? "overview-first-row" : undefined}>
                   <MatchedAppCard
                     app={a}
                     lineFilter={lines}
@@ -3890,6 +4800,7 @@ function MatchedAppCard({
   // `file_used`, the Excel's File used), else ours.
   const fileLine =
     typeof app.file_used === "string" && app.file_used.trim() ? app.file_used.trim() : appFileLine(app.file_host, app.file_source);
+  const store = storeHint(app);
   return (
     <div
       className={cn(
@@ -3928,6 +4839,8 @@ function MatchedAppCard({
               never an app's phone. */}
           {String(app.store ?? "").toLowerCase() === "website" ? (
             <Globe aria-hidden data-website-icon className="h-5 w-5" />
+          ) : appPlatformOf(app) === "CTV" ? (
+            <Tv aria-hidden data-tv-icon className="h-5 w-5" />
           ) : (
             <Smartphone aria-hidden className="h-5 w-5" />
           )}
@@ -3937,26 +4850,42 @@ function MatchedAppCard({
             <span className="truncate text-base font-semibold tracking-tight text-slate-900">
               {app.app_name}
             </span>
-            <StoreBadge row={app} inactive={Boolean(inactive)} />
+            {/* The badges are the facts a reader scans by: the platform,
+                and IPD. The store is the platform's detail, in words on the
+                line below (David, 2026-11-02: not everything a badge). */}
+            <PlatformBadge row={app} inactive={Boolean(inactive)} />
             {!inactive && <IpdChip row={app} subject={appSubject(app)} others={otherPartners(app, app.matched_lines)} />}
             {inactive && <InactiveChip />}
           </div>
           {/* A trial withholds an inactive app's publisher (the crawler
               sends ""): no "publisher:" with nothing after it. */}
-          {(!inactive || app.owner_domain) && (
+          {(!inactive || app.owner_domain || store) && (
             // Inactive, it wraps on a phone: whether the publisher is still
             // live is the point of the line and must not be cut off.
-            <div className={cn("text-xs text-slate-500", inactive ? "break-words sm:truncate" : "truncate")}>
-              publisher:{" "}
-              {app.owner_domain ? (
-                <PublisherDomainLink domain={app.owner_domain} className="text-slate-600" arrow={false} />
-              ) : null}
-              {app.owner_name ? (
-                <span className="app-owner-name text-slate-400">, {app.owner_name}</span>
-              ) : null}
-              {inactive && inactive.publisherLive != null && (
-                <span className={inactive.publisherLive ? "text-slate-500" : "text-critical"}>
-                  , {inactive.publisherLive ? "still live" : "inactive too"}
+            // On a phone the store takes its own line under the publisher's
+            // (index.css .app-subline): one line would cut the publisher's
+            // domain away whole, a link not being cut part way.
+            <div data-wrap={inactive ? "" : undefined} className={cn("app-subline text-xs text-slate-500", inactive ? "break-words sm:truncate" : "truncate")}>
+              {store && (
+                <span data-store-hint data-platform={String(app.store ?? "").trim().toLowerCase()} className="app-store-hint">
+                  On <span className="text-slate-600">{store}</span>
+                  {(!inactive || app.owner_domain) && <span className="app-store-comma">, </span>}
+                </span>
+              )}
+              {(!inactive || app.owner_domain) && (
+                <span className="app-owner">
+                  publisher:{" "}
+                  {app.owner_domain ? (
+                    <PublisherDomainLink domain={app.owner_domain} className="text-slate-600" arrow={false} />
+                  ) : null}
+                  {app.owner_name ? (
+                    <span className="app-owner-name text-slate-400">, {app.owner_name}</span>
+                  ) : null}
+                  {inactive && inactive.publisherLive != null && (
+                    <span className={inactive.publisherLive ? "text-slate-500" : "text-critical"}>
+                      , {inactive.publisherLive ? "still live" : "inactive too"}
+                    </span>
+                  )}
                 </span>
               )}
             </div>
@@ -4030,6 +4959,7 @@ function MatchedAppCard({
                   removed={app.removed_lines ?? []}
                   certChanged={app.cert_changed_lines ?? []}
                   matched={lines}
+                  counts={{ added, removed, cert: certChanged }}
                   // Own lines open the publisher's file; each partner's
                   // lines open that partner's ads.txt.
                   publisherDomain={app.owner_domain}

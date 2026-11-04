@@ -15,8 +15,10 @@ import type { MatchedSeatLine } from "../src/lib/api";
 import { installFakeApi, removalFor, TOKEN, type Scenario } from "./fakeApi";
 
 const BASE = `/crawl-report/${TOKEN}`;
-/** A removed window prints this many lines, then "Plus N more". */
-const CAP = 8;
+/** A removed window opens on this many lines when it has more than
+ *  OPEN + SLACK, and "Show all" opens every one. */
+const OPEN = 5;
+const SLACK = 2;
 
 function watchErrors(page: Page): string[] {
   const errors: string[] = [];
@@ -53,9 +55,14 @@ async function expectWindow(page: Page, lines: MatchedSeatLine[]) {
   const w = removedWindow(page);
   // Still counted as removed: the window's count is every removed line.
   await expect(w.locator("div").first()).toHaveText(new RegExp(`Removed lines\\s*${lines.length}$`));
-  const shown = Math.min(lines.length, CAP);
-  await expect(w.locator("li")).toHaveCount(shown);
-  await expect(w.locator("[data-removal-reason]")).toHaveText(Array.from({ length: shown }, (_, i) => expected(i)));
+  // The window opens on its first lines; "Show all" opens every one
+  // (David, 2026-11-02), each still saying why.
+  if (lines.length > OPEN + SLACK) {
+    await expect(w.locator("li")).toHaveCount(OPEN);
+    await w.locator("[data-window-toggle]").click();
+  }
+  await expect(w.locator("li")).toHaveCount(lines.length);
+  await expect(w.locator("[data-removal-reason]")).toHaveText(Array.from({ length: lines.length }, (_, i) => expected(i)));
 }
 
 test.describe("why a removed line was removed", () => {

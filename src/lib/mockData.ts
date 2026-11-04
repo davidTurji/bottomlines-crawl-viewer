@@ -41,6 +41,9 @@ import type {
   MatchedApp,
   MatchedAppsPage,
   AppChange,
+  FoundInFile,
+  FoundInFilter,
+  PlatformFilter,
   ChatFrame,
   DeclarationRow,
   DeclarationRowsPayload,
@@ -216,10 +219,13 @@ export const WEEK_TOTALS = {
     removed: 271,
     cert_changed: 93,
   },
+  /* Publishers behind each tab, sized so a publisher moves about six lines
+   * (the generator's own long tail) and the tabs' rows add up to the line
+   * totals above (fitTab). The Added tab holds the 380 found publishers. */
   developers: {
-    added: 214,
-    removed: 137,
-    changed: 1_106,
+    added: 777,
+    removed: 583,
+    changed: 760,
   },
 } as const;
 
@@ -1108,6 +1114,9 @@ function devTail(
   target: number,
   idBase: number,
   seed: number,
+  /** The tab's lines in all (head included): the rows' counts are fitted
+   *  to it, so "Lines added" is the sum of the Added tab's rows. */
+  lines: number,
 ): DeveloperEvent[] {
   const rnd = xorshift(seed);
   const rows: DeveloperEvent[] = [];
@@ -1139,12 +1148,51 @@ function devTail(
       occurred_at: stamp(THIS_RUN, 9, 17 + (i % 2), i % 60),
     });
   }
+  fitTab(kind, head, rows, lines);
   return [...head, ...rows];
 }
 
-const DEV_ADDED = devTail("added", DEV_ADDED_HEAD, WEEK_TOTALS.developers.added, 200_000, 8_101);
-const DEV_REMOVED = devTail("removed", DEV_REMOVED_HEAD, WEEK_TOTALS.developers.removed, 300_000, 8_209);
-const DEV_CHANGED = devTail("changed", DEV_CHANGED_HEAD, WEEK_TOTALS.developers.changed, 400_000, 8_317);
+/*
+ * A TAB'S LINES ARE ITS ROWS' LINES (2026-11-04).
+ *
+ * "Lines added 4,821" sat over an Added tab whose rows added 1,369, so the
+ * card and the list disagreed by 3,452 the moment a filter re-counted the
+ * card off the rows (IPD: 218 of an "All" of 4,821). Each tail's counts are
+ * now fitted, keeping their long-tail shape, so head + tail add up to the
+ * week's total exactly; each row's other figures follow its count.
+ */
+function fitTab(kind: "added" | "removed" | "changed", head: DeveloperEvent[], rows: DeveloperEvent[], lines: number) {
+  const field = kind === "added" ? "lines_added" : kind === "removed" ? "lines_removed" : "lines_cert_changed";
+  const want = lines - head.reduce((n, d) => n + (d[field] ?? 0), 0);
+  const have = rows.reduce((n, d) => n + (d[field] ?? 0), 0);
+  if (rows.length === 0 || want < rows.length || have === 0) return;
+  // Every row keeps at least one: a row on a tab moved something there.
+  const next = rows.map((d) => Math.max(1, Math.floor(((d[field] ?? 0) * want) / have)));
+  const order = rows.map((_, i) => i).sort((a, b) => (rows[b][field] ?? 0) - (rows[a][field] ?? 0));
+  let diff = want - next.reduce((n, v) => n + v, 0);
+  for (let k = 0; diff !== 0; k += 1) {
+    const i = order[k % order.length];
+    if (diff > 0) { next[i] += 1; diff -= 1; } else if (next[i] > 1) { next[i] -= 1; diff += 1; }
+  }
+  rows.forEach((d, i) => {
+    d[field] = next[i];
+    if (kind === "removed") d.matched_lines_prev = next[i];
+    d.matched_lines_current = kind === "removed" ? 0 : (d.matched_lines_prev ?? 0) + d.lines_added - d.lines_removed;
+    // The SSP split behind the row, re-shared over its new count.
+    const total = Math.max(1, d.lines_added + d.lines_removed + d.lines_cert_changed);
+    const was = d.top_ssps.reduce((n, t) => n + t.count, 0) || 1;
+    const split = d.top_ssps.map((t) => ({ ...t, count: Math.max(0, Math.floor((t.count * total) / was)) }));
+    split[0].count += total - split.reduce((n, t) => n + t.count, 0);
+    d.top_ssps = split.filter((t) => t.count > 0);
+  });
+}
+
+// The Added tab also holds the week's one IPD event (MT_ADDED_EVENT, its
+// two lines through the partner): the tails make up the rest.
+const IPD_EVENT_ADDED = 2;
+const DEV_ADDED = devTail("added", DEV_ADDED_HEAD, WEEK_TOTALS.developers.added, 200_000, 8_101, WEEK_TOTALS.lines.added - IPD_EVENT_ADDED);
+const DEV_REMOVED = devTail("removed", DEV_REMOVED_HEAD, WEEK_TOTALS.developers.removed, 300_000, 8_209, WEEK_TOTALS.lines.removed);
+const DEV_CHANGED = devTail("changed", DEV_CHANGED_HEAD, WEEK_TOTALS.developers.changed, 400_000, 8_317, WEEK_TOTALS.lines.cert_changed);
 
 const DEV_TABLES: Record<string, DeveloperEvent[]> = {
   added: DEV_ADDED,
@@ -1646,8 +1694,10 @@ const DEV_HEAD = [
    watchlist above, chosen by id so the same row always carries the same
    lines. That is what gives the seat-line filter something true to
    narrow by. */
-function matchedLinesFor(developer_id: number, line_count: number): MatchedSeatLine[] {
+function matchedLinesFor(developer_id: number, line_count: number, owner = developer_id): MatchedSeatLine[] {
   const n = Math.max(1, Math.min(line_count, CUSTOMER_SEATS.length));
+  const files = fileProfileOf(owner);
+  const type = matchProfileOf(owner);
   const out: MatchedSeatLine[] = [];
   for (let i = 0; i < n; i += 1) {
     const seat = CUSTOMER_SEATS[(developer_id + i * 5) % CUSTOMER_SEATS.length];
@@ -1655,10 +1705,67 @@ function matchedLinesFor(developer_id: number, line_count: number): MatchedSeatL
     const line: MatchedSeatLine = { ...seat };
     // Roughly a quarter of lines carry the optional fourth field.
     if ((developer_id + i) % 4 === 0) line.cert_id = certId(developer_id * 13 + i * 7);
-    line.found_in = (developer_id + i) % 3 === 0 ? "both" : "app-ads.txt";
+    line.found_in =
+      files === "ads" ? "ads.txt"
+        : files === "app" ? "app-ads.txt"
+        : (developer_id + i) % 3 === 0 ? "both" : (developer_id + i) % 2 === 0 ? "ads.txt" : "app-ads.txt";
     out.push(line);
   }
+  // Through an inventory partner: a partner's line sits in ITS ads.txt.
+  if (type === "ipd") {
+    for (const line of out) Object.assign(line, { match_type: "ipd", ipd_partner: partnerOf(owner), found_in: "ads.txt" });
+  }
   return out;
+}
+
+/*
+ * WHERE A PUBLISHER'S LINES SIT, AND HOW THEY MATCHED (2026-11-04).
+ *
+ * The demo had one IPD publisher in 8,414 and one "ads.txt only" publisher,
+ * so its Match type and Found in menus read 8,413 / 1 and the filters had
+ * nothing to show. A customer's report has both in volume: web publishers
+ * whose lines sit in ads.txt alone, app publishers in app-ads.txt alone, a
+ * large middle in both, and around one in eight matched through an
+ * inventory partner. Keyed off the publisher id (an app takes its owner's),
+ * so a publisher reads the same on every list and tab.
+ */
+function profileHash(id: number, salt: number): number {
+  return (Math.imul((id ^ salt) >>> 0, 2_654_435_761) >>> 0) % 1000;
+}
+/** ads.txt only (30%), app-ads.txt only (28%), or lines in both (42%). */
+function fileProfileOf(id: number): "ads" | "app" | "mixed" {
+  const h = profileHash(id, 0x5bd1e995);
+  return h < 300 ? "ads" : h < 580 ? "app" : "mixed";
+}
+/** Its own file (88%), or through an inventory partner (12%). One kind
+ *  per publisher, so the menu's Own + IPD is its All. */
+function matchProfileOf(id: number): "own" | "ipd" {
+  return profileHash(id, 0x27d4eb2f) < 120 ? "ipd" : "own";
+}
+/** The partner whose ads.txt carries an IPD publisher's lines: one of the
+ *  roster's own declarers (DNS-checked, fictional). */
+function partnerOf(id: number): string {
+  return IPD_DECLARERS[id % IPD_DECLARERS.length];
+}
+/** A row's match-type fields, read off its lines (the crawler's rule: IPD
+ *  when a line came through a partner, Own when one is in its own file). */
+function typeFieldsOf(lines: readonly MatchedSeatLine[], name: string): MatchTypeFields {
+  const ipd = lines.find((l) => l.match_type === "ipd");
+  const own = lines.some((l) => l.match_type !== "ipd");
+  if (!ipd || own) return MT_OWN;
+  return {
+    match_type: "ipd",
+    ipd_partner: String(ipd.ipd_partner ?? ""),
+    ipd_platform: name,
+    declared_in: `${name}'s app-ads.txt`,
+    seller_role: "reseller",
+    managed_by: "",
+    verdict_alerts: "",
+  };
+}
+/** A change row's lines as an IPD publisher's: in its partner's ads.txt. */
+function asPartnerLines(lines: MatchedSeatLine[] | undefined, partner: string): MatchedSeatLine[] {
+  return (lines ?? []).map((l) => ({ ...l, match_type: "ipd", ipd_partner: partner, found_in: "ads.txt" }));
 }
 
 // ─────────────────────────────────────────────────────────────────
@@ -1718,15 +1825,21 @@ function changeArrays(
   added: number,
   removed: number,
   cert: number,
+  /** Whose files they moved in (an app's owner): a web publisher's lines
+   *  move in ads.txt, an app publisher's in app-ads.txt (2026-11-04). */
+  owner = id,
 ): {
   added_lines: MatchedSeatLine[];
   removed_lines: MatchedSeatLine[];
   cert_changed_lines: MatchedSeatLine[];
 } {
+  const files = fileProfileOf(owner);
+  const inFiles = (lines: MatchedSeatLine[]) =>
+    files === "mixed" ? lines : lines.map((l) => ({ ...l, found_in: files === "ads" ? "ads.txt" : "app-ads.txt" }));
   return {
-    added_lines: changeLinesFor(id * 2 + 1, added, "added"),
-    removed_lines: changeLinesFor(id * 2 + 501, removed, "removed"),
-    cert_changed_lines: changeLinesFor(id * 2 + 907, cert, "cert_changed"),
+    added_lines: inFiles(changeLinesFor(id * 2 + 1, added, "added")),
+    removed_lines: inFiles(changeLinesFor(id * 2 + 501, removed, "removed")),
+    cert_changed_lines: inFiles(changeLinesFor(id * 2 + 907, cert, "cert_changed")),
   };
 }
 
@@ -1948,6 +2061,95 @@ export function mockWatchView<P extends { rows: { developer_id?: number | null }
   return { ...first, page, page_size: pageSize, total: kept.length, change_counts: counts, ...(watch ? { change: watch } : {}), rows } as P;
 }
 
+// ─────────────────────────────────────────────────────────────────
+// Found in (publishers) and Platform (apps), the crawler's two list
+// filters, so a local run shows them (2026-11-01)
+// ─────────────────────────────────────────────────────────────────
+
+/** The files a row's lines were found in, the crawler's rule: a line
+ *  through an inventory partner is in the partner's ads.txt. */
+export function mockFilesOf(lines: readonly MatchedSeatLine[] | null | undefined): FoundInFile | null {
+  let bits = 0;
+  for (const l of lines ?? []) {
+    const word = String(l?.found_in ?? "").toLowerCase();
+    bits |= word === "both" ? 3 : word === "ads.txt" ? 1 : word === "app-ads.txt" ? 2 : l?.match_type === "ipd" ? 1 : 0;
+  }
+  return bits === 3 ? "both" : bits === 1 ? "ads_txt" : bits === 2 ? "app_ads_txt" : null;
+}
+
+const FILE_WORD: Record<FoundInFile, string> = { ads_txt: "ads.txt", app_ads_txt: "app-ads.txt", both: "both" };
+
+type MockList = { rows: object[]; total: number; page: number; page_size: number };
+
+/** ``found_in`` on a publishers list: the whole list read, each row's files
+ *  decided (on a change tab from ``tabLines``, the lines that moved there;
+ *  on the list from its frozen ``found_in_all``, stamped here from its
+ *  lines), counted per file, kept when its file is ticked, then paged. */
+export function mockFoundIn<P extends MockList>(
+  read: (page: number, pageSize: number) => P,
+  page: number,
+  pageSize: number,
+  foundIn: FoundInFilter,
+  tabLines?: string,
+): P {
+  const whole = read(1, 1_000_000);
+  const rows = (whole.rows as Record<string, unknown>[]).map((row) => {
+    if (tabLines) return { row, file: mockFilesOf(row[tabLines] as MatchedSeatLine[]) };
+    const file = mockFilesOf(row.matched_lines as MatchedSeatLine[]);
+    return { row: file && !row.found_in_all ? { ...row, found_in_all: FILE_WORD[file] } : row, file };
+  });
+  const counts = { all: rows.length, ads_txt: 0, app_ads_txt: 0, both: 0, unknown: 0 };
+  for (const r of rows) counts[r.file ?? "unknown"] += 1;
+  const asked = foundIn === "all" ? null : new Set(foundIn.split(","));
+  const kept = asked ? rows.filter((r) => r.file && asked.has(r.file)) : rows;
+  return {
+    ...whole,
+    page,
+    page_size: pageSize,
+    total: kept.length,
+    rows: kept.slice((page - 1) * pageSize, page * pageSize).map((r) => r.row),
+    found_in_counts: counts,
+    ...(asked ? { found_in: foundIn } : {}),
+  };
+}
+
+/** An app's platform by its store, the crawler's map (domain/platforms.py). */
+export function mockAppPlatform(store: unknown): "ctv" | "mobile" | "web" | null {
+  const s = String(store ?? "").toLowerCase();
+  // "mobile" and "ctv": this fixture's own generic stores.
+  if (s === "ios" || s === "android" || s === "mobile") return "mobile";
+  if (["googleplay", "tvos", "roku", "firetv", "samsung", "lg", "vizio", "ctv"].includes(s)) return "ctv";
+  return s === "website" ? "web" : null;
+}
+
+/** ``platform`` on the apps list, the same way as ``mockFoundIn``; each
+ *  row carries its platform, as the crawler serves it (2026-11-01). */
+export function mockPlatform<P extends MockList>(
+  read: (page: number, pageSize: number) => P,
+  page: number,
+  pageSize: number,
+  platform: PlatformFilter,
+): P {
+  const whole = read(1, 1_000_000);
+  const label = { ctv: "CTV", mobile: "Mobile", web: "Web" } as const;
+  const rows = (whole.rows as { store?: unknown }[]).map((row) => {
+    const on = mockAppPlatform(row.store);
+    return { row: { ...row, platform: on ? label[on] : "" }, on };
+  });
+  const counts = { all: rows.length, ctv: 0, mobile: 0, web: 0, unknown: 0 };
+  for (const r of rows) counts[r.on ?? "unknown"] += 1;
+  const kept = platform === "all" ? rows : rows.filter((r) => r.on === platform);
+  return {
+    ...whole,
+    page,
+    page_size: pageSize,
+    total: kept.length,
+    rows: kept.slice((page - 1) * pageSize, page * pageSize).map((r) => r.row),
+    platform_counts: counts,
+    ...(platform === "all" ? {} : { platform }),
+  };
+}
+
 const MATCHED_DEVS = buildMatchedDevs();
 
 export function mockMatchedDevelopers(
@@ -1956,10 +2158,12 @@ export function mockMatchedDevelopers(
   lines: string[] = [],
   /** null: a report frozen before match types (today's exact answer). */
   matchType: MatchTypeFilter | null = null,
+  /** Rows per page; a read of the whole list asks for all of them at once. */
+  pageSize: number = PAGE_SIZE,
 ): MatchedDevelopersPage {
-  if (matchType !== null) return matchTypePublishers(page, q, lines, matchType);
+  if (matchType !== null) return matchTypePublishers(page, q, lines, matchType, pageSize);
   const pool = MATCHED_DEVS.filter((d) => carries(d.matched_lines, lines));
-  return mockPage(pool, page, q, ["name", "domain"], PAGE_SIZE) as MatchedDevelopersPage;
+  return mockPage(pool, page, q, ["name", "domain"], pageSize) as MatchedDevelopersPage;
 }
 
 /* App bundle seed. Long-tail same as developers: a head of hero apps that
@@ -2134,8 +2338,8 @@ function buildMatchedApps(): MatchedApp[] {
       lines_added,
       lines_removed,
       lines_cert_changed,
-      matched_lines: matchedLinesFor(appSeed, line_count),
-      ...changeArrays(appSeed, lines_added, lines_removed, lines_cert_changed),
+      matched_lines: matchedLinesFor(appSeed, line_count, owner.developer_id),
+      ...changeArrays(appSeed, lines_added, lines_removed, lines_cert_changed, owner.developer_id),
     });
   }
   return rows.sort((a, b) => b.line_count - a.line_count);
@@ -2160,10 +2364,12 @@ export function mockMatchedApps(
   /** The change tabs: the whole list filtered before paging, echoed as
    *  ``change``. null: no filter, and no echo (today's exact answer). */
   change: AppChange | null = null,
+  /** Rows per page; a read of the whole list asks for all of them at once. */
+  pageSize: number = PAGE_SIZE,
 ): MatchedAppsPage {
-  if (matchType !== null) return matchTypeApps(page, q, lines, matchType, change);
+  if (matchType !== null) return matchTypeApps(page, q, lines, matchType, change, pageSize);
   const pool = MATCHED_APPS.filter((a) => carries(a.matched_lines, lines) && appMoved(a, change));
-  const r = mockPage(pool, page, q, ["app_name", "bundle_id", "owner_domain"], PAGE_SIZE) as MatchedAppsPage;
+  const r = mockPage(pool, page, q, ["app_name", "bundle_id", "owner_domain"], pageSize) as MatchedAppsPage;
   return change ? { ...r, change } : r;
 }
 
@@ -2310,10 +2516,16 @@ function mtSplit<T extends MatchTypeFields>(
   matchType: MatchTypeFilter,
 ): { rows: T[]; counts: MatchTypeCounts } {
   const ipd = rows.filter((r) => r.match_type === "ipd").length;
+  const kept = matchType === "all" ? rows : rows.filter((r) => (r.match_type ?? "own") === matchType);
   return {
-    rows: matchType === "all" ? rows : rows.filter((r) => (r.match_type ?? "own") === matchType),
+    // The worked example (the platform matched through its partner) leads
+    // the IPD list, as it did when it was the demo's only IPD match.
+    rows: matchType === "ipd" ? [...kept.filter(isWorkedExample), ...kept.filter((r) => !isWorkedExample(r))] : kept,
     counts: { all: rows.length, own: rows.length - ipd, ipd },
   };
+}
+function isWorkedExample(r: MatchTypeFields): boolean {
+  return r.ipd_partner === MT_PARTNER && r.ipd_platform === MT_PLATFORM.name;
 }
 function mtSearch<T>(rows: T[], q: string, text: (r: T) => (string | null | undefined)[]): T[] {
   const needle = (q || "").trim().toLowerCase();
@@ -2330,9 +2542,10 @@ function matchTypePublishers(
   q: string,
   lines: string[],
   matchType: MatchTypeFilter,
+  pageSize: number = PAGE_SIZE,
 ): MatchedDevelopersPage {
   const all: MatchedDeveloper[] = [
-    ...MATCHED_DEVS.map((d): MatchedDeveloper => ({ ...d, ...MT_OWN })),
+    ...MATCHED_DEVS.map((d): MatchedDeveloper => ({ ...d, ...typeFieldsOf(d.matched_lines, d.name) })),
     ...MT_PUBLISHERS,
   ].sort((a, b) => b.line_count - a.line_count);
   const pool = mtSearch(
@@ -2342,7 +2555,7 @@ function matchTypePublishers(
   );
   const split = mtSplit(pool, matchType);
   return {
-    ...(mockPage(split.rows, page, "", [], PAGE_SIZE) as MatchedDevelopersPage),
+    ...(mockPage(split.rows, page, "", [], pageSize) as MatchedDevelopersPage),
     match_type_counts: split.counts,
     ipd_inconclusive: mtInconclusive(lines, 1),
   };
@@ -2354,8 +2567,16 @@ function matchTypeApps(
   lines: string[],
   matchType: MatchTypeFilter,
   change: AppChange | null,
+  pageSize: number = PAGE_SIZE,
 ): MatchedAppsPage {
-  const all: MatchedApp[] = [...MATCHED_APPS.map((a): MatchedApp => ({ ...a, ...MT_OWN })), ...MT_APPS].sort(
+  const all: MatchedApp[] = [...MATCHED_APPS.map((a): MatchedApp => {
+    const typed = typeFieldsOf(a.matched_lines ?? [], a.owner_name ?? a.app_name);
+    // An app matched only through a partner is credited from the partner's
+    // ads.txt (crawler #348's file_source), as the golden row is.
+    return typed.match_type === "ipd"
+      ? { ...a, ...typed, file_host: typed.ipd_partner ?? "", file_source: "inventory_partner" }
+      : { ...a, ...typed };
+  }), ...MT_APPS].sort(
     (a, b) => b.line_count - a.line_count,
   );
   const pool = mtSearch(
@@ -2364,13 +2585,13 @@ function matchTypeApps(
     (a) => [a.app_name, a.bundle_id, a.owner_domain, a.ipd_partner, a.ipd_platform],
   );
   const split = mtSplit(pool, matchType);
-  const start = (page - 1) * PAGE_SIZE;
+  const start = (page - 1) * pageSize;
   return {
     page,
-    page_size: PAGE_SIZE,
+    page_size: pageSize,
     total: split.rows.length,
     truncated: false,
-    rows: split.rows.slice(start, start + PAGE_SIZE),
+    rows: split.rows.slice(start, start + pageSize),
     match_type_counts: split.counts,
     // Tidewick TV's two apps, through northfold-tv.com: not read, not counted.
     ipd_inconclusive: mtInconclusive(lines, 2),
@@ -2405,7 +2626,20 @@ function matchTypeEvents(
   pageSize = PAGE_SIZE,
 ): DeveloperEventsPage {
   const all: DeveloperEvent[] = [
-    ...rows.map((d): DeveloperEvent => ({ ...d, ...MT_OWN })),
+    // A publisher matched only through a partner moved through it: its
+    // change row is IPD and its moved lines sit in the partner's ads.txt.
+    ...rows.map((d): DeveloperEvent => {
+      if (matchProfileOf(d.developer_id) !== "ipd") return { ...d, ...MT_OWN };
+      const partner = partnerOf(d.developer_id);
+      const name = d.developer_name ?? d.developer_domain ?? "";
+      return {
+        ...d,
+        ...typeFieldsOf(asPartnerLines(d.matched_lines ?? matchedLinesFor(d.developer_id, 6), partner), name),
+        added_lines: asPartnerLines(d.added_lines, partner),
+        removed_lines: asPartnerLines(d.removed_lines, partner),
+        cert_changed_lines: asPartnerLines(d.cert_changed_lines, partner),
+      };
+    }),
     // An IPD row under Added, with its partner, platform and file: the
     // developer-events rows carry them too (crawler #348).
     ...(event === "added" && carries(MT_ADDED_EVENT.matched_lines, lines) ? [MT_ADDED_EVENT] : []),
@@ -2441,6 +2675,15 @@ function matchTypeEvents(
   // rows: one publisher matching 58 of your lines is 58, not 1.
   const lines = MATCHED_DEVS.reduce((n, d) => n + d.line_count, 0) + MT_PUBLISHERS.reduce((n, d) => n + d.line_count, 0);
   mockSummary.counters.matched = { developers, apps, lines };
+  // The line cards are their tabs' rows (fitTab), counted, never typed: so
+  // under a Match type or Found in the cards re-count to parts of a whole.
+  const moved = (rows: DeveloperEvent[], f: "lines_added" | "lines_removed" | "lines_cert_changed") =>
+    rows.reduce((n, d) => n + (d[f] ?? 0), 0);
+  Object.assign(mockSummary.hero_diff.line_totals, {
+    added: moved(DEV_ADDED, "lines_added") + MT_ADDED.lines_added,
+    removed: moved(DEV_REMOVED, "lines_removed"),
+    cert_changed: moved(DEV_CHANGED, "lines_cert_changed"),
+  });
   mockPreviousSummary.counters.matched = {
     developers: developers - 380 + 29,
     apps: apps - 1_702 + 61,
