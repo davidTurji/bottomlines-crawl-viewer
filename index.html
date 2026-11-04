@@ -10,8 +10,16 @@
       name="viewport"
       content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no"
     />
-    <link rel="icon" type="image/png" href="/assets/images/favicon.png" />
-    <link rel="apple-touch-icon" href="/assets/images/favicon.png" />
+    <!-- The admin console's icon (David, 2026-11-04: one icon for both, the
+         flat green b; copied from bottomlines-manage-console public/assets/
+         images, its 2026-11-04 transparent version). 32 px for the tab, 512
+         px for everything else, 180 px with its white for a phone's home
+         screen (iOS paints transparency black). /assets/ is cached for a
+         year as immutable, so ?v=2 makes a browser that holds the old icon
+         fetch this one (index.html itself is never cached). -->
+    <link rel="icon" type="image/png" sizes="32x32" href="/assets/images/favicon-32.png?v=2" />
+    <link rel="icon" type="image/png" sizes="512x512" href="/assets/images/favicon.png?v=2" />
+    <link rel="apple-touch-icon" sizes="180x180" href="/assets/images/favicon-180.png?v=2" />
     <!-- PathFinder is the product the customer bought. "Crawl"/"crawler"
          is the internal machinery that produces the report and must not
          appear in anything a customer reads; this tab title was the one
