@@ -270,7 +270,7 @@ export function FilterAction({
  * trigger carries it as its description, and on a touch screen, where
  * nothing hovers, its menu says it under the heading.
  */
-function FilterInfo({ text }: { text: string }) {
+export function FilterInfo({ text }: { text: string }) {
   const mark = useRef<HTMLSpanElement>(null);
   const [at, setAt] = useState<{ left: number; top: number } | null>(null);
   useEffect(() => {

@@ -1,7 +1,7 @@
 import { requestReportDownload } from "@/lib/reportDownload";
 import { ReportButton } from "@/components/ReportButton";
 import { appPlatformOf, PlatformBadge, storeHint } from "@/components/StoreBadge";
-import { FilterBar, FilterGroup, FilterMultiSelect, FilterSearch, FilterSelect } from "@/components/FilterBar";
+import { FilterBar, FilterGroup, FilterInfo, FilterMultiSelect, FilterSearch, FilterSelect } from "@/components/FilterBar";
 import InactiveSection, { type InactiveCards } from "@/components/InactiveSection";
 import { MovesQuietLine, type MovesTab } from "@/components/MovesExplained";
 import LockedTail from "@/components/LockedTail";
@@ -29,7 +29,7 @@ import { PAGE_SIZE } from "@/lib/paging";
 import { usePageCache } from "@/lib/pageCache";
 import { useLineFilter } from "@/lib/lineFilter";
 import { Link } from "react-router-dom";
-import { ChevronDown, ChevronRight, Download, EyeOff, FileText, Globe, MonitorSmartphone, SlidersHorizontal, Smartphone, Tv } from "lucide-react";
+import { ChevronDown, ChevronRight, Download, Eye, EyeOff, FileText, Globe, MonitorSmartphone, SlidersHorizontal, Smartphone, Tv } from "lucide-react";
 import { FOLD_OPEN, FOLD_SLACK, FOLD_STEP, easeListHeight } from "@/components/FoldedList";
 import {
   type TrialCaps, type TrialSlice,
@@ -1894,6 +1894,22 @@ function watchTabOn(counts: ChangeCounts | null, off: boolean, tab: ScopeTab): b
   return !off && typeof counts?.[WATCH_CHANGE[tab]] === "number";
 }
 
+/**
+ * WHAT A STATUS MEANS, ON HOVER (David, 2026-11-04: "an information thing
+ * on hover ... very hidden and nice"). Only the statuses that are not plain
+ * file changes; the filters' own small mark and floating line.
+ */
+const STATUS_INFO: Partial<Record<DrillTab, string>> = {
+  started:
+    "Lines that started counting for you this week without being added to a file: a seat new on your watchlist, a file read for the first time, or a publisher that newly names its inventory partner.",
+  stopped:
+    "Lines that stopped counting for you this week without being removed from a file: a seat taken off your watchlist, a file not read this crawl, or a publisher that no longer names its inventory partner.",
+  unconfirmed:
+    "Lines this crawl could not verify, because the file answered differently on its reads. They stay matched until a later read settles them.",
+  inactive:
+    "Publishers and apps that went inactive between the two crawls, such as a site that stopped answering or an app its store removed. Not counted in the totals above.",
+};
+
 /** Keep supported watch statuses visible even when the current filter has no rows. */
 /** Desktop tabs and a native phone selector share exactly the same status state. */
 function StatusControls({ tab, setTab, counts, off, inactive }: {
@@ -1922,7 +1938,12 @@ function StatusControls({ tab, setTab, counts, off, inactive }: {
       <TabsList aria-label="Matched statuses" className="status-track h-auto max-w-full justify-start">
         {primary.map(option => <TabsTrigger key={option.value} value={option.value}>{option.label}</TabsTrigger>)}
         {extra.length > 0 && <span id={moreId} hidden={!expanded} className="status-extra-inline">
-          {extra.map(option => <TabsTrigger key={option.value} value={option.value}>{option.label}</TabsTrigger>)}
+          {extra.map(option => (
+            <TabsTrigger key={option.value} value={option.value} className="gap-1">
+              {option.label}
+              {STATUS_INFO[option.value] && <FilterInfo text={STATUS_INFO[option.value] as string} />}
+            </TabsTrigger>
+          ))}
         </span>}
         {extra.length > 0 && <button type="button" data-testid="status-toggle"
           className={cn("status-more", selectedExtra && "status-more-active")}
@@ -3158,6 +3179,7 @@ function PublisherCard({
   // site: hovering any of them lights the circle and the name together.
   // Every row on Stopped watching, whatever its reason (2026-11-04).
   const stopped = watchTab === "stopped" && !inactive;
+  const started = watchTab === "started" && !inactive;
   const [siteHover, setSiteHover] = useState(false);
   const hasEmbeddedLines =
     row.matched_lines.length > 0 ||
@@ -3205,7 +3227,7 @@ function PublisherCard({
               )}
             >
               {initial}
-              {stopped && <StoppedBadge />}
+              {(stopped || started) && <WatchBadge stopped={stopped} />}
             </div>
           </PublisherAvatarLink>
         ) : (
@@ -3216,7 +3238,7 @@ function PublisherCard({
             )}
           >
             {initial}
-            {stopped && <StoppedBadge />}
+            {(stopped || started) && <WatchBadge stopped={stopped} />}
           </div>
         )}
         <div className="min-w-0 flex-1">
@@ -3242,7 +3264,6 @@ function PublisherCard({
                 store, and its list splits by platform. */}
             {!inactive && <IpdChip row={row} others={otherPartners(row, row.matched_lines)} />}
             {inactive && <InactiveChip />}
-            {stopped && <StoppedChip />}
           </div>
           {((row.developer_domain && row.developer_name) || (!inactive && row.files)) && (
             <div className="publisher-subline flex min-w-0 items-center text-xs text-slate-500">
@@ -4630,6 +4651,7 @@ function MatchedAppCard({
 }) {
   // Every row on Stopped watching, whatever its reason (2026-11-04).
   const stopped = watchTab === "stopped" && !inactive;
+  const started = watchTab === "started" && !inactive;
   const lines = app.matched_lines ?? [];
   const added = app.lines_added ?? 0;
   const removed = app.lines_removed ?? 0;
@@ -4694,7 +4716,7 @@ function MatchedAppCard({
           ) : (
             <Smartphone aria-hidden className="h-5 w-5" />
           )}
-          {stopped && <StoppedBadge />}
+          {(stopped || started) && <WatchBadge stopped={stopped} />}
         </div>
         <div className="min-w-0 flex-1">
           <div className="matched-app-title flex min-w-0 items-center gap-2">
@@ -4707,7 +4729,6 @@ function MatchedAppCard({
             <PlatformBadge row={app} inactive={Boolean(inactive)} />
             {!inactive && <IpdChip row={app} subject={appSubject(app)} others={otherPartners(app, app.matched_lines)} />}
             {inactive && <InactiveChip />}
-            {stopped && <StoppedChip />}
           </div>
           {/* A trial withholds an inactive app's publisher (the crawler
               sends ""): no "publisher:" with nothing after it. */}
@@ -4872,44 +4893,46 @@ function InactiveChip() {
 }
 
 /*
- * STOPPED WATCHING, IN THE INACTIVE TAB'S LANGUAGE (David, 2026-11-04: "so
- * we can see intuitively that those were really stopped"; the same for
- * every row on the tab, whatever its reason). A strip across the top with
- * the reason ("Stopped watching:" in bold), a grey icon with a crossed-out
- * eye, a label beside the name, grey figures. Never on the Inactive tab
- * itself, which has its own strip.
+ * THE WATCH TABS' ROWS (David, 2026-11-04). On Stopped watching every row,
+ * whatever its reason, reads as stopped at a glance, in the Inactive tab's
+ * language: the reason in a strip across the top, a grey icon with a
+ * crossed-out eye, grey figures. No "Stopped watching" heading or label on
+ * the row: the tab already says it (as Added and Removed rows say nothing
+ * of their tab). On Started watching the icon carries an open eye.
  */
+function sentence(text: string): string {
+  const t = text.trim();
+  if (!t) return t;
+  // A domain opening the sentence keeps its case ("denverpost.com no
+  // longer names ..."); words get their capital.
+  const first = t.split(/\s/, 1)[0];
+  const head = first.includes(".") ? t : t.charAt(0).toUpperCase() + t.slice(1);
+  return /[.!?]$/.test(head) ? head : `${head}.`;
+}
+
 function StoppedStrip({ reason }: { reason: string | null | undefined }) {
+  if (!reason) return null;
   return (
     <div
-      data-testid="stopped-strip"
+      data-stopped-strip
       className="inactive-record-note pointer-events-none border-b border-border bg-[#f7f9f6] px-4 py-2 sm:px-5"
     >
-      <p className="text-xs text-slate-700">
-        <span className="font-semibold text-slate-800">Stopped watching{reason ? ":" : ""}</span>
-        {reason ? <span className="font-medium"> {reason}</span> : null}
-      </p>
+      <p className="text-xs font-semibold text-slate-800">{sentence(reason)}</p>
     </div>
   );
 }
 
-function StoppedChip() {
-  return (
-    <span data-stopped-chip className="inactive-status-label flex-shrink-0 text-[10px] font-medium text-slate-500">
-      Stopped watching
-    </span>
-  );
-}
-
-/** The crossed-out eye on the row's icon. */
-function StoppedBadge() {
+/** The eye on the row's icon: crossed out on Stopped watching, open on
+ *  Started watching. */
+function WatchBadge({ stopped }: { stopped: boolean }) {
+  const Mark = stopped ? EyeOff : Eye;
   return (
     <span
       aria-hidden
-      data-stopped-badge
+      data-watch-badge={stopped ? "stopped" : "started"}
       className="absolute -bottom-0.5 -right-0.5 flex h-[18px] w-[18px] items-center justify-center rounded-full bg-white ring-1 ring-slate-200"
     >
-      <EyeOff className="h-3 w-3 text-slate-500" />
+      <Mark className={cn("h-3 w-3", stopped ? "text-slate-500" : "text-primary")} />
     </span>
   );
 }
