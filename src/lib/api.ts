@@ -295,13 +295,21 @@ export const api = {
     `${BASE}/v1/viewer/${token}/export.xlsx${
       lines.length ? `?${LINES_PARAM}=${serializeLines(lines)}` : ""
     }`,
-  summary: async (token: string, lines?: string[]) => {
+  /**
+   * This crawl's summary. Under ``lines`` (the seat-line filter) and the
+   * lists' ``filters`` (Match type, Found in, Platform; crawler 2026-11-04)
+   * the four headline figures are re-counted the way their lists count, so
+   * each card is the rows its list shows. An API from before the list
+   * filters ignores them: ``list_filters`` absent says so.
+   */
+  summary: async (token: string, lines?: string[], filters?: ListFilters): Promise<Summary> => {
     if (MOCK) {
       const { mockSummaryFor } = await import("./mockData");
-      const s = mockInactiveVariant(mockSummaryFor(lines ?? []));
+      const base = mockInactiveVariant(mockSummaryFor(lines ?? []));
+      const s = await mockListSummary(token, base, lines ?? [], filters ?? NO_LIST_FILTERS);
       return trialMock() ? { ...s, trial: TRIAL_CAPS_MOCK } : s;
     }
-    const q = linesQuery(lines);
+    const q = linesQuery(lines) + listFiltersQuery(filters);
     try {
       return await req<Summary>(
         "GET",
@@ -365,7 +373,15 @@ export const api = {
   ) => {
     if (MOCK) {
       const { mockDeveloperEvents, mockFoundIn } = await import("./mockData");
-      const r = mockFoundIn((pg, size) => mockDeveloperEvents(event, pg, lines ?? [], mockMatchType(matchType), q, size), page, pageSize, foundIn, event === "changed" ? "cert_changed_lines" : `${event}_lines`);
+      const mt = mockMatchType(matchType);
+      const tabLines = event === "changed" ? "cert_changed_lines" : `${event}_lines`;
+      const read = (type: MatchTypeFilter | null) => (pg: number, size: number) =>
+        mockDeveloperEvents(event, pg, lines ?? [], type, q, size);
+      const r = mockFacet(
+        mockFoundIn(read(mt), page, pageSize, foundIn, tabLines),
+        mt !== null && foundIn !== "all",
+        () => mockFoundIn(read("all"), 1, 1_000_000, foundIn, tabLines).rows,
+      );
       return trialMock()
         ? {
             ...r,
@@ -506,7 +522,15 @@ export const api = {
   ) => {
     if (MOCK) {
       const { mockMatchedDevelopers, mockWatchView, mockFoundIn } = await import("./mockData");
-      const r = mockFoundIn((pg, size) => mockWatchView(p => mockMatchedDevelopers(p, q, lines ?? [], mockMatchType(matchType)), pg, size, change, lines), page, pageSize, foundIn, change ? `${change}_lines` : undefined);
+      const mt = mockMatchType(matchType);
+      const tabLines = change ? `${change}_lines` : undefined;
+      const read = (type: MatchTypeFilter | null) => (pg: number, size: number) =>
+        mockWatchView(p => mockMatchedDevelopers(p, q, lines ?? [], type, MOCK_WHOLE), pg, size, change, lines);
+      const r = mockFacet(
+        mockFoundIn(read(mt), page, pageSize, foundIn, tabLines),
+        mt !== null && foundIn !== "all",
+        () => mockFoundIn(read("all"), 1, 1_000_000, foundIn, tabLines).rows,
+      );
       return trialMock()
         ? {
             ...r,
@@ -565,7 +589,14 @@ export const api = {
   ) => {
     if (MOCK) {
       const { mockMatchedApps, mockWatchView, mockPlatform } = await import("./mockData");
-      const r = mockPlatform((pg, size) => mockWatchView(p => mockMatchedApps(p, q, lines ?? [], mockMatchType(matchType), change ?? null), pg, size, change, lines), page, pageSize, platform);
+      const mt = mockMatchType(matchType);
+      const read = (type: MatchTypeFilter | null) => (pg: number, size: number) =>
+        mockWatchView(p => mockMatchedApps(p, q, lines ?? [], type, change ?? null, MOCK_WHOLE), pg, size, change, lines);
+      const r = mockFacet(
+        mockPlatform(read(mt), page, pageSize, platform),
+        mt !== null && platform !== "all",
+        () => mockPlatform(read("all"), 1, 1_000_000, platform).rows,
+      );
       return trialMock()
         ? { ...r, page: 1, ...cutRows(r.rows, TRIAL_CAPS_MOCK.apps, r.total) }
         : r;
@@ -1199,7 +1230,9 @@ export type ExportInfo = {
 };
 
 export type MatchedMove = { found: number; lost: number };
-export type MatchedMoves = { developers: MatchedMove; apps: MatchedMove | null };
+/** Either side is null where its figure is cut by a list filter (last
+ *  week is never filtered), and ``apps`` when the bake capped an app list. */
+export type MatchedMoves = { developers: MatchedMove | null; apps: MatchedMove | null };
 
 /** A publisher that carried the reader's lines and is gone (dead domain,
  *  site down for many crawls). Listed apart, never counted. */
@@ -1399,6 +1432,13 @@ export type Summary = {
      *  crawl did not reach is never counted as lost. */
     matched_moves?: MatchedMoves | null;
   };
+  /** What the summary was re-counted under besides the seat lines (crawler,
+   *  2026-11-04): the lists' Match type, Found in and Platform. Absent when
+   *  none was asked, and on an API from before it (which ignores them and
+   *  answers the whole report: the page then never paints its figures as
+   *  filtered). ``line_totals`` false: the report cannot split its line
+   *  totals (frozen without line events), so they are the whole week's. */
+  list_filters?: ListFiltersApplied | null;
   hero_diff: {
     line_totals: LineEventCounts;
     line_totals_matched_seat: LineEventCounts;
@@ -1504,6 +1544,91 @@ export type ListChange = "added" | "removed" | "changed" | WatchChange;
 
 function matchTypeQuery(matchType: MatchTypeFilter | undefined): string {
   return matchType && matchType !== "all" ? `&match_type=${matchType}` : "";
+}
+
+/** Mock mode: the lists are read whole in ONE call and paged here. Read 25
+ *  rows at a time, a whole-list read (Found in, Platform, the watch tabs)
+ *  rebuilt the 24,783-app demo list a thousand times: 6.5 s a click. */
+const MOCK_WHOLE = 1_000_000;
+
+/** A row's match types, the crawler's rule (owner, 2026-10-27): its frozen
+ *  ``match_types`` (a row matched both ways is in Own and in IPD), else its
+ *  served type. */
+function mockTypesOf(row: unknown): MatchType[] {
+  const r = row as { match_type?: string | null; match_types?: string[] | null };
+  if (Array.isArray(r.match_types) && r.match_types.length) return r.match_types as MatchType[];
+  return [r.match_type === "ipd" ? "ipd" : "own"];
+}
+
+/** MATCH TYPE COUNTS UNDER THE OTHER FILTERS (2026-11-04), the crawler's
+ *  facet rule: each menu counts the list every OTHER filter leaves, so
+ *  Match type's numbers follow a Found in or Platform pick (and Found in's
+ *  and Platform's already follow Match type). ``every``: that list, read
+ *  only when the counts need it. Mock only. */
+function mockFacet<P extends { match_type_counts?: MatchTypeCounts | null }>(
+  page: P,
+  recount: boolean,
+  every: () => unknown[],
+): P {
+  if (!recount || !page.match_type_counts) return page;
+  const rows = every();
+  const has = (t: MatchType) => rows.filter((r) => mockTypesOf(r).includes(t)).length;
+  return { ...page, match_type_counts: { all: rows.length, own: has("own"), ipd: has("ipd") } };
+}
+
+/**
+ * THE HEADLINE UNDER THE LIST FILTERS, MOCK MODE (2026-11-04): the crawler's
+ * rule, read off the same lists the page shows, so every card is the rows
+ * its list holds under the same choices. Matched publishers is the
+ * publishers' list total (Match type, Found in), Matched apps the apps'
+ * (Match type, Platform); the line occurrences are the listed publishers'
+ * lines, and Lines added / removed the moved lines of the Added / Removed
+ * tabs' rows (Match type, Found in). Without a list filter: ``base``.
+ */
+async function mockListSummary(token: string, base: Summary, lines: string[], f: ListFilters): Promise<Summary> {
+  const mt = f.matchType !== "all" && mockMatchType(f.matchType) !== null ? f.matchType : null;
+  const fi = f.foundIn !== "all" ? f.foundIn : null;
+  const pf = f.platform !== "all" ? f.platform : null;
+  if (!mt && !fi && !pf) return base;
+  const BIG = 1_000_000;
+  const matched = { ...base.counters.matched };
+  const lineTotals = { ...base.hero_diff.line_totals };
+  if (mt || fi) {
+    const kept = await api.matchedDevelopers(token, 1, "", lines, f.matchType, BIG, undefined, f.foundIn);
+    // A row matched both ways keeps only the asked type's lines.
+    const weight = (row: MatchedDeveloper) => {
+      const n = row.line_count ?? row.matched_lines?.length ?? 0;
+      const own = row.matched_lines ?? [];
+      if (!mt || mockTypesOf(row).length < 2 || own.length === 0) return n;
+      return Math.round((n * own.filter((l) => (l.match_type ?? "own") === mt).length) / own.length);
+    };
+    matched.developers = kept.total;
+    matched.lines = kept.rows.reduce((n, r) => n + weight(r), 0);
+    for (const [event, key, field] of [
+      ["added", "added", "lines_added"],
+      ["removed", "removed", "lines_removed"],
+      ["changed", "cert_changed", "lines_cert_changed"],
+    ] as const) {
+      const cut = await api.developerEvents(token, event, 1, "", lines, f.matchType, BIG, f.foundIn);
+      lineTotals[key] = cut.rows.reduce((n, r) => n + (r[field] ?? 0), 0);
+    }
+  }
+  if (mt || pf) {
+    matched.apps = (await api.matchedApps(token, 1, "", lines, f.matchType, undefined, 1, f.platform)).total;
+  }
+  const moves = base.counters.matched_moves;
+  return {
+    ...base,
+    counters: {
+      ...base.counters,
+      matched,
+      matched_moves: moves
+        ? { ...moves, ...(mt || fi ? { developers: null } : {}), ...(mt || pf ? { apps: null } : {}) }
+        : moves,
+    },
+    hero_diff: { ...base.hero_diff, line_totals: lineTotals },
+    list_filters: { match_type: mt, found_in: fi, platform: pf, publishers: true, apps: true, line_totals: true },
+  };
 }
 
 /** Mock mode only: ``?matchtype=off`` previews a report frozen before
@@ -1966,6 +2091,38 @@ export type FoundInCounts = { all: number; ads_txt: number; app_ads_txt: number;
  *  or with app-ads.txt. Web is not an app, so the apps list's Platform
  *  "Web" opens the publishers list on this. */
 export const WEB_PUBLISHERS: FoundInFilter = "ads_txt,both";
+
+/** The lists' three filters, the page's state (Match type on both lists,
+ *  Found in on the publishers', Platform on the apps'). */
+export type ListFilters = {
+  matchType: MatchTypeFilter;
+  foundIn: FoundInFilter;
+  platform: PlatformFilter;
+};
+export const NO_LIST_FILTERS: ListFilters = { matchType: "all", foundIn: "all", platform: "all" };
+
+/** The summary's echo of the list filters it applied (see Summary). */
+export type ListFiltersApplied = {
+  match_type: MatchType | null;
+  found_in: string | null;
+  platform: "ctv" | "mobile" | "web" | null;
+  /** False: that card could not be split (a list frozen as cut, a report
+   *  frozen without line events) and keeps the whole figure. Absent on
+   *  the first version of the echo: read as true. */
+  publishers?: boolean;
+  apps?: boolean;
+  line_totals: boolean;
+};
+
+/** The query the summary takes for the list filters; "" for none. */
+export function listFiltersQuery(f: ListFilters | undefined): string {
+  if (!f) return "";
+  return (
+    (f.matchType !== "all" ? `&match_type=${f.matchType}` : "") +
+    (f.foundIn !== "all" ? `&found_in=${f.foundIn}` : "") +
+    (f.platform !== "all" ? `&platform=${f.platform}` : "")
+  );
+}
 
 /** The files a Found in choice ticks; none for "all". */
 export function foundInFiles(f: FoundInFilter): FoundInFile[] {
