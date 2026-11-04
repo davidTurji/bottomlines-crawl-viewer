@@ -29,7 +29,7 @@ import { PAGE_SIZE } from "@/lib/paging";
 import { usePageCache } from "@/lib/pageCache";
 import { useLineFilter } from "@/lib/lineFilter";
 import { Link } from "react-router-dom";
-import { ChevronDown, ChevronRight, CircleHelp, Download, Eye, EyeOff, FileText, Globe, MonitorSmartphone, SlidersHorizontal, Smartphone, Tv } from "lucide-react";
+import { ChevronDown, ChevronRight, CircleHelp, Download, Eye, EyeOff, FileText, Globe, MonitorSmartphone, PowerOff, SlidersHorizontal, Smartphone, Tv } from "lucide-react";
 import { FOLD_OPEN, FOLD_SLACK, FOLD_STEP, easeListHeight } from "@/components/FoldedList";
 import {
   type TrialCaps, type TrialSlice,
@@ -1908,9 +1908,9 @@ const STATUS_INFO: Partial<Record<DrillTab, string>> = {
   // (David, 2026-11-04: Started watching is a new line to track, not a line
   // added to a file).
   started:
-    "Lines we started tracking for you this week, such as a new line added to your list. They were already in the publisher's file, so they are not counted as added.",
+    "Lines we started tracking for you this week, such as a new seat added to your watchlist. They were already in the publisher's file, so they are not counted as added.",
   stopped:
-    "Lines we stopped tracking for you this week, such as a line taken off your list. They are not counted as removed. Each row says why.",
+    "Lines we stopped tracking for you this week, such as a seat taken off your watchlist. They are not counted as removed. Each row says why.",
   unconfirmed:
     "Lines we could not verify this crawl, because the file answered differently on each read. They stay matched until the next crawl settles them.",
   inactive:
@@ -3202,7 +3202,7 @@ function PublisherCard({
           : unconfirmed
             ? "border-violet-200 bg-violet-50/40"
             : inactive
-              ? "inactive-report-row border-border bg-white"
+              ? "inactive-report-row border-amber-200 bg-amber-50/40"
               : "border-border bg-white",
         open && "shadow-md",
       )}
@@ -3234,22 +3234,22 @@ function PublisherCard({
             <div
               className={cn(
                 "relative flex h-11 w-11 items-center justify-center rounded-full text-base font-semibold",
-                iconTone(stopped, unconfirmed, "bg-accent text-primary"),
+                iconTone(stopped, unconfirmed, "bg-accent text-primary", Boolean(inactive)),
               )}
             >
               {initial}
-              {watchTab && !inactive && <WatchBadge tab={watchTab} />}
+              {inactive ? <InactiveBadge /> : watchTab && <WatchBadge tab={watchTab} />}
             </div>
           </PublisherAvatarLink>
         ) : (
           <div
             className={cn(
               "relative flex h-11 w-11 flex-shrink-0 items-center justify-center rounded-full text-base font-semibold",
-              iconTone(stopped, unconfirmed, "bg-accent text-primary"),
+              iconTone(stopped, unconfirmed, "bg-accent text-primary", Boolean(inactive)),
             )}
           >
             {initial}
-            {watchTab && !inactive && <WatchBadge tab={watchTab} />}
+            {inactive ? <InactiveBadge /> : watchTab && <WatchBadge tab={watchTab} />}
           </div>
         )}
         <div className="min-w-0 flex-1">
@@ -4692,7 +4692,7 @@ function MatchedAppCard({
           : unconfirmed
             ? cn("border-violet-200 bg-violet-50/40", open && "shadow-md")
           : inactive
-          ? cn("inactive-report-row border-border bg-white", open && "shadow-md")
+          ? cn("inactive-report-row border-amber-200 bg-amber-50/40", open && "shadow-md")
           : open
             ? "border-app-border bg-app-bg/40 shadow-md"
             : "border-border bg-white",
@@ -4716,7 +4716,7 @@ function MatchedAppCard({
         <div
           className={cn(
             "relative flex h-11 w-11 flex-shrink-0 items-center justify-center rounded-full",
-            iconTone(stopped, unconfirmed, "bg-app-bg text-app"),
+            iconTone(stopped, unconfirmed, "bg-app-bg text-app", Boolean(inactive)),
           )}
         >
           {/* A website row (crawler #370: on new reports the apps list
@@ -4729,7 +4729,7 @@ function MatchedAppCard({
           ) : (
             <Smartphone aria-hidden className="h-5 w-5" />
           )}
-          {watchTab && !inactive && <WatchBadge tab={watchTab} />}
+          {inactive ? <InactiveBadge /> : watchTab && <WatchBadge tab={watchTab} />}
         </div>
         <div className="min-w-0 flex-1">
           <div className="matched-app-title flex min-w-0 items-center gap-2">
@@ -4888,7 +4888,8 @@ type InactiveMark = {
  *                      grey figures, the reason as a line
  *   Started watching   a regular card, an open eye on the icon, the reason
  *   Unconfirmed        a soft violet card and icon, the reason
- *   Inactive           a regular card, "Inactive since <day>: <why>."
+ *   Inactive           its own sand card and icon (never Removed's red),
+ *                      a power-off mark, "Inactive since <day>: <why>."
  */
 function sentence(text: string): string {
   const t = text.trim();
@@ -4901,9 +4902,10 @@ function sentence(text: string): string {
 }
 
 /** The icon circle's tone on a status row. */
-function iconTone(stopped: boolean, unconfirmed: boolean, regular: string): string {
+function iconTone(stopped: boolean, unconfirmed: boolean, regular: string, inactive = false): string {
   if (stopped) return "bg-slate-200 text-slate-500";
   if (unconfirmed) return "bg-violet-100 text-violet-600";
+  if (inactive) return "bg-amber-100 text-amber-700";
   return regular;
 }
 
@@ -4919,6 +4921,19 @@ function WatchBadge({ tab }: { tab: ScopeTab }) {
       className="absolute -bottom-0.5 -right-0.5 flex h-[18px] w-[18px] items-center justify-center rounded-full bg-white ring-1 ring-slate-200"
     >
       <Mark className={cn("h-3 w-3", tone)} />
+    </span>
+  );
+}
+
+/** The small mark on an inactive card's icon. */
+function InactiveBadge() {
+  return (
+    <span
+      aria-hidden
+      data-inactive-badge
+      className="absolute -bottom-0.5 -right-0.5 flex h-[18px] w-[18px] items-center justify-center rounded-full bg-white ring-1 ring-amber-200"
+    >
+      <PowerOff className="h-3 w-3 text-amber-700" />
     </span>
   );
 }
