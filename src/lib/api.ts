@@ -525,7 +525,7 @@ export const api = {
       const mt = mockMatchType(matchType);
       const tabLines = change ? `${change}_lines` : undefined;
       const read = (type: MatchTypeFilter | null) => (pg: number, size: number) =>
-        mockWatchView(p => mockMatchedDevelopers(p, q, lines ?? [], type), pg, size, change, lines);
+        mockWatchView(p => mockMatchedDevelopers(p, q, lines ?? [], type, MOCK_WHOLE), pg, size, change, lines);
       const r = mockFacet(
         mockFoundIn(read(mt), page, pageSize, foundIn, tabLines),
         mt !== null && foundIn !== "all",
@@ -591,7 +591,7 @@ export const api = {
       const { mockMatchedApps, mockWatchView, mockPlatform } = await import("./mockData");
       const mt = mockMatchType(matchType);
       const read = (type: MatchTypeFilter | null) => (pg: number, size: number) =>
-        mockWatchView(p => mockMatchedApps(p, q, lines ?? [], type, change ?? null), pg, size, change, lines);
+        mockWatchView(p => mockMatchedApps(p, q, lines ?? [], type, change ?? null, MOCK_WHOLE), pg, size, change, lines);
       const r = mockFacet(
         mockPlatform(read(mt), page, pageSize, platform),
         mt !== null && platform !== "all",
@@ -1545,6 +1545,11 @@ export type ListChange = "added" | "removed" | "changed" | WatchChange;
 function matchTypeQuery(matchType: MatchTypeFilter | undefined): string {
   return matchType && matchType !== "all" ? `&match_type=${matchType}` : "";
 }
+
+/** Mock mode: the lists are read whole in ONE call and paged here. Read 25
+ *  rows at a time, a whole-list read (Found in, Platform, the watch tabs)
+ *  rebuilt the 24,783-app demo list a thousand times: 6.5 s a click. */
+const MOCK_WHOLE = 1_000_000;
 
 /** A row's match types, the crawler's rule (owner, 2026-10-27): its frozen
  *  ``match_types`` (a row matched both ways is in Own and in IPD), else its
