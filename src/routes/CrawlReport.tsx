@@ -3373,6 +3373,7 @@ function PublisherCard({
             "border-border bg-accent/30",
           )}
         >
+          {inactive && <InactiveEvidence text={inactive.evidence} />}
           {inactive ? (
             row.matched_lines.length > 0 ? (
               <MatchedSeatLines
@@ -4843,6 +4844,7 @@ function MatchedAppCard({
             "border-app-border bg-app-bg/30",
           )}
         >
+          {inactive && <InactiveEvidence text={inactive.evidence} />}
           {/* An inactive app's row carries its publisher's lines (even
               none): shown as they are, never fetched again. Only a row
               frozen without them reads them by developer_id below. */}
@@ -4981,8 +4983,22 @@ function StatusBadge({ status }: { status: RowStatus }) {
   );
 }
 
+/** The proof an inactive row carries ("Failed in 3 crawls in a row, from
+ *  ... to ...", "Checked in US, CA, the store answered 404"), first thing in
+ *  the opened card: the card itself says one sentence (David, 2026-11-04),
+ *  the evidence stays one click away (owner, 2026-10-08: date, reason and
+ *  evidence on every inactive row). */
+function InactiveEvidence({ text }: { text: string | null | undefined }) {
+  if (!text) return null;
+  return (
+    <p data-testid="inactive-evidence" className="mb-2.5 text-[11px] leading-snug text-slate-500">
+      {text}
+    </p>
+  );
+}
+
 /** An inactive card's one sentence: since when and why; the store's or
- *  the site's evidence on hover. */
+ *  the site's evidence on hover and in the opened card. */
 function InactiveLine({ mark }: { mark: InactiveMark }) {
   const day = inactiveDay(mark.since);
   const why = (mark.reason ?? "").trim();

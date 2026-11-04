@@ -383,14 +383,16 @@ test.describe("inactive", () => {
     await open(page, {});
     await expectOverview(page);
     await selectStatus(page, "Inactive");
-    await expect(section(page).getByText("Failed in 3 crawls in a row, from Aug 11, 2026 to Aug 25, 2026").first()).toBeVisible();
+    // The card says one sentence (2026-11-04); the evidence is the first
+    // thing in the opened card.
     await section(page).getByRole("button", { name: "Show the seat lines of Quokkaplay Legacy" }).click();
+    await expect(section(page).getByTestId("inactive-evidence").filter({ hasText: "Failed in 3 crawls in a row, from Aug 11, 2026 to Aug 25, 2026" })).toBeVisible();
     await expect(section(page).getByText("Your seat lines it carried")).toBeVisible();
     await sub(page, "Apps").click();
     await expect(section(page).getByText("inactive too")).toHaveCount(1);
     await expect(section(page).getByText("still live").first()).toBeVisible();
-    await expect(section(page).getByText("Checked in US, CA, the store answered 404")).toBeVisible();
     await section(page).getByRole("button", { name: "Show the seat lines of Glintfox Runner" }).click();
+    await expect(section(page).getByTestId("inactive-evidence").filter({ hasText: "Checked in US, CA, the store answered 404" })).toBeVisible();
     await expect(section(page).getByText("Your seat lines its publisher carries")).toBeVisible();
   });
 
