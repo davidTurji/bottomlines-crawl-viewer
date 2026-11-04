@@ -1172,10 +1172,11 @@ button:hover > .report-expand-control, button:focus-visible > .report-expand-con
 [data-report-main] { overflow-anchor: none; }
 .report-expansion { display:grid; grid-template-rows:0fr; opacity:0; transition:grid-template-rows 200ms cubic-bezier(.2,.8,.2,1),opacity 140ms ease; }
 .report-expansion[data-expanded="true"] { grid-template-rows:1fr; opacity:1; }
-/* Closing is shorter and sharper than opening (David, 2026-11-04: "slick
-   and short"): the transition of the state being entered applies, so the
-   closed state carries its own. Opening keeps 200 / 140 ms. */
-.report-expansion[data-expanded="false"] { transition:grid-template-rows 160ms cubic-bezier(.4,0,.2,1),opacity 110ms ease-in; }
+/* Closing is crisp (David, 2026-11-04: "slick and short"): the opening's
+   ease-out made a close drop fast then creep; the close eases in and out
+   over the same 200 ms, its content fading a little sooner. The state being
+   entered sets the transition, so the closed state carries its own. */
+.report-expansion[data-expanded="false"] { transition:grid-template-rows 200ms cubic-bezier(.4,0,.2,1),opacity 120ms ease-in; }
 .report-expansion > div { min-height:0; overflow:hidden; }
 @media (prefers-reduced-motion: reduce) { .report-expansion, .report-expansion[data-expanded="false"] { transition:none; } }
 .line-group-toolbar { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; padding: 8px 10px; border-bottom: 1px solid hsl(var(--border)); background: #fafbf9; }
