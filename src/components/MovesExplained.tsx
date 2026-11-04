@@ -32,8 +32,8 @@ function side(pubs: number, apps: number | null | undefined, word: string): stri
 /** The line's words, or null when there is no partner move to explain. */
 export function movesSentence(moves: MatchedMoves | null): string | null {
   if (!moves) return null;
-  const lost = moves.developers.partner_dropped ?? 0;
-  const found = moves.developers.partner_found ?? 0;
+  const lost = moves.developers?.partner_dropped ?? 0;
+  const found = moves.developers?.partner_found ?? 0;
   if (!lost && !found) return null;
   // "No line removed" is proven for the lost (the crawler counts a partner
   // drop only when the declaration is gone and the line is not); the found
@@ -54,8 +54,8 @@ export function MovesQuietLine({
 }) {
   const said = movesSentence(moves);
   if (!said || !moves) return null;
-  const lost = (moves.developers.partner_dropped ?? 0) > 0;
-  const found = (moves.developers.partner_found ?? 0) > 0;
+  const lost = (moves.developers?.partner_dropped ?? 0) > 0;
+  const found = (moves.developers?.partner_found ?? 0) > 0;
   const link = (label: string, tab: MovesTab) => (
     <button
       type="button"

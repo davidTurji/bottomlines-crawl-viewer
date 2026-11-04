@@ -1671,10 +1671,12 @@ export function mockMatchedDevelopers(
   lines: string[] = [],
   /** null: a report frozen before match types (today's exact answer). */
   matchType: MatchTypeFilter | null = null,
+  /** Rows per page; a read of the whole list asks for all of them at once. */
+  pageSize: number = PAGE_SIZE,
 ): MatchedDevelopersPage {
-  if (matchType !== null) return matchTypePublishers(page, q, lines, matchType);
+  if (matchType !== null) return matchTypePublishers(page, q, lines, matchType, pageSize);
   const pool = MATCHED_DEVS.filter((d) => carries(d.matched_lines, lines));
-  return mockPage(pool, page, q, ["name", "domain"], PAGE_SIZE) as MatchedDevelopersPage;
+  return mockPage(pool, page, q, ["name", "domain"], pageSize) as MatchedDevelopersPage;
 }
 
 /* App bundle seed. Long-tail same as developers: a head of hero apps that
@@ -1845,10 +1847,12 @@ export function mockMatchedApps(
   /** The change tabs: the whole list filtered before paging, echoed as
    *  ``change``. null: no filter, and no echo (today's exact answer). */
   change: AppChange | null = null,
+  /** Rows per page; a read of the whole list asks for all of them at once. */
+  pageSize: number = PAGE_SIZE,
 ): MatchedAppsPage {
-  if (matchType !== null) return matchTypeApps(page, q, lines, matchType, change);
+  if (matchType !== null) return matchTypeApps(page, q, lines, matchType, change, pageSize);
   const pool = MATCHED_APPS.filter((a) => carries(a.matched_lines, lines) && appMoved(a, change));
-  const r = mockPage(pool, page, q, ["app_name", "bundle_id", "owner_domain"], PAGE_SIZE) as MatchedAppsPage;
+  const r = mockPage(pool, page, q, ["app_name", "bundle_id", "owner_domain"], pageSize) as MatchedAppsPage;
   return change ? { ...r, change } : r;
 }
 
@@ -2015,6 +2019,7 @@ function matchTypePublishers(
   q: string,
   lines: string[],
   matchType: MatchTypeFilter,
+  pageSize: number = PAGE_SIZE,
 ): MatchedDevelopersPage {
   const all: MatchedDeveloper[] = [
     ...MATCHED_DEVS.map((d): MatchedDeveloper => ({ ...d, ...MT_OWN })),
@@ -2027,7 +2032,7 @@ function matchTypePublishers(
   );
   const split = mtSplit(pool, matchType);
   return {
-    ...(mockPage(split.rows, page, "", [], PAGE_SIZE) as MatchedDevelopersPage),
+    ...(mockPage(split.rows, page, "", [], pageSize) as MatchedDevelopersPage),
     match_type_counts: split.counts,
     ipd_inconclusive: mtInconclusive(lines, 1),
   };
@@ -2039,6 +2044,7 @@ function matchTypeApps(
   lines: string[],
   matchType: MatchTypeFilter,
   change: AppChange | null,
+  pageSize: number = PAGE_SIZE,
 ): MatchedAppsPage {
   const all: MatchedApp[] = [...MATCHED_APPS.map((a): MatchedApp => ({ ...a, ...MT_OWN })), ...MT_APPS].sort(
     (a, b) => b.line_count - a.line_count,
@@ -2049,13 +2055,13 @@ function matchTypeApps(
     (a) => [a.app_name, a.bundle_id, a.owner_domain, a.ipd_partner, a.ipd_platform],
   );
   const split = mtSplit(pool, matchType);
-  const start = (page - 1) * PAGE_SIZE;
+  const start = (page - 1) * pageSize;
   return {
     page,
-    page_size: PAGE_SIZE,
+    page_size: pageSize,
     total: split.rows.length,
     truncated: false,
-    rows: split.rows.slice(start, start + PAGE_SIZE),
+    rows: split.rows.slice(start, start + pageSize),
     match_type_counts: split.counts,
     // Tidewick TV's two apps, through northfold-tv.com: not read, not counted.
     ipd_inconclusive: mtInconclusive(lines, 2),
