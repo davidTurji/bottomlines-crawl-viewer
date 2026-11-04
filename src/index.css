@@ -1172,8 +1172,12 @@ button:hover > .report-expand-control, button:focus-visible > .report-expand-con
 [data-report-main] { overflow-anchor: none; }
 .report-expansion { display:grid; grid-template-rows:0fr; opacity:0; transition:grid-template-rows 200ms cubic-bezier(.2,.8,.2,1),opacity 140ms ease; }
 .report-expansion[data-expanded="true"] { grid-template-rows:1fr; opacity:1; }
+/* Closing is shorter and sharper than opening (David, 2026-11-04: "slick
+   and short"): the transition of the state being entered applies, so the
+   closed state carries its own. Opening keeps 200 / 140 ms. */
+.report-expansion[data-expanded="false"] { transition:grid-template-rows 160ms cubic-bezier(.4,0,.2,1),opacity 110ms ease-in; }
 .report-expansion > div { min-height:0; overflow:hidden; }
-@media (prefers-reduced-motion: reduce) { .report-expansion { transition:none; } }
+@media (prefers-reduced-motion: reduce) { .report-expansion, .report-expansion[data-expanded="false"] { transition:none; } }
 .line-group-toolbar { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; padding: 8px 10px; border-bottom: 1px solid hsl(var(--border)); background: #fafbf9; }
 .line-group-selection { display: flex; flex: 1; min-width: 100px; flex-direction: column; gap: 1px; font-size: 11px; line-height: 1.4; }
 .line-group-source { flex-basis: 100%; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 10px; color: hsl(215 16% 47%); }
@@ -1526,7 +1530,11 @@ a.line-source-reference:hover { color:hsl(var(--primary)); text-decoration-color
 .status-extra-inline { display:inline-flex; align-items:center; flex:none; animation:status-reveal 160ms ease-out; }
 .status-extra-inline[hidden] { display:none; }
 @keyframes status-reveal { from { opacity:0; transform:translateX(-6px); } to { opacity:1; transform:translateX(0); } }
-@media(prefers-reduced-motion:reduce) { .status-extra-inline { animation:none; } }
+/* Folding back: narrows from its own width to none while it fades (the
+   arrow glides back with it), then the statuses hide. */
+.status-extra-inline.status-extra-out { overflow:hidden; animation:status-hide 150ms cubic-bezier(.4,0,.2,1) forwards; }
+@keyframes status-hide { from { max-width:var(--status-extra-w, 600px); opacity:1; } to { max-width:0; opacity:0; } }
+@media(prefers-reduced-motion:reduce) { .status-extra-inline, .status-extra-inline.status-extra-out { animation:none; } }
 .line-ipd-badge { display:inline-block; padding:0 4px; border:1px solid #cadbed; border-radius:4px; background:#f0f6fc; color:#285e91; font-size:9px; font-weight:600; line-height:14px; vertical-align:baseline; }
 .discovery-placement.line-entry-selected,.discovery-placement.line-entry-selected:hover { box-shadow:none; }
 

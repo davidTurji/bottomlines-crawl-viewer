@@ -1261,7 +1261,7 @@ function SchainPublisherCard({
         />
       </button>
       <Collapse open={open}>
-        <div className="space-y-1.5 border-t border-border bg-accent/30 px-4 pb-4 pt-3 sm:px-5">
+        <div className="space-y-1.5 border-t border-border bg-[#f6f7f5] px-4 pb-4 pt-3 sm:px-5">
           <CardLine label="Your seat line" line={row.seat_written} />
           {row.direct_written.map((l) => (
             <CardLine key={l} label={`Sells ${sdk.name} directly`} line={l} />
@@ -1325,7 +1325,7 @@ function SchainAppCard({ row, open, onToggle }: { row: SchainRow; open: boolean;
         />
       </button>
       <Collapse open={open}>
-        <div className="space-y-1.5 border-t border-app-border bg-app-bg/30 px-4 pb-4 pt-3 sm:px-5">
+        <div className="space-y-1.5 border-t border-border bg-[#f6f7f5] px-4 pb-4 pt-3 sm:px-5">
           <CardLine label="Bundle / store ID" line={row.bundle_id} />
           <CardLine label="Node 1 (asi1, sid1)" line={`${row.asi1}, ${row.sid1}`} />
           <CardLine label="Node 2 (asi2, sid2)" line={`${row.asi2}, ${row.sid2}`} />

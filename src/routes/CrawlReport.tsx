@@ -1923,6 +1923,35 @@ function StatusControls({ tab, setTab, counts, off, inactive }: {
   tab: DrillTab; setTab: (tab: DrillTab) => void; counts: ChangeCounts | null; off: boolean; inactive: boolean;
 }) {
   const [expanded, setExpanded] = useState(!["all", "added", "removed", "changed"].includes(tab));
+  // Folding back (David, 2026-11-04: "the closing ... smooth, short"): the
+  // extra statuses narrow and fade away, then hide; the arrow glides back.
+  const [closing, setClosing] = useState(false);
+  const extraRef = useRef<HTMLSpanElement | null>(null);
+  const finishClosing = useCallback(() => {
+    setClosing(false);
+    setExpanded(false);
+  }, []);
+  useEffect(() => {
+    if (!closing) return;
+    // Never stuck half-closed if the animation's end is not reported.
+    const timer = window.setTimeout(finishClosing, 260);
+    return () => window.clearTimeout(timer);
+  }, [closing, finishClosing]);
+  const toggleMore = () => {
+    if (closing) return;
+    if (!expanded) {
+      setExpanded(true);
+      return;
+    }
+    const el = extraRef.current;
+    if (!el || prefersReducedMotion()) {
+      setExpanded(false);
+      return;
+    }
+    el.style.setProperty("--status-extra-w", `${el.scrollWidth}px`);
+    setClosing(true);
+  };
+  const open = expanded && !closing;
   const moreId = useId();
   const primary: { value: DrillTab; label: string }[] = [
     { value: "all", label: "All matched" }, { value: "added", label: "Added" },
@@ -1980,7 +2009,13 @@ function StatusControls({ tab, setTab, counts, off, inactive }: {
           />
         )}
         {primary.map(option => <TabsTrigger key={option.value} value={option.value}>{option.label}</TabsTrigger>)}
-        {extra.length > 0 && <span id={moreId} hidden={!expanded} className="status-extra-inline">
+        {extra.length > 0 && <span
+          id={moreId}
+          ref={extraRef}
+          hidden={!expanded}
+          className={cn("status-extra-inline", closing && "status-extra-out")}
+          onAnimationEnd={(event) => { if (closing && event.animationName === "status-hide") finishClosing(); }}
+        >
           {extra.map(option => (
             <TabsTrigger key={option.value} value={option.value} className="gap-1">
               {option.label}
@@ -1990,11 +2025,11 @@ function StatusControls({ tab, setTab, counts, off, inactive }: {
         </span>}
         {extra.length > 0 && <button type="button" data-testid="status-toggle"
           className={cn("status-more", selectedExtra && "status-more-active")}
-          aria-label={expanded ? "Hide additional statuses" : "Show additional statuses"}
-          title={expanded ? "Hide additional statuses" : selectedExtra ? `${selectedExtra.label} selected · Show additional statuses` : "Show additional statuses"}
-          aria-expanded={expanded} aria-controls={moreId} onClick={() => setExpanded(value => !value)}>
-          <ChevronRight aria-hidden className={cn("h-4 w-4 transition-transform", expanded && "rotate-180")} />
-          <span>{expanded ? "Fewer" : `+${extra.length} ${extra.length === 1 ? "status" : "statuses"}`}</span>
+          aria-label={open ? "Hide additional statuses" : "Show additional statuses"}
+          title={open ? "Hide additional statuses" : selectedExtra ? `${selectedExtra.label} selected, show additional statuses` : "Show additional statuses"}
+          aria-expanded={open} aria-controls={moreId} onClick={toggleMore}>
+          <ChevronRight aria-hidden className={cn("h-4 w-4 transition-transform", open && "rotate-180")} />
+          <span>{open ? "Fewer" : `+${extra.length} ${extra.length === 1 ? "status" : "statuses"}`}</span>
         </button>}
       </TabsList>
     </Tabs>
@@ -3370,7 +3405,7 @@ function PublisherCard({
         <div
           className={cn(
             "border-t px-4 pb-4 pt-3 sm:px-5",
-            "border-border bg-accent/30",
+            OPENED_AREA,
           )}
         >
           {inactive && <InactiveEvidence text={inactive.evidence} />}
@@ -4841,7 +4876,7 @@ function MatchedAppCard({
         <div
           className={cn(
             "border-t px-4 pb-4 pt-3 sm:px-5",
-            "border-app-border bg-app-bg/30",
+            OPENED_AREA,
           )}
         >
           {inactive && <InactiveEvidence text={inactive.evidence} />}
@@ -4935,6 +4970,12 @@ function sentence(text: string): string {
   const head = first.includes(".") ? t : t.charAt(0).toUpperCase() + t.slice(1);
   return /[.!?]$/.test(head) ? head : `${head}.`;
 }
+
+/** THE OPENED AREA (David, 2026-11-04: one stable rule): a card's opened
+ *  lines area is one soft neutral on every status and both lists; the boxes
+ *  inside carry the colours (Added green, Removed red, Cert changes
+ *  yellow), so none of them sits on a clashing tint. */
+export const OPENED_AREA = "border-border bg-[#f6f7f5]";
 
 /** A row's status: the tab it is listed on (every tab but All matched),
  *  or inactive on the Inactive list. */
