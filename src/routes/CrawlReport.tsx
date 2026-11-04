@@ -745,12 +745,18 @@ export default function CrawlReport() {
       <section className="overview-kpis space-y-2.5" aria-label="Weekly performance">
       {/* Under any filter the line says which, and Reset puts the whole
           report back in one press (David, 2026-11-04). */}
-      <div data-kpi-comparison className="flex min-h-[18px] flex-wrap items-center gap-x-3 gap-y-1 text-xs text-slate-500">
-        <span>
-          {cardsFiltered
-            ? `Filtered: ${filterWords(listFilters, lines.length).join(", ")}`
-            : isFirstCrawl ? "First crawl, no prior week to compare" : "Compared with last week"}
-        </span>
+      {/* ONE LINE, ALWAYS (David, 2026-11-04): the words truncate before
+          the line ever wraps, and Reset never leaves the line. */}
+      <div data-kpi-comparison className="flex h-[18px] min-w-0 items-center gap-x-3 whitespace-nowrap text-xs leading-[18px] text-slate-500">
+        {cardsFiltered ? (
+          <span data-kpi-filter-words className="min-w-0 truncate" title={`Filtered: ${filterWords(listFilters, lines.length).join(", ")}`}>
+            Filtered:{" "}
+            <span className="hidden sm:inline">{filterWords(listFilters, lines.length).join(", ")}</span>
+            <span className="sm:hidden">{filterWords(listFilters, lines.length, true).join(", ")}</span>
+          </span>
+        ) : (
+          <span className="min-w-0 truncate">{isFirstCrawl ? "First crawl, no prior week to compare" : "Compared with last week"}</span>
+        )}
         {anyFilter && <ResetFilters onReset={resetFilters} testId="reset-filters-cards" />}
       </div>
       <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
@@ -1285,7 +1291,7 @@ export function SplitStat({
         ) : hint ? (
           <span className={hintClassName ?? "text-slate-500"}>{hint}</span>
         ) : note ? (
-          <span className="text-slate-400">{note}</span>
+          <CardNote note={note} />
         ) : null}
       </div>
     </>
@@ -1411,7 +1417,7 @@ export function MatchedTile({
   ) : delta ? (
     <DeltaChip delta={delta} tone={tone} />
   ) : note ? (
-    <span className="text-slate-400">{note}</span>
+    <CardNote note={note} />
   ) : null;
   return (
     <button
@@ -1719,12 +1725,13 @@ const MOVE_WHY = {
 /** A single Found in choice as its menu says it. */
 /** The page's filters in words, for the cards' line: "Match type: IPD,
  *  Found in: ads.txt + Both, 2 selected lines". */
-function filterWords(f: ListFilters, seatLines: number): string[] {
+function filterWords(f: ListFilters, seatLines: number, short = false): string[] {
   const out: string[] = [];
-  if (f.matchType !== "all") out.push(`Match type: ${MATCH_WORD[f.matchType]}`);
-  if (f.foundIn !== "all") out.push(`Found in: ${filesWord(f.foundIn)}`);
-  if (f.platform !== "all") out.push(`Platform: ${PLATFORM_WORD[f.platform]}`);
-  if (seatLines > 0) out.push(seatLines === 1 ? "1 selected line" : `${seatLines} selected lines`);
+  // Short (a phone): the choices alone, "IPD, ads.txt, CTV, 2 lines".
+  if (f.matchType !== "all") out.push(short ? MATCH_WORD[f.matchType] : `Match type: ${MATCH_WORD[f.matchType]}`);
+  if (f.foundIn !== "all") out.push(short ? filesWord(f.foundIn) : `Found in: ${filesWord(f.foundIn)}`);
+  if (f.platform !== "all") out.push(short ? PLATFORM_WORD[f.platform] : `Platform: ${PLATFORM_WORD[f.platform]}`);
+  if (seatLines > 0) out.push(short ? `${seatLines} ${seatLines === 1 ? "line" : "lines"}` : seatLines === 1 ? "1 selected line" : `${seatLines} selected lines`);
   return out;
 }
 
@@ -2610,13 +2617,20 @@ function matchTypeFieldsOf(d: MatchTypeFields): MatchTypeFields {
  * Outside the filter bar on purpose: a fifth control there folds the
  * filters behind one button on a laptop screen.
  */
+/** A card's quiet line ("Filtered: IPD, ads.txt"): ONE LINE, ALWAYS (David,
+ *  2026-11-04). It truncates before it would wrap; the whole of it is its
+ *  title and what a screen reader hears. */
+function CardNote({ note }: { note: string }) {
+  return <span data-card-note title={note} className="block truncate text-slate-400">{note}</span>;
+}
+
 function ResetFilters({ onReset, testId = "reset-filters" }: { onReset: () => void; testId?: string }) {
   return (
     <button
       type="button"
       data-testid={testId}
       onClick={onReset}
-      className="inline-flex items-center gap-1 rounded text-xs font-medium text-primary underline-offset-2 hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+      className="inline-flex shrink-0 items-center gap-1 whitespace-nowrap rounded text-xs font-medium text-primary underline-offset-2 hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
     >
       <RotateCcw aria-hidden className="h-3 w-3" />
       Reset filters
