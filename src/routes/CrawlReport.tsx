@@ -29,7 +29,7 @@ import { PAGE_SIZE } from "@/lib/paging";
 import { usePageCache } from "@/lib/pageCache";
 import { useLineFilter } from "@/lib/lineFilter";
 import { Link } from "react-router-dom";
-import { ChevronDown, ChevronRight, Download, FileText, Globe, MonitorSmartphone, SlidersHorizontal, Smartphone, Tv } from "lucide-react";
+import { ChevronDown, ChevronRight, Download, EyeOff, FileText, Globe, MonitorSmartphone, SlidersHorizontal, Smartphone, Tv } from "lucide-react";
 import { FOLD_OPEN, FOLD_SLACK, FOLD_STEP, easeListHeight } from "@/components/FoldedList";
 import {
   type TrialCaps, type TrialSlice,
@@ -1562,7 +1562,10 @@ function tabNoun(tab: DrillTab, view: "publishers" | "apps"): { many: string; on
  */
 function watchReason(row: object, tab: DrillTab): string | null {
   if (!isScopeTab(tab)) return null;
-  const lines = (row as Record<string, unknown>)[`${WATCH_CHANGE[tab]}_lines`];
+  // A publisher row keeps the lines that moved under ``scope`` (developerRow);
+  // an app row has them as they came.
+  const scoped = (row as { scope?: { lines?: unknown } }).scope?.lines;
+  const lines = Array.isArray(scoped) ? scoped : (row as Record<string, unknown>)[`${WATCH_CHANGE[tab]}_lines`];
   if (!Array.isArray(lines)) return null;
   const said = [...new Set(lines.map((l) => scopeReasonText((l as { reason?: unknown } | null)?.reason)).filter(Boolean))];
   return said.length ? said.join(" ") : null;
@@ -3008,6 +3011,7 @@ function DrilldownList({
                     <PublisherCard
                       row={r}
                       watchNote={watchReason(r, tab)}
+                      watchTab={isScopeTab(tab) ? tab : null}
                       token={token}
                       lineFilter={lines}
                       open={expanded === r.developer_id}
@@ -3123,6 +3127,7 @@ function PublisherCard({
   inactive,
   lineFilter = [],
   watchNote = null,
+  watchTab = null,
 }: {
   row: Row;
   token: string;
@@ -3134,6 +3139,8 @@ function PublisherCard({
   lineFilter?: string[];
   /** On a watch tab: the row's one-line reason (``watchReason``). */
   watchNote?: string | null;
+  /** The watch tab the row is listed on (Stopped watching greys it). */
+  watchTab?: ScopeTab | null;
 }) {
   const initial = (
     (row.developer_name || row.developer_domain || "?")
@@ -3149,6 +3156,8 @@ function PublisherCard({
   // the change counts: absent arrays are the real-data signal.
   // The circle, the name and the domain are one link to the publisher's
   // site: hovering any of them lights the circle and the name together.
+  // Every row on Stopped watching, whatever its reason (2026-11-04).
+  const stopped = watchTab === "stopped" && !inactive;
   const [siteHover, setSiteHover] = useState(false);
   const hasEmbeddedLines =
     row.matched_lines.length > 0 ||
@@ -3159,7 +3168,7 @@ function PublisherCard({
     <div
       className={cn(
         "report-row overflow-hidden rounded-xl border shadow-sm transition-colors",
-        inactive ? "inactive-report-row border-border bg-white" : "border-border bg-white",
+        inactive || stopped ? "inactive-report-row border-border bg-white" : "border-border bg-white",
         open && "shadow-md",
       )}
     >
@@ -3180,6 +3189,7 @@ function PublisherCard({
           </span>
         </button>
         {inactive && <InactiveStrip mark={inactive} />}
+        {stopped && <StoppedStrip reason={watchNote} />}
       <div className="pointer-events-none flex w-full items-center gap-4 px-4 py-4 text-left sm:px-5">
         {row.developer_domain ? (
           <PublisherAvatarLink
@@ -3190,21 +3200,23 @@ function PublisherCard({
           >
             <div
               className={cn(
-                "flex h-11 w-11 items-center justify-center rounded-full text-base font-semibold",
-                inactive ? "bg-slate-200 text-slate-500" : "bg-accent text-primary",
+                "relative flex h-11 w-11 items-center justify-center rounded-full text-base font-semibold",
+                inactive || stopped ? "bg-slate-200 text-slate-500" : "bg-accent text-primary",
               )}
             >
               {initial}
+              {stopped && <StoppedBadge />}
             </div>
           </PublisherAvatarLink>
         ) : (
           <div
             className={cn(
-              "flex h-11 w-11 flex-shrink-0 items-center justify-center rounded-full text-base font-semibold",
-              inactive ? "bg-slate-200 text-slate-500" : "bg-accent text-primary",
+              "relative flex h-11 w-11 flex-shrink-0 items-center justify-center rounded-full text-base font-semibold",
+              inactive || stopped ? "bg-slate-200 text-slate-500" : "bg-accent text-primary",
             )}
           >
             {initial}
+            {stopped && <StoppedBadge />}
           </div>
         )}
         <div className="min-w-0 flex-1">
@@ -3230,6 +3242,7 @@ function PublisherCard({
                 store, and its list splits by platform. */}
             {!inactive && <IpdChip row={row} others={otherPartners(row, row.matched_lines)} />}
             {inactive && <InactiveChip />}
+            {stopped && <StoppedChip />}
           </div>
           {((row.developer_domain && row.developer_name) || (!inactive && row.files)) && (
             <div className="publisher-subline flex min-w-0 items-center text-xs text-slate-500">
@@ -3251,7 +3264,7 @@ function PublisherCard({
               app-ads.txt hold some of this publisher's lines. One quiet
               line, only when there are any; the lines below say which. */}
           {!inactive && <IpdWhere row={row} others={otherPartners(row, row.matched_lines)} />}
-          <WatchReason text={watchNote} />
+          {!stopped && <WatchReason text={watchNote} />}
           {fileHostsLabel(row.file_hosts) && (
             <div data-file-hosts className="truncate text-[11px] text-slate-400">
               {fileHostsLabel(row.file_hosts)}
@@ -3271,11 +3284,11 @@ function PublisherCard({
         <div className="hidden items-center gap-6 text-right sm:flex">
           {row.prev != null && (
             <div className="w-[84px]">
-              <MiniStat label="Last week" value={row.prev} />
+              <MiniStat label="Last week" value={row.prev} muted={stopped} />
             </div>
           )}
           <div className="w-[84px]">
-            <MiniStat label="This week" value={row.current} emphasis />
+            <MiniStat label="This week" value={row.current} emphasis muted={stopped} />
           </div>
           <ChangeCell
             added={row.added}
@@ -3291,7 +3304,7 @@ function PublisherCard({
         <div
           className={cn(
             "border-t px-4 pb-4 pt-3 sm:px-5",
-            inactive ? "border-slate-200 bg-slate-100/50" : "border-border bg-accent/30",
+            inactive || stopped ? "border-slate-200 bg-slate-100/50" : "border-border bg-accent/30",
           )}
         >
           {inactive ? (
@@ -4533,6 +4546,7 @@ function MatchedAppsList({
                   <MatchedAppCard
                     app={a}
                     watchNote={watchReason(a, tab)}
+                    watchTab={isScopeTab(tab) ? tab : null}
                     lineFilter={lines}
                     open={expanded === keyOf(a)}
                     onToggle={() =>
@@ -4597,6 +4611,7 @@ function MatchedAppCard({
   inactive,
   lineFilter = [],
   watchNote = null,
+  watchTab = null,
 }: {
   app: AppRow;
   open: boolean;
@@ -4610,7 +4625,11 @@ function MatchedAppCard({
   lineFilter?: string[];
   /** On a watch tab: the row's one-line reason (``watchReason``). */
   watchNote?: string | null;
+  /** The watch tab the row is listed on (Stopped watching greys it). */
+  watchTab?: ScopeTab | null;
 }) {
+  // Every row on Stopped watching, whatever its reason (2026-11-04).
+  const stopped = watchTab === "stopped" && !inactive;
   const lines = app.matched_lines ?? [];
   const added = app.lines_added ?? 0;
   const removed = app.lines_removed ?? 0;
@@ -4635,7 +4654,7 @@ function MatchedAppCard({
     <div
       className={cn(
         "report-row overflow-hidden rounded-xl border shadow-sm transition-colors",
-        inactive
+        inactive || stopped
           ? cn("inactive-report-row border-border bg-white", open && "shadow-md")
           : open
             ? "border-app-border bg-app-bg/40 shadow-md"
@@ -4657,11 +4676,12 @@ function MatchedAppCard({
           </span>
         </button>
         {inactive && <InactiveStrip mark={inactive} />}
+        {stopped && <StoppedStrip reason={watchNote} />}
       <div className="pointer-events-none flex w-full items-center gap-4 px-4 py-4 text-left sm:px-5">
         <div
           className={cn(
-            "flex h-11 w-11 flex-shrink-0 items-center justify-center rounded-full",
-            inactive ? "bg-slate-200 text-slate-500" : "bg-app-bg text-app",
+            "relative flex h-11 w-11 flex-shrink-0 items-center justify-center rounded-full",
+            inactive || stopped ? "bg-slate-200 text-slate-500" : "bg-app-bg text-app",
           )}
         >
           {/* A website row (crawler #370: on new reports the apps list
@@ -4674,6 +4694,7 @@ function MatchedAppCard({
           ) : (
             <Smartphone aria-hidden className="h-5 w-5" />
           )}
+          {stopped && <StoppedBadge />}
         </div>
         <div className="min-w-0 flex-1">
           <div className="matched-app-title flex min-w-0 items-center gap-2">
@@ -4686,6 +4707,7 @@ function MatchedAppCard({
             <PlatformBadge row={app} inactive={Boolean(inactive)} />
             {!inactive && <IpdChip row={app} subject={appSubject(app)} others={otherPartners(app, app.matched_lines)} />}
             {inactive && <InactiveChip />}
+            {stopped && <StoppedChip />}
           </div>
           {/* A trial withholds an inactive app's publisher (the crawler
               sends ""): no "publisher:" with nothing after it. */}
@@ -4721,7 +4743,7 @@ function MatchedAppCard({
             </div>
           )}
           {!inactive && <IpdWhere row={app} subject={appSubject(app)} others={otherPartners(app, app.matched_lines)} />}
-          <WatchReason text={watchNote} />
+          {!stopped && <WatchReason text={watchNote} />}
           {fileLine && (
             <div data-app-file className="truncate text-[11px] text-slate-400">
               {fileLine}
@@ -4739,7 +4761,7 @@ function MatchedAppCard({
         ) : (
         <div className="hidden items-center gap-6 text-right sm:flex">
           <div className="w-[84px] whitespace-nowrap">
-            <MiniStat label="Matched lines" value={app.line_count} emphasis />
+            <MiniStat label="Matched lines" value={app.line_count} emphasis muted={stopped} />
           </div>
           <ChangeCell added={added} removed={removed} certChanged={certChanged} />
         </div>
@@ -4751,7 +4773,7 @@ function MatchedAppCard({
         <div
           className={cn(
             "border-t px-4 pb-4 pt-3 sm:px-5",
-            inactive ? "border-slate-200 bg-slate-100/50" : "border-app-border bg-app-bg/30",
+            inactive || stopped ? "border-slate-200 bg-slate-100/50" : "border-app-border bg-app-bg/30",
           )}
         >
           {/* An inactive app's row carries its publisher's lines (even
@@ -4845,6 +4867,49 @@ function InactiveChip() {
   return (
     <span className="inactive-status-label flex-shrink-0 text-[10px] font-medium text-slate-500">
       Inactive
+    </span>
+  );
+}
+
+/*
+ * STOPPED WATCHING, IN THE INACTIVE TAB'S LANGUAGE (David, 2026-11-04: "so
+ * we can see intuitively that those were really stopped"; the same for
+ * every row on the tab, whatever its reason). A strip across the top with
+ * the reason ("Stopped watching:" in bold), a grey icon with a crossed-out
+ * eye, a label beside the name, grey figures. Never on the Inactive tab
+ * itself, which has its own strip.
+ */
+function StoppedStrip({ reason }: { reason: string | null | undefined }) {
+  return (
+    <div
+      data-testid="stopped-strip"
+      className="inactive-record-note pointer-events-none border-b border-border bg-[#f7f9f6] px-4 py-2 sm:px-5"
+    >
+      <p className="text-xs text-slate-700">
+        <span className="font-semibold text-slate-800">Stopped watching{reason ? ":" : ""}</span>
+        {reason ? <span className="font-medium"> {reason}</span> : null}
+      </p>
+    </div>
+  );
+}
+
+function StoppedChip() {
+  return (
+    <span data-stopped-chip className="inactive-status-label flex-shrink-0 text-[10px] font-medium text-slate-500">
+      Stopped watching
+    </span>
+  );
+}
+
+/** The crossed-out eye on the row's icon. */
+function StoppedBadge() {
+  return (
+    <span
+      aria-hidden
+      data-stopped-badge
+      className="absolute -bottom-0.5 -right-0.5 flex h-[18px] w-[18px] items-center justify-center rounded-full bg-white ring-1 ring-slate-200"
+    >
+      <EyeOff className="h-3 w-3 text-slate-500" />
     </span>
   );
 }

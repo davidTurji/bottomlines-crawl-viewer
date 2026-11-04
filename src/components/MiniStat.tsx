@@ -11,10 +11,13 @@ export function MiniStat({
   label,
   value,
   emphasis,
+  muted,
 }: {
   label: string;
   value: number;
   emphasis?: boolean;
+  /** Greyed: a row no longer watched (Stopped watching, 2026-11-04). */
+  muted?: boolean;
 }) {
   return (
     <div>
@@ -26,7 +29,7 @@ export function MiniStat({
       <div
         className={cn(
           "font-sans text-sm tabular-nums",
-          emphasis ? "font-semibold text-slate-900" : "text-slate-700",
+          muted ? "text-slate-400" : emphasis ? "font-semibold text-slate-900" : "text-slate-700",
         )}
       >
         {value.toLocaleString()}

@@ -176,5 +176,6 @@ export function scopeReasonText(reason: unknown): string | null {
   if (!raw) return null;
   if (raw === "host first read") return "first read of this file this crawl";
   if (raw === "host not read") return "this file was not read this crawl";
+  if (raw === "seat taken off watchlist") return "this seat was taken off your watchlist";
   return raw;
 }

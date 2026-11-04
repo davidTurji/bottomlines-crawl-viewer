@@ -1005,6 +1005,12 @@ function seededLines(
             : null,
         matched_via: matchedVia,
         ipd_declared_by: declaredBy,
+        // Why a line stopped being watched, the crawler's words (2026-11-04:
+        // every Stopped watching row says it): a seat off the watchlist, or
+        // a file this crawl did not read.
+        ...(event === "monitoring_stopped"
+          ? { reason: line % 2 === 0 ? "seat taken off watchlist" : "host not read" }
+          : {}),
         ...changeDatesFor(event, line, j),
       });
     }
