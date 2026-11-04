@@ -347,11 +347,13 @@ test.describe("inactive", () => {
     await expect(section(page).getByText(SINCE).first()).toBeVisible();
     await expect(section(page).getByRole("button", { name: /Show the seat lines of/ })).toHaveCount(counts.publishers);
     await expect(section(page).getByText("Quokkaplay Legacy")).toBeVisible();
-    // The matched card, greyed: an Inactive chip and the strip on top.
-    const strips = section(page).getByTestId("inactive-strip");
-    await expect(strips).toHaveCount(counts.publishers);
-    await expect(strips.filter({ hasText: "Inactive since Aug 25, 2026: The domain no longer exists" })).toHaveCount(1);
-    await expect(section(page).getByText("Inactive", { exact: true })).toHaveCount(counts.publishers);
+    // A regular card (David, 2026-11-04): no strip on top and no label
+    // repeating the tab; one sentence inside the card says since when and why.
+    const lines = section(page).getByTestId("inactive-line");
+    await expect(lines).toHaveCount(counts.publishers);
+    await expect(lines.filter({ hasText: "Inactive since Aug 25, 2026: the domain no longer exists." })).toHaveCount(1);
+    await expect(section(page).getByTestId("inactive-strip")).toHaveCount(0);
+    await expect(section(page).getByText("Inactive", { exact: true })).toHaveCount(0);
     await sub(page, "Apps").click();
     await expect(section(page).getByRole("button", { name: /Show the seat lines of/ })).toHaveCount(counts.apps);
     await expect(section(page).getByText("No longer on Google Play").first()).toBeVisible();
@@ -381,14 +383,16 @@ test.describe("inactive", () => {
     await open(page, {});
     await expectOverview(page);
     await selectStatus(page, "Inactive");
-    await expect(section(page).getByText("Failed in 3 crawls in a row, from Aug 11, 2026 to Aug 25, 2026").first()).toBeVisible();
+    // The card says one sentence (2026-11-04); the evidence is the first
+    // thing in the opened card.
     await section(page).getByRole("button", { name: "Show the seat lines of Quokkaplay Legacy" }).click();
+    await expect(section(page).getByTestId("inactive-evidence").filter({ hasText: "Failed in 3 crawls in a row, from Aug 11, 2026 to Aug 25, 2026" })).toBeVisible();
     await expect(section(page).getByText("Your seat lines it carried")).toBeVisible();
     await sub(page, "Apps").click();
     await expect(section(page).getByText("inactive too")).toHaveCount(1);
     await expect(section(page).getByText("still live").first()).toBeVisible();
-    await expect(section(page).getByText("Checked in US, CA, the store answered 404")).toBeVisible();
     await section(page).getByRole("button", { name: "Show the seat lines of Glintfox Runner" }).click();
+    await expect(section(page).getByTestId("inactive-evidence").filter({ hasText: "Checked in US, CA, the store answered 404" })).toBeVisible();
     await expect(section(page).getByText("Your seat lines its publisher carries")).toBeVisible();
   });
 

@@ -452,8 +452,11 @@ export const mockSummary: Summary = {
     // Found and lost behind the net: 380 - 29 = +351 publishers,
     // 1,702 - 61 = +1,641 apps.
     matched_moves: {
-      developers: { found: 380, lost: 29 },
-      apps: { found: 1_702, lost: 61 },
+      // 2 of the lost stopped naming their inventory partner (5 apps, no
+      // line removed): the line under the tiles, its "See them" opens the
+      // apps' Stopped watching tab (MOCK_LOST_APPS).
+      developers: { found: 380, lost: 29, partner_found: 0, partner_dropped: 2 },
+      apps: { found: 1_702, lost: 61, partner_found: 0, partner_dropped: 5 },
     },
   },
   hero_diff: {
@@ -1002,6 +1005,12 @@ function seededLines(
             : null,
         matched_via: matchedVia,
         ipd_declared_by: declaredBy,
+        // Why a line stopped being watched, the crawler's words (2026-11-04:
+        // every Stopped watching row says it): a seat off the watchlist, or
+        // a file this crawl did not read.
+        ...(event === "monitoring_stopped"
+          ? { reason: line % 2 === 0 ? "seat taken off watchlist" : "host not read" }
+          : {}),
         ...changeDatesFor(event, line, j),
       });
     }
@@ -3088,4 +3097,57 @@ export async function* mockChatStream(
  */
 export function mockSchainSource() {
   return { developers: MATCHED_DEVS, bundles: MATCHED_BUNDLES };
+}
+
+// ── apps that stopped matching (the apps' Stopped watching tab) ────────────
+//
+// The crawler appends last week's rows of the apps whose publisher stopped
+// matching to the apps list's change tabs (viewer_frozen.with_lost_apps,
+// 2026-11-04). Every name belongs to nobody (checked 2026-11-04, `dig`
+// NXDOMAIN, no NS): madeupweather.tv, madeupmedianews.tv,
+// madeupfastpartner.tv.
+
+const LOST_PARTNER = "madeupfastpartner.tv";
+
+function lostApp(domain: string, name: string, store: string, bundle: string, n: number): MatchedApp {
+  const line = {
+    ssp_domain: "madeupmedia.com", publisher_id: "12345", relationship: "DIRECT", cert_id: "",
+    found_in: "ads.txt", match_type: "ipd", ipd_partner: LOST_PARTNER,
+  } as MatchedSeatLine;
+  return {
+    store, bundle_id: bundle, app_name: name, owner_domain: domain, owner_name: null,
+    developer_id: 990000 + n, line_count: 1, match_type: "ipd", ipd_partner: LOST_PARTNER,
+    matched_lines: [line],
+    stopped_watching_lines: [{
+      ...line,
+      reason: `${domain} no longer names ${LOST_PARTNER} as its inventory partner, so this line no longer covers it.`,
+    }],
+  } as MatchedApp;
+}
+
+export const MOCK_LOST_APPS: MatchedApp[] = [
+  lostApp("madeupweather.tv", "Madeup Weather", "roku", "com.madeupweather.roku", 1),
+  lostApp("madeupweather.tv", "Madeup Weather", "firetv", "B0MADEUPWX1", 1),
+  lostApp("madeupweather.tv", "Madeup Weather Live", "android", "com.madeupweather.live", 1),
+  lostApp("madeupmedianews.tv", "Madeup Media News", "samsung", "com.madeupmedianews.tizen", 2),
+  lostApp("madeupmedianews.tv", "Madeup Media News", "lg", "com.madeupmedianews.webos", 2),
+];
+
+/** The mock apps page with the lost apps on their tab, as the crawler
+ *  serves them: on Stopped watching only, its count raised, the matched
+ *  list and its total untouched. */
+export function withMockLostApps<P extends { rows: MatchedApp[]; total: number; change?: string | null; change_counts?: Record<string, number> | null }>(
+  page: P,
+  change: string | null | undefined,
+  pageNo: number,
+  pageSize: number,
+): P {
+  const counts = page.change_counts
+    ? { ...page.change_counts, stopped_watching: (page.change_counts.stopped_watching ?? 0) + MOCK_LOST_APPS.length }
+    : page.change_counts;
+  if (change !== "stopped_watching") return { ...page, change_counts: counts };
+  const listed = page.total;
+  const start = (pageNo - 1) * pageSize;
+  const extra = MOCK_LOST_APPS.slice(Math.max(0, start - listed), Math.max(0, start - listed) + pageSize - page.rows.length);
+  return { ...page, rows: [...page.rows, ...extra], total: listed + MOCK_LOST_APPS.length, change_counts: counts };
 }

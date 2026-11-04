@@ -588,15 +588,17 @@ export const api = {
     platform: PlatformFilter = "all",
   ) => {
     if (MOCK) {
-      const { mockMatchedApps, mockWatchView, mockPlatform } = await import("./mockData");
+      const { mockMatchedApps, mockWatchView, mockPlatform, withMockLostApps } = await import("./mockData");
       const mt = mockMatchType(matchType);
       const read = (type: MatchTypeFilter | null) => (pg: number, size: number) =>
         mockWatchView(p => mockMatchedApps(p, q, lines ?? [], type, change ?? null, MOCK_WHOLE), pg, size, change, lines);
-      const r = mockFacet(
+      const r0 = mockFacet(
         mockPlatform(read(mt), page, pageSize, platform),
         mt !== null && platform !== "all",
         () => mockPlatform(read("all"), 1, 1_000_000, platform).rows,
       );
+      // The apps that stopped matching, on their tab only (crawler, 2026-11-04).
+      const r = q || (lines ?? []).length || (platform && platform !== "all") ? r0 : withMockLostApps(r0, change, page, pageSize);
       return trialMock()
         ? { ...r, page: 1, ...cutRows(r.rows, TRIAL_CAPS_MOCK.apps, r.total) }
         : r;
@@ -1229,7 +1231,16 @@ export type ExportInfo = {
   apps_rows?: number | null;
 };
 
-export type MatchedMove = { found: number; lost: number };
+export type MatchedMove = {
+  found: number;
+  lost: number;
+  /** Of the found, how many came only through an inventory partner they
+   *  name (reports baked since 2026-11-04; absent before). */
+  partner_found?: number | null;
+  /** Of the lost, how many stopped naming the inventory partner whose
+   *  ads.txt carries the reader's line: lost with no line removed. */
+  partner_dropped?: number | null;
+};
 /** Either side is null where its figure is cut by a list filter (last
  *  week is never filtered), and ``apps`` when the bake capped an app list. */
 export type MatchedMoves = { developers: MatchedMove | null; apps: MatchedMove | null };
