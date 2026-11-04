@@ -113,9 +113,10 @@ test("every card note and the filter line stay on one line, phone to desktop", a
   for (const width of [320, 390, 768, 1440]) {
     await page.setViewportSize({ width, height: 900 });
     if (width === 320) {
+      // The longest notes: Own, app-ads.txt ticked with Both.
       await open(page, { matchType: true, listSummary: true, foundIn: true });
-      await chooseFilter(page, "match-type", "IPD");
-      await chooseFilter(page, "found-in", "ads.txt");
+      await chooseFilter(page, "match-type", "Own");
+      await chooseFilter(page, "found-in", "app-ads.txt");
       await chooseFilter(page, "found-in", "Both");
     }
     await page.waitForTimeout(300);
