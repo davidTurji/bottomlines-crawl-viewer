@@ -29,7 +29,7 @@ import { PAGE_SIZE } from "@/lib/paging";
 import { usePageCache } from "@/lib/pageCache";
 import { useLineFilter } from "@/lib/lineFilter";
 import { Link } from "react-router-dom";
-import { ChevronDown, ChevronRight, CircleHelp, Download, Eye, EyeOff, FileText, Globe, MonitorSmartphone, PowerOff, SlidersHorizontal, Smartphone, Tv } from "lucide-react";
+import { ChevronDown, ChevronRight, CircleHelp, Download, Eye, EyeOff, FileText, Globe, Minus, MonitorSmartphone, Plus, PowerOff, RefreshCw, SlidersHorizontal, Smartphone, Tv } from "lucide-react";
 import { FOLD_OPEN, FOLD_SLACK, FOLD_STEP, easeListHeight } from "@/components/FoldedList";
 import {
   type TrialCaps, type TrialSlice,
@@ -1579,7 +1579,7 @@ function watchReason(row: object, tab: DrillTab): string | null {
 function WatchReason({ text }: { text: string | null | undefined }) {
   if (!text) return null;
   return (
-    <div data-watch-reason title={sentence(text)} className="truncate text-[11px] font-medium text-slate-600">
+    <div data-watch-reason title={sentence(text)} className="truncate text-[11px] text-slate-600">
       {sentence(text)}
     </div>
   );
@@ -1935,6 +1935,35 @@ function StatusControls({ tab, setTab, counts, off, inactive }: {
   ];
   const selectedExtra = extra.find(option => option.value === tab);
   useEffect(() => { if (!["all", "added", "removed", "changed"].includes(tab)) setExpanded(true); }, [tab]);
+  // THE SLIDING HIGHLIGHT (David, 2026-11-04: "when you click a lot of
+  // statuses, make it a smooth move"). One white pill glides under the
+  // selected status instead of each tab lighting up on its own. Measured
+  // from the selected tab after every change (tab, the extra statuses
+  // opening, a resize); no animation on the first placement.
+  const trackRef = useRef<HTMLDivElement | null>(null);
+  const [pill, setPill] = useState<{ x: number; y: number; w: number; h: number } | null>(null);
+  const [pillReady, setPillReady] = useState(false);
+  useLayoutEffect(() => {
+    const track = trackRef.current;
+    if (!track) return;
+    const place = () => {
+      const el = track.querySelector<HTMLElement>('[role="tab"][data-state="active"]');
+      if (!el || el.offsetParent === null) {
+        setPill(null);
+        return;
+      }
+      setPill({ x: el.offsetLeft, y: el.offsetTop, w: el.offsetWidth, h: el.offsetHeight });
+    };
+    place();
+    const watch = typeof ResizeObserver !== "undefined" ? new ResizeObserver(place) : null;
+    watch?.observe(track);
+    return () => watch?.disconnect();
+  }, [tab, expanded, extra.length]);
+  useEffect(() => {
+    if (!pill || pillReady) return;
+    const frame = requestAnimationFrame(() => setPillReady(true));
+    return () => cancelAnimationFrame(frame);
+  }, [pill, pillReady]);
   return <>
     <label className="report-mobile-status" data-tour="list-tabs-mobile"><span>Status</span>
       <select aria-label="Matched status" value={tab} onChange={event => setTab(event.target.value as DrillTab)}>
@@ -1942,7 +1971,14 @@ function StatusControls({ tab, setTab, counts, off, inactive }: {
       </select>
     </label>
     <Tabs value={tab} onValueChange={value => setTab(value as DrillTab)} className="report-desktop-status max-w-full" data-tour="list-tabs">
-      <TabsList aria-label="Matched statuses" className="status-track h-auto max-w-full justify-start">
+      <TabsList ref={trackRef} aria-label="Matched statuses" className={cn("status-track h-auto max-w-full justify-start", pill && "has-pill")}>
+        {pill && (
+          <span
+            aria-hidden
+            className={cn("status-pill", pillReady && "is-ready")}
+            style={{ transform: `translate(${pill.x}px, ${pill.y}px)`, width: pill.w, height: pill.h }}
+          />
+        )}
         {primary.map(option => <TabsTrigger key={option.value} value={option.value}>{option.label}</TabsTrigger>)}
         {extra.length > 0 && <span id={moreId} hidden={!expanded} className="status-extra-inline">
           {extra.map(option => (
@@ -3039,7 +3075,7 @@ function DrilldownList({
                     <PublisherCard
                       row={r}
                       watchNote={watchReason(r, tab)}
-                      watchTab={isScopeTab(tab) ? tab : null}
+                      status={rowStatus(tab)}
                       token={token}
                       lineFilter={lines}
                       open={expanded === r.developer_id}
@@ -3155,7 +3191,7 @@ function PublisherCard({
   inactive,
   lineFilter = [],
   watchNote = null,
-  watchTab = null,
+  status = null,
 }: {
   row: Row;
   token: string;
@@ -3167,8 +3203,8 @@ function PublisherCard({
   lineFilter?: string[];
   /** On a watch tab: the row's one-line reason (``watchReason``). */
   watchNote?: string | null;
-  /** The watch tab the row is listed on (Stopped watching greys it). */
-  watchTab?: ScopeTab | null;
+  /** The status tab the row is listed on: its avatar's tint and mark. */
+  status?: RowStatus | null;
 }) {
   const initial = (
     (row.developer_name || row.developer_domain || "?")
@@ -3185,8 +3221,9 @@ function PublisherCard({
   // The circle, the name and the domain are one link to the publisher's
   // site: hovering any of them lights the circle and the name together.
   // Every row on Stopped watching, whatever its reason (2026-11-04).
-  const stopped = watchTab === "stopped" && !inactive;
-  const unconfirmed = watchTab === "unconfirmed" && !inactive;
+  // The row's look: its tab's status, or inactive on the Inactive list.
+  const look: RowStatus | null = inactive ? "inactive" : status;
+  const stopped = look === "stopped";
   const [siteHover, setSiteHover] = useState(false);
   const hasEmbeddedLines =
     row.matched_lines.length > 0 ||
@@ -3197,13 +3234,10 @@ function PublisherCard({
     <div
       className={cn(
         "report-row overflow-hidden rounded-xl border shadow-sm transition-colors",
-        stopped
-          ? "inactive-report-row border-slate-200 bg-slate-50"
-          : unconfirmed
-            ? "border-violet-200 bg-violet-50/40"
-            : inactive
-              ? "inactive-report-row border-amber-200 bg-amber-50/40"
-              : "border-border bg-white",
+        // Every status row is a white card; only its avatar carries the
+        // status (David, 2026-11-04). The class keeps an inactive row's
+        // phone layout.
+        inactive ? "inactive-report-row border-border bg-white" : "border-border bg-white",
         open && "shadow-md",
       )}
     >
@@ -3234,22 +3268,22 @@ function PublisherCard({
             <div
               className={cn(
                 "relative flex h-11 w-11 items-center justify-center rounded-full text-base font-semibold",
-                iconTone(stopped, unconfirmed, "bg-accent text-primary", Boolean(inactive)),
+                avatarTone(look, "bg-accent text-primary"),
               )}
             >
               {initial}
-              {inactive ? <InactiveBadge /> : watchTab && <WatchBadge tab={watchTab} />}
+              {look && <StatusBadge status={look} />}
             </div>
           </PublisherAvatarLink>
         ) : (
           <div
             className={cn(
               "relative flex h-11 w-11 flex-shrink-0 items-center justify-center rounded-full text-base font-semibold",
-              iconTone(stopped, unconfirmed, "bg-accent text-primary", Boolean(inactive)),
+              avatarTone(look, "bg-accent text-primary"),
             )}
           >
             {initial}
-            {inactive ? <InactiveBadge /> : watchTab && <WatchBadge tab={watchTab} />}
+            {look && <StatusBadge status={look} />}
           </div>
         )}
         <div className="min-w-0 flex-1">
@@ -3336,7 +3370,7 @@ function PublisherCard({
         <div
           className={cn(
             "border-t px-4 pb-4 pt-3 sm:px-5",
-            stopped ? "border-slate-200 bg-slate-100/50" : "border-border bg-accent/30",
+            "border-border bg-accent/30",
           )}
         >
           {inactive ? (
@@ -4578,7 +4612,7 @@ function MatchedAppsList({
                   <MatchedAppCard
                     app={a}
                     watchNote={watchReason(a, tab)}
-                    watchTab={isScopeTab(tab) ? tab : null}
+                    status={rowStatus(tab)}
                     lineFilter={lines}
                     open={expanded === keyOf(a)}
                     onToggle={() =>
@@ -4643,7 +4677,7 @@ function MatchedAppCard({
   inactive,
   lineFilter = [],
   watchNote = null,
-  watchTab = null,
+  status = null,
 }: {
   app: AppRow;
   open: boolean;
@@ -4657,12 +4691,13 @@ function MatchedAppCard({
   lineFilter?: string[];
   /** On a watch tab: the row's one-line reason (``watchReason``). */
   watchNote?: string | null;
-  /** The watch tab the row is listed on (Stopped watching greys it). */
-  watchTab?: ScopeTab | null;
+  /** The status tab the row is listed on: its avatar's tint and mark. */
+  status?: RowStatus | null;
 }) {
   // Every row on Stopped watching, whatever its reason (2026-11-04).
-  const stopped = watchTab === "stopped" && !inactive;
-  const unconfirmed = watchTab === "unconfirmed" && !inactive;
+  // The row's look: its tab's status, or inactive on the Inactive list.
+  const look: RowStatus | null = inactive ? "inactive" : status;
+  const stopped = look === "stopped";
   const lines = app.matched_lines ?? [];
   const added = app.lines_added ?? 0;
   const removed = app.lines_removed ?? 0;
@@ -4687,12 +4722,8 @@ function MatchedAppCard({
     <div
       className={cn(
         "report-row overflow-hidden rounded-xl border shadow-sm transition-colors",
-        stopped
-          ? cn("inactive-report-row border-slate-200 bg-slate-50", open && "shadow-md")
-          : unconfirmed
-            ? cn("border-violet-200 bg-violet-50/40", open && "shadow-md")
-          : inactive
-          ? cn("inactive-report-row border-amber-200 bg-amber-50/40", open && "shadow-md")
+        inactive
+          ? cn("inactive-report-row border-border bg-white", open && "shadow-md")
           : open
             ? "border-app-border bg-app-bg/40 shadow-md"
             : "border-border bg-white",
@@ -4716,7 +4747,7 @@ function MatchedAppCard({
         <div
           className={cn(
             "relative flex h-11 w-11 flex-shrink-0 items-center justify-center rounded-full",
-            iconTone(stopped, unconfirmed, "bg-app-bg text-app", Boolean(inactive)),
+            avatarTone(look, "bg-app-bg text-app"),
           )}
         >
           {/* A website row (crawler #370: on new reports the apps list
@@ -4729,7 +4760,7 @@ function MatchedAppCard({
           ) : (
             <Smartphone aria-hidden className="h-5 w-5" />
           )}
-          {inactive ? <InactiveBadge /> : watchTab && <WatchBadge tab={watchTab} />}
+          {look && <StatusBadge status={look} />}
         </div>
         <div className="min-w-0 flex-1">
           <div className="matched-app-title flex min-w-0 items-center gap-2">
@@ -4807,7 +4838,7 @@ function MatchedAppCard({
         <div
           className={cn(
             "border-t px-4 pb-4 pt-3 sm:px-5",
-            stopped ? "border-slate-200 bg-slate-100/50" : "border-app-border bg-app-bg/30",
+            "border-app-border bg-app-bg/30",
           )}
         >
           {/* An inactive app's row carries its publisher's lines (even
@@ -4881,15 +4912,15 @@ type InactiveMark = {
 };
 
 /*
- * THE STATUS ROWS (David, 2026-11-04). Every card is a regular card; the
- * status says itself through the card's tone and one plain sentence inside
- * it, never a strip on top or a label repeating the tab:
- *   Stopped watching   a grey card, a grey icon with a crossed-out eye,
- *                      grey figures, the reason as a line
- *   Started watching   a regular card, an open eye on the icon, the reason
- *   Unconfirmed        a soft violet card and icon, the reason
- *   Inactive           its own sand card and icon (never Removed's red),
- *                      a power-off mark, "Inactive since <day>: <why>."
+ * THE STATUS ROWS (David, 2026-11-04). Every status row is a white card
+ * like Added / Removed; only its avatar carries the status (a soft tint and
+ * a small mark), and one plain sentence inside the card says why. Never a
+ * strip on top, a tinted card or a label repeating the tab:
+ *   Stopped watching   grey avatar, crossed-out eye, grey figures
+ *   Started watching   green avatar, open eye
+ *   Unconfirmed        violet avatar, question mark
+ *   Inactive           sand avatar, power-off mark (never Removed's red),
+ *                      "Inactive since <day>: <why>."
  */
 function sentence(text: string): string {
   const t = text.trim();
@@ -4901,39 +4932,49 @@ function sentence(text: string): string {
   return /[.!?]$/.test(head) ? head : `${head}.`;
 }
 
-/** The icon circle's tone on a status row. */
-function iconTone(stopped: boolean, unconfirmed: boolean, regular: string, inactive = false): string {
-  if (stopped) return "bg-slate-200 text-slate-500";
-  if (unconfirmed) return "bg-violet-100 text-violet-600";
-  if (inactive) return "bg-amber-100 text-amber-700";
-  return regular;
+/** A row's status: the tab it is listed on (every tab but All matched),
+ *  or inactive on the Inactive list. */
+type RowStatus = "added" | "removed" | "changed" | ScopeTab | "inactive";
+
+function rowStatus(tab: DrillTab): RowStatus | null {
+  return tab === "all" ? null : tab;
 }
 
-/** The small mark on the row's icon: a crossed-out eye on Stopped
- *  watching, an open eye on Started watching, a question on Unconfirmed. */
-function WatchBadge({ tab }: { tab: ScopeTab }) {
-  const Mark = tab === "stopped" ? EyeOff : tab === "started" ? Eye : CircleHelp;
-  const tone = tab === "stopped" ? "text-slate-500" : tab === "started" ? "text-primary" : "text-violet-600";
+/**
+ * EVERY STATUS IN ITS COLOUR, ON THE AVATAR (David, 2026-11-04): the card
+ * stays white; the avatar takes the status's tint and a small mark. All
+ * matched keeps the list's own colours (publishers green, apps teal, as
+ * the tiles). Inactive is orange, never Removed's red; Changed is yellow.
+ */
+const STATUS_LOOK: Record<RowStatus, { Mark: typeof Eye; tone: string }> = {
+  added: { Mark: Plus, tone: "bg-accent text-primary" },
+  removed: { Mark: Minus, tone: "bg-red-50 text-red-600" },
+  changed: { Mark: RefreshCw, tone: "bg-yellow-100 text-yellow-700" },
+  started: { Mark: Eye, tone: "bg-accent text-primary" },
+  stopped: { Mark: EyeOff, tone: "bg-slate-200 text-slate-500" },
+  unconfirmed: { Mark: CircleHelp, tone: "bg-violet-100 text-violet-600" },
+  inactive: { Mark: PowerOff, tone: "bg-orange-100 text-orange-600" },
+};
+
+/** The avatar's tint: its status's, else the list's own. */
+function avatarTone(look: RowStatus | null, regular: string): string {
+  return cn("transition-colors duration-300", look ? STATUS_LOOK[look].tone : regular);
+}
+
+/** The status mark on the avatar: a small disc in the status's tint with
+ *  a white ring (the eyes kept on Started / Stopped watching). */
+function StatusBadge({ status }: { status: RowStatus }) {
+  const { Mark, tone } = STATUS_LOOK[status];
   return (
     <span
       aria-hidden
-      data-watch-badge={tab}
-      className="absolute -bottom-0.5 -right-0.5 flex h-[18px] w-[18px] items-center justify-center rounded-full bg-white ring-1 ring-slate-200"
+      data-status-badge={status}
+      className={cn(
+        "status-badge-in absolute -bottom-0.5 -right-0.5 flex h-4 w-4 items-center justify-center rounded-full shadow-sm ring-2 ring-white",
+        tone,
+      )}
     >
-      <Mark className={cn("h-3 w-3", tone)} />
-    </span>
-  );
-}
-
-/** The small mark on an inactive card's icon. */
-function InactiveBadge() {
-  return (
-    <span
-      aria-hidden
-      data-inactive-badge
-      className="absolute -bottom-0.5 -right-0.5 flex h-[18px] w-[18px] items-center justify-center rounded-full bg-white ring-1 ring-amber-200"
-    >
-      <PowerOff className="h-3 w-3 text-amber-700" />
+      <Mark className="h-2.5 w-2.5" strokeWidth={2.5} />
     </span>
   );
 }
@@ -4949,7 +4990,7 @@ function InactiveLine({ mark }: { mark: InactiveMark }) {
   const lowered = why && /^[A-Z][a-z]/.test(why) ? why.charAt(0).toLowerCase() + why.slice(1) : why;
   const text = day ? `Inactive since ${day}${lowered ? `: ${lowered}` : ""}` : why || "Inactive";
   return (
-    <div data-testid="inactive-line" title={mark.evidence || undefined} className="truncate text-[11px] font-medium text-slate-600">
+    <div data-testid="inactive-line" title={mark.evidence || undefined} className="truncate text-[11px] text-slate-600">
       {sentence(text)}
     </div>
   );

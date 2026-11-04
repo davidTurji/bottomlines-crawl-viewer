@@ -1296,6 +1296,13 @@ section:has(> .line-action-group) { overflow: clip; }
 .platform-badge[data-app-platform="ctv"] { --badge-ink:var(--tone-special); --badge-wash:var(--tone-special-bg); --badge-line:var(--tone-special-border); }
 .platform-badge[data-app-platform="mobile"] { --badge-ink:var(--tone-app); --badge-wash:var(--tone-app-bg); --badge-line:var(--tone-app-border); }
 .platform-badge[data-inactive] { filter:saturate(.3); opacity:.85; }
+/* Solid, like the IPD badge (2026-11-04): the platform's colour as the
+   fill, white text, a small icon. Overrides the tinted outline above. */
+.platform-badge { gap:3px; border-color:transparent; background:hsl(var(--badge-ink)); color:#fff; box-shadow:0 1px 1px rgb(15 35 25 / .08); }
+.platform-badge-icon { width:11px; height:11px; flex:none; }
+.platform-badge[data-app-platform="mobile"] { background:hsl(187 80% 25%); }
+.platform-badge[data-app-platform="ctv"] { background:hsl(276 44% 37%); }
+.platform-badge[data-app-platform="web"] { background:hsl(215 16% 34%); }
 .line-action-group { container-type:inline-size; }
 .line-inline-actions { position:relative; z-index:2; display:flex; flex:none; flex-wrap:wrap; align-items:center; align-self:center; justify-content:flex-end; gap:6px; padding:0; background:transparent; }
 .line-inline-actions .line-control { min-height:30px; font-size:11px; }
@@ -1563,6 +1570,16 @@ a.line-source-reference:hover { color:hsl(var(--primary)); text-decoration-color
 .status-track { gap:2px; padding:3px; border:1px solid hsl(var(--border)); border-radius:8px; background:#f5f7f5; }
 .status-track [role="tab"] { height:30px; padding-inline:12px; border:1px solid transparent; border-radius:5px; font-size:12px; font-weight:500; box-shadow:none; transition:background-color 140ms,color 140ms,border-color 140ms; }
 .status-track [role="tab"][data-state="active"] { border-color:#d5dfd8; background:white; color:#153d2b; box-shadow:0 1px 2px rgb(20 40 28 / .04); }
+/* The sliding highlight (2026-11-04): one pill moves under the selected
+   status; the tabs sit above it and drop their own active background. */
+.status-pill { position:absolute; top:0; left:0; z-index:0; pointer-events:none; border:1px solid #d5dfd8; border-radius:5px; background:white; box-shadow:0 1px 2px rgb(20 40 28 / .06); }
+.status-pill.is-ready { transition:transform 280ms cubic-bezier(.22,1,.36,1), width 280ms cubic-bezier(.22,1,.36,1); }
+.status-track [role="tab"] { position:relative; z-index:1; }
+.status-track.has-pill [role="tab"][data-state="active"] { border-color:transparent; background:transparent; box-shadow:none; }
+/* The avatar's status mark arrives with a small pop. */
+.status-badge-in { animation:status-badge-in 240ms cubic-bezier(.22,1,.36,1); }
+@keyframes status-badge-in { from { transform:scale(.55); opacity:0; } to { transform:scale(1); opacity:1; } }
+@media (prefers-reduced-motion:reduce) { .status-pill.is-ready { transition:none; } .status-badge-in { animation:none; } }
 .status-track [role="tab"]:hover { color:#153d2b; background:#edf2ee; }
 .status-more { height:30px; background:#f5f7f5; box-shadow:-4px 0 5px #f5f7f5; border-radius:5px; }
 .filter-select-menu { width:min(340px,calc(100vw - 32px)); max-height:min(30rem,var(--radix-dropdown-menu-content-available-height)); overflow-y:auto; }

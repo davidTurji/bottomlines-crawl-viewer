@@ -1,3 +1,5 @@
+import { Globe, Smartphone, Tv } from "lucide-react";
+
 import { storeName } from "@/lib/utils";
 
 /** Consistent platform metadata; the report's own store label takes precedence. */
@@ -34,11 +36,22 @@ export function appPlatformOf(row: { platform?: unknown; store?: string | null }
  * round icon already draws the TV or the phone). The filled navy stays
  * IPD's alone, so the one badge that is a match fact still stands out.
  */
+/** The badge's small icon: a phone, a TV, a globe. */
+const PLATFORM_ICON = { Mobile: Smartphone, CTV: Tv, Web: Globe } as const;
+
+/**
+ * THE PLATFORM BADGE (David, 2026-11-04: "full background, more premium").
+ * A solid chip in the platform's colour with white text and a small icon,
+ * the same shape as the IPD badge beside it: Mobile deep teal, CTV deep
+ * plum, Web slate.
+ */
 export function PlatformBadge({ row, inactive = false }: { row: { platform?: unknown; store?: string | null }; inactive?: boolean }) {
   const platform = appPlatformOf(row);
   if (!platform) return null;
+  const Icon = PLATFORM_ICON[platform as keyof typeof PLATFORM_ICON];
   return (
     <span data-app-platform={platform.toLowerCase()} data-inactive={inactive || undefined} className="platform-badge" title={`Platform: ${platform}`}>
+      {Icon && <Icon aria-hidden className="platform-badge-icon" strokeWidth={2.25} />}
       {platform}
     </span>
   );
