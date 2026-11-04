@@ -1627,7 +1627,7 @@ async function mockListSummary(token: string, base: Summary, lines: string[], f:
         : moves,
     },
     hero_diff: { ...base.hero_diff, line_totals: lineTotals },
-    list_filters: { match_type: mt, found_in: fi, platform: pf, line_totals: true },
+    list_filters: { match_type: mt, found_in: fi, platform: pf, publishers: true, apps: true, line_totals: true },
   };
 }
 
@@ -2106,6 +2106,11 @@ export type ListFiltersApplied = {
   match_type: MatchType | null;
   found_in: string | null;
   platform: "ctv" | "mobile" | "web" | null;
+  /** False: that card could not be split (a list frozen as cut, a report
+   *  frozen without line events) and keeps the whole figure. Absent on
+   *  the first version of the echo: read as true. */
+  publishers?: boolean;
+  apps?: boolean;
   line_totals: boolean;
 };
 

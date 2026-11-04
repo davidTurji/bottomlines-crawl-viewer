@@ -200,7 +200,7 @@ export type Scenario = {
    *  line totals off the same lists, and the answer echoes
    *  ``list_filters``. Default false: today's API, which ignores them and
    *  answers the whole report with no echo. */
-  listSummary?: boolean;
+  listSummary?: boolean | "fails";
 };
 
 /** The summary under ``?match_type=`` as the crawler counts it: each card
@@ -223,7 +223,7 @@ function listSummaryOf(base: Summary, matchType: MatchTypeFilter, lines: string[
       ...base.hero_diff,
       line_totals: { ...base.hero_diff.line_totals, added: linesOf("added", "lines_added"), removed: linesOf("removed", "lines_removed") },
     },
-    list_filters: { match_type: matchType, found_in: null, platform: null, line_totals: true },
+    list_filters: { match_type: matchType, found_in: null, platform: null, publishers: true, apps: true, line_totals: true },
   };
 }
 
@@ -699,6 +699,9 @@ export async function installFakeApi(page: Page, scenario: Scenario = {}): Promi
         const sum = s.sellersReads
           ? { ...first, sellers_json_reads: typeof s.sellersReads === "object" ? s.sellersReads : SELLERS_READS }
           : first;
+        // "fails": the re-read under a list filter answers 500 (a timeout, a
+        // deploy); the report must stand on its whole figures.
+        if (s.listSummary === "fails" && matchType && matchType !== "all") return reply(500, { detail: "boom" });
         const listed = s.listSummary && matchType ? listSummaryOf(sum as Summary, matchType, lines) : {};
         const extra = { ...sum, ...listed, ...s.summaryExtra };
         return reply(200, s.trial ? { ...extra, trial: TRIAL_CAPS } : extra);
