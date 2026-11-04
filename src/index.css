@@ -926,12 +926,16 @@ All colors MUST be HSL.
     transform: none;
   }
 }
+/* Fill BACKWARDS, never both (2026-11-04): a fill that outlives the
+   animation keeps an identity transform on every row, which holds the row
+   on its own layer and renders small text soft on a 1x screen (the CTV
+   badge read blurred). Backwards still hides a row during its delay. */
 .bl-row-in {
-  animation: bl-row-in 220ms cubic-bezier(0.2, 0.8, 0.2, 1) both;
+  animation: bl-row-in 220ms cubic-bezier(0.2, 0.8, 0.2, 1) backwards;
   animation-delay: var(--bl-row-delay, 0ms);
 }
 .bl-lines-in > li {
-  animation: bl-line-in 160ms ease-out both;
+  animation: bl-line-in 160ms ease-out backwards;
 }
 .bl-lines-in > li:nth-child(2) { animation-delay: 20ms; }
 .bl-lines-in > li:nth-child(3) { animation-delay: 40ms; }
@@ -1303,6 +1307,12 @@ section:has(> .line-action-group) { overflow: clip; }
 .platform-badge[data-app-platform="mobile"] { background:hsl(187 80% 25%); }
 .platform-badge[data-app-platform="ctv"] { background:hsl(276 44% 37%); }
 .platform-badge[data-app-platform="web"] { background:hsl(215 16% 34%); }
+/* Sharp on every screen (David, 2026-11-04: "CTV text is blurred"): white
+   text on a solid chip at 10 px semibold renders soft on a 1x display.
+   11 px bold on a whole-pixel line, crisp smoothing; the IPD badge beside
+   it takes the same size so the two stay one family. */
+.platform-badge, .ipd-badge { height:20px; min-height:20px; padding:0 7px; font-size:11px; font-weight:700; line-height:20px; letter-spacing:.02em; -webkit-font-smoothing:antialiased; -moz-osx-font-smoothing:grayscale; text-rendering:geometricPrecision; }
+.platform-badge-icon { width:12px; height:12px; }
 .line-action-group { container-type:inline-size; }
 .line-inline-actions { position:relative; z-index:2; display:flex; flex:none; flex-wrap:wrap; align-items:center; align-self:center; justify-content:flex-end; gap:6px; padding:0; background:transparent; }
 .line-inline-actions .line-control { min-height:30px; font-size:11px; }
