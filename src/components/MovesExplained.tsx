@@ -66,7 +66,7 @@ export function MovesQuietLine({
     </button>
   );
   return (
-    <p data-testid="moves-quiet" className="mt-2 text-[12px] leading-snug text-slate-500">
+    <p data-testid="moves-quiet" className="text-[12px] leading-snug text-slate-500">
       {said}{" "}
       {lost && found ? (
         <>

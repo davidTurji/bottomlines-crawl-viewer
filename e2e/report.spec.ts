@@ -347,11 +347,13 @@ test.describe("inactive", () => {
     await expect(section(page).getByText(SINCE).first()).toBeVisible();
     await expect(section(page).getByRole("button", { name: /Show the seat lines of/ })).toHaveCount(counts.publishers);
     await expect(section(page).getByText("Quokkaplay Legacy")).toBeVisible();
-    // The matched card, greyed: an Inactive chip and the strip on top.
-    const strips = section(page).getByTestId("inactive-strip");
-    await expect(strips).toHaveCount(counts.publishers);
-    await expect(strips.filter({ hasText: "Inactive since Aug 25, 2026: The domain no longer exists" })).toHaveCount(1);
-    await expect(section(page).getByText("Inactive", { exact: true })).toHaveCount(counts.publishers);
+    // A regular card (David, 2026-11-04): no strip on top and no label
+    // repeating the tab; one sentence inside the card says since when and why.
+    const lines = section(page).getByTestId("inactive-line");
+    await expect(lines).toHaveCount(counts.publishers);
+    await expect(lines.filter({ hasText: "Inactive since Aug 25, 2026: the domain no longer exists." })).toHaveCount(1);
+    await expect(section(page).getByTestId("inactive-strip")).toHaveCount(0);
+    await expect(section(page).getByText("Inactive", { exact: true })).toHaveCount(0);
     await sub(page, "Apps").click();
     await expect(section(page).getByRole("button", { name: /Show the seat lines of/ })).toHaveCount(counts.apps);
     await expect(section(page).getByText("No longer on Google Play").first()).toBeVisible();

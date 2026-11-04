@@ -3,7 +3,7 @@ import { ReportButton } from "@/components/ReportButton";
 import { appPlatformOf, PlatformBadge, storeHint } from "@/components/StoreBadge";
 import { FilterBar, FilterGroup, FilterInfo, FilterMultiSelect, FilterSearch, FilterSelect } from "@/components/FilterBar";
 import InactiveSection, { type InactiveCards } from "@/components/InactiveSection";
-import { MovesQuietLine, type MovesTab } from "@/components/MovesExplained";
+import { MovesQuietLine, movesSentence, type MovesTab } from "@/components/MovesExplained";
 import LockedTail from "@/components/LockedTail";
 import { MiniStat } from "@/components/MiniStat";
 import { Collapse, Settle, glideTo, prefersReducedMotion, preserveReportViewport, toggleWithoutJump } from "@/components/Motion";
@@ -29,7 +29,7 @@ import { PAGE_SIZE } from "@/lib/paging";
 import { usePageCache } from "@/lib/pageCache";
 import { useLineFilter } from "@/lib/lineFilter";
 import { Link } from "react-router-dom";
-import { ChevronDown, ChevronRight, Download, Eye, EyeOff, FileText, Globe, MonitorSmartphone, SlidersHorizontal, Smartphone, Tv } from "lucide-react";
+import { ChevronDown, ChevronRight, CircleHelp, Download, Eye, EyeOff, FileText, Globe, MonitorSmartphone, SlidersHorizontal, Smartphone, Tv } from "lucide-react";
 import { FOLD_OPEN, FOLD_SLACK, FOLD_STEP, easeListHeight } from "@/components/FoldedList";
 import {
   type TrialCaps, type TrialSlice,
@@ -766,14 +766,6 @@ export default function CrawlReport() {
             />
           </div>
           )}
-          {/* A side finding is a line, never a card (David, 2026-10-20):
-              what could not be checked sits under the figures it is kept
-              out of, in the same quiet voice as the inactive line. */}
-          {!isFirstCrawl && unconfirmed > 0 && (
-            <p data-testid="unconfirmed-quiet" className="mt-3 text-[12px] leading-snug text-slate-500">
-              {unconfirmedSentence(unconfirmed)}
-            </p>
-          )}
         </div>
 
         <div
@@ -829,6 +821,21 @@ export default function CrawlReport() {
               onClick={() => pickView("apps")}
             />
           </div>
+        </div>
+      </div>
+      {/* THE SIDE FINDINGS, BELOW BOTH KPI CARDS (David, 2026-11-04: the
+          KPI cards are always the same size; a line inside one of them made
+          it taller). One quiet line each, never a card (2026-10-20): what
+          could not be verified, what went inactive, what was found or lost
+          through an inventory partner (its links open the list below on
+          Stopped / Started watching; never under a line filter). */}
+      {((!isFirstCrawl && unconfirmed > 0) || inactive || movesSentence(moves)) && (
+        <div data-testid="kpi-notes" className="space-y-1 px-1">
+          {!isFirstCrawl && unconfirmed > 0 && (
+            <p data-testid="unconfirmed-quiet" className="text-[12px] leading-snug text-slate-500">
+              {unconfirmedSentence(unconfirmed)}
+            </p>
+          )}
           {inactive && (
             <InactiveQuietLine
               counts={inactive.counts}
@@ -837,13 +844,9 @@ export default function CrawlReport() {
               onShow={() => showInactive(inactive.counts)}
             />
           )}
-          {/* Publishers found or lost through an inventory partner (David,
-              2026-11-04): the figures in one line, its links open the list
-              below on Stopped / Started watching, never inside the KPIs.
-              Never under a line filter (moves is null there). */}
           <MovesQuietLine moves={moves} onShow={showMoves} />
         </div>
-      </div>
+      )}
       </section>
       )}
 
@@ -1571,12 +1574,13 @@ function watchReason(row: object, tab: DrillTab): string | null {
   return said.length ? said.join(" ") : null;
 }
 
-/** The row's reason line, under its "Via" line; the full text on hover. */
+/** The row's reason line, inside the card under its "Via" line; the full
+ *  text on hover. */
 function WatchReason({ text }: { text: string | null | undefined }) {
   if (!text) return null;
   return (
-    <div data-watch-reason title={text} className="truncate text-[11px] text-slate-600">
-      {text}
+    <div data-watch-reason title={sentence(text)} className="truncate text-[11px] font-medium text-slate-600">
+      {sentence(text)}
     </div>
   );
 }
@@ -1845,7 +1849,7 @@ function InactiveQuietLine({
   const said = inactiveSentence(counts, since);
   if (!said) return null;
   return (
-    <p data-testid="inactive-quiet" className="mt-3 text-[12px] leading-snug text-slate-500">
+    <p data-testid="inactive-quiet" className="text-[12px] leading-snug text-slate-500">
       {said}
       {filtered ? ", across all your seat lines" : ""}, not counted above.{" "}
       <button
@@ -1900,14 +1904,17 @@ function watchTabOn(counts: ChangeCounts | null, off: boolean, tab: ScopeTab): b
  * file changes; the filters' own small mark and floating line.
  */
 const STATUS_INFO: Partial<Record<DrillTab, string>> = {
+  // Plain words, what the reader did or what we did, never the machinery
+  // (David, 2026-11-04: Started watching is a new line to track, not a line
+  // added to a file).
   started:
-    "Lines that started counting for you this week without being added to a file: a seat new on your watchlist, a file read for the first time, or a publisher that newly names its inventory partner.",
+    "Lines we started tracking for you this week, such as a new line added to your list. They were already in the publisher's file, so they are not counted as added.",
   stopped:
-    "Lines that stopped counting for you this week without being removed from a file: a seat taken off your watchlist, a file not read this crawl, or a publisher that no longer names its inventory partner.",
+    "Lines we stopped tracking for you this week, such as a line taken off your list. They are not counted as removed. Each row says why.",
   unconfirmed:
-    "Lines this crawl could not verify, because the file answered differently on its reads. They stay matched until a later read settles them.",
+    "Lines we could not verify this crawl, because the file answered differently on each read. They stay matched until the next crawl settles them.",
   inactive:
-    "Publishers and apps that went inactive between the two crawls, such as a site that stopped answering or an app its store removed. Not counted in the totals above.",
+    "Publishers and apps that went inactive this week, such as a site that stopped answering or an app removed from its store. Not counted in the totals.",
 };
 
 /** Keep supported watch statuses visible even when the current filter has no rows. */
@@ -3179,7 +3186,7 @@ function PublisherCard({
   // site: hovering any of them lights the circle and the name together.
   // Every row on Stopped watching, whatever its reason (2026-11-04).
   const stopped = watchTab === "stopped" && !inactive;
-  const started = watchTab === "started" && !inactive;
+  const unconfirmed = watchTab === "unconfirmed" && !inactive;
   const [siteHover, setSiteHover] = useState(false);
   const hasEmbeddedLines =
     row.matched_lines.length > 0 ||
@@ -3190,7 +3197,13 @@ function PublisherCard({
     <div
       className={cn(
         "report-row overflow-hidden rounded-xl border shadow-sm transition-colors",
-        inactive || stopped ? "inactive-report-row border-border bg-white" : "border-border bg-white",
+        stopped
+          ? "inactive-report-row border-slate-200 bg-slate-50"
+          : unconfirmed
+            ? "border-violet-200 bg-violet-50/40"
+            : inactive
+              ? "inactive-report-row border-border bg-white"
+              : "border-border bg-white",
         open && "shadow-md",
       )}
     >
@@ -3210,8 +3223,6 @@ function PublisherCard({
             <ChevronDown aria-hidden className={cn("h-3.5 w-3.5 transition-transform", open && "rotate-180")} />
           </span>
         </button>
-        {inactive && <InactiveStrip mark={inactive} />}
-        {stopped && <StoppedStrip reason={watchNote} />}
       <div className="pointer-events-none flex w-full items-center gap-4 px-4 py-4 text-left sm:px-5">
         {row.developer_domain ? (
           <PublisherAvatarLink
@@ -3223,22 +3234,22 @@ function PublisherCard({
             <div
               className={cn(
                 "relative flex h-11 w-11 items-center justify-center rounded-full text-base font-semibold",
-                inactive || stopped ? "bg-slate-200 text-slate-500" : "bg-accent text-primary",
+                iconTone(stopped, unconfirmed, "bg-accent text-primary"),
               )}
             >
               {initial}
-              {(stopped || started) && <WatchBadge stopped={stopped} />}
+              {watchTab && !inactive && <WatchBadge tab={watchTab} />}
             </div>
           </PublisherAvatarLink>
         ) : (
           <div
             className={cn(
               "relative flex h-11 w-11 flex-shrink-0 items-center justify-center rounded-full text-base font-semibold",
-              inactive || stopped ? "bg-slate-200 text-slate-500" : "bg-accent text-primary",
+              iconTone(stopped, unconfirmed, "bg-accent text-primary"),
             )}
           >
             {initial}
-            {(stopped || started) && <WatchBadge stopped={stopped} />}
+            {watchTab && !inactive && <WatchBadge tab={watchTab} />}
           </div>
         )}
         <div className="min-w-0 flex-1">
@@ -3263,7 +3274,6 @@ function PublisherCard({
                 anywhere in the viewer (David, 2026-10-27); an app says its
                 store, and its list splits by platform. */}
             {!inactive && <IpdChip row={row} others={otherPartners(row, row.matched_lines)} />}
-            {inactive && <InactiveChip />}
           </div>
           {((row.developer_domain && row.developer_name) || (!inactive && row.files)) && (
             <div className="publisher-subline flex min-w-0 items-center text-xs text-slate-500">
@@ -3285,7 +3295,8 @@ function PublisherCard({
               app-ads.txt hold some of this publisher's lines. One quiet
               line, only when there are any; the lines below say which. */}
           {!inactive && <IpdWhere row={row} others={otherPartners(row, row.matched_lines)} />}
-          {!stopped && <WatchReason text={watchNote} />}
+          <WatchReason text={watchNote} />
+          {inactive && <InactiveLine mark={inactive} />}
           {fileHostsLabel(row.file_hosts) && (
             <div data-file-hosts className="truncate text-[11px] text-slate-400">
               {fileHostsLabel(row.file_hosts)}
@@ -3325,7 +3336,7 @@ function PublisherCard({
         <div
           className={cn(
             "border-t px-4 pb-4 pt-3 sm:px-5",
-            inactive || stopped ? "border-slate-200 bg-slate-100/50" : "border-border bg-accent/30",
+            stopped ? "border-slate-200 bg-slate-100/50" : "border-border bg-accent/30",
           )}
         >
           {inactive ? (
@@ -4651,7 +4662,7 @@ function MatchedAppCard({
 }) {
   // Every row on Stopped watching, whatever its reason (2026-11-04).
   const stopped = watchTab === "stopped" && !inactive;
-  const started = watchTab === "started" && !inactive;
+  const unconfirmed = watchTab === "unconfirmed" && !inactive;
   const lines = app.matched_lines ?? [];
   const added = app.lines_added ?? 0;
   const removed = app.lines_removed ?? 0;
@@ -4676,7 +4687,11 @@ function MatchedAppCard({
     <div
       className={cn(
         "report-row overflow-hidden rounded-xl border shadow-sm transition-colors",
-        inactive || stopped
+        stopped
+          ? cn("inactive-report-row border-slate-200 bg-slate-50", open && "shadow-md")
+          : unconfirmed
+            ? cn("border-violet-200 bg-violet-50/40", open && "shadow-md")
+          : inactive
           ? cn("inactive-report-row border-border bg-white", open && "shadow-md")
           : open
             ? "border-app-border bg-app-bg/40 shadow-md"
@@ -4697,13 +4712,11 @@ function MatchedAppCard({
             <ChevronDown aria-hidden className={cn("h-3.5 w-3.5 transition-transform", open && "rotate-180")} />
           </span>
         </button>
-        {inactive && <InactiveStrip mark={inactive} />}
-        {stopped && <StoppedStrip reason={watchNote} />}
       <div className="pointer-events-none flex w-full items-center gap-4 px-4 py-4 text-left sm:px-5">
         <div
           className={cn(
             "relative flex h-11 w-11 flex-shrink-0 items-center justify-center rounded-full",
-            inactive || stopped ? "bg-slate-200 text-slate-500" : "bg-app-bg text-app",
+            iconTone(stopped, unconfirmed, "bg-app-bg text-app"),
           )}
         >
           {/* A website row (crawler #370: on new reports the apps list
@@ -4716,7 +4729,7 @@ function MatchedAppCard({
           ) : (
             <Smartphone aria-hidden className="h-5 w-5" />
           )}
-          {(stopped || started) && <WatchBadge stopped={stopped} />}
+          {watchTab && !inactive && <WatchBadge tab={watchTab} />}
         </div>
         <div className="min-w-0 flex-1">
           <div className="matched-app-title flex min-w-0 items-center gap-2">
@@ -4726,9 +4739,8 @@ function MatchedAppCard({
             {/* The badges are the facts a reader scans by: the platform,
                 and IPD. The store is the platform's detail, in words on the
                 line below (David, 2026-11-02: not everything a badge). */}
-            <PlatformBadge row={app} inactive={Boolean(inactive)} />
+            <PlatformBadge row={app} />
             {!inactive && <IpdChip row={app} subject={appSubject(app)} others={otherPartners(app, app.matched_lines)} />}
-            {inactive && <InactiveChip />}
           </div>
           {/* A trial withholds an inactive app's publisher (the crawler
               sends ""): no "publisher:" with nothing after it. */}
@@ -4764,7 +4776,8 @@ function MatchedAppCard({
             </div>
           )}
           {!inactive && <IpdWhere row={app} subject={appSubject(app)} others={otherPartners(app, app.matched_lines)} />}
-          {!stopped && <WatchReason text={watchNote} />}
+          <WatchReason text={watchNote} />
+          {inactive && <InactiveLine mark={inactive} />}
           {fileLine && (
             <div data-app-file className="truncate text-[11px] text-slate-400">
               {fileLine}
@@ -4794,7 +4807,7 @@ function MatchedAppCard({
         <div
           className={cn(
             "border-t px-4 pb-4 pt-3 sm:px-5",
-            inactive || stopped ? "border-slate-200 bg-slate-100/50" : "border-app-border bg-app-bg/30",
+            stopped ? "border-slate-200 bg-slate-100/50" : "border-app-border bg-app-bg/30",
           )}
         >
           {/* An inactive app's row carries its publisher's lines (even
@@ -4867,38 +4880,15 @@ type InactiveMark = {
   evidence?: string | null;
 };
 
-/** The strip on top of an inactive card: since when, why, and the proof. */
-function InactiveStrip({ mark }: { mark: InactiveMark }) {
-  const day = inactiveDay(mark.since);
-  return (
-    <div
-      data-testid="inactive-strip"
-      className="inactive-record-note pointer-events-none border-b border-border bg-[#f7f9f6] px-4 py-2 sm:px-5"
-    >
-      <p className="text-xs font-medium text-slate-700">
-        {day ? `Inactive since ${day}: ` : ""}
-        {mark.reason}
-      </p>
-      {mark.evidence && <p className="mt-0.5 text-[11px] leading-snug text-slate-400">{mark.evidence}</p>}
-    </div>
-  );
-}
-
-function InactiveChip() {
-  return (
-    <span className="inactive-status-label flex-shrink-0 text-[10px] font-medium text-slate-500">
-      Inactive
-    </span>
-  );
-}
-
 /*
- * THE WATCH TABS' ROWS (David, 2026-11-04). On Stopped watching every row,
- * whatever its reason, reads as stopped at a glance, in the Inactive tab's
- * language: the reason in a strip across the top, a grey icon with a
- * crossed-out eye, grey figures. No "Stopped watching" heading or label on
- * the row: the tab already says it (as Added and Removed rows say nothing
- * of their tab). On Started watching the icon carries an open eye.
+ * THE STATUS ROWS (David, 2026-11-04). Every card is a regular card; the
+ * status says itself through the card's tone and one plain sentence inside
+ * it, never a strip on top or a label repeating the tab:
+ *   Stopped watching   a grey card, a grey icon with a crossed-out eye,
+ *                      grey figures, the reason as a line
+ *   Started watching   a regular card, an open eye on the icon, the reason
+ *   Unconfirmed        a soft violet card and icon, the reason
+ *   Inactive           a regular card, "Inactive since <day>: <why>."
  */
 function sentence(text: string): string {
   const t = text.trim();
@@ -4910,30 +4900,43 @@ function sentence(text: string): string {
   return /[.!?]$/.test(head) ? head : `${head}.`;
 }
 
-function StoppedStrip({ reason }: { reason: string | null | undefined }) {
-  if (!reason) return null;
-  return (
-    <div
-      data-stopped-strip
-      className="inactive-record-note pointer-events-none border-b border-border bg-[#f7f9f6] px-4 py-2 sm:px-5"
-    >
-      <p className="text-xs font-semibold text-slate-800">{sentence(reason)}</p>
-    </div>
-  );
+/** The icon circle's tone on a status row. */
+function iconTone(stopped: boolean, unconfirmed: boolean, regular: string): string {
+  if (stopped) return "bg-slate-200 text-slate-500";
+  if (unconfirmed) return "bg-violet-100 text-violet-600";
+  return regular;
 }
 
-/** The eye on the row's icon: crossed out on Stopped watching, open on
- *  Started watching. */
-function WatchBadge({ stopped }: { stopped: boolean }) {
-  const Mark = stopped ? EyeOff : Eye;
+/** The small mark on the row's icon: a crossed-out eye on Stopped
+ *  watching, an open eye on Started watching, a question on Unconfirmed. */
+function WatchBadge({ tab }: { tab: ScopeTab }) {
+  const Mark = tab === "stopped" ? EyeOff : tab === "started" ? Eye : CircleHelp;
+  const tone = tab === "stopped" ? "text-slate-500" : tab === "started" ? "text-primary" : "text-violet-600";
   return (
     <span
       aria-hidden
-      data-watch-badge={stopped ? "stopped" : "started"}
+      data-watch-badge={tab}
       className="absolute -bottom-0.5 -right-0.5 flex h-[18px] w-[18px] items-center justify-center rounded-full bg-white ring-1 ring-slate-200"
     >
-      <Mark className={cn("h-3 w-3", stopped ? "text-slate-500" : "text-primary")} />
+      <Mark className={cn("h-3 w-3", tone)} />
     </span>
+  );
+}
+
+/** An inactive card's one sentence: since when and why; the store's or
+ *  the site's evidence on hover. */
+function InactiveLine({ mark }: { mark: InactiveMark }) {
+  const day = inactiveDay(mark.since);
+  const why = (mark.reason ?? "").trim();
+  // "Inactive since Aug 25, 2026: the domain no longer exists." A reason
+  // opening with a capitalised word is lowered after the colon; a name or
+  // an acronym ("IPD", "Google Play" later on) keeps its case.
+  const lowered = why && /^[A-Z][a-z]/.test(why) ? why.charAt(0).toLowerCase() + why.slice(1) : why;
+  const text = day ? `Inactive since ${day}${lowered ? `: ${lowered}` : ""}` : why || "Inactive";
+  return (
+    <div data-testid="inactive-line" title={mark.evidence || undefined} className="truncate text-[11px] font-medium text-slate-600">
+      {sentence(text)}
+    </div>
   );
 }
 
