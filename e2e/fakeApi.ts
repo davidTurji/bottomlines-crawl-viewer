@@ -49,6 +49,7 @@ import type {
   MatchedSeatLine,
   MatchTypeFilter,
   AppChange,
+  Summary,
 } from "../src/lib/api";
 import {
   MOCK_CHECKED_AT,
@@ -194,7 +195,37 @@ export type Scenario = {
    *  "single": the 2026-10-27 crawler, one file only: a comma list is
    *  refused with a 422, as its query pattern does. */
   foundIn?: boolean | "single";
+  /** true: a crawler whose summary takes the lists' filters (2026-11-04):
+   *  ``?match_type=`` re-counts Matched publishers, Matched apps and the
+   *  line totals off the same lists, and the answer echoes
+   *  ``list_filters``. Default false: today's API, which ignores them and
+   *  answers the whole report with no echo. */
+  listSummary?: boolean;
 };
+
+/** The summary under ``?match_type=`` as the crawler counts it: each card
+ *  the rows its list holds under the same choice (see ``listSummary``). */
+function listSummaryOf(base: Summary, matchType: MatchTypeFilter, lines: string[]): Partial<Summary> {
+  if (matchType === "all") return {};
+  const linesOf = (event: "added" | "removed", field: "lines_added" | "lines_removed") =>
+    mockDeveloperEvents(event, 1, lines, matchType, "", 1_000_000).rows.reduce((n, r) => n + (r[field] ?? 0), 0);
+  return {
+    counters: {
+      ...base.counters,
+      matched: {
+        ...base.counters.matched,
+        developers: readAll((p) => mockMatchedDevelopers(p, "", lines, matchType)).length,
+        apps: readAll((p) => mockMatchedApps(p, "", lines, matchType)).length,
+      },
+      matched_moves: { developers: null, apps: null },
+    },
+    hero_diff: {
+      ...base.hero_diff,
+      line_totals: { ...base.hero_diff.line_totals, added: linesOf("added", "lines_added"), removed: linesOf("removed", "lines_removed") },
+    },
+    list_filters: { match_type: matchType, found_in: null, platform: null, line_totals: true },
+  };
+}
 
 /** Every row of a paged mock list. */
 function readAll<T>(readPage: (page: number) => { rows: T[]; total: number }): T[] {
@@ -550,6 +581,7 @@ export async function installFakeApi(page: Page, scenario: Scenario = {}): Promi
     watchTabs: false,
     appPlatform: false,
     foundIn: false,
+    listSummary: false,
     ...scenario,
   };
   const hostApp = s.declaredHost ? declaredHostApp() : null;
@@ -667,7 +699,8 @@ export async function installFakeApi(page: Page, scenario: Scenario = {}): Promi
         const sum = s.sellersReads
           ? { ...first, sellers_json_reads: typeof s.sellersReads === "object" ? s.sellersReads : SELLERS_READS }
           : first;
-        const extra = { ...sum, ...s.summaryExtra };
+        const listed = s.listSummary && matchType ? listSummaryOf(sum as Summary, matchType, lines) : {};
+        const extra = { ...sum, ...listed, ...s.summaryExtra };
         return reply(200, s.trial ? { ...extra, trial: TRIAL_CAPS } : extra);
       }
       case "export-info":
