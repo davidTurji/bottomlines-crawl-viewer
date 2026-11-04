@@ -564,8 +564,10 @@ export const api = {
     platform: PlatformFilter = "all",
   ) => {
     if (MOCK) {
-      const { mockMatchedApps, mockWatchView, mockPlatform } = await import("./mockData");
-      const r = mockPlatform((pg, size) => mockWatchView(p => mockMatchedApps(p, q, lines ?? [], mockMatchType(matchType), change ?? null), pg, size, change, lines), page, pageSize, platform);
+      const { mockMatchedApps, mockWatchView, mockPlatform, withMockLostApps } = await import("./mockData");
+      const r0 = mockPlatform((pg, size) => mockWatchView(p => mockMatchedApps(p, q, lines ?? [], mockMatchType(matchType), change ?? null), pg, size, change, lines), page, pageSize, platform);
+      // The apps that stopped matching, on their tab only (crawler, 2026-11-04).
+      const r = q || (lines ?? []).length || (platform && platform !== "all") ? r0 : withMockLostApps(r0, change, page, pageSize);
       return trialMock()
         ? { ...r, page: 1, ...cutRows(r.rows, TRIAL_CAPS_MOCK.apps, r.total) }
         : r;
@@ -574,34 +576,6 @@ export const api = {
       "GET",
       `/v1/viewer/${token}/matched-apps?page=${page}&page_size=${pageSize}${q ? `&q=${encodeURIComponent(q)}` : ""}${linesQuery(lines)}${matchTypeQuery(matchType)}${change ? `&change=${change}` : ""}${platform !== "all" ? `&platform=${platform}` : ""}`,
     );
-  },
-  /**
-   * The publishers behind the tiles' found / lost, each with why (its own
-   * files, or an inventory partner it named or stopped naming) and every
-   * app it carried (David, 2026-11-04). Frozen with the report.
-   *
-   * BACKWARDS COMPATIBLE. An API from before this route answers 404: read
-   * as "not available", the way an older report answers, never as an
-   * empty list.
-   */
-  moves: async (
-    token: string,
-    side: "found" | "lost",
-    opts: { page?: number; pageSize?: number; q?: string } = {},
-  ): Promise<MovesPage> => {
-    const page = opts.page ?? 1;
-    if (MOCK) {
-      const { mockMoves } = await import("./mockData");
-      return mockMoves(side, { page, pageSize: opts.pageSize ?? PAGE_SIZE, q: opts.q }, trialMock());
-    }
-    const q = new URLSearchParams({ side, page: String(page), page_size: String(opts.pageSize ?? PAGE_SIZE) });
-    if (opts.q) q.set("q", opts.q);
-    try {
-      return await req<MovesPage>("GET", `/v1/viewer/${token}/moves?${q.toString()}`);
-    } catch (e) {
-      if (e instanceof ApiError && e.status === 404) return { available: false, side };
-      throw e;
-    }
   },
   /**
    * One page of one Inactive list (publishers or apps): what carried the
@@ -1237,38 +1211,6 @@ export type MatchedMove = {
   partner_dropped?: number | null;
 };
 
-/** How a publisher started or stopped matching (``/moves`` rows). */
-export type MoveHow = "own" | "partner" | "partner_dropped" | "partner_line_removed";
-
-/** One publisher behind the found / lost figure, with why and its apps. */
-export type MoveRow = {
-  developer_id: number;
-  domain: string;
-  name: string;
-  platform: string;
-  how: MoveHow;
-  /** The inventory partners it named or stopped naming. */
-  partners: string[];
-  /** The sentence the row says, written by the crawler. */
-  reason: string;
-  /** Every app it carried: [store, bundle id, app name]. Null when the
-   *  report could not list them (a capped app list). */
-  apps: [string, string, string][] | null;
-};
-
-export type MovesPage = {
-  /** False: the report was frozen without these rows (an older report, a
-   *  first report, a trial). Never an empty list in its place. */
-  available: boolean;
-  side: "found" | "lost";
-  partner_side?: boolean;
-  total?: number;
-  page?: number;
-  page_size?: number;
-  /** The whole side's rows by how, whatever the page or search. */
-  counts?: Partial<Record<MoveHow, number>>;
-  rows?: MoveRow[];
-};
 export type MatchedMoves = { developers: MatchedMove; apps: MatchedMove | null };
 
 /** A publisher that carried the reader's lines and is gone (dead domain,

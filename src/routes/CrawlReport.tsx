@@ -3,7 +3,7 @@ import { ReportButton } from "@/components/ReportButton";
 import { appPlatformOf, PlatformBadge, storeHint } from "@/components/StoreBadge";
 import { FilterBar, FilterGroup, FilterMultiSelect, FilterSearch, FilterSelect } from "@/components/FilterBar";
 import InactiveSection, { type InactiveCards } from "@/components/InactiveSection";
-import { MovesQuietLine } from "@/components/MovesExplained";
+import { MovesQuietLine, type MovesTab } from "@/components/MovesExplained";
 import LockedTail from "@/components/LockedTail";
 import { MiniStat } from "@/components/MiniStat";
 import { Collapse, Settle, glideTo, prefersReducedMotion, preserveReportViewport, toggleWithoutJump } from "@/components/Motion";
@@ -368,6 +368,15 @@ export default function CrawlReport() {
     cancelMove();
     setDrillTab("inactive");
     if (!counts[matchedView]) setMatchedView(matchedView === "publishers" ? "apps" : "publishers");
+    glideTo(listRef.current);
+  };
+  /* The partner moves' line under the tiles: the list below on the status
+     that holds them, on the apps (every app together, David 2026-11-04)
+     unless the report did not count apps. */
+  const showMoves = (tab: MovesTab) => {
+    cancelMove();
+    setDrillTab(tab);
+    setMatchedView(summary?.counters.matched_moves?.apps ? "apps" : "publishers");
     glideTo(listRef.current);
   };
   /* THE SEAT-LINE FILTER. In the URL, so it survives a refresh and follows
@@ -828,11 +837,11 @@ export default function CrawlReport() {
               onShow={() => showInactive(inactive.counts)}
             />
           )}
-          {/* Publishers found or lost through an inventory partner, with no
-              line added or removed (David, 2026-11-04): why, in one line,
-              and every publisher with its apps one click away. Never under
-              a line filter (moves is null there). */}
-          <MovesQuietLine moves={moves} token={token} />
+          {/* Publishers found or lost through an inventory partner (David,
+              2026-11-04): the figures in one line, its links open the list
+              below on Stopped / Started watching, never inside the KPIs.
+              Never under a line filter (moves is null there). */}
+          <MovesQuietLine moves={moves} onShow={showMoves} />
         </div>
       </div>
       </section>
@@ -1545,12 +1554,36 @@ function tabNoun(tab: DrillTab, view: "publishers" | "apps"): { many: string; on
   return view === "apps" ? { many: "apps", one: "app" } : { many: "publishers", one: "publisher" };
 }
 
+/**
+ * A row's one-line reason on a watch tab (David, 2026-11-04: "the reason
+ * should be a one-line sentence, very easy to understand"): the distinct
+ * reasons of its lines that moved to the tab, said once. Null off a watch
+ * tab or when the crawler sent none.
+ */
+function watchReason(row: object, tab: DrillTab): string | null {
+  if (!isScopeTab(tab)) return null;
+  const lines = (row as Record<string, unknown>)[`${WATCH_CHANGE[tab]}_lines`];
+  if (!Array.isArray(lines)) return null;
+  const said = [...new Set(lines.map((l) => scopeReasonText((l as { reason?: unknown } | null)?.reason)).filter(Boolean))];
+  return said.length ? said.join(" ") : null;
+}
+
+/** The row's reason line, under its "Via" line; the full text on hover. */
+function WatchReason({ text }: { text: string | null | undefined }) {
+  if (!text) return null;
+  return (
+    <div data-watch-reason title={text} className="truncate text-[11px] text-slate-600">
+      {text}
+    </div>
+  );
+}
+
 /** The quiet line a watch tab carries under its controls. */
 const SCOPE_NOTE: Record<ScopeTab, string> = {
-  started:
-    "Lines you started watching this week. Not counted as added: the publishers carrying them did not change.",
-  stopped:
-    "Lines you stopped watching this week. Not counted as removed: the publishers carrying them did not change.",
+  // "Did not change" was untrue of a publisher that named or stopped naming
+  // its inventory partner (2026-11-04): each row now says its own why.
+  started: "Lines you started watching this week, each with why. Not counted as added.",
+  stopped: "Lines you stopped watching this week, each with why. Not counted as removed.",
   unconfirmed:
     "Lines this crawl could not verify, each with its reason. Kept as matched, never counted as added or removed.",
 };
@@ -2974,6 +3007,7 @@ function DrilldownList({
                   <Settle key={r.developer_id} index={i} tour={i === 0 ? "overview-first-row" : undefined}>
                     <PublisherCard
                       row={r}
+                      watchNote={watchReason(r, tab)}
                       token={token}
                       lineFilter={lines}
                       open={expanded === r.developer_id}
@@ -3088,6 +3122,7 @@ function PublisherCard({
   onToggle,
   inactive,
   lineFilter = [],
+  watchNote = null,
 }: {
   row: Row;
   token: string;
@@ -3097,6 +3132,8 @@ function PublisherCard({
   inactive?: InactiveMark & { apps: number | null };
   /** The page's line filter, for what an opened row reads. */
   lineFilter?: string[];
+  /** On a watch tab: the row's one-line reason (``watchReason``). */
+  watchNote?: string | null;
 }) {
   const initial = (
     (row.developer_name || row.developer_domain || "?")
@@ -3214,6 +3251,7 @@ function PublisherCard({
               app-ads.txt hold some of this publisher's lines. One quiet
               line, only when there are any; the lines below say which. */}
           {!inactive && <IpdWhere row={row} others={otherPartners(row, row.matched_lines)} />}
+          <WatchReason text={watchNote} />
           {fileHostsLabel(row.file_hosts) && (
             <div data-file-hosts className="truncate text-[11px] text-slate-400">
               {fileHostsLabel(row.file_hosts)}
@@ -4494,6 +4532,7 @@ function MatchedAppsList({
                 <Settle key={keyOf(a)} index={i} tour={i === 0 ? "overview-first-row" : undefined}>
                   <MatchedAppCard
                     app={a}
+                    watchNote={watchReason(a, tab)}
                     lineFilter={lines}
                     open={expanded === keyOf(a)}
                     onToggle={() =>
@@ -4557,6 +4596,7 @@ function MatchedAppCard({
   token,
   inactive,
   lineFilter = [],
+  watchNote = null,
 }: {
   app: AppRow;
   open: boolean;
@@ -4568,6 +4608,8 @@ function MatchedAppCard({
   inactive?: InactiveMark & { publisherLive: boolean | null };
   /** The page's line filter, for what an opened row reads. */
   lineFilter?: string[];
+  /** On a watch tab: the row's one-line reason (``watchReason``). */
+  watchNote?: string | null;
 }) {
   const lines = app.matched_lines ?? [];
   const added = app.lines_added ?? 0;
@@ -4679,6 +4721,7 @@ function MatchedAppCard({
             </div>
           )}
           {!inactive && <IpdWhere row={app} subject={appSubject(app)} others={otherPartners(app, app.matched_lines)} />}
+          <WatchReason text={watchNote} />
           {fileLine && (
             <div data-app-file className="truncate text-[11px] text-slate-400">
               {fileLine}
