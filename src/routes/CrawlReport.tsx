@@ -3,6 +3,7 @@ import { ReportButton } from "@/components/ReportButton";
 import { appPlatformOf, PlatformBadge, storeHint } from "@/components/StoreBadge";
 import { FilterBar, FilterGroup, FilterMultiSelect, FilterSearch, FilterSelect } from "@/components/FilterBar";
 import InactiveSection, { type InactiveCards } from "@/components/InactiveSection";
+import { MovesQuietLine } from "@/components/MovesExplained";
 import LockedTail from "@/components/LockedTail";
 import { MiniStat } from "@/components/MiniStat";
 import { Collapse, Settle, glideTo, prefersReducedMotion, preserveReportViewport, toggleWithoutJump } from "@/components/Motion";
@@ -827,6 +828,11 @@ export default function CrawlReport() {
               onShow={() => showInactive(inactive.counts)}
             />
           )}
+          {/* Publishers found or lost through an inventory partner, with no
+              line added or removed (David, 2026-11-04): why, in one line,
+              and every publisher with its apps one click away. Never under
+              a line filter (moves is null there). */}
+          <MovesQuietLine moves={moves} token={token} />
         </div>
       </div>
       </section>

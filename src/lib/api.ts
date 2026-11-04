@@ -576,6 +576,34 @@ export const api = {
     );
   },
   /**
+   * The publishers behind the tiles' found / lost, each with why (its own
+   * files, or an inventory partner it named or stopped naming) and every
+   * app it carried (David, 2026-11-04). Frozen with the report.
+   *
+   * BACKWARDS COMPATIBLE. An API from before this route answers 404: read
+   * as "not available", the way an older report answers, never as an
+   * empty list.
+   */
+  moves: async (
+    token: string,
+    side: "found" | "lost",
+    opts: { page?: number; pageSize?: number; q?: string } = {},
+  ): Promise<MovesPage> => {
+    const page = opts.page ?? 1;
+    if (MOCK) {
+      const { mockMoves } = await import("./mockData");
+      return mockMoves(side, { page, pageSize: opts.pageSize ?? PAGE_SIZE, q: opts.q }, trialMock());
+    }
+    const q = new URLSearchParams({ side, page: String(page), page_size: String(opts.pageSize ?? PAGE_SIZE) });
+    if (opts.q) q.set("q", opts.q);
+    try {
+      return await req<MovesPage>("GET", `/v1/viewer/${token}/moves?${q.toString()}`);
+    } catch (e) {
+      if (e instanceof ApiError && e.status === 404) return { available: false, side };
+      throw e;
+    }
+  },
+  /**
    * One page of one Inactive list (publishers or apps): what carried the
    * reader's lines and went inactive between the two compared crawls, with
    * the date, the reason and the evidence. Frozen with the report, searched and paged server-side
@@ -1198,7 +1226,49 @@ export type ExportInfo = {
   apps_rows?: number | null;
 };
 
-export type MatchedMove = { found: number; lost: number };
+export type MatchedMove = {
+  found: number;
+  lost: number;
+  /** Of the found, how many came only through an inventory partner they
+   *  name (reports baked since 2026-11-04; absent before). */
+  partner_found?: number | null;
+  /** Of the lost, how many stopped naming the inventory partner whose
+   *  ads.txt carries the reader's line: lost with no line removed. */
+  partner_dropped?: number | null;
+};
+
+/** How a publisher started or stopped matching (``/moves`` rows). */
+export type MoveHow = "own" | "partner" | "partner_dropped" | "partner_line_removed";
+
+/** One publisher behind the found / lost figure, with why and its apps. */
+export type MoveRow = {
+  developer_id: number;
+  domain: string;
+  name: string;
+  platform: string;
+  how: MoveHow;
+  /** The inventory partners it named or stopped naming. */
+  partners: string[];
+  /** The sentence the row says, written by the crawler. */
+  reason: string;
+  /** Every app it carried: [store, bundle id, app name]. Null when the
+   *  report could not list them (a capped app list). */
+  apps: [string, string, string][] | null;
+};
+
+export type MovesPage = {
+  /** False: the report was frozen without these rows (an older report, a
+   *  first report, a trial). Never an empty list in its place. */
+  available: boolean;
+  side: "found" | "lost";
+  partner_side?: boolean;
+  total?: number;
+  page?: number;
+  page_size?: number;
+  /** The whole side's rows by how, whatever the page or search. */
+  counts?: Partial<Record<MoveHow, number>>;
+  rows?: MoveRow[];
+};
 export type MatchedMoves = { developers: MatchedMove; apps: MatchedMove | null };
 
 /** A publisher that carried the reader's lines and is gone (dead domain,

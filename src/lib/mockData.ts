@@ -14,6 +14,8 @@
  */
 
 import type {
+  MoveRow,
+  MovesPage,
   Summary,
   DeclarationSource,
   Declarations,
@@ -452,8 +454,11 @@ export const mockSummary: Summary = {
     // Found and lost behind the net: 380 - 29 = +351 publishers,
     // 1,702 - 61 = +1,641 apps.
     matched_moves: {
-      developers: { found: 380, lost: 29 },
-      apps: { found: 1_702, lost: 61 },
+      // 214 of the found came through an inventory partner they name, and
+      // 4 of the lost stopped naming theirs (23 apps, no line removed):
+      // the line under the tiles and its "See them" (mockMoves).
+      developers: { found: 380, lost: 29, partner_found: 214, partner_dropped: 4 },
+      apps: { found: 1_702, lost: 61, partner_found: 960, partner_dropped: 23 },
     },
   },
   hero_diff: {
@@ -3082,4 +3087,119 @@ export async function* mockChatStream(
  */
 export function mockSchainSource() {
   return { developers: MATCHED_DEVS, bundles: MATCHED_BUNDLES };
+}
+
+
+// ── the publishers behind found / lost (``/moves``) ─────────────────────────
+//
+// Every name here belongs to nobody (checked 2026-11-04, `dig` NXDOMAIN, no
+// NS): madeupweather.tv, madeupmedianews.tv, madeupsportsnet.tv,
+// madeupstreams.tv, madeupkidsplay.app, madeupfastpartner.tv,
+// madeupchannels.tv. The rest are generated under the reserved .example
+// domain (RFC 2606), so the rows add up to the summary's counts exactly.
+
+type MockApp = [string, string, string];
+
+function mockApps(prefix: string, n: number, label: string): MockApp[] {
+  const stores = ["android", "firetv", "roku", "samsung", "lg"];
+  return Array.from({ length: n }, (_, i) => [
+    stores[i % stores.length],
+    `com.${prefix}.app${i + 1}`,
+    `${label} ${i + 1}`,
+  ]);
+}
+
+/** Spread ``total`` apps over ``rows`` rows, the first rows the biggest. */
+function spread(total: number, rows: number): number[] {
+  const base = Math.floor(total / rows);
+  return Array.from({ length: rows }, (_, i) => base + (i < total - base * rows ? 1 : 0));
+}
+
+function moveRows(): { found: MoveRow[]; lost: MoveRow[] } {
+  const partner = "madeupfastpartner.tv";
+  const lostHand: MoveRow[] = [
+    {
+      developer_id: 910001, domain: "madeupweather.tv", name: "Madeup Weather", platform: "CTV",
+      how: "partner_dropped", partners: [partner],
+      reason: `No longer names ${partner} as its inventory partner, so your line in ${partner}'s ads.txt no longer covers it. No line was removed.`,
+      apps: mockApps("madeupweather", 12, "Madeup Weather"),
+    },
+    {
+      developer_id: 910002, domain: "madeupmedianews.tv", name: "Madeup Media News", platform: "CTV",
+      how: "partner_dropped", partners: [partner],
+      reason: `No longer names ${partner} as its inventory partner, so your line in ${partner}'s ads.txt no longer covers it. No line was removed.`,
+      apps: mockApps("madeupmedianews", 7, "Madeup News"),
+    },
+    {
+      developer_id: 910003, domain: "madeupsportsnet.tv", name: "Madeup Sports", platform: "CTV",
+      how: "own", partners: [], reason: "Your lines left its own files (see Removed).",
+      apps: mockApps("madeupsportsnet", 3, "Madeup Sports"),
+    },
+  ];
+  // 4 partner drops carrying 23 apps (12 + 7 + 2 + 2), 25 own losses with
+  // the remaining 38 of the 61 lost apps (3 above, 35 below).
+  const lostFill: MoveRow[] = [
+    ...[0, 1].map((i): MoveRow => ({
+      developer_id: 911000 + i, domain: `lost-partner-${i + 1}.example`, name: "", platform: "CTV",
+      how: "partner_dropped", partners: [partner],
+      reason: `No longer names ${partner} as its inventory partner, so your line in ${partner}'s ads.txt no longer covers it. No line was removed.`,
+      apps: mockApps(`lostpartner${i + 1}`, 2, `Lost partner app ${i + 1}`),
+    })),
+    ...spread(35, 24).map((n, i): MoveRow => ({
+      developer_id: 912000 + i, domain: `lost-${String(i + 1).padStart(3, "0")}.example`, name: "",
+      platform: "Mobile", how: "own", partners: [], reason: "Your lines left its own files (see Removed).",
+      apps: mockApps(`lost${i + 1}`, n, `Lost app ${i + 1}`),
+    })),
+  ];
+  const foundHand: MoveRow[] = [
+    {
+      developer_id: 920001, domain: "madeupstreams.tv", name: "Madeup Streams", platform: "CTV",
+      how: "partner", partners: ["madeupchannels.tv"],
+      reason: "Newly names madeupchannels.tv as its inventory partner, and madeupchannels.tv's ads.txt carries your line.",
+      apps: mockApps("madeupstreams", 9, "Madeup Streams"),
+    },
+    {
+      developer_id: 920002, domain: "madeupkidsplay.app", name: "Madeup Kids Play", platform: "Mobile",
+      how: "own", partners: [], reason: "Matched through its own files from this report on.",
+      apps: mockApps("madeupkidsplay", 4, "Madeup Kids"),
+    },
+  ];
+  // 214 partner finds with 960 apps (9 above), 166 own finds with 742.
+  const foundFill: MoveRow[] = [
+    ...spread(951, 213).map((n, i): MoveRow => ({
+      developer_id: 921000 + i, domain: `found-partner-${String(i + 1).padStart(3, "0")}.example`, name: "",
+      platform: "CTV", how: "partner", partners: ["madeupchannels.tv"],
+      reason: "Matched through its inventory partner madeupchannels.tv from this report on.",
+      apps: mockApps(`foundpartner${i + 1}`, n, `Found partner app ${i + 1}`),
+    })),
+    ...spread(738, 165).map((n, i): MoveRow => ({
+      developer_id: 922000 + i, domain: `found-${String(i + 1).padStart(3, "0")}.example`, name: "",
+      platform: "Mobile", how: "own", partners: [], reason: "Matched through its own files from this report on.",
+      apps: mockApps(`found${i + 1}`, n, `Found app ${i + 1}`),
+    })),
+  ];
+  const byApps = (a: MoveRow, b: MoveRow) => (b.apps?.length ?? 0) - (a.apps?.length ?? 0) || a.domain.localeCompare(b.domain);
+  return { found: [...foundHand, ...foundFill].sort(byApps), lost: [...lostHand, ...lostFill].sort(byApps) };
+}
+
+/** One page of ``/moves``, the way viewer_frozen.moves serves it; a trial
+ *  is not served the rows (the counts stay on the tiles). */
+export function mockMoves(
+  side: "found" | "lost",
+  opts: { page: number; pageSize: number; q?: string },
+  trial = false,
+): MovesPage {
+  if (trial) return { available: false, side };
+  const all = moveRows()[side];
+  const counts: Partial<Record<MoveRow["how"], number>> = {};
+  for (const r of all) counts[r.how] = (counts[r.how] ?? 0) + 1;
+  const needle = (opts.q ?? "").trim().toLowerCase();
+  const rows = needle
+    ? all.filter((r) => [r.domain, r.name, ...r.partners, ...(r.apps ?? []).flat()].some((w) => w.toLowerCase().includes(needle)))
+    : all;
+  const start = (opts.page - 1) * opts.pageSize;
+  return {
+    available: true, side, partner_side: true, total: rows.length, page: opts.page,
+    page_size: opts.pageSize, counts, rows: rows.slice(start, start + opts.pageSize),
+  };
 }
