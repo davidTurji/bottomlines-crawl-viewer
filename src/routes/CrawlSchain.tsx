@@ -1290,7 +1290,9 @@ function SchainAppCard({ row, open, onToggle }: { row: SchainRow; open: boolean;
     <div
       className={cn(
         "report-row overflow-hidden rounded-xl border shadow-sm transition-colors",
-        open ? "border-app-border bg-app-bg/40 shadow-md" : "border-border bg-white",
+        // Open like a publisher card (David, 2026-11-04): a white top, the
+        // tint only in the opened area below.
+        open ? "border-border bg-white shadow-md" : "border-border bg-white",
       )}
     >
       <button

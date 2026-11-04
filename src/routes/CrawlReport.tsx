@@ -4725,7 +4725,9 @@ function MatchedAppCard({
         inactive
           ? cn("inactive-report-row border-border bg-white", open && "shadow-md")
           : open
-            ? "border-app-border bg-app-bg/40 shadow-md"
+            // Open like a publisher card (David, 2026-11-04): the top stays
+            // white; only the opened lines area below carries the tint.
+            ? "border-border bg-white shadow-md"
             : "border-border bg-white",
       )}
     >
