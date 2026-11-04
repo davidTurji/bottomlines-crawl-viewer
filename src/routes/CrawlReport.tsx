@@ -401,7 +401,11 @@ export default function CrawlReport() {
      publishers by Match type and Found in, Matched apps by Match type and
      Platform, the line cards by Match type and Found in. */
   const listFilters = useMemo<ListFilters>(() => ({ matchType, foundIn, platform }), [matchType, foundIn, platform]);
-  const filtersKey = `${linesKey}|${matchType}|${foundIn}|${platform}`;
+  const filtersKey = `${token}|${linesKey}|${matchType}|${foundIn}|${platform}`;
+  // The last summary read with no list filter, and under which seat lines:
+  // what a failed list-filter re-read falls back to (whole figures, said
+  // "not split"), and what the trial banner counts (review, 2026-11-04).
+  const unlisted = useRef<{ summary: Summary; lines: string; token: string } | null>(null);
   const [settledFor, setSettledFor] = useState<{ key: string; lines: string } | null>(null);
   const refreshing = summary != null && settledFor?.key !== filtersKey;
   // The seat-line filter's own wait (its button says it is busy).
@@ -413,12 +417,21 @@ export default function CrawlReport() {
       .summary(token, lines, listFilters)
       .then((s) => {
         if (!cancelled) {
+          if (listFilters.matchType === "all" && listFilters.foundIn === "all" && listFilters.platform === "all")
+            unlisted.current = { summary: s, lines: linesKey, token };
           setSummary(s);
           setSettledFor({ key: filtersKey, lines: linesKey });
         }
       })
       .catch((e: ApiError) => {
-        if (!cancelled) setError(e.message);
+        if (cancelled) return;
+        // A list filter's re-read that fails never takes the report away:
+        // the whole figures stand, each card saying it is not split.
+        const fallback = unlisted.current;
+        if (fallback && fallback.lines === linesKey && fallback.token === token) {
+          setSummary(fallback.summary);
+          setSettledFor({ key: filtersKey, lines: linesKey });
+        } else setError(e.message);
       });
     return () => {
       cancelled = true;
@@ -459,6 +472,9 @@ export default function CrawlReport() {
   // POPULAR (David, 2026-10-27): the counts come first, so a choice whose
   // list is empty is never offered.
   const popularCounts = usePopularCounts(token, lines, summary);
+  // The Found / Lost the unfiltered cards last showed: a filtered card keeps
+  // that row's room with these very figures (same width, same wrap).
+  const shownMoves = useRef<MatchedMoves | null>(null);
   const [popular, setPopular] = useState<PopularId | null>(null);
   // Bumped by a Popular choice: the lists clear their search.
   const [searchReset, setSearchReset] = useState(0);
@@ -477,6 +493,9 @@ export default function CrawlReport() {
   const anyFilter = lines.length > 0 || matchType !== "all" || foundIn !== "all" || platform !== "all";
   const resetFilters = useCallback(() => {
     cancelMove();
+    // Reset leaves the page once nothing is filtered: a keyboard reader's
+    // focus goes on to the list's search, never back to the page's top.
+    const byKeyboard = (document.activeElement as HTMLElement | null)?.matches?.(":focus-visible") ?? false;
     preserveReportViewport(listRef.current, () => {
       setLines([]);
       setMatchType("all");
@@ -486,6 +505,9 @@ export default function CrawlReport() {
       setPopular(null);
       setSearchReset((n) => n + 1);
     });
+    if (byKeyboard)
+      window.requestAnimationFrame(() =>
+        listRef.current?.querySelector<HTMLInputElement>('input[aria-label^="Search matched"]')?.focus({ preventScroll: true }));
   }, [cancelMove, setLines]);
   const pickPopular = (raw: string) => {
     const id = raw as PopularId;
@@ -551,14 +573,16 @@ export default function CrawlReport() {
   const listFiltered = matchType !== "all" || foundIn !== "all" || platform !== "all";
   const cardsFiltered = filtered || listFiltered;
   const cuts = cardCuts(summary.list_filters ?? null, listFilters, filtered);
+  if (!cardsFiltered && !refreshing && previous && summary.counters.matched_moves)
+    shownMoves.current = summary.counters.matched_moves;
   const prevMatchedDevs = cardsFiltered ? null : (previous?.counters.matched.developers ?? null);
   const prevMatchedApps = cardsFiltered ? null : (previous?.counters.matched.apps ?? null);
   // Found and lost behind the net, when the report carries them (David,
   // 2026-10-05: "+351" alone hides the 380 we found). Never under a filter.
   const moves = cardsFiltered ? null : (summary.counters.matched_moves ?? null);
-  // A report that carries Found / Lost keeps that row's room while a
-  // filter hides it, so the cards never change height.
-  const reserveCorner = (cardsFiltered || refreshing) && summary.previous_job_id !== null && "matched_moves" in summary.counters;
+  // A card that showed Found / Lost keeps that row's room, with the very
+  // figures it showed, while a filter hides it: the cards never change height.
+  const reserveMoves = cardsFiltered || refreshing ? shownMoves.current : null;
 
   // Last week's OWN added/removed totals, so "+32 lines added" can say
   // whether 32 is a busy week or a quiet one. Comparing this week's added
@@ -672,26 +696,26 @@ export default function CrawlReport() {
               {summary.partial_line.trim()}
             </p>
           )}
-          {refreshing ? (
-            // The figures below are reloading for a new line selection;
-            // a sentence about the old one would be wrong for a moment.
-            // One line of the sentence's own type, so its height is the
-            // sentence's to the pixel and nothing below moves.
-            <p aria-hidden className="mt-3 max-w-3xl text-[15px] leading-snug sm:text-base">
-              <span className="inline-block h-[1em] w-full max-w-md animate-pulse rounded bg-muted align-middle" />
-            </p>
-          ) : (
-            <WeeklyWin
-              publishers={matchedDevs}
-              apps={matchedApps}
-              publishersDelta={matchedDevsDelta}
-              appsDelta={matchedAppsDelta}
-              moves={moves}
-              firstCrawl={isFirstCrawl}
-              filtered={filtered}
-              listFiltered={listFiltered}
-            />
-          )}
+          {/* While the figures re-read, the last sentence keeps its room
+              (hidden, so it is never read as the new answer) under a
+              skeleton bar: the header neither shrinks nor grows. */}
+          <SteadyHeight className="relative">
+            <div className={refreshing ? "invisible" : undefined} aria-hidden={refreshing || undefined}>
+              <WeeklyWin
+                publishers={matchedDevs}
+                apps={matchedApps}
+                publishersDelta={matchedDevsDelta}
+                appsDelta={matchedAppsDelta}
+                moves={moves}
+                firstCrawl={isFirstCrawl}
+                filtered={filtered}
+                sides={cuts.sides}
+              />
+            </div>
+            {refreshing && (
+              <span aria-hidden className="absolute left-0 top-[15px] block h-4 w-full max-w-md animate-pulse rounded bg-muted" />
+            )}
+          </SteadyHeight>
         </div>
         <div className="report-header-actions flex flex-wrap items-center gap-2">
           <LineFilter
@@ -715,7 +739,13 @@ export default function CrawlReport() {
       </div>
       {/* Reserved whether or not a filter is on, so toggling one never
           pushes the cards below down and back up. */}
-      {summary.trial && <TrialBanner caps={summary.trial} summary={summary} />}
+      {summary.trial && (
+        <TrialBanner
+          caps={summary.trial}
+          // The pitch counts the whole report, never a list filter's slice.
+          summary={unlisted.current && unlisted.current.lines === linesKey && unlisted.current.token === token ? unlisted.current.summary : summary}
+        />
+      )}
       <p className="report-filter-note -mt-2 min-h-[18px] text-[12px] leading-[18px] text-slate-500">
         {lines.length > 0 && (
           <>
@@ -758,12 +788,18 @@ export default function CrawlReport() {
       <section className="overview-kpis space-y-2.5" aria-label="Weekly performance">
       {/* Under any filter the line says which, and Reset puts the whole
           report back in one press (David, 2026-11-04). */}
-      <div data-kpi-comparison className="flex min-h-[18px] flex-wrap items-center gap-x-3 gap-y-1 text-xs text-slate-500">
-        <span>
-          {cardsFiltered
-            ? `Filtered: ${filterWords(listFilters, lines.length).join(", ")}`
-            : isFirstCrawl ? "First crawl, no prior week to compare" : "Compared with last week"}
-        </span>
+      {/* ONE LINE, ALWAYS (David, 2026-11-04): the words truncate before
+          the line ever wraps, and Reset never leaves the line. */}
+      <div data-kpi-comparison className="flex h-[18px] min-w-0 items-center gap-x-3 whitespace-nowrap text-xs leading-[18px] text-slate-500">
+        {cardsFiltered ? (
+          <span data-kpi-filter-words className="min-w-0 truncate" title={`Filtered: ${filterWords(listFilters, lines.length).join(", ")}`}>
+            Filtered:{" "}
+            <span className="hidden sm:inline">{filterWords(listFilters, lines.length).join(", ")}</span>
+            <span className="sm:hidden">{filterWords(listFilters, lines.length, true).join(", ")}</span>
+          </span>
+        ) : (
+          <span className="min-w-0 truncate">{isFirstCrawl ? "First crawl, no prior week to compare" : "Compared with last week"}</span>
+        )}
         {anyFilter && <ResetFilters onReset={resetFilters} testId="reset-filters-cards" />}
       </div>
       <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
@@ -869,7 +905,7 @@ export default function CrawlReport() {
               move={moves?.developers ?? null}
               note={cuts.publishers}
               pending={refreshing}
-              reserveCorner={reserveCorner}
+              reserveMove={reserveMoves?.developers ?? null}
               active={matchedView === "publishers"}
               // The tab stays (David, 2026-10-07): Added on publishers
               // is Added on apps, never a silent jump back to All matched.
@@ -886,7 +922,7 @@ export default function CrawlReport() {
               move={moves?.apps ?? null}
               note={cuts.apps}
               pending={refreshing}
-              reserveCorner={reserveCorner}
+              reserveMove={reserveMoves?.apps ?? null}
               active={matchedView === "apps"}
               // The tab stays (David, 2026-10-07): Added on publishers
               // is Added on apps, never a silent jump back to All matched.
@@ -1021,7 +1057,7 @@ function WeeklyWin({
   moves,
   firstCrawl,
   filtered,
-  listFiltered = false,
+  sides = null,
 }: {
   publishers: number;
   apps: number;
@@ -1032,8 +1068,9 @@ function WeeklyWin({
   moves: MatchedMoves | null;
   firstCrawl: boolean;
   filtered: boolean;
-  /** Match type, Found in or Platform narrows the cards (2026-11-04). */
-  listFiltered?: boolean;
+  /** Which figures a list filter (Match type, Found in, Platform) really
+   *  cut, by the summary's own word (2026-11-04); null: none. */
+  sides?: { publishers: boolean; apps: boolean } | null;
 }) {
   const fig = (n: number, cls: string) => (
     <span className={cn("font-semibold tabular-nums", cls)}>{n.toLocaleString()}</span>
@@ -1047,13 +1084,14 @@ function WeeklyWin({
   const foundApps = moves?.apps?.found ?? null;
 
   let line: ReactNode;
-  if (listFiltered) {
-    line = (
-      <>
-        {pub(publishers)} {plural(publishers, "publisher", "publishers")} and {app(apps)}{" "}
-        {plural(apps, "app", "apps")} match your filters.
-      </>
-    );
+  if (sides && (sides.publishers || sides.apps)) {
+    // Only the figures the filters cut are said to match them (Platform
+    // never cuts publishers, Found in never cuts apps).
+    const p = <>{pub(publishers)} {plural(publishers, "publisher", "publishers")}</>;
+    const a = <>{app(apps)} {plural(apps, "app", "apps")}</>;
+    line = sides.publishers && sides.apps ? <>{p} and {a} match your filters.</>
+      : sides.publishers ? <>{p} {publishers === 1 ? "matches" : "match"} your filters.</>
+      : <>{a} {apps === 1 ? "matches" : "match"} your filters.</>;
   } else if (filtered) {
     line = (
       <>
@@ -1302,7 +1340,7 @@ export function SplitStat({
         ) : hint ? (
           <span className={hintClassName ?? "text-slate-500"}>{hint}</span>
         ) : note ? (
-          <span className="text-slate-400">{note}</span>
+          <CardNote note={note} />
         ) : null}
       </div>
     </>
@@ -1356,14 +1394,14 @@ export function MatchedTile({
   onClick,
   delayMs = 0,
   pending = false,
-  reserveCorner = false,
+  reserveMove = null,
 }: {
   tone: "publisher" | "app";
   /** Being re-counted under a new filter: a skeleton of the figure's size. */
   pending?: boolean;
-  /** Keep the Found / Lost row's room while it is not shown (a filter
-   *  hides it), so the tile and the list under it never move. */
-  reserveCorner?: boolean;
+  /** The Found / Lost this tile showed unfiltered: its room is kept, with
+   *  these figures, while a filter hides it, so nothing moves. */
+  reserveMove?: MatchedMove | null;
   /** Found / lost behind the net, when the report has them. */
   move?: MatchedMove | null;
   icon: typeof Globe;
@@ -1428,7 +1466,7 @@ export function MatchedTile({
   ) : delta ? (
     <DeltaChip delta={delta} tone={tone} />
   ) : note ? (
-    <span className="text-slate-400">{note}</span>
+    <CardNote note={note} />
   ) : null;
   return (
     <button
@@ -1452,7 +1490,7 @@ export function MatchedTile({
         {moveLine}
       </span>
       {w && move && !pending ? <FoundLostCorner move={move} style={payoff} />
-        : reserveCorner ? <FoundLostCorner move={{ found: 0, lost: 0 }} hidden /> : null}
+        : reserveMove ? <FoundLostCorner move={reserveMove} hidden /> : null}
     </button>
   );
 }
@@ -1736,12 +1774,13 @@ const MOVE_WHY = {
 /** A single Found in choice as its menu says it. */
 /** The page's filters in words, for the cards' line: "Match type: IPD,
  *  Found in: ads.txt + Both, 2 selected lines". */
-function filterWords(f: ListFilters, seatLines: number): string[] {
+function filterWords(f: ListFilters, seatLines: number, short = false): string[] {
   const out: string[] = [];
-  if (f.matchType !== "all") out.push(`Match type: ${MATCH_WORD[f.matchType]}`);
-  if (f.foundIn !== "all") out.push(`Found in: ${filesWord(f.foundIn)}`);
-  if (f.platform !== "all") out.push(`Platform: ${PLATFORM_WORD[f.platform]}`);
-  if (seatLines > 0) out.push(seatLines === 1 ? "1 selected line" : `${seatLines} selected lines`);
+  // Short (a phone): the choices alone, "IPD, ads.txt, CTV, 2 lines".
+  if (f.matchType !== "all") out.push(short ? MATCH_WORD[f.matchType] : `Match type: ${MATCH_WORD[f.matchType]}`);
+  if (f.foundIn !== "all") out.push(short ? filesWord(f.foundIn) : `Found in: ${filesWord(f.foundIn)}`);
+  if (f.platform !== "all") out.push(short ? PLATFORM_WORD[f.platform] : `Platform: ${PLATFORM_WORD[f.platform]}`);
+  if (seatLines > 0) out.push(short ? `${seatLines} ${seatLines === 1 ? "line" : "lines"}` : seatLines === 1 ? "1 selected line" : `${seatLines} selected lines`);
   return out;
 }
 
@@ -1768,26 +1807,44 @@ function cardCuts(
   applied: ListFiltersApplied | null,
   asked: ListFilters,
   seatLines: boolean,
-): { publishers?: string; apps?: string; lines?: string } {
+): { publishers?: string; apps?: string; lines?: string; sides: { publishers: boolean; apps: boolean } | null } {
   const mt = applied?.match_type ? MATCH_WORD[applied.match_type] : null;
   const fi = applied?.found_in ? filesWord(applied.found_in) : null;
   const pf = applied?.platform ? PLATFORM_WORD[applied.platform] : null;
-  const split = applied?.line_totals !== false;
+  // Whether each card could be split at all (a list frozen as cut, a report
+  // without line events: the server keeps the whole figure and says so).
+  const pubsSplit = applied?.publishers !== false;
+  const appsSplit = applied?.apps !== false;
+  const linesSplit = applied?.line_totals !== false && pubsSplit;
   const seat = seatLines ? "selected lines" : null;
   const askedMt = asked.matchType !== "all";
   const askedFi = asked.foundIn !== "all";
   const askedPf = asked.platform !== "all";
-  const note = (on: (string | null)[], off: (string | false)[]): string | undefined => {
+  /** A filter the card takes that was not applied comes first: the figure
+   *  must never pass for split when it is not. Then what cut it; then a
+   *  picked filter the card does not take, by design. */
+  const note = (missing: (string | false)[], on: (string | null)[], other: (string | false)[]): string | undefined => {
+    const miss = missing.filter((w): w is string => !!w);
+    if (miss.length) return `Not split by ${miss.join(" or ")}`;
     const by = on.filter((w): w is string => !!w);
     if (by.length) return `Filtered: ${by.join(", ")}`;
-    const not = off.filter((w): w is string => !!w);
+    const not = other.filter((w): w is string => !!w);
     return not.length ? `Not split by ${not.join(" or ")}` : undefined;
   };
+  const listApplied = !!(mt || fi || pf);
   return {
-    publishers: note([mt, fi, seat], [askedMt && !mt && "match type", askedFi && !fi && "file", askedPf && "platform"]),
-    apps: note([mt, pf, seat], [askedMt && !mt && "match type", askedFi && "file", askedPf && !pf && "platform"]),
-    lines: note(split ? [mt, fi, seat] : [seat], [
-      askedMt && !(mt && split) && "match type", askedFi && !(fi && split) && "file", askedPf && "platform"]),
+    publishers: note(
+      [askedMt && !(mt && pubsSplit) && "match type", askedFi && !(fi && pubsSplit) && "file"],
+      pubsSplit ? [mt, fi, seat] : [seat], [askedPf && "platform"]),
+    apps: note(
+      [askedMt && !(mt && appsSplit) && "match type", askedPf && !(pf && appsSplit) && "platform"],
+      appsSplit ? [mt, pf, seat] : [seat], [askedFi && "file"]),
+    lines: note(
+      [askedMt && !(mt && linesSplit) && "match type", askedFi && !(fi && linesSplit) && "file"],
+      linesSplit ? [mt, fi, seat] : [seat], [askedPf && "platform"]),
+    sides: listApplied
+      ? { publishers: seatLines || (pubsSplit && !!(mt || fi)), apps: seatLines || (appsSplit && !!(mt || pf)) }
+      : null,
   };
 }
 
@@ -2627,13 +2684,62 @@ function matchTypeFieldsOf(d: MatchTypeFields): MatchTypeFields {
  * Outside the filter bar on purpose: a fifth control there folds the
  * filters behind one button on a laptop screen.
  */
-function ResetFilters({ onReset, testId = "reset-filters" }: { onReset: () => void; testId?: string }) {
+/**
+ * A block that never shrinks while the page is the same width: its tallest
+ * height so far is its floor (a new width starts over). The sentence under
+ * the title wraps to two lines on a phone for the whole report and fits on
+ * one under a filter; without this the header, and the list under the
+ * reader's hand, would jump up when a filter lands (review, 2026-11-04).
+ */
+function SteadyHeight({ children, className }: { children: ReactNode; className?: string }) {
+  const inner = useRef<HTMLDivElement>(null);
+  const width = useRef(0);
+  const [floor, setFloor] = useState(0);
+  useLayoutEffect(() => {
+    const el = inner.current;
+    if (!el) return;
+    const box = el.getBoundingClientRect(); // fractional: a rounded floor moves the page by a sliver
+    const w = box.width;
+    const h = box.height;
+    if (w !== width.current) {
+      width.current = w;
+      if (floor !== h) setFloor(h);
+    } else if (h > floor) setFloor(h);
+  });
+  useEffect(() => {
+    const again = () => { width.current = 0; setFloor(0); };
+    window.addEventListener("resize", again);
+    return () => window.removeEventListener("resize", again);
+  }, []);
+  return (
+    <div className={className} style={floor ? { minHeight: floor } : undefined}>
+      <div ref={inner}>{children}</div>
+    </div>
+  );
+}
+
+/** A card's quiet line ("Filtered: IPD, ads.txt"): ONE LINE, ALWAYS (David,
+ *  2026-11-04). It truncates before it would wrap; the whole of it is its
+ *  title and what a screen reader hears. */
+function CardNote({ note }: { note: string }) {
+  // On a phone the line above the cards already says "Filtered:", so a card
+  // names the choices alone and they fit whole ("IPD, ads.txt + Both").
+  const short = note.replace(/^Filtered: /, "");
+  return (
+    <span data-card-note title={note} aria-label={note} className="block truncate text-slate-400">
+      <span className="hidden sm:inline">{note}</span>
+      <span className="sm:hidden">{short}</span>
+    </span>
+  );
+}
+
+function ResetFilters({ onReset, testId = "reset-filters", className }: { onReset: () => void; testId?: string; className?: string }) {
   return (
     <button
       type="button"
       data-testid={testId}
       onClick={onReset}
-      className="inline-flex items-center gap-1 rounded text-xs font-medium text-primary underline-offset-2 hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+      className={cn("inline-flex shrink-0 items-center gap-1 whitespace-nowrap rounded text-xs font-medium text-primary underline-offset-2 hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring", className)}
     >
       <RotateCcw aria-hidden className="h-3 w-3" />
       Reset filters
@@ -3039,7 +3145,9 @@ function DrilldownList({
           <StatusControls tab={tab} setTab={setTab} counts={changeCounts} off={watchOff} inactive={!!inactive} />
             </>
           }
-          right={onReset && (pageFiltered || query !== "" || tab !== "all") ? <ResetFilters onReset={onReset} /> : null}
+          // Not on a phone: there it would take a row of its own and push the
+          // list down as it comes and goes; the cards' line has the same Reset.
+          right={onReset && (pageFiltered || query !== "" || tab !== "all") ? <ResetFilters onReset={onReset} className="hidden sm:inline-flex" /> : null}
         />
         {isScopeTab(tab) && <p data-scope-note className="text-[12px] leading-relaxed text-slate-500">{SCOPE_NOTE[tab]}</p>}
         {tab !== "inactive" && (
@@ -4581,7 +4689,9 @@ function MatchedAppsList({
           <StatusControls tab={tab} setTab={setTab} counts={changeCounts} off={watchOff} inactive={!!inactive} />
             </>
           }
-          right={onReset && (pageFiltered || query !== "" || tab !== "all") ? <ResetFilters onReset={onReset} /> : null}
+          // Not on a phone: there it would take a row of its own and push the
+          // list down as it comes and goes; the cards' line has the same Reset.
+          right={onReset && (pageFiltered || query !== "" || tab !== "all") ? <ResetFilters onReset={onReset} className="hidden sm:inline-flex" /> : null}
         />
         {isScopeTab(tab) && <p data-scope-note className="text-[12px] leading-relaxed text-slate-500">{SCOPE_NOTE[tab]}</p>}
         {tab !== "inactive" && (

@@ -89,3 +89,42 @@ test("an older crawler answers the whole report: the cards say they are not spli
   await page.getByTestId("reset-filters-cards").click();
   await expect(page.getByTestId("match-type")).toContainText("All");
 });
+
+test("the sentence under the title names only what the filters cut", async ({ page }) => {
+  await open(page, { matchType: true, listSummary: true });
+  await chooseFilter(page, "match-type", "IPD");
+  const win = page.locator('[data-tour="overview-header"] .relative p').first();
+  await expect(win).toHaveText(
+    `${ipdPublishers.toLocaleString()} ${ipdPublishers === 1 ? "publisher" : "publishers"} and ${ipdApps.toLocaleString()} ${ipdApps === 1 ? "app" : "apps"} match your filters.`,
+    { timeout: 10000 });
+});
+
+test("a list filter whose re-read fails keeps the report: whole figures, said not split", async ({ page }) => {
+  await open(page, { matchType: true, listSummary: "fails" });
+  await chooseFilter(page, "match-type", "IPD");
+  await expect(tile(page, "Matched publishers")).toContainText("Not split by match type", { timeout: 10000 });
+  await expect(figure(page, "Matched publishers")).toHaveText(whole.counters.matched.developers.toLocaleString());
+  await expect(page.getByText("Could not load this report")).toHaveCount(0);
+  // The list itself still filters.
+  await expect(page.getByTestId("match-type")).toContainText("IPD");
+});
+
+test("every card note and the filter line stay on one line, phone to desktop", async ({ page }) => {
+  for (const width of [320, 390, 768, 1440]) {
+    await page.setViewportSize({ width, height: 900 });
+    if (width === 320) {
+      await open(page, { matchType: true, listSummary: true, foundIn: true });
+      await chooseFilter(page, "match-type", "IPD");
+      await chooseFilter(page, "found-in", "ads.txt");
+      await chooseFilter(page, "found-in", "Both");
+    }
+    await page.waitForTimeout(300);
+    const heights = await page.evaluate(() =>
+      [...document.querySelectorAll("[data-card-note], [data-kpi-comparison]")].map((el) => {
+        const lh = parseFloat(getComputedStyle(el).lineHeight) || 17;
+        return Math.round(el.getBoundingClientRect().height / lh);
+      }));
+    expect(heights.length).toBeGreaterThan(0);
+    for (const lines of heights) expect(lines, `at ${width}px`).toBe(1);
+  }
+});
