@@ -85,7 +85,7 @@ export default function AskAIPanel({ onClose }: { onClose: () => void }) {
     <section aria-label="Ask AI" className="ask-font flex h-full w-full flex-col bg-white text-slate-900">
       <header
         className={cn(
-          "flex h-12 flex-shrink-0 items-center gap-2 pl-4 pr-2",
+          "flex h-12 flex-shrink-0 items-center gap-2 border-b border-slate-200/80 pl-4 pr-2",
           "max-sm:h-auto max-sm:py-2 max-sm:pt-[max(0.5rem,env(safe-area-inset-top))]",
         )}
       >
