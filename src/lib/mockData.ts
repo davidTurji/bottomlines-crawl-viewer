@@ -3099,7 +3099,7 @@ function mockAskAnswer(question: string): string | null {
   const n = (v: number) => v.toLocaleString();
   const has = (...words: string[]) => words.every((w) => q.includes(w));
   if (has("removed") || has("dropped")) {
-    return `**${n(t.removed)} lines were removed** this week: lines that were in a publisher's file in the compared crawl and are gone from it now. ${n(d.removed)} publishers lost at least one of your lines. Open the Changes page and pick Removed to see each publisher and the exact line.`;
+    return `**${n(t.removed)} lines were removed** this week: lines that were in a publisher's file in the compared crawl and are gone from it now. ${n(d.removed)} publishers lost at least one of your lines. Open the Removed tab under Matched publishers on the Overview to see each publisher and the exact line.`;
   }
   if (has("added")) {
     return `**${n(t.added)} lines were added** this week across ${n(d.added)} publishers. An added line appears in a publisher's file now and was not there in the compared crawl, with both weeks watched.`;
