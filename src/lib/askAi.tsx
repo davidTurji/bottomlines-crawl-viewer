@@ -272,27 +272,6 @@ export function AskAiProvider({ children }: { children: ReactNode }) {
   return <AskAiContext.Provider value={value}>{children}</AskAiContext.Provider>;
 }
 
-/**
- * Whether the pane sits beside the report (desktop) or takes the screen.
- * Tailwind's `lg` breakpoint, read the same way, so the two never disagree.
- * One pane is mounted at a time: two mounted panes would be two composers,
- * two focus calls and two transcripts' worth of state for one conversation.
- */
-export function useIsDesktop(): boolean {
-  const query = "(min-width: 1024px)";
-  const [desktop, setDesktop] = useState<boolean>(() =>
-    typeof window !== "undefined" ? window.matchMedia(query).matches : true,
-  );
-  useEffect(() => {
-    const mq = window.matchMedia(query);
-    const onChange = (e: MediaQueryListEvent) => setDesktop(e.matches);
-    mq.addEventListener("change", onChange);
-    setDesktop(mq.matches);
-    return () => mq.removeEventListener("change", onChange);
-  }, []);
-  return desktop;
-}
-
 export function useAskAi(): AskAiState {
   const ctx = useContext(AskAiContext);
   if (!ctx) {

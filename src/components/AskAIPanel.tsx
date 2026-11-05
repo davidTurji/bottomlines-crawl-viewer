@@ -1,52 +1,52 @@
-import { ArrowUp, Sparkles, X } from "lucide-react";
+import { ArrowUp, Check, Copy, Maximize2, Minimize2, SquarePen, X } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 
+import { BottomlinesAiMark, BottomlinesAiWordmark } from "@/components/BottomlinesAiMark";
 import { Markdown } from "@/components/Markdown";
 import { PAGE_LABEL, useAskAi, type AskMessage } from "@/lib/askAi";
 import { cn } from "@/lib/utils";
 
 /**
- * THE ASK AI PANE.
+ * THE ASK AI DRAWER'S CONTENT. The launcher owns the pill, the backdrop and
+ * the drawer frame (see AskAILauncher); this is what is inside the frame.
  *
- * The shape every chat has, because it is the shape people already know
- * how to use: a quiet header, the conversation scrolling in the middle, a
- * rounded composer pinned to the bottom with a round send button, one line
- * of small print under it. The reader's question sits on the right in a
- * soft grey bubble; the answer sits on the left as plain text with a small
- * mark beside it. System fonts throughout, so the pane reads like the chat
- * apps on the reader's own machine rather than like the report.
- *
- * It is a SIDE pane, not a dialog. On a desktop it takes about a third of
- * the window and pushes the report over, so the numbers an answer talks
- * about stay on screen beside it; nothing is covered and nothing is
- * dimmed. On a phone it takes the screen, which is the only honest amount
- * of room for a conversation at that width.
+ * The shape is the console's Ask AI, which readers of the console already
+ * know, in the chat idiom everyone else knows: a one-row header with the
+ * bottomlines.ai mark and the quota for this page, the conversation in the
+ * middle (the reader's question in a grey bubble on the right, the answer
+ * under a small byline on the left, full width), a rounded composer with a
+ * round green send button, one line of small print.
  *
  * Nothing in here decides anything. How many questions are left, whether
  * the budget is spent and what a refusal says all come from the server;
  * this pane shows them.
  */
-export default function AskAIPanel({ className }: { className?: string }) {
-  const { status, setOpen, page, messages, pending, remaining, budgetExhausted, send } = useAskAi();
+export default function AskAIPanel({
+  onClose,
+  expanded = false,
+  onToggleExpand,
+}: {
+  onClose: () => void;
+  expanded?: boolean;
+  onToggleExpand?: () => void;
+}) {
+  const { status, page, messages, pending, remaining, budgetExhausted, send, clear } = useAskAi();
   const [value, setValue] = useState("");
-  const endRef = useRef<HTMLDivElement>(null);
+  const scrollRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
 
-  // Follow the conversation as it grows. Instant, not smooth: a smooth
-  // scroll restarts on every change and never arrives.
+  // Follow the conversation as it grows.
   useEffect(() => {
-    endRef.current?.scrollIntoView({ block: "end" });
-  }, [messages, pending]);
+    const el = scrollRef.current;
+    if (el) el.scrollTo({ top: el.scrollHeight, behavior: "smooth" });
+  }, [messages.length, pending]);
 
-  // The composer is the point of opening the pane: focus it.
+  // The composer is the point of opening the drawer: focus it, once it exists.
   useEffect(() => {
-    inputRef.current?.focus();
+    requestAnimationFrame(() => inputRef.current?.focus());
   }, [page]);
 
-  // Auto-grow in place: reset to 0 first or scrollHeight only ever grows.
-  // An empty box is one line, measured or not: while the pane is still
-  // sliding open its width is a few pixels, every character wraps, and a
-  // measurement taken then would leave a tall empty box behind.
+  // Auto-grow in place; an empty box is one line.
   useEffect(() => {
     const el = inputRef.current;
     if (!el) return;
@@ -55,10 +55,11 @@ export default function AskAIPanel({ className }: { className?: string }) {
       return;
     }
     el.style.height = "0px";
-    el.style.height = `${Math.min(el.scrollHeight, 160)}px`;
+    el.style.height = `${Math.min(el.scrollHeight, 140)}px`;
   }, [value]);
 
   const cap = status?.per_page_cap ?? 0;
+  const used = remaining !== null && cap > 0 ? Math.max(0, cap - remaining) : 0;
   const quotaReached = remaining !== null && remaining <= 0;
   const locked = quotaReached || budgetExhausted;
   const canSend = value.trim().length > 0 && !pending && !locked;
@@ -76,68 +77,86 @@ export default function AskAIPanel({ className }: { className?: string }) {
     send(q);
   };
 
-  const lockedLine = budgetExhausted
-    ? "This report's AI budget is used up."
-    : quotaReached
-      ? `You have used the ${cap} questions for this page.`
-      : null;
-
   return (
-    <section
-      aria-label="Ask AI"
-      className={cn("ask-font flex h-full w-full flex-col bg-white text-slate-900", className)}
-    >
-      <header className="flex h-12 shrink-0 items-center gap-2.5 border-b border-slate-200/80 px-3.5 sm:h-14 sm:px-4">
-        <span className="flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-full bg-primary/10">
-          <Sparkles className="h-4 w-4 text-primary" />
-        </span>
-        <div className="min-w-0 flex-1">
-          <h2 className="truncate text-[15px] font-semibold leading-tight text-slate-900">Ask AI</h2>
-          <p className="truncate text-[12px] leading-tight text-slate-500">
-            About this report, {PAGE_LABEL[page]} page
-          </p>
+    <section aria-label="Ask AI" className="ask-font flex h-full w-full flex-col bg-white text-slate-900">
+      {/* Header: who is answering, and the close. */}
+      <header className="flex h-[52px] flex-shrink-0 items-center gap-2 border-b border-slate-200/70 pl-4 pr-2">
+        <BottomlinesAiMark className="h-8 w-8" />
+        <div className="min-w-0 flex-1 leading-tight">
+          <BottomlinesAiWordmark className="block truncate text-[15px]" />
+          <p className="truncate text-[11.5px] text-slate-500">Ask about this report, {PAGE_LABEL[page]} page</p>
         </div>
-        {remaining !== null && cap > 0 && (
-          <span
-            className={cn(
-              "hidden flex-shrink-0 rounded-full px-2 py-0.5 text-[11.5px] tabular-nums sm:inline",
-              locked ? "bg-slate-100 text-slate-500" : "bg-primary/10 text-primary",
-            )}
-            title={`${remaining} of ${cap} questions left on this page`}
-          >
-            {remaining} of {cap} left
-          </span>
+        {/* New conversation on this page. Only once there is one: a reset
+            button on an empty thread is a control with nothing to do. */}
+        {messages.length > 0 && !pending && (
+          <HeaderButton label="New conversation" onClick={clear}>
+            <SquarePen className="h-4 w-4" />
+          </HeaderButton>
         )}
-        <button
-          type="button"
-          onClick={() => setOpen(false)}
-          aria-label="Close Ask AI"
-          className="flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-full text-slate-500 transition-colors hover:bg-slate-100 hover:text-slate-800"
-        >
+        {onToggleExpand && (
+          <HeaderButton
+            label={expanded ? "Smaller" : "Larger"}
+            onClick={onToggleExpand}
+            className="max-sm:hidden"
+          >
+            {expanded ? <Minimize2 className="h-4 w-4" /> : <Maximize2 className="h-4 w-4" />}
+          </HeaderButton>
+        )}
+        <HeaderButton label="Close" onClick={onClose}>
           <X className="h-4 w-4" />
-        </button>
+        </HeaderButton>
       </header>
 
-      <div className="min-h-0 flex-1 overflow-y-auto px-4 py-5 sm:px-5">
+      {/* The quota, always in view. Five segments per page, filled as they
+          are used; the words say the same thing for a reader who does not
+          count segments. The server owns both numbers. */}
+      {cap > 0 && remaining !== null && (
+        <div
+          className={cn(
+            "flex flex-shrink-0 items-center gap-3 border-b border-slate-200/70 px-4 py-2 text-[12px]",
+            locked ? "bg-slate-50 text-slate-500" : "bg-white text-slate-600",
+          )}
+          aria-label={`${remaining} of ${cap} questions left on this page`}
+        >
+          <span className="flex items-center gap-1" aria-hidden>
+            {Array.from({ length: cap }).map((_, i) => (
+              <span
+                key={i}
+                className={cn(
+                  "h-1.5 w-5 rounded-full transition-colors",
+                  i < used ? (locked ? "bg-slate-300" : "bg-primary") : "bg-slate-200",
+                )}
+              />
+            ))}
+          </span>
+          <span className="tabular-nums">
+            {budgetExhausted
+              ? "This report's AI budget is used up"
+              : quotaReached
+                ? `All ${cap} questions used on this page`
+                : `${remaining} of ${cap} questions left on this page`}
+          </span>
+        </div>
+      )}
+
+      {/* The conversation. */}
+      <div ref={scrollRef} className="min-h-0 flex-1 overflow-y-auto">
         {empty ? (
           <EmptyState suggestions={suggestions} onPick={ask} disabled={pending || locked} />
         ) : (
-          <div className="space-y-6">
+          <div className="flex flex-col gap-6 px-5 py-6">
             {messages.map((m) => (
               <Message key={m.id} message={m} />
             ))}
-            <div ref={endRef} />
+            {!locked && suggestions.length > 0 && !pending && (
+              <SuggestionRail suggestions={suggestions} asked={messages} onPick={ask} />
+            )}
           </div>
         )}
       </div>
 
-      <div className="shrink-0 px-3.5 pb-3 pt-1 sm:px-4">
-        {lockedLine && (
-          <p className="mb-2 px-1 text-[12.5px] text-slate-500">{lockedLine}</p>
-        )}
-        {!empty && suggestions.length > 0 && !locked && (
-          <SuggestionRail suggestions={suggestions} asked={messages} onPick={ask} disabled={pending} />
-        )}
+      {/* The composer. */}
+      <div className="flex-shrink-0 px-3 pb-3 pt-2 sm:px-4 sm:pb-4">
         <form
           onSubmit={(e) => {
             e.preventDefault();
@@ -169,7 +188,7 @@ export default function AskAIPanel({ className }: { className?: string }) {
                   ? "No questions left on this page"
                   : "Ask anything about this report"
             }
-            className="min-h-[24px] flex-1 resize-none bg-transparent py-1.5 text-[15px] leading-[1.55] text-slate-900 outline-none placeholder:text-slate-500 disabled:text-slate-400"
+            className="min-h-[24px] flex-1 resize-none bg-transparent py-1.5 text-[15px] leading-[1.55] text-slate-900 outline-none placeholder:text-slate-500"
           />
           <button
             type="submit"
@@ -191,6 +210,37 @@ export default function AskAIPanel({ className }: { className?: string }) {
   );
 }
 
+function HeaderButton({
+  label,
+  onClick,
+  className,
+  children,
+}: {
+  label: string;
+  onClick: () => void;
+  className?: string;
+  children: React.ReactNode;
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      aria-label={label}
+      title={label}
+      className={cn(
+        "flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-full text-slate-400 transition-colors hover:bg-slate-100 hover:text-slate-700",
+        className,
+      )}
+    >
+      {children}
+    </button>
+  );
+}
+
+/**
+ * The empty card: the question, and the starters as raised pills on a
+ * soft emerald glow, the console's own treatment.
+ */
 function EmptyState({
   suggestions,
   onPick,
@@ -201,58 +251,60 @@ function EmptyState({
   disabled: boolean;
 }) {
   return (
-    <div className="flex h-full flex-col justify-center py-4">
-      <span className="mx-auto flex h-12 w-12 items-center justify-center rounded-full bg-primary/10">
-        <Sparkles className="h-6 w-6 text-primary" />
-      </span>
-      <h3 className="mt-4 text-center text-[20px] font-semibold tracking-tight text-slate-900">
-        What would you like to know?
-      </h3>
-      <p className="mx-auto mt-1.5 max-w-[22rem] text-center text-[13.5px] leading-relaxed text-slate-500">
-        Ask about the numbers, lines, publishers and apps on this page, or what a term means.
-        Answers come from this report only.
-      </p>
-      <div className="mt-6 grid gap-2">
-        {suggestions.map((s) => (
-          <button
-            key={s}
-            type="button"
-            onClick={() => onPick(s)}
-            disabled={disabled}
-            className="rounded-2xl border border-slate-200 bg-white px-4 py-3 text-left text-[14px] leading-snug text-slate-700 transition-colors hover:border-primary/30 hover:bg-primary/[0.04] hover:text-slate-900 disabled:opacity-50"
-          >
-            {s}
-          </button>
-        ))}
+    <div className="flex h-full flex-col items-center justify-center gap-7 px-5 py-12">
+      <BottomlinesAiMark className="h-12 w-12" />
+      <div className="text-center">
+        <h3 className="text-[19px] font-semibold tracking-tight text-slate-900">What do you want to know?</h3>
+        <p className="mx-auto mt-1.5 max-w-[20rem] text-[13px] leading-relaxed text-slate-500">
+          Ask about the numbers, lines, publishers and apps on this page, or what a term means.
+        </p>
       </div>
+      {suggestions.length > 0 && (
+        <div className="relative w-full">
+          <div
+            aria-hidden
+            className="pointer-events-none absolute inset-0 -z-10 bg-[radial-gradient(ellipse_at_center,rgba(16,185,129,0.20),rgba(16,185,129,0)_65%)] blur-2xl"
+          />
+          <div className="mx-auto flex max-w-[360px] flex-wrap justify-center gap-2.5">
+            {suggestions.map((s) => (
+              <button
+                key={s}
+                type="button"
+                onClick={() => onPick(s)}
+                disabled={disabled}
+                className="rounded-full border border-emerald-500/25 bg-white px-4 py-2 text-[12.5px] font-medium text-slate-700 shadow-[0_1px_2px_rgba(15,23,42,0.05),0_4px_14px_-4px_rgba(16,185,129,0.35)] ring-1 ring-inset ring-white/60 transition-all hover:-translate-y-0.5 hover:border-emerald-500/55 hover:text-primary hover:shadow-[0_2px_4px_rgba(15,23,42,0.06),0_10px_24px_-6px_rgba(16,185,129,0.55)] disabled:opacity-50"
+              >
+                {s}
+              </button>
+            ))}
+          </div>
+        </div>
+      )}
     </div>
   );
 }
 
-/** The starters not yet asked, as small chips above the composer. */
+/** The starters not asked yet, as quiet chips after the last answer. */
 function SuggestionRail({
   suggestions,
   asked,
   onPick,
-  disabled,
 }: {
   suggestions: string[];
   asked: AskMessage[];
   onPick: (q: string) => void;
-  disabled: boolean;
 }) {
   const done = new Set(asked.filter((m) => m.role === "user").map((m) => m.content));
-  const remaining = suggestions.filter((s) => !done.has(s)).slice(0, 3);
-  if (remaining.length === 0) return null;
+  const left = suggestions.filter((s) => !done.has(s)).slice(0, 3);
+  if (left.length === 0) return null;
   return (
-    <div className="tbl tbl-no-scrollbar mb-2 flex gap-1.5 overflow-x-auto px-0.5 pb-0.5">
-      {remaining.map((s) => (
+    <div className="flex flex-wrap gap-2 pl-8">
+      {left.map((s) => (
         <button
           key={s}
           type="button"
           onClick={() => onPick(s)}
-          disabled={disabled}
-          className="flex-shrink-0 whitespace-nowrap rounded-full border border-slate-200 bg-white px-3 py-1.5 text-[12.5px] text-slate-600 transition-colors hover:border-primary/30 hover:text-primary disabled:opacity-50"
+          className="rounded-full border border-slate-200 bg-white px-3 py-1.5 text-[12px] text-slate-600 transition-colors hover:border-emerald-500/40 hover:text-primary"
         >
           {s}
         </button>
@@ -265,27 +317,60 @@ function Message({ message }: { message: AskMessage }) {
   if (message.role === "user") {
     return (
       <div className="flex justify-end">
-        <div className="max-w-[85%] whitespace-pre-wrap rounded-[20px] bg-[#f4f4f4] px-4 py-2.5 text-[15px] leading-[1.6] text-slate-900">
+        <div className="max-w-[85%] whitespace-pre-wrap rounded-[20px] bg-[#f4f4f4] px-4 py-2.5 text-[14.5px] leading-[1.6] text-slate-900">
           {message.content}
         </div>
       </div>
     );
   }
   return (
-    <div className="flex gap-3">
-      <span className="mt-0.5 flex h-7 w-7 flex-shrink-0 items-center justify-center rounded-full bg-primary text-primary-foreground">
-        <Sparkles className="h-3.5 w-3.5" />
-      </span>
-      <div className="min-w-0 flex-1 pt-0.5">
+    <div className="group">
+      {/* Who is speaking, above the answer rather than beside it, so the
+          text gets the full width of a narrow drawer. */}
+      <div className="mb-1.5 flex select-none items-center gap-1.5">
+        <BottomlinesAiMark tone="avatar" className="h-5 w-5" />
+        <BottomlinesAiWordmark className="text-[11px] font-medium tracking-tight" />
+      </div>
+      <div className="min-w-0">
         {message.pending ? (
           <ThinkingDots />
         ) : (
-          <Markdown
-            text={message.content}
-            className={cn("text-[15px] leading-[1.7]", message.refused ? "text-slate-600" : "text-slate-800")}
-          />
+          <>
+            <Markdown
+              text={message.content}
+              className={cn("text-[14.5px] leading-[1.7]", message.refused ? "text-slate-600" : "text-slate-800")}
+            />
+            {!message.refused && <CopyButton text={message.content} />}
+          </>
         )}
       </div>
+    </div>
+  );
+}
+
+/** Copy the answer. Shown on hover so a resting thread stays quiet. */
+function CopyButton({ text }: { text: string }) {
+  const [copied, setCopied] = useState(false);
+  const copy = async () => {
+    try {
+      await navigator.clipboard.writeText(text);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 1500);
+    } catch {
+      /* clipboard unavailable: the text is on screen and selectable */
+    }
+  };
+  return (
+    <div className="mt-1.5 flex items-center opacity-0 transition-opacity focus-within:opacity-100 group-hover:opacity-100">
+      <button
+        type="button"
+        onClick={copy}
+        aria-label="Copy answer"
+        title="Copy"
+        className="flex h-6 w-6 items-center justify-center rounded text-slate-400 hover:bg-slate-100 hover:text-slate-700"
+      >
+        {copied ? <Check className="h-3.5 w-3.5 text-primary" /> : <Copy className="h-3.5 w-3.5" />}
+      </button>
     </div>
   );
 }
@@ -293,13 +378,9 @@ function Message({ message }: { message: AskMessage }) {
 /** Three quiet dots while the answer is being written and checked. */
 function ThinkingDots() {
   return (
-    <span className="flex h-7 items-center gap-1" role="status" aria-label="Thinking">
+    <span className="flex h-6 items-center gap-1" role="status" aria-label="Thinking">
       {[0, 1, 2].map((n) => (
-        <span
-          key={n}
-          className="ask-dot h-2 w-2 rounded-full bg-slate-400"
-          style={{ animationDelay: `${n * 0.18}s` }}
-        />
+        <span key={n} className="ask-dot h-1.5 w-1.5 rounded-full bg-slate-400" style={{ animationDelay: `${n * 0.18}s` }} />
       ))}
     </span>
   );

@@ -3,10 +3,8 @@ import { LineSelectionProvider } from "@/components/PublisherLinks";
 import { useReportScope } from "@/lib/reportScope";
 import { useLocation } from "react-router-dom";
 import { AppSidebar } from "./AppSidebar";
-import AskAIButton from "./AskAIButton";
-import AskAIPanel from "./AskAIPanel";
-import { AskAiProvider, useAskAi, useIsDesktop } from "@/lib/askAi";
-import { cn } from "@/lib/utils";
+import AskAILauncher from "./AskAILauncher";
+import { AskAiProvider, useAskAi } from "@/lib/askAi";
 import {
   SidebarProvider,
   SidebarInset,
@@ -57,7 +55,6 @@ export default function Layout(props: LayoutProps) {
 
 function LayoutShell({ children, email }: LayoutProps) {
   const ask = useAskAi();
-  const desktop = useIsDesktop();
   /* THE IDENTITY SHOWN IS THE ONE THAT SIGNED IN, or nothing. The prop
      used to default to a placeholder address, so every report claimed its
      reader was you@publisherstudios.com -- a fabricated fact on a screen
@@ -110,16 +107,6 @@ function LayoutShell({ children, email }: LayoutProps) {
       cancelAnimationFrame(rafId);
     };
   }, [location.pathname]);
-
-  // Escape closes the Ask AI pane, from anywhere on the page.
-  useEffect(() => {
-    if (!ask.open) return;
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape") ask.setOpen(false);
-    };
-    window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
-  }, [ask]);
 
   /** Two-letter monogram from the email local part. */
   const userInitials = (() => {
@@ -177,7 +164,6 @@ function LayoutShell({ children, email }: LayoutProps) {
             </div>
 
             <div className="flex items-center gap-2">
-              <AskAIButton />
               <WalkthroughButton />
               <DropdownMenu>
                 <DropdownMenuTrigger asChild>
@@ -215,13 +201,7 @@ function LayoutShell({ children, email }: LayoutProps) {
             </div>
           </header>
 
-          {/* The report and, beside it, the Ask AI pane. A side pane and
-              not a dialog: on a desktop it takes about a third of the
-              window and the report moves over, so the numbers an answer
-              names stay in view and nothing is covered or dimmed. On a
-              phone it takes the screen. */}
-          <div className="relative flex-1 min-h-0 flex flex-row">
-          <div className="relative flex-1 min-w-0 min-h-0 flex flex-col">
+          <div className="relative flex-1 min-h-0 flex flex-col">
             <main
               ref={mainRef}
               // The walkthrough slides the page in here when it moves between
@@ -238,7 +218,11 @@ function LayoutShell({ children, email }: LayoutProps) {
               aria-label="Back to top"
               aria-hidden={!showBackToTop}
               tabIndex={showBackToTop ? 0 : -1}
-              className={`absolute bottom-[max(1.25rem,env(safe-area-inset-bottom))] right-4 z-30 flex items-center gap-1.5 rounded-full border border-primary/25 bg-white/95 p-2.5 text-[0.8125rem] font-medium text-primary shadow-lg backdrop-blur-sm transition-all duration-200 hover:bg-primary hover:text-primary-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring sm:right-6 sm:py-2 sm:pl-3 sm:pr-3.5 ${
+              className={`absolute right-4 z-30 flex items-center gap-1.5 rounded-full border border-primary/25 bg-white/95 p-2.5 text-[0.8125rem] font-medium text-primary shadow-lg backdrop-blur-sm transition-all duration-200 hover:bg-primary hover:text-primary-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring sm:right-6 sm:py-2 sm:pl-3 sm:pr-3.5 ${
+                ask.available
+                  ? "bottom-[calc(max(1.25rem,env(safe-area-inset-bottom))+3.75rem)] sm:bottom-[5.25rem]"
+                  : "bottom-[max(1.25rem,env(safe-area-inset-bottom))]"
+              } ${
                 showBackToTop
                   ? "translate-y-0 opacity-100"
                   : "pointer-events-none translate-y-3 opacity-0"
@@ -247,31 +231,10 @@ function LayoutShell({ children, email }: LayoutProps) {
               <ArrowUp className="h-3.5 w-3.5" />
               <span className="hidden sm:inline">Back to top</span>
             </button>
-          </div>
 
-          {/* Desktop: in the flow, so it pushes the report rather than
-              covering it. The width animates; the pane inside keeps its
-              own width so its text never reflows mid-slide. */}
-          <aside
-            aria-hidden={!ask.open}
-            className={cn(
-              "hidden shrink-0 overflow-hidden border-slate-200/80 bg-white transition-[width] duration-300 ease-out lg:block",
-              ask.open ? "border-l" : "border-l-0",
-            )}
-            style={{ width: ask.open ? "clamp(360px, 33.333vw, 520px)" : 0 }}
-          >
-            <div className="h-full w-[clamp(360px,33.333vw,520px)]">
-              {ask.open && desktop && <AskAIPanel />}
-            </div>
-          </aside>
-
-          {/* Phone and tablet: the whole screen. One pane is mounted at a
-              time, so the composer, its focus and its draft are singular. */}
-          {ask.open && !desktop && (
-            <div className="fixed inset-0 z-50 flex flex-col bg-white">
-              <AskAIPanel />
-            </div>
-          )}
+            {/* Ask AI: the pill in the corner and the drawer it opens,
+                both portalled to the body. See AskAILauncher. */}
+            <AskAILauncher />
           </div>
         </SidebarInset>
       </div>

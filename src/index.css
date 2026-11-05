@@ -1721,3 +1721,26 @@ a.line-source-reference:hover { color:hsl(var(--primary)); text-decoration-color
 .ask-dot {
   animation: ask-dot 1.2s ease-in-out infinite;
 }
+
+/* The chat card opening from its corner: a short rise and settle, the way
+   a native widget arrives, never a full-screen slide. Transform and opacity
+   only, so it composites on the GPU. */
+@keyframes ask-pop {
+  from {
+    opacity: 0;
+    transform: translate3d(0, 10px, 0) scale(0.97);
+  }
+  to {
+    opacity: 1;
+    transform: translate3d(0, 0, 0) scale(1);
+  }
+}
+.ask-pop {
+  transform-origin: bottom right;
+  animation: ask-pop 0.2s cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+@media (prefers-reduced-motion: reduce) {
+  .ask-pop {
+    animation: none;
+  }
+}
