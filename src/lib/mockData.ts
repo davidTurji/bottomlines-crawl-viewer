@@ -3029,15 +3029,16 @@ export const mockDeclarations: Declarations = {
 // the server refuses, because a mock that answers everything teaches the
 // wrong thing about the product. Five questions per page, like the server.
 
-const MOCK_ASK_CAP = 5;
-const mockAskUsed: Record<AskPage, number> = { overview: 0, discovery: 0, declarations: 0, sellers: 0, schain: 0 };
+/** The mock's quota, in percent: each model answer takes a few percent,
+ *  answers the report gives by itself take none, like the server. */
+let mockAskLeft = 100;
 
 const MOCK_ASK_SUGGESTIONS: Record<AskPage, string[]> = {
   overview: [
     "What changed this week, in short?",
     "What was removed this week?",
     "How many publishers and apps carry my lines?",
-    "What does newly monitored mean?",
+    "How do I know if a publisher authorizes my seller ID?",
   ],
   discovery: [
     "What does the Discovery page show?",
@@ -3065,26 +3066,14 @@ const MOCK_ASK_SUGGESTIONS: Record<AskPage, string[]> = {
   ],
 };
 
-const MOCK_ASK_DISCLAIMER = "Answers come only from this report and can be wrong. Check the lines.";
-
-function mockAskRemaining(): Record<AskPage, number> {
-  return {
-    overview: Math.max(0, MOCK_ASK_CAP - mockAskUsed.overview),
-    discovery: Math.max(0, MOCK_ASK_CAP - mockAskUsed.discovery),
-    declarations: Math.max(0, MOCK_ASK_CAP - mockAskUsed.declarations),
-    sellers: Math.max(0, MOCK_ASK_CAP - mockAskUsed.sellers),
-    schain: Math.max(0, MOCK_ASK_CAP - mockAskUsed.schain),
-  };
-}
+const MOCK_ASK_DISCLAIMER = "Answers can be wrong, check the report.";
 
 export function mockAskStatus(): AskStatus {
   return {
     enabled: true,
-    per_page_cap: MOCK_ASK_CAP,
     pages: ["overview", "discovery", "declarations", "sellers", "schain"],
-    used: { ...mockAskUsed },
-    remaining: mockAskRemaining(),
-    budget_exhausted: false,
+    allowance_left_pct: mockAskLeft,
+    budget_exhausted: mockAskLeft <= 0,
     suggestions: MOCK_ASK_SUGGESTIONS,
     disclaimer: MOCK_ASK_DISCLAIMER,
   };
@@ -3149,6 +3138,9 @@ function mockAskAnswer(question: string): string | null {
   if (has("schain page") || has("supply chain")) {
     return `The **Schain page** shows, for each SDK named in your sellers.json, the chain your matched apps sell through and the publishers left after each hop. A supply chain object lists every seller a bid request passed through, each node with the advertising system (asi) and the seller ID (sid). It is only true as of the dates shown.`;
   }
+  if (has("authoriz")) {
+    return `A publisher authorizes a seller ID when its file carries a line with that advertising system, that seller ID and a relationship: **DIRECT** if the publisher controls the account, **RESELLER** if it authorized someone else to. For an app, the file is the app-ads.txt on the publisher's website named in its store listing. Ask me about one by name, for example "Can I sell madeupmedia.com through seller ID 1045?"`;
+  }
   if (has("who named") || has("named my domain")) {
     return `The Declarations page lists each publisher file that named your domain this crawl, with the kind of declaration (inventory partner, owner domain or manager domain) and which file said it. If the page says no publisher file named your domain, nobody did this crawl.`;
   }
@@ -3160,31 +3152,43 @@ export async function mockAsk(body: {
   question: string;
   history: AskTurn[];
 }): Promise<AskAnswer> {
-  await new Promise((r) => setTimeout(r, 900));
-  if (mockAskUsed[body.page] >= MOCK_ASK_CAP) {
+  const answer = mockAskAnswer(body.question);
+  // Answers the report gives by itself: free.
+  if (answer !== null) {
+    await new Promise((r) => setTimeout(r, 500));
+    return {
+      answerable: true,
+      answer,
+      reason: "",
+      counted: false,
+      local: true,
+      used_pct: 0,
+      allowance_left_pct: mockAskLeft,
+      budget_exhausted: mockAskLeft <= 0,
+    };
+  }
+  await new Promise((r) => setTimeout(r, 1200));
+  if (mockAskLeft <= 0) {
     const { ApiError } = await import("./api");
     throw new ApiError(
       429,
-      JSON.stringify({
-        detail: {
-          code: "page_quota",
-          message: `You have used the ${MOCK_ASK_CAP} questions for this page in this report.`,
-          remaining: mockAskRemaining(),
-        },
-      }),
+      JSON.stringify({ detail: { code: "budget", message: "This report's AI quota is used up.", allowance_left_pct: 0, budget_exhausted: true } }),
     );
   }
-  mockAskUsed[body.page] += 1;
-  const answer = mockAskAnswer(body.question);
+  // Anything else stands in for a model answer the mock cannot give: it is
+  // refused the way the server refuses, and charged the way the model is.
+  const used = 4.2;
+  mockAskLeft = Math.max(0, Math.floor(mockAskLeft - used));
   return {
-    answerable: answer !== null,
+    answerable: false,
     answer:
-      answer ??
       "This report does not contain that, so I cannot answer it. I can answer questions about the numbers, lines, publishers and apps in this report, and explain the ads.txt, app-ads.txt and sellers.json terms it uses.",
-    reason: answer === null ? "not_in_report" : "",
+    reason: "not_in_report",
     counted: true,
-    remaining: mockAskRemaining(),
-    budget_exhausted: false,
+    local: false,
+    used_pct: used,
+    allowance_left_pct: mockAskLeft,
+    budget_exhausted: mockAskLeft <= 0,
   };
 }
 

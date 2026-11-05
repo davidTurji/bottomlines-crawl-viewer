@@ -46,6 +46,10 @@ export type AskMessage = {
   pending?: boolean;
   /** Just arrived: write it out progressively, once. Never persisted. */
   reveal?: boolean;
+  /** Answered from the report itself: no quota used. */
+  local?: boolean;
+  /** This answer's share of the report's quota, in percent. */
+  usedPct?: number;
 };
 
 export const ASK_PAGES: AskPage[] = ["overview", "discovery", "declarations", "sellers", "schain"];
@@ -80,8 +84,8 @@ type AskAiState = {
   page: AskPage;
   messages: AskMessage[];
   pending: boolean;
-  /** Questions left on the current page, null until the status has loaded. */
-  remaining: number | null;
+  /** Percent of the report's AI quota left, null until the status has loaded. */
+  allowanceLeft: number | null;
   budgetExhausted: boolean;
   send: (question: string) => void;
   clear: () => void;
@@ -115,7 +119,7 @@ function saveTranscript(token: string, page: AskPage, messages: AskMessage[]) {
 const newId = () => `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
 
 /** The server's refusal detail, when the error body carries one. */
-function refusalDetail(err: unknown): { code?: string; message?: string; remaining?: Record<string, number> } | null {
+function refusalDetail(err: unknown): { code?: string; message?: string } | null {
   if (!(err instanceof ApiError)) return null;
   try {
     const parsed = JSON.parse(err.message) as { detail?: unknown };
@@ -183,21 +187,18 @@ export function AskAiProvider({ children }: { children: ReactNode }) {
     [token],
   );
 
-  const applyRemaining = useCallback(
-    (remaining?: Record<string, number>, budgetExhausted?: boolean) => {
-      if (!remaining && budgetExhausted === undefined) return;
-      setStatus((s) =>
-        s
-          ? {
-              ...s,
-              remaining: remaining ? { ...s.remaining, ...(remaining as AskStatus["remaining"]) } : s.remaining,
-              budget_exhausted: budgetExhausted ?? s.budget_exhausted,
-            }
-          : s,
-      );
-    },
-    [],
-  );
+  const applyAllowance = useCallback((leftPct?: number, exhausted?: boolean) => {
+    if (leftPct === undefined && exhausted === undefined) return;
+    setStatus((s) =>
+      s
+        ? {
+            ...s,
+            allowance_left_pct: leftPct ?? s.allowance_left_pct,
+            budget_exhausted: exhausted ?? s.budget_exhausted,
+          }
+        : s,
+    );
+  }, []);
 
   const send = useCallback(
     (question: string) => {
@@ -226,11 +227,19 @@ export function AskAiProvider({ children }: { children: ReactNode }) {
           update(forPage, (prev) =>
             prev.map((m) =>
               m.id === botId
-                ? { id: botId, role: "assistant", content: res.answer, refused: !res.answerable, reveal: true }
+                ? {
+                    id: botId,
+                    role: "assistant",
+                    content: res.answer,
+                    refused: !res.answerable,
+                    reveal: true,
+                    local: res.local,
+                    usedPct: res.counted ? res.used_pct : 0,
+                  }
                 : m,
             ),
           );
-          applyRemaining(res.remaining, res.budget_exhausted);
+          applyAllowance(res.allowance_left_pct, res.budget_exhausted);
         })
         .catch((err: unknown) => {
           const detail = refusalDetail(err);
@@ -238,22 +247,21 @@ export function AskAiProvider({ children }: { children: ReactNode }) {
           update(forPage, (prev) =>
             prev.map((m) => (m.id === botId ? { id: botId, role: "assistant", content: text, refused: true, reveal: true } : m)),
           );
-          if (detail?.code === "budget") applyRemaining(detail.remaining, true);
-          else if (detail?.remaining) applyRemaining(detail.remaining);
+          if (detail?.code === "budget") applyAllowance(0, true);
         })
         .finally(() => {
           pendingRef.current = false;
           setPending(false);
         });
     },
-    [token, page, transcripts, update, applyRemaining],
+    [token, page, transcripts, update, applyAllowance],
   );
 
   const clear = useCallback(() => {
     update(page, () => []);
   }, [page, update]);
 
-  const remaining = status ? status.remaining?.[page] ?? null : null;
+  const allowanceLeft = status ? status.allowance_left_pct ?? null : null;
 
   const value = useMemo<AskAiState>(
     () => ({
@@ -264,12 +272,12 @@ export function AskAiProvider({ children }: { children: ReactNode }) {
       page,
       messages,
       pending,
-      remaining,
+      allowanceLeft,
       budgetExhausted: Boolean(status?.budget_exhausted),
       send,
       clear,
     }),
-    [available, status, open, page, messages, pending, remaining, send, clear],
+    [available, status, open, page, messages, pending, allowanceLeft, send, clear],
   );
 
   return <AskAiContext.Provider value={value}>{children}</AskAiContext.Provider>;

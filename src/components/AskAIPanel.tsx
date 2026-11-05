@@ -22,7 +22,7 @@ import { cn } from "@/lib/utils";
  * this panel shows them.
  */
 export default function AskAIPanel({ onClose }: { onClose: () => void }) {
-  const { status, page, messages, pending, remaining, budgetExhausted, send, clear } = useAskAi();
+  const { status, page, messages, pending, allowanceLeft, budgetExhausted, send, clear } = useAskAi();
   const [value, setValue] = useState("");
   const scrollRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
@@ -54,10 +54,10 @@ export default function AskAIPanel({ onClose }: { onClose: () => void }) {
     el.style.height = `${Math.min(el.scrollHeight, 140)}px`;
   }, [value]);
 
-  const cap = status?.per_page_cap ?? 0;
-  const quotaReached = remaining !== null && remaining <= 0;
-  const locked = quotaReached || budgetExhausted;
-  const canSend = value.trim().length > 0 && !pending && !locked;
+  // Out of quota, the composer stays open: questions the report answers by
+  // itself are free and still work; anything that needs the model is
+  // refused by the server in a sentence.
+  const canSend = value.trim().length > 0 && !pending;
   const suggestions = status?.suggestions?.[page] ?? [];
   const empty = messages.length === 0;
 
@@ -67,19 +67,9 @@ export default function AskAIPanel({ onClose }: { onClose: () => void }) {
     setValue("");
   };
   const ask = (q: string) => {
-    if (pending || locked) return;
+    if (pending) return;
     send(q);
   };
-
-  // One line under the composer: what is left, and the caution. When a
-  // limit is reached the line says only that, because nothing else matters.
-  const footer = budgetExhausted
-    ? "This report's AI budget is used up."
-    : quotaReached
-      ? "No questions left on this page."
-      : remaining !== null && cap > 0
-        ? `${remaining} of ${cap} questions left on this page. Answers can be wrong, check the report.`
-        : "Answers can be wrong, check the report.";
 
   return (
     <section aria-label="Ask AI" className="ask-font flex h-full w-full flex-col bg-white text-slate-900">
@@ -103,7 +93,7 @@ export default function AskAIPanel({ onClose }: { onClose: () => void }) {
 
       <div ref={scrollRef} className="min-h-0 flex-1 overflow-y-auto">
         {empty ? (
-          <EmptyState suggestions={suggestions} onPick={ask} disabled={pending || locked} />
+          <EmptyState suggestions={suggestions} onPick={ask} disabled={pending} />
         ) : (
           <div className="flex flex-col gap-5 px-4 pb-4 pt-5 sm:px-5">
             {messages.map((m) => (
@@ -119,14 +109,11 @@ export default function AskAIPanel({ onClose }: { onClose: () => void }) {
             e.preventDefault();
             submit();
           }}
-          className={cn(
-            "flex items-end gap-2 rounded-[26px] py-2 pl-4 pr-2 transition-shadow",
-            locked ? "bg-slate-100" : "bg-[#f4f4f4] focus-within:shadow-[0_0_0_1px_rgba(0,0,0,0.06)]",
-          )}
+          className="flex items-end gap-2 rounded-[26px] bg-[#f4f4f4] py-2 pl-4 pr-2 transition-shadow focus-within:shadow-[0_0_0_1px_rgba(0,0,0,0.06)]"
         >
           <textarea
             ref={inputRef}
-            value={locked ? "" : value}
+            value={value}
             onChange={(e) => setValue(e.target.value)}
             onKeyDown={(e) => {
               if (e.key === "Enter" && !e.shiftKey) {
@@ -136,9 +123,7 @@ export default function AskAIPanel({ onClose }: { onClose: () => void }) {
             }}
             rows={1}
             maxLength={400}
-            readOnly={locked}
-            aria-disabled={locked || undefined}
-            placeholder={locked ? "" : "Ask anything about this report"}
+            placeholder="Ask anything about this report"
             className="min-h-[24px] flex-1 resize-none bg-transparent py-1.5 text-[16px] leading-[1.5] text-slate-900 outline-none placeholder:text-slate-500"
           />
           <button
@@ -153,7 +138,7 @@ export default function AskAIPanel({ onClose }: { onClose: () => void }) {
             <ArrowUp className="h-[18px] w-[18px]" strokeWidth={2.5} />
           </button>
         </form>
-        <p className="mt-2 truncate px-2 text-center text-[11px] leading-snug text-slate-500">{footer}</p>
+        <QuotaLine left={allowanceLeft} exhausted={budgetExhausted} disclaimer={status?.disclaimer} />
       </div>
     </section>
   );
@@ -256,7 +241,12 @@ function Message({ message, onProgress }: { message: AskMessage; onProgress?: ()
               onProgress={onProgress}
               className={cn("text-[16px] leading-[1.75]", message.refused ? "text-slate-600" : "text-[#0d0d0d]")}
             />
-            {!message.refused && written && <CopyButton text={message.content} />}
+            {written && (
+              <div className="mt-1 flex items-center gap-2">
+                {!message.refused && <CopyButton text={message.content} />}
+                <UsageNote message={message} />
+              </div>
+            )}
           </>
         )}
       </div>
@@ -277,7 +267,7 @@ function CopyButton({ text }: { text: string }) {
     }
   };
   return (
-    <div className="mt-1 flex items-center opacity-0 transition-opacity focus-within:opacity-100 group-hover:opacity-100">
+    <div className="flex items-center opacity-0 transition-opacity focus-within:opacity-100 group-hover:opacity-100">
       <button
         type="button"
         onClick={copy}
@@ -288,6 +278,65 @@ function CopyButton({ text }: { text: string }) {
         {copied ? <Check className="h-3.5 w-3.5 text-primary" /> : <Copy className="h-3.5 w-3.5" />}
       </button>
     </div>
+  );
+}
+
+/**
+ * How much of the quota an answer used, in grey under it. Answers the report
+ * gives by itself say so, because they are the ones a reader can lean on
+ * when the quota runs low. Stored transcripts from before carry nothing.
+ */
+function UsageNote({ message }: { message: AskMessage }) {
+  if (message.local) {
+    return <span className="text-[11.5px] text-slate-400">From the report, no quota used</span>;
+  }
+  if (message.usedPct === undefined || message.usedPct <= 0) return null;
+  const pct = message.usedPct < 1 ? "under 1%" : `${Math.round(message.usedPct)}%`;
+  return <span className="text-[11.5px] text-slate-400">Used {pct} of quota</span>;
+}
+
+/**
+ * The quota, always in view under the composer: a small ring that empties as
+ * the report's AI quota is spent, the percent left, and the caution. When the
+ * quota is gone it says so, and that the report's own answers still work.
+ */
+function QuotaLine({
+  left,
+  exhausted,
+  disclaimer,
+}: {
+  left: number | null;
+  exhausted: boolean;
+  disclaimer?: string;
+}) {
+  const caution = disclaimer ?? "Answers can be wrong, check the report.";
+  if (left === null) {
+    return <p className="mt-2 px-2 text-center text-[11px] leading-snug text-slate-500">{caution}</p>;
+  }
+  const pct = exhausted ? 0 : Math.max(0, Math.min(100, left));
+  const r = 5.5;
+  const c = 2 * Math.PI * r;
+  return (
+    <p className="mt-2 flex items-center justify-center gap-1.5 px-2 text-center text-[11px] leading-snug text-slate-500">
+      <svg viewBox="0 0 14 14" className="h-3.5 w-3.5 flex-shrink-0 -rotate-90" aria-hidden>
+        <circle cx="7" cy="7" r={r} fill="none" stroke="currentColor" strokeOpacity="0.2" strokeWidth="2" />
+        <circle
+          cx="7"
+          cy="7"
+          r={r}
+          fill="none"
+          stroke={pct > 15 ? "hsl(var(--primary))" : "hsl(var(--tone-warn))"}
+          strokeWidth="2"
+          strokeLinecap="round"
+          strokeDasharray={`${(pct / 100) * c} ${c}`}
+        />
+      </svg>
+      <span className="truncate">
+        {exhausted
+          ? "AI quota used up. Questions the report answers itself still work."
+          : `${pct}% of AI quota left. ${caution}`}
+      </span>
+    </p>
   );
 }
 

@@ -2446,13 +2446,13 @@ export type AskPage = "overview" | "discovery" | "declarations" | "sellers" | "s
 
 export type AskTurn = { role: "user" | "assistant"; content: string };
 
-/** What `/ask/status` says: whether the panel shows and what is left. No money. */
+/** What `/ask/status` says: whether the panel shows and how much of the
+ *  report's AI quota is left, as a percentage. Never money. */
 export type AskStatus = {
   enabled: boolean;
-  per_page_cap: number;
   pages: AskPage[];
-  used: Record<AskPage, number>;
-  remaining: Record<AskPage, number>;
+  /** Whole percent of the report's AI quota left, rounded down. */
+  allowance_left_pct: number;
   budget_exhausted: boolean;
   suggestions: Record<AskPage, string[]>;
   disclaimer: string;
@@ -2464,9 +2464,13 @@ export type AskAnswer = {
   /** The text to show: the answer, or the server's refusal sentence. */
   answer: string;
   reason: string;
-  /** False when the model never answered and the question was given back. */
+  /** False when nothing was charged (answered from the report, or the model never answered). */
   counted: boolean;
-  remaining: Record<AskPage, number>;
+  /** Answered from the report itself, without the model: free. */
+  local: boolean;
+  /** This answer's share of the report's quota, in percent (one decimal). */
+  used_pct: number;
+  allowance_left_pct: number;
   budget_exhausted: boolean;
 };
 
