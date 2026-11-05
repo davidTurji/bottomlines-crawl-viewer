@@ -5,7 +5,7 @@ import { useLocation } from "react-router-dom";
 import { AppSidebar } from "./AppSidebar";
 import AskAIButton from "./AskAIButton";
 import AskAIPanel from "./AskAIPanel";
-import { AskAiProvider, useAskAi } from "@/lib/askAi";
+import { AskAiProvider, useAskAi, useIsDesktop } from "@/lib/askAi";
 import { cn } from "@/lib/utils";
 import {
   SidebarProvider,
@@ -57,6 +57,7 @@ export default function Layout(props: LayoutProps) {
 
 function LayoutShell({ children, email }: LayoutProps) {
   const ask = useAskAi();
+  const desktop = useIsDesktop();
   /* THE IDENTITY SHOWN IS THE ONE THAT SIGNED IN, or nothing. The prop
      used to default to a placeholder address, so every report claimed its
      reader was you@publisherstudios.com -- a fabricated fact on a screen
@@ -260,13 +261,14 @@ function LayoutShell({ children, email }: LayoutProps) {
             style={{ width: ask.open ? "clamp(360px, 33.333vw, 520px)" : 0 }}
           >
             <div className="h-full w-[clamp(360px,33.333vw,520px)]">
-              {ask.open && <AskAIPanel />}
+              {ask.open && desktop && <AskAIPanel />}
             </div>
           </aside>
 
-          {/* Phone and tablet: the whole screen. */}
-          {ask.open && (
-            <div className="fixed inset-0 z-50 flex flex-col bg-white lg:hidden">
+          {/* Phone and tablet: the whole screen. One pane is mounted at a
+              time, so the composer, its focus and its draft are singular. */}
+          {ask.open && !desktop && (
+            <div className="fixed inset-0 z-50 flex flex-col bg-white">
               <AskAIPanel />
             </div>
           )}

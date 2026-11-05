@@ -46,23 +46,26 @@ export type AskMessage = {
   pending?: boolean;
 };
 
-export const ASK_PAGES: AskPage[] = ["overview", "changes", "discovery", "declarations"];
+export const ASK_PAGES: AskPage[] = ["overview", "discovery", "declarations", "sellers", "schain"];
 
 export const PAGE_LABEL: Record<AskPage, string> = {
   overview: "Overview",
-  changes: "Changes",
   discovery: "Discovery",
   declarations: "Declarations",
+  sellers: "Sellers.json",
+  schain: "Schain",
 };
 
-/** Which report page a path is, relative to the report's base path. */
+/** Which report page a path is, relative to the report's base path. The
+ *  retired /changes and /discovered paths count as the pages they land on. */
 export function pageOf(pathname: string, basePath: string): AskPage {
   let rest = pathname;
   if (basePath && rest.startsWith(basePath)) rest = rest.slice(basePath.length);
   const first = rest.replace(/^\/+/, "").split("/")[0] ?? "";
-  if (first === "changes") return "changes";
   if (first === "discovery" || first === "discovered") return "discovery";
   if (first === "declarations") return "declarations";
+  if (first === "sellers") return "sellers";
+  if (first === "schain") return "schain";
   return "overview";
 }
 
@@ -267,6 +270,27 @@ export function AskAiProvider({ children }: { children: ReactNode }) {
   );
 
   return <AskAiContext.Provider value={value}>{children}</AskAiContext.Provider>;
+}
+
+/**
+ * Whether the pane sits beside the report (desktop) or takes the screen.
+ * Tailwind's `lg` breakpoint, read the same way, so the two never disagree.
+ * One pane is mounted at a time: two mounted panes would be two composers,
+ * two focus calls and two transcripts' worth of state for one conversation.
+ */
+export function useIsDesktop(): boolean {
+  const query = "(min-width: 1024px)";
+  const [desktop, setDesktop] = useState<boolean>(() =>
+    typeof window !== "undefined" ? window.matchMedia(query).matches : true,
+  );
+  useEffect(() => {
+    const mq = window.matchMedia(query);
+    const onChange = (e: MediaQueryListEvent) => setDesktop(e.matches);
+    mq.addEventListener("change", onChange);
+    setDesktop(mq.matches);
+    return () => mq.removeEventListener("change", onChange);
+  }, []);
+  return desktop;
 }
 
 export function useAskAi(): AskAiState {

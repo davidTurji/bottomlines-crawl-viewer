@@ -44,9 +44,16 @@ export default function AskAIPanel({ className }: { className?: string }) {
   }, [page]);
 
   // Auto-grow in place: reset to 0 first or scrollHeight only ever grows.
+  // An empty box is one line, measured or not: while the pane is still
+  // sliding open its width is a few pixels, every character wraps, and a
+  // measurement taken then would leave a tall empty box behind.
   useEffect(() => {
     const el = inputRef.current;
     if (!el) return;
+    if (!value) {
+      el.style.height = "";
+      return;
+    }
     el.style.height = "0px";
     el.style.height = `${Math.min(el.scrollHeight, 160)}px`;
   }, [value]);

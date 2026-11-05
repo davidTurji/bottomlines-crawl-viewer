@@ -3030,20 +3030,14 @@ export const mockDeclarations: Declarations = {
 // wrong thing about the product. Five questions per page, like the server.
 
 const MOCK_ASK_CAP = 5;
-const mockAskUsed: Record<AskPage, number> = { overview: 0, changes: 0, discovery: 0, declarations: 0 };
+const mockAskUsed: Record<AskPage, number> = { overview: 0, discovery: 0, declarations: 0, sellers: 0, schain: 0 };
 
 const MOCK_ASK_SUGGESTIONS: Record<AskPage, string[]> = {
   overview: [
     "What changed this week, in short?",
-    "How many publishers and apps carry my lines?",
-    "What do Found and Lost mean?",
-    "What is a matched publisher?",
-  ],
-  changes: [
     "What was removed this week?",
-    "What was added this week?",
+    "How many publishers and apps carry my lines?",
     "What does newly monitored mean?",
-    "Which publishers dropped my lines?",
   ],
   discovery: [
     "What does the Discovery page show?",
@@ -3057,6 +3051,18 @@ const MOCK_ASK_SUGGESTIONS: Record<AskPage, string[]> = {
     "Who named my domain this week?",
     "What is the difference between DIRECT and RESELLER?",
   ],
+  sellers: [
+    "What does the Sellers.json page check?",
+    "What is the difference between PUBLISHER, INTERMEDIARY and BOTH?",
+    "What does it mean when a seller is not in my sellers.json?",
+    "What does is_confidential mean?",
+  ],
+  schain: [
+    "What does the Schain page show?",
+    "What is a supply chain object?",
+    "What is an SDK in my sellers.json?",
+    "What is the difference between DIRECT and RESELLER?",
+  ],
 };
 
 const MOCK_ASK_DISCLAIMER = "Answers come only from this report and can be wrong. Check the lines.";
@@ -3064,9 +3070,10 @@ const MOCK_ASK_DISCLAIMER = "Answers come only from this report and can be wrong
 function mockAskRemaining(): Record<AskPage, number> {
   return {
     overview: Math.max(0, MOCK_ASK_CAP - mockAskUsed.overview),
-    changes: Math.max(0, MOCK_ASK_CAP - mockAskUsed.changes),
     discovery: Math.max(0, MOCK_ASK_CAP - mockAskUsed.discovery),
     declarations: Math.max(0, MOCK_ASK_CAP - mockAskUsed.declarations),
+    sellers: Math.max(0, MOCK_ASK_CAP - mockAskUsed.sellers),
+    schain: Math.max(0, MOCK_ASK_CAP - mockAskUsed.schain),
   };
 }
 
@@ -3074,7 +3081,7 @@ export function mockAskStatus(): AskStatus {
   return {
     enabled: true,
     per_page_cap: MOCK_ASK_CAP,
-    pages: ["overview", "changes", "discovery", "declarations"],
+    pages: ["overview", "discovery", "declarations", "sellers", "schain"],
     used: { ...mockAskUsed },
     remaining: mockAskRemaining(),
     budget_exhausted: false,
@@ -3132,6 +3139,15 @@ function mockAskAnswer(question: string): string | null {
   }
   if (has("listed") && has("sellers.json")) {
     return `**Listed** means the line's seller ID is present in the advertising system's sellers.json; **unlisted** means it is not. From the spec, every seller_id "must map to only a single entity that is paid for inventory transacted with that seller_id".`;
+  }
+  if (has("sellers.json page") || (has("sellers.json") && has("check"))) {
+    return `The **Sellers.json page** puts your own sellers.json against what publishers list under your domain. It builds the file the crawl implies from every seller ID publishers list under your domain, compares it with yours and reports the file's status. A file that could not be fetched is not a missing seller, and no removal is recommended for it.`;
+  }
+  if (has("publisher") && has("intermediary")) {
+    return `From the sellers.json spec: **PUBLISHER** means the inventory sold through the account is on a site or app owned by the named entity and the advertising system pays them directly; **INTERMEDIARY** means the inventory is not owned by the named entity or they are not paid directly; **BOTH** means both. DIRECT or RESELLER on a line does not determine the role.`;
+  }
+  if (has("schain page") || has("supply chain")) {
+    return `The **Schain page** shows, for each SDK named in your sellers.json, the chain your matched apps sell through and the publishers left after each hop. A supply chain object lists every seller a bid request passed through, each node with the advertising system (asi) and the seller ID (sid). It is only true as of the dates shown.`;
   }
   if (has("who named") || has("named my domain")) {
     return `The Declarations page lists each publisher file that named your domain this crawl, with the kind of declaration (inventory partner, owner domain or manager domain) and which file said it. If the page says no publisher file named your domain, nobody did this crawl.`;

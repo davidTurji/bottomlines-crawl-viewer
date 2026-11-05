@@ -2440,7 +2440,9 @@ export type DeclarationsPayload = Declarations | DeclarationRowsPayload;
 
 // ---- Ask AI ----
 
-export type AskPage = "overview" | "changes" | "discovery" | "declarations";
+/** The report's pages as the rail lists them. The Changes tabs live on
+ *  the Overview, so a reader on /changes asks as the Overview. */
+export type AskPage = "overview" | "discovery" | "declarations" | "sellers" | "schain";
 
 export type AskTurn = { role: "user" | "assistant"; content: string };
 
