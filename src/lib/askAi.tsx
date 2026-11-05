@@ -44,6 +44,8 @@ export type AskMessage = {
   refused?: boolean;
   /** Still waiting for the server. */
   pending?: boolean;
+  /** Just arrived: write it out progressively, once. Never persisted. */
+  reveal?: boolean;
 };
 
 export const ASK_PAGES: AskPage[] = ["overview", "discovery", "declarations", "sellers", "schain"];
@@ -95,7 +97,8 @@ function loadTranscript(token: string, page: AskPage): AskMessage[] {
     const parsed = raw ? (JSON.parse(raw) as AskMessage[]) : [];
     // A question that was in flight when the tab closed never got its
     // answer; showing it as still thinking would be a lie that never ends.
-    return parsed.filter((m) => !m.pending);
+    // A stored answer is shown whole: the reveal is for the moment it lands.
+    return parsed.filter((m) => !m.pending).map((m) => ({ ...m, reveal: false }));
   } catch {
     return [];
   }
@@ -223,7 +226,7 @@ export function AskAiProvider({ children }: { children: ReactNode }) {
           update(forPage, (prev) =>
             prev.map((m) =>
               m.id === botId
-                ? { id: botId, role: "assistant", content: res.answer, refused: !res.answerable }
+                ? { id: botId, role: "assistant", content: res.answer, refused: !res.answerable, reveal: true }
                 : m,
             ),
           );
@@ -233,7 +236,7 @@ export function AskAiProvider({ children }: { children: ReactNode }) {
           const detail = refusalDetail(err);
           const text = detail?.message || UNAVAILABLE_NOW;
           update(forPage, (prev) =>
-            prev.map((m) => (m.id === botId ? { id: botId, role: "assistant", content: text, refused: true } : m)),
+            prev.map((m) => (m.id === botId ? { id: botId, role: "assistant", content: text, refused: true, reveal: true } : m)),
           );
           if (detail?.code === "budget") applyRemaining(detail.remaining, true);
           else if (detail?.remaining) applyRemaining(detail.remaining);

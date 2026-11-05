@@ -1,7 +1,7 @@
 import { ArrowUp, Check, Copy, Sparkles, SquarePen, X } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 
-import { Markdown } from "@/components/Markdown";
+import { RevealedMarkdown } from "@/components/RevealedMarkdown";
 import { useAskAi, type AskMessage } from "@/lib/askAi";
 import { cn } from "@/lib/utils";
 
@@ -27,7 +27,11 @@ export default function AskAIPanel({ onClose }: { onClose: () => void }) {
   const scrollRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
 
-  // Follow the conversation as it grows.
+  // Follow the conversation as it grows, and as an answer is written out.
+  const follow = () => {
+    const el = scrollRef.current;
+    if (el) el.scrollTo({ top: el.scrollHeight });
+  };
   useEffect(() => {
     const el = scrollRef.current;
     if (el) el.scrollTo({ top: el.scrollHeight, behavior: "smooth" });
@@ -103,7 +107,7 @@ export default function AskAIPanel({ onClose }: { onClose: () => void }) {
         ) : (
           <div className="flex flex-col gap-5 px-4 pb-4 pt-5 sm:px-5">
             {messages.map((m) => (
-              <Message key={m.id} message={m} />
+              <Message key={m.id} message={m} onProgress={follow} />
             ))}
           </div>
         )}
@@ -135,7 +139,7 @@ export default function AskAIPanel({ onClose }: { onClose: () => void }) {
             readOnly={locked}
             aria-disabled={locked || undefined}
             placeholder={locked ? "" : "Ask anything about this report"}
-            className="min-h-[24px] flex-1 resize-none bg-transparent py-1.5 text-[15px] leading-[1.55] text-slate-900 outline-none placeholder:text-slate-500"
+            className="min-h-[24px] flex-1 resize-none bg-transparent py-1.5 text-[16px] leading-[1.5] text-slate-900 outline-none placeholder:text-slate-500"
           />
           <button
             type="submit"
@@ -226,11 +230,12 @@ function EmptyState({
   );
 }
 
-function Message({ message }: { message: AskMessage }) {
+function Message({ message, onProgress }: { message: AskMessage; onProgress?: () => void }) {
+  const [written, setWritten] = useState(!message.reveal);
   if (message.role === "user") {
     return (
       <div className="flex justify-end">
-        <div className="max-w-[85%] whitespace-pre-wrap rounded-[20px] bg-[#f4f4f4] px-4 py-2.5 text-[14.5px] leading-[1.6] text-slate-900">
+        <div className="max-w-[85%] whitespace-pre-wrap rounded-[24px] bg-[#f4f4f4] px-5 py-2.5 text-[16px] leading-[1.6] text-[#0d0d0d]">
           {message.content}
         </div>
       </div>
@@ -238,17 +243,20 @@ function Message({ message }: { message: AskMessage }) {
   }
   return (
     <div className="group flex gap-3">
-      <Mark className="mt-0.5 h-6 w-6" />
-      <div className="min-w-0 flex-1 pt-0.5">
+      <Mark className="mt-1 h-6 w-6" />
+      <div className="min-w-0 flex-1">
         {message.pending ? (
-          <ThinkingDots />
+          <Thinking />
         ) : (
           <>
-            <Markdown
+            <RevealedMarkdown
               text={message.content}
-              className={cn("text-[14.5px] leading-[1.7]", message.refused ? "text-slate-600" : "text-slate-800")}
+              reveal={Boolean(message.reveal)}
+              onDone={() => setWritten(true)}
+              onProgress={onProgress}
+              className={cn("text-[16px] leading-[1.75]", message.refused ? "text-slate-600" : "text-[#0d0d0d]")}
             />
-            {!message.refused && <CopyButton text={message.content} />}
+            {!message.refused && written && <CopyButton text={message.content} />}
           </>
         )}
       </div>
@@ -283,13 +291,11 @@ function CopyButton({ text }: { text: string }) {
   );
 }
 
-/** Three quiet dots while the answer is being written and checked. */
-function ThinkingDots() {
+/** One breathing dot while the answer is being written and checked. */
+function Thinking() {
   return (
-    <span className="flex h-6 items-center gap-1" role="status" aria-label="Thinking">
-      {[0, 1, 2].map((n) => (
-        <span key={n} className="ask-dot h-1.5 w-1.5 rounded-full bg-slate-400" style={{ animationDelay: `${n * 0.18}s` }} />
-      ))}
+    <span className="flex h-7 items-center" role="status" aria-label="Thinking">
+      <span className="ask-breathe inline-block h-3.5 w-3.5 rounded-full bg-slate-800" />
     </span>
   );
 }
