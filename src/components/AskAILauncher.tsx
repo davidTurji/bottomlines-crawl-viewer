@@ -27,8 +27,8 @@ import { cn } from "@/lib/utils";
  *   the page over is the other standard choice; it was tried and the
  *   reflow was not wanted.)
  * - Width is the reader's: drag the left edge between 340px and 60% of the
- *   window; a wide toggle jumps to half; the width is remembered for the
- *   session. Double-click the edge to reset.
+ *   window; the width is remembered for the session. Double-click the edge
+ *   to reset. No button for it: the edge is the control.
  * - Minimise keeps the conversation; the pill brings it back.
  * - On a phone (under 640px) the panel is the screen, modal, with the safe
  *   areas respected, which is Material's rule for compact windows.
@@ -121,7 +121,6 @@ export default function AskAILauncher() {
   }, [open, setOpen]);
 
   const current = width ?? (typeof window !== "undefined" ? defaultWidth() : 440);
-  const wide = current >= Math.round(window.innerWidth * 0.48);
 
   const beginResize = (e: ReactPointerEvent<HTMLDivElement>) => {
     if (e.button !== 0) return;
@@ -152,11 +151,6 @@ export default function AskAILauncher() {
   const resetWidth = () => {
     setWidth(null);
     remember(null);
-  };
-  const toggleWide = () => {
-    const next = wide ? defaultWidth() : clampWidth(Math.round(window.innerWidth * 0.5));
-    setWidth(next);
-    remember(next);
   };
 
   if (!available) return null;
@@ -219,7 +213,7 @@ export default function AskAILauncher() {
               />
             </div>
           )}
-          <AskAIPanel onClose={() => setOpen(false)} expanded={wide} onToggleExpand={desktop ? toggleWide : undefined} />
+          <AskAIPanel onClose={() => setOpen(false)} />
         </section>
       )}
     </>,

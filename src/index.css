@@ -1744,30 +1744,3 @@ a.line-source-reference:hover { color:hsl(var(--primary)); text-decoration-color
     animation: none;
   }
 }
-
-/* The empty state's lights: a slow drift, each on its own phase. */
-@keyframes ask-glow {
-  0%,
-  100% {
-    transform: translate3d(-50%, -50%, 0) scale(1);
-  }
-  50% {
-    transform: translate3d(-44%, -56%, 0) scale(1.12);
-  }
-}
-.ask-glow {
-  animation: ask-glow 9s ease-in-out infinite;
-}
-.ask-glow-2 {
-  animation-duration: 11s;
-  animation-delay: -3s;
-}
-.ask-glow-3 {
-  animation-duration: 13s;
-  animation-delay: -6s;
-}
-@media (prefers-reduced-motion: reduce) {
-  .ask-glow {
-    animation: none;
-  }
-}
