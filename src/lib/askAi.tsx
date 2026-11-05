@@ -238,7 +238,9 @@ export function AskAiProvider({ children }: { children: ReactNode }) {
           update(forPage, (prev) =>
             prev.map((m) => (m.id === botId ? { id: botId, role: "assistant", content: text, refused: true, reveal: true } : m)),
           );
-          if (detail?.code === "budget") applyRemaining(detail.remaining, true);
+          // The report's budget or the day's: either way the panel stops
+          // offering questions until the server says otherwise.
+          if (detail?.code === "budget" || detail?.code === "daily_budget") applyRemaining(detail.remaining, true);
           else if (detail?.remaining) applyRemaining(detail.remaining);
         })
         .finally(() => {
