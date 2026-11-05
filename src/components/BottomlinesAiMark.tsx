@@ -33,20 +33,21 @@ export function BottomlinesAiMark({
         className,
       )}
     >
-      <svg viewBox="0 0 24 24" fill="none" className="h-[68%] w-[68%]" aria-hidden="true">
+      <svg viewBox="0 0 24 24" fill="none" className="h-[74%] w-[74%]" aria-hidden="true">
         {/* the bottom line */}
-        <path d="M4.5 19.5h15" stroke={ink} strokeWidth="3" strokeLinecap="round" />
-        {/* the trend above it */}
+        <path d="M4 20h16" stroke={ink} strokeWidth="3.2" strokeLinecap="round" />
+        {/* the trend above it, rising to the spark */}
         <path
-          d="M5.5 14l4-4.4 3.4 3 3.6-4.7"
+          d="M5 15l4-4.6 3.4 3 2.9-3.8"
           stroke={ink}
-          strokeWidth="2.4"
+          strokeWidth="2.6"
           strokeLinecap="round"
           strokeLinejoin="round"
         />
-        {/* the marker, now a spark: four points, a little lift */}
+        {/* the marker, now a spark: four points in the brand teal, big
+            enough to read as a star at 20px */}
         <path
-          d="M18 2.6l0.95 2.45L21.4 6l-2.45 0.95L18 9.4l-0.95-2.45L14.6 6l2.45-0.95z"
+          d="M18.2 1.8l1.3 3.2 3.2 1.3-3.2 1.3-1.3 3.2-1.3-3.2L13.7 6.3l3.2-1.3z"
           fill={spark}
         />
       </svg>
