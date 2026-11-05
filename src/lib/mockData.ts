@@ -44,7 +44,10 @@ import type {
   FoundInFile,
   FoundInFilter,
   PlatformFilter,
-  ChatFrame,
+  AskAnswer,
+  AskPage,
+  AskStatus,
+  AskTurn,
   DeclarationRow,
   DeclarationRowsPayload,
   InactiveApp,
@@ -3018,75 +3021,155 @@ export const mockDeclarations: Declarations = {
 // Chat SSE stream (mock)
 // ─────────────────────────────────────────────────────────────────
 
-const CHAT_RESPONSES: Record<string, string> = {
-  DEFAULT: `Here is the short read of this week:
+// ── Ask AI (mock) ─────────────────────────────────────────────────────
+//
+// The pane with no backend behind it. Every answer below is written from the
+// same fixture the tiles read, so a mock answer can never contradict the
+// page it sits beside; anything it does not recognise is refused the way
+// the server refuses, because a mock that answers everything teaches the
+// wrong thing about the product. Five questions per page, like the server.
 
-- **184 lines removed**, mostly from rubiconproject.com (42), appnexus.com (38) and google.com (29).
-- **127 lines added**, led by magnite.com, openx.com and pubmatic.com. Most of those additions are on new mobile publishers (Chomp Studios, Roost Media, Deep Sea Games).
+const MOCK_ASK_CAP = 5;
+const mockAskUsed: Record<AskPage, number> = { overview: 0, changes: 0, discovery: 0, declarations: 0 };
 
-The removals cluster on three publishers this week: Kite Interactive, Cinder and Sky, and Meridian Sports Media. That is 22, 16, and 12 lines gone. It looks like a cleanup of older relationships. Worth checking whether those publishers moved to a sales-house partner.`,
-
-  "who removed my lines this week?": `Four publishers dropped your matched lines entirely this week:
-
-1. **Kite Interactive** (kiteinteractive.com, iOS): 22 lines removed (Rubicon 9, AppNexus 8, Google 5).
-2. **Cinder and Sky** (cinderandsky.co, Web): 16 lines (Google 7, Criteo 5, Yahoo 4).
-3. **Meridian Sports Media** (meridiansports.io, iOS): 12 lines (AppNexus 6, Yahoo 4, Rubicon 2).
-4. **Sable Broadcasting** (sablebroadcast.tv, Samsung CTV): 9 lines (Rubicon 5).
-
-A missing ads.txt entry means the publisher no longer authorizes that relationship. These are real removals, not fetch errors.`,
-
-  "what changed for magnite?": `Magnite (magnite.com) added **34 new lines this week**, with no removals and no cert changes. Details:
-
-- **New publishers on Magnite**: Chomp Studios (+6), Roost Media (+3), Aurora TV Networks (+3), Northlight Games (+2).
-- **Existing publishers where Magnite grew**: Riverstone Publishers (+4), Copperline Studios (+2).
-- **No cert-id changes** for Magnite on your seats this week.
-
-This is one of the cleanest single-partner expansions in the diff. If Magnite is a priority for you, confirm the owner domain is aligned on the new publishers next week.`,
-
-  "show me all new resellers.": `There are **127 new reseller lines** and 43 new direct lines added this week. Reseller only:
-
-| SSP | New reseller lines | Notable publishers |
-|---|---|---|
-| magnite.com | 24 | Chomp Studios, Roost Media, Riverstone Publishers |
-| openx.com | 16 | Chomp Studios, Pixel Cauldron |
-| pubmatic.com | 14 | Deep Sea Games, Northlight Games |
-| sharethrough.com | 11 | Aurora TV Networks, Riverstone Publishers |
-| smartadserver.com | 8 | Deep Sea Games, Pixel Cauldron |
-| adform.com | 7 | Riverstone Publishers |
-
-Every one of these reseller nodes is a live counterparty in the seller list, so the payment path looks clean.`,
-
-  "which of my seats are unauthorized?": `You have **12 seat lines removed this week**, which means 12 of your declared partner relationships are no longer authorized by the publisher:
-
-- **appnexus.com, xf-4402, DIRECT**: Kite Interactive dropped this line entirely.
-- **rubiconproject.com, 22890, DIRECT**: Sable Broadcasting removed it (was your only direct with them on Samsung CTV).
-- **google.com, pub-9083..., DIRECT**: Cinder and Sky purged all Google lines this week.
-- **Plus 9 more**. Open the Lines view on the Overview and pick Removed to see the full list.
-
-A removed line means the publisher no longer lists your partner as authorized. Buyers that check for authorization will start filtering these on the next crawl.`,
+const MOCK_ASK_SUGGESTIONS: Record<AskPage, string[]> = {
+  overview: [
+    "What changed this week, in short?",
+    "How many publishers and apps carry my lines?",
+    "What do Found and Lost mean?",
+    "What is a matched publisher?",
+  ],
+  changes: [
+    "What was removed this week?",
+    "What was added this week?",
+    "What does newly monitored mean?",
+    "Which publishers dropped my lines?",
+  ],
+  discovery: [
+    "What does the Discovery page show?",
+    "What is the difference between given and found lines?",
+    "Which lines need fixing?",
+    "What does listed in sellers.json mean?",
+  ],
+  declarations: [
+    "What is an inventory partner domain?",
+    "What is the difference between owner domain and manager domain?",
+    "Who named my domain this week?",
+    "What is the difference between DIRECT and RESELLER?",
+  ],
 };
 
-function pickChatResponse(prompt: string): string {
-  const p = prompt.toLowerCase().trim();
-  for (const [key, val] of Object.entries(CHAT_RESPONSES)) {
-    if (key === "DEFAULT") continue;
-    if (p.includes(key.toLowerCase().replace(/[?.]/g, ""))) return val;
-  }
-  return CHAT_RESPONSES.DEFAULT;
+const MOCK_ASK_DISCLAIMER = "Answers come only from this report and can be wrong. Check the lines.";
+
+function mockAskRemaining(): Record<AskPage, number> {
+  return {
+    overview: Math.max(0, MOCK_ASK_CAP - mockAskUsed.overview),
+    changes: Math.max(0, MOCK_ASK_CAP - mockAskUsed.changes),
+    discovery: Math.max(0, MOCK_ASK_CAP - mockAskUsed.discovery),
+    declarations: Math.max(0, MOCK_ASK_CAP - mockAskUsed.declarations),
+  };
 }
 
-export async function* mockChatStream(
-  prompt: string,
-): AsyncGenerator<ChatFrame> {
-  const response = pickChatResponse(prompt);
-  // Chunk word-by-word to look like a streaming LLM.
-  const words = response.split(/(\s+)/);
-  for (const w of words) {
-    await new Promise((r) => setTimeout(r, 22));
-    yield { type: "text", delta: w };
+export function mockAskStatus(): AskStatus {
+  return {
+    enabled: true,
+    per_page_cap: MOCK_ASK_CAP,
+    pages: ["overview", "changes", "discovery", "declarations"],
+    used: { ...mockAskUsed },
+    remaining: mockAskRemaining(),
+    budget_exhausted: false,
+    suggestions: MOCK_ASK_SUGGESTIONS,
+    disclaimer: MOCK_ASK_DISCLAIMER,
+  };
+}
+
+/** Canned answers, keyed by the words a question must contain. */
+function mockAskAnswer(question: string): string | null {
+  const q = question.toLowerCase();
+  const m = mockSummary.counters.matched;
+  const t = mockSummary.hero_diff.line_totals;
+  const d = mockSummary.hero_diff.developer_totals;
+  const n = (v: number) => v.toLocaleString();
+  const has = (...words: string[]) => words.every((w) => q.includes(w));
+  if (has("removed") || has("dropped")) {
+    return `**${n(t.removed)} lines were removed** this week: lines that were in a publisher's file in the compared crawl and are gone from it now. ${n(d.removed)} publishers lost at least one of your lines. Open the Changes page and pick Removed to see each publisher and the exact line.`;
   }
-  await new Promise((r) => setTimeout(r, 100));
-  yield { type: "done" };
+  if (has("added")) {
+    return `**${n(t.added)} lines were added** this week across ${n(d.added)} publishers. An added line appears in a publisher's file now and was not there in the compared crawl, with both weeks watched.`;
+  }
+  if (has("newly monitored")) {
+    return `**Newly monitored** means you added the seat line to your watchlist since the compared crawl, so the line is new to the report. It does not mean the publisher just added it; the report was not looking for it last week. This report has ${n(t.newly_monitored)} newly monitored lines, listed apart from the added ones.`;
+  }
+  if (has("how many") || has("carry")) {
+    return `Your lines are carried by **${n(m.developers)} publishers** and **${n(m.apps)} apps**, for ${n(m.lines)} matched lines in total.`;
+  }
+  if (has("found") && has("lost")) {
+    return `**Found** is a publisher or app that started carrying one of your lines since the compared crawl. **Lost** is one that no longer carries any of your lines. Together they explain the net change in the matched publishers and matched apps counts on the Overview.`;
+  }
+  if (has("matched publisher")) {
+    return `A **matched publisher** is a website or app publisher whose ads.txt or app-ads.txt carried at least one of your seat lines in this crawl. Click a row on the Overview to see the exact lines it carried.`;
+  }
+  if (has("changed") && has("short")) {
+    return `Compared with the previous crawl: **${n(t.added)} lines added**, **${n(t.removed)} removed** and ${n(t.cert_changed)} with a changed cert. ${n(t.newly_monitored)} lines are newly monitored because your watchlist grew. Your lines are now carried by ${n(m.developers)} publishers and ${n(m.apps)} apps.`;
+  }
+  if (has("inventory partner")) {
+    return `An **inventory partner domain** is declared in a publisher's file with INVENTORYPARTNERDOMAIN. The spec: "When a site or an app contains ad inventory that is owned by another partner - the app or site may list all domains for those partners via this directive". A file that names your domain this way vouches for your supply on that publisher's inventory.`;
+  }
+  if (has("owner domain") || has("manager domain")) {
+    return `**OWNERDOMAIN** names the business that owns the domain, site or app the file belongs to. **MANAGERDOMAIN** names the primary or exclusive monetisation partner, the sales house selling that publisher's inventory, optionally for one country, for example MANAGERDOMAIN=madeupmedia.com, FR. The Declarations page lists every publisher file that names your domain either way.`;
+  }
+  if (has("direct") && has("reseller")) {
+    return `From the ads.txt spec: **DIRECT** "indicates that the Publisher (content owner) directly controls the account" on the advertising system, a direct business contract. **RESELLER** "indicates that the Publisher has authorized another entity to control the account" and resell their ad space. In your watchlist each seat line carries one of the two, and the report matches the relationship as written.`;
+  }
+  if (has("discovery")) {
+    return `The **Discovery** page lists every line on the open web, across all crawled publishers, that carries one of your discovery domains, whatever the seller ID. For each line it shows how many publishers and files carry it this week and in the compared week.`;
+  }
+  if (has("given") && has("found")) {
+    return `A **given** line is one you handed us, by hand or imported from your sellers.json. A **found** line is one the crawl discovered carrying one of your domains that is not in your watchlist. Found lines are where unknown seller IDs show up.`;
+  }
+  if (has("need") && has("fixing")) {
+    return `A line **needs fixing** when it carries a defect, most often a seller ID that is not in the advertising system's sellers.json. The Discovery page marks them, and the filter "Needs fixing" lists only those.`;
+  }
+  if (has("listed") && has("sellers.json")) {
+    return `**Listed** means the line's seller ID is present in the advertising system's sellers.json; **unlisted** means it is not. From the spec, every seller_id "must map to only a single entity that is paid for inventory transacted with that seller_id".`;
+  }
+  if (has("who named") || has("named my domain")) {
+    return `The Declarations page lists each publisher file that named your domain this crawl, with the kind of declaration (inventory partner, owner domain or manager domain) and which file said it. If the page says no publisher file named your domain, nobody did this crawl.`;
+  }
+  return null;
+}
+
+export async function mockAsk(body: {
+  page: AskPage;
+  question: string;
+  history: AskTurn[];
+}): Promise<AskAnswer> {
+  await new Promise((r) => setTimeout(r, 900));
+  if (mockAskUsed[body.page] >= MOCK_ASK_CAP) {
+    const { ApiError } = await import("./api");
+    throw new ApiError(
+      429,
+      JSON.stringify({
+        detail: {
+          code: "page_quota",
+          message: `You have used the ${MOCK_ASK_CAP} questions for this page in this report.`,
+          remaining: mockAskRemaining(),
+        },
+      }),
+    );
+  }
+  mockAskUsed[body.page] += 1;
+  const answer = mockAskAnswer(body.question);
+  return {
+    answerable: answer !== null,
+    answer:
+      answer ??
+      "This report does not contain that, so I cannot answer it. I can answer questions about the numbers, lines, publishers and apps in this report, and explain the ads.txt, app-ads.txt and sellers.json terms it uses.",
+    reason: answer === null ? "not_in_report" : "",
+    counted: true,
+    remaining: mockAskRemaining(),
+    budget_exhausted: false,
+  };
 }
 
 /**

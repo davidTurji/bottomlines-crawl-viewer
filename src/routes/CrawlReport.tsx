@@ -35,7 +35,6 @@ import {
   type TrialCaps, type TrialSlice,
   api,
   ApiError,
-  ENABLE_CHAT,
   MOCK,
   type ExportInfo,
   type Summary,
@@ -80,7 +79,6 @@ import {
   TruncatedNotice,
 } from "@/components/ListControls";
 import { Card } from "@/components/ui/card";
-import InlineAskAI from "@/components/InlineAskAI";
 import { PageShell } from "@/components/PageShell";
 import { formatWeek } from "@/components/WeekLine";
 import { appFileLine, cn, fileHostsLabel, foundInLabel, lineHostLabel, scopeReasonText, storeName } from "@/lib/utils";
@@ -134,13 +132,6 @@ import {
   SeatLinesHead,
   SeatLinesSkeleton,
 } from "@/components/SeatLines";
-
-const OVERVIEW_SUGGESTIONS = [
-  "What lines were added this week?",
-  "Which publisher lost the most?",
-  "Which SSP moved the most on my seats?",
-  "Are any of my seats unauthorized?",
-];
 
 /**
  * OVERVIEW page, "Your weekly crawl".
@@ -947,19 +938,6 @@ export default function CrawlReport() {
       </section>
       )}
 
-      {/* Ask AI, inline, between the KPIs and the drilldown. Same shape
-          bottomlines-app uses on the "Your Bottom Line" page: pill input
-          with a sparkle glyph + horizontal suggestion rail; answers grow
-          in a thread below the composer. The backend has no chat endpoint,
-          so this is available only when both VITE_MOCK=true and
-          VITE_ENABLE_CHAT=true are set for a local demo. */}
-      {ENABLE_CHAT && (
-        <InlineAskAI
-          token={token}
-          suggestions={OVERVIEW_SUGGESTIONS}
-          placeholder="Ask about your crawl"
-        />
-      )}
 
       {/* The matched list. Which one shows is driven by the two cards above:
           publishers by default, apps when the pink card is selected. Both are

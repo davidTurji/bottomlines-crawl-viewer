@@ -60,13 +60,6 @@ function mockInactiveVariant(s: Summary): Summary {
   return mode === "legacy" ? rest : { ...rest, gone: undefined };
 }
 
-// ── AI chat flag ─────────────────────────────────────────────────
-// The MVP backend ships no chat endpoint, so the Ask AI surface is
-// available only in mock-mode demos. A production build cannot expose
-// a control whose backend endpoint has not shipped.
-export const ENABLE_CHAT = MOCK &&
-  (import.meta.env.VITE_ENABLE_CHAT as string | undefined) === "true";
-
 export class ApiError extends Error {
   constructor(public status: number, message: string) {
     super(message);
@@ -1159,45 +1152,32 @@ export const api = {
     downloadBlob(blob, name);
     return { used, limit };
   },
-  chat: async function* (
-    token: string,
-    prompt: string,
-  ): AsyncGenerator<ChatFrame> {
+  /**
+   * Ask AI: whether the panel is offered on this report, and what is left.
+   * The server owns every number here; the pane shows them.
+   */
+  askStatus: async (token: string): Promise<AskStatus> => {
     if (MOCK) {
-      const { mockChatStream } = await import("./mockData");
-      for await (const frame of mockChatStream(prompt)) yield frame;
-      return;
+      const { mockAskStatus } = await import("./mockData");
+      return mockAskStatus();
     }
-    await whenSignedIn();
-    const res = await fetch(`${BASE}/v1/viewer/${token}/chat`, {
-      method: "POST",
-      credentials: "include",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ prompt }),
-    });
-    if (!res.ok || !res.body) {
-      throw new ApiError(res.status, `chat stream failed: ${res.status}`);
+    return req<AskStatus>("GET", `/v1/viewer/${token}/ask/status`);
+  },
+  /**
+   * One question about this report. The answer is already checked by the
+   * server against the frozen report; a refusal arrives as `answerable:
+   * false` with the sentence to show. A spent page or budget arrives as a
+   * 429 whose JSON detail carries `code` and `message` (see lib/askAi).
+   */
+  ask: async (
+    token: string,
+    body: { page: AskPage; question: string; history: AskTurn[] },
+  ): Promise<AskAnswer> => {
+    if (MOCK) {
+      const { mockAsk } = await import("./mockData");
+      return mockAsk(body);
     }
-    const reader = res.body.pipeThrough(new TextDecoderStream()).getReader();
-    let buffer = "";
-    for (;;) {
-      const { value, done } = await reader.read();
-      if (done) break;
-      buffer += value;
-      const parts = buffer.split("\n\n");
-      buffer = parts.pop() ?? "";
-      for (const raw of parts) {
-        const line = raw.trim();
-        if (!line.startsWith("data:")) continue;
-        const chunk = line.slice(5).trim();
-        if (!chunk) continue;
-        try {
-          yield JSON.parse(chunk) as ChatFrame;
-        } catch {
-          /* skip */
-        }
-      }
-    }
+    return req<AskAnswer>("POST", `/v1/viewer/${token}/ask`, body);
   },
 };
 
@@ -2458,11 +2438,35 @@ export type DeclarationRowsPayload = {
  */
 export type DeclarationsPayload = Declarations | DeclarationRowsPayload;
 
-export type ChatFrame =
-  | { type: "text"; delta: string }
-  | { type: "tool_call"; name: string; args: unknown; result_preview: unknown }
-  | { type: "done" }
-  | { type: "error"; message: string };
+// ---- Ask AI ----
+
+export type AskPage = "overview" | "changes" | "discovery" | "declarations";
+
+export type AskTurn = { role: "user" | "assistant"; content: string };
+
+/** What `/ask/status` says: whether the panel shows and what is left. No money. */
+export type AskStatus = {
+  enabled: boolean;
+  per_page_cap: number;
+  pages: AskPage[];
+  used: Record<AskPage, number>;
+  remaining: Record<AskPage, number>;
+  budget_exhausted: boolean;
+  suggestions: Record<AskPage, string[]>;
+  disclaimer: string;
+};
+
+/** One answer, already checked by the server. */
+export type AskAnswer = {
+  answerable: boolean;
+  /** The text to show: the answer, or the server's refusal sentence. */
+  answer: string;
+  reason: string;
+  /** False when the model never answered and the question was given back. */
+  counted: boolean;
+  remaining: Record<AskPage, number>;
+  budget_exhausted: boolean;
+};
 
 // ---- schain export ----
 
