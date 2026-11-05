@@ -54,6 +54,14 @@ export type AskMessage = {
 
 export const ASK_PAGES: AskPage[] = ["overview", "discovery", "declarations", "sellers", "schain"];
 
+/**
+ * The AI usage policy on the main site. Linked from the empty panel (the
+ * consent line) and from the line under the composer. Overridable at build
+ * time so a local preview can point at a local copy of the site.
+ */
+export const AI_POLICY_URL =
+  (import.meta.env.VITE_AI_POLICY_URL as string | undefined) || "https://bottomlines.ai/ai-policy";
+
 export const PAGE_LABEL: Record<AskPage, string> = {
   overview: "Overview",
   discovery: "Discovery",

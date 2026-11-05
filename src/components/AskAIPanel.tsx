@@ -2,7 +2,7 @@ import { ArrowUp, Check, Copy, Sparkles, SquarePen, X } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 
 import { RevealedMarkdown } from "@/components/RevealedMarkdown";
-import { useAskAi, type AskMessage } from "@/lib/askAi";
+import { AI_POLICY_URL, useAskAi, type AskMessage } from "@/lib/askAi";
 import { cn } from "@/lib/utils";
 
 /**
@@ -211,6 +211,9 @@ function EmptyState({
           ))}
         </div>
       )}
+      <p className="mt-6 max-w-[380px] text-center text-[11.5px] leading-relaxed text-slate-400">
+        By asking a question you agree to the <PolicyLink>AI usage policy</PolicyLink>.
+      </p>
     </div>
   );
 }
@@ -303,15 +306,18 @@ function UsageNote({ message }: { message: AskMessage }) {
 function QuotaLine({
   left,
   exhausted,
-  disclaimer,
 }: {
   left: number | null;
   exhausted: boolean;
   disclaimer?: string;
 }) {
-  const caution = disclaimer ?? "Answers can be wrong, check the report.";
+  const policy = <PolicyLink>usage policy</PolicyLink>;
   if (left === null) {
-    return <p className="mt-2 px-2 text-center text-[11px] leading-snug text-slate-500">{caution}</p>;
+    return (
+      <p className="mt-2 px-2 text-center text-[11px] leading-snug text-slate-500">
+        Answers can be wrong, see the {policy}.
+      </p>
+    );
   }
   const pct = exhausted ? 0 : Math.max(0, Math.min(100, left));
   const r = 5.5;
@@ -332,11 +338,29 @@ function QuotaLine({
         />
       </svg>
       <span className="truncate">
-        {exhausted
-          ? "AI quota used up. Questions the report answers itself still work."
-          : `${pct}% of AI quota left. ${caution}`}
+        {exhausted ? (
+          <>AI quota used up. Report questions still work. See the {policy}.</>
+        ) : (
+          <>
+            {pct}% of AI quota left. Answers can be wrong, see the {policy}.
+          </>
+        )}
       </span>
     </p>
+  );
+}
+
+/** The AI usage policy on the main site, in a new tab so the report stays put. */
+function PolicyLink({ children }: { children: React.ReactNode }) {
+  return (
+    <a
+      href={AI_POLICY_URL}
+      target="_blank"
+      rel="noopener noreferrer"
+      className="underline decoration-slate-300 underline-offset-2 transition-colors hover:text-slate-800 hover:decoration-slate-500"
+    >
+      {children}
+    </a>
   );
 }
 
