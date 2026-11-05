@@ -1,7 +1,7 @@
-import { ArrowUp, Check, Copy, Maximize2, Minimize2, SquarePen, X } from "lucide-react";
+import { ArrowUp, Check, ChevronsRight, Copy, PanelRightClose, PanelRightOpen, SquarePen, X } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 
-import { BottomlinesAiMark, BottomlinesAiWordmark } from "@/components/BottomlinesAiMark";
+import { AiMark, BottomlinesAiWordmark } from "@/components/BottomlinesAiMark";
 import { Markdown } from "@/components/Markdown";
 import { PAGE_LABEL, useAskAi, type AskMessage } from "@/lib/askAi";
 import { cn } from "@/lib/utils";
@@ -26,8 +26,11 @@ export default function AskAIPanel({
   expanded = false,
   onToggleExpand,
 }: {
+  /** Minimise: the conversation is kept, the pill brings it back. */
   onClose: () => void;
+  /** The panel is at its wide setting (half the window). */
   expanded?: boolean;
+  /** Toggle between a third and half of the window; absent on a phone. */
   onToggleExpand?: () => void;
 }) {
   const { status, page, messages, pending, remaining, budgetExhausted, send, clear } = useAskAi();
@@ -80,8 +83,13 @@ export default function AskAIPanel({
   return (
     <section aria-label="Ask AI" className="ask-font flex h-full w-full flex-col bg-white text-slate-900">
       {/* Header: who is answering, and the close. */}
-      <header className="flex h-[52px] flex-shrink-0 items-center gap-2 border-b border-slate-200/70 pl-4 pr-2">
-        <BottomlinesAiMark className="h-8 w-8" />
+      <header
+        className={cn(
+          "flex h-[52px] flex-shrink-0 items-center gap-2 border-b border-slate-200/70 pl-4 pr-2",
+          "max-sm:h-auto max-sm:py-2.5 max-sm:pt-[max(0.625rem,env(safe-area-inset-top))]",
+        )}
+      >
+        <AiMark className="h-8 w-8" />
         <div className="min-w-0 flex-1 leading-tight">
           <BottomlinesAiWordmark className="block truncate text-[15px]" />
           <p className="truncate text-[11.5px] text-slate-500">Ask about this report, {PAGE_LABEL[page]} page</p>
@@ -94,15 +102,16 @@ export default function AskAIPanel({
           </HeaderButton>
         )}
         {onToggleExpand && (
-          <HeaderButton
-            label={expanded ? "Smaller" : "Larger"}
-            onClick={onToggleExpand}
-            className="max-sm:hidden"
-          >
-            {expanded ? <Minimize2 className="h-4 w-4" /> : <Maximize2 className="h-4 w-4" />}
+          <HeaderButton label={expanded ? "Narrower" : "Wider"} onClick={onToggleExpand}>
+            {expanded ? <PanelRightClose className="h-4 w-4" /> : <PanelRightOpen className="h-4 w-4" />}
           </HeaderButton>
         )}
-        <HeaderButton label="Close" onClick={onClose}>
+        {/* Minimise on a desktop (the thread stays, the pill brings it
+            back); a plain close on a phone, where the panel is the screen. */}
+        <HeaderButton label="Minimise" onClick={onClose} className="max-sm:hidden">
+          <ChevronsRight className="h-4 w-4" />
+        </HeaderButton>
+        <HeaderButton label="Close" onClick={onClose} className="sm:hidden">
           <X className="h-4 w-4" />
         </HeaderButton>
       </header>
@@ -156,7 +165,7 @@ export default function AskAIPanel({
       </div>
 
       {/* The composer. */}
-      <div className="flex-shrink-0 px-3 pb-3 pt-2 sm:px-4 sm:pb-4">
+      <div className="flex-shrink-0 px-3 pb-[max(0.75rem,env(safe-area-inset-bottom))] pt-2 sm:px-4 sm:pb-4">
         <form
           onSubmit={(e) => {
             e.preventDefault();
@@ -251,8 +260,17 @@ function EmptyState({
   disabled: boolean;
 }) {
   return (
-    <div className="flex h-full flex-col items-center justify-center gap-7 px-5 py-12">
-      <BottomlinesAiMark className="h-12 w-12" />
+    <div className="relative flex h-full flex-col items-center justify-center gap-7 overflow-hidden px-5 py-10">
+      {/* The glow: three soft lights in the brand's greens drifting slowly
+          behind the greeting, the way a premium assistant's home screen
+          breathes. Blurred blobs, transform-only animation, no motion when
+          the reader asked for none. */}
+      <div aria-hidden className="pointer-events-none absolute inset-0 -z-10">
+        <span className="ask-glow absolute left-1/2 top-[38%] h-72 w-72 -translate-x-1/2 -translate-y-1/2 rounded-full bg-[radial-gradient(closest-side,rgba(16,185,129,0.28),rgba(16,185,129,0))] blur-2xl" />
+        <span className="ask-glow ask-glow-2 absolute left-[30%] top-[62%] h-56 w-56 -translate-x-1/2 -translate-y-1/2 rounded-full bg-[radial-gradient(closest-side,rgba(45,212,191,0.22),rgba(45,212,191,0))] blur-2xl" />
+        <span className="ask-glow ask-glow-3 absolute left-[72%] top-[58%] h-60 w-60 -translate-x-1/2 -translate-y-1/2 rounded-full bg-[radial-gradient(closest-side,rgba(132,204,22,0.16),rgba(132,204,22,0))] blur-2xl" />
+      </div>
+      <AiMark className="h-12 w-12" />
       <div className="text-center">
         <h3 className="text-[19px] font-semibold tracking-tight text-slate-900">What do you want to know?</h3>
         <p className="mx-auto mt-1.5 max-w-[20rem] text-[13px] leading-relaxed text-slate-500">
@@ -260,24 +278,18 @@ function EmptyState({
         </p>
       </div>
       {suggestions.length > 0 && (
-        <div className="relative w-full">
-          <div
-            aria-hidden
-            className="pointer-events-none absolute inset-0 -z-10 bg-[radial-gradient(ellipse_at_center,rgba(16,185,129,0.20),rgba(16,185,129,0)_65%)] blur-2xl"
-          />
-          <div className="mx-auto flex max-w-[360px] flex-wrap justify-center gap-2.5">
-            {suggestions.map((s) => (
-              <button
-                key={s}
-                type="button"
-                onClick={() => onPick(s)}
-                disabled={disabled}
-                className="rounded-full border border-emerald-500/25 bg-white px-4 py-2 text-[12.5px] font-medium text-slate-700 shadow-[0_1px_2px_rgba(15,23,42,0.05),0_4px_14px_-4px_rgba(16,185,129,0.35)] ring-1 ring-inset ring-white/60 transition-all hover:-translate-y-0.5 hover:border-emerald-500/55 hover:text-primary hover:shadow-[0_2px_4px_rgba(15,23,42,0.06),0_10px_24px_-6px_rgba(16,185,129,0.55)] disabled:opacity-50"
-              >
-                {s}
-              </button>
-            ))}
-          </div>
+        <div className="mx-auto flex max-w-[360px] flex-wrap justify-center gap-2.5">
+          {suggestions.map((s) => (
+            <button
+              key={s}
+              type="button"
+              onClick={() => onPick(s)}
+              disabled={disabled}
+              className="rounded-full border border-emerald-600/15 bg-[linear-gradient(180deg,#ffffff,#f6fbf8)] px-4 py-2 text-[12.5px] font-medium text-slate-700 shadow-[inset_0_1px_0_rgba(255,255,255,0.9),0_1px_2px_rgba(15,23,42,0.06),0_10px_28px_-12px_rgba(16,185,129,0.45)] transition-all hover:-translate-y-0.5 hover:border-emerald-600/35 hover:text-primary hover:shadow-[inset_0_1px_0_rgba(255,255,255,0.9),0_2px_4px_rgba(15,23,42,0.06),0_14px_32px_-10px_rgba(16,185,129,0.55)] disabled:opacity-50"
+            >
+              {s}
+            </button>
+          ))}
         </div>
       )}
     </div>
@@ -328,7 +340,7 @@ function Message({ message }: { message: AskMessage }) {
       {/* Who is speaking, above the answer rather than beside it, so the
           text gets the full width of a narrow drawer. */}
       <div className="mb-1.5 flex select-none items-center gap-1.5">
-        <BottomlinesAiMark tone="avatar" className="h-5 w-5" />
+        <AiMark tone="avatar" className="h-5 w-5" />
         <BottomlinesAiWordmark className="text-[11px] font-medium tracking-tight" />
       </div>
       <div className="min-w-0">
