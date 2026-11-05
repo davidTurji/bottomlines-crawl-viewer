@@ -101,7 +101,7 @@ export default function AskAIPanel({ onClose }: { onClose: () => void }) {
         {empty ? (
           <EmptyState suggestions={suggestions} onPick={ask} disabled={pending || locked} />
         ) : (
-          <div className="flex flex-col gap-5 px-4 pb-4 pt-2 sm:px-5">
+          <div className="flex flex-col gap-5 px-4 pb-4 pt-5 sm:px-5">
             {messages.map((m) => (
               <Message key={m.id} message={m} />
             ))}
