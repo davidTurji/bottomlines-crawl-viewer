@@ -49,6 +49,7 @@ export default function AskAIPanel({ onClose }: { onClose: () => void }) {
   const fileRef = useRef<HTMLInputElement>(null);
   const dragDepth = useRef(0);
   const following = useRef(true);
+  const scrollSize = useRef({ width: 0, height: 0 });
   const expandedComposer = value.includes("\n") || value.length > 80;
 
   // Follow the conversation as it grows, and as an answer is written out.
@@ -60,7 +61,9 @@ export default function AskAIPanel({ onClose }: { onClose: () => void }) {
     const el = scrollRef.current;
     if (el && following.current) el.scrollTo({ top: el.scrollHeight });
     if (!el) return;
+    scrollSize.current = { width: el.clientWidth, height: el.clientHeight };
     const observer = new ResizeObserver(() => {
+      scrollSize.current = { width: el.clientWidth, height: el.clientHeight };
       if (following.current) el.scrollTo({ top: el.scrollHeight });
     });
     observer.observe(el);
@@ -173,6 +176,10 @@ export default function AskAIPanel({ onClose }: { onClose: () => void }) {
       <div ref={scrollRef} className="min-h-0 flex-1 overflow-y-auto overscroll-contain"
         onScroll={(e) => {
           const el = e.currentTarget;
+          // Layout changes can emit scroll events before ResizeObserver.
+          // They must not look like the reader scrolled up and disable following.
+          const size = scrollSize.current;
+          if (el.clientWidth !== size.width || el.clientHeight !== size.height) return;
           following.current = el.scrollHeight - el.scrollTop - el.clientHeight < 80;
         }}>
         {empty ? (
