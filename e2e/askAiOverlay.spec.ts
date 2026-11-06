@@ -66,7 +66,7 @@ for (const viewport of [{ width: 320, height: 568 }, { width: 844, height: 390 }
       expect(input!.y).toBeGreaterThanOrEqual(0);
       expect(input!.y + input!.height).toBeLessThanOrEqual(viewport.height);
       await panel.getByRole('link', { name: 'AI usage policy', exact: true }).last().press('Tab');
-      await expect(panel.getByRole('button', { name: 'Close', exact: true })).toBeFocused();
+      await expect(panel.locator('summary')).toBeFocused();
       await panel.getByRole('button', { name: 'Close', exact: true }).press('Escape');
       await expect(panel).toHaveCount(0);
       await expect(page.locator('#root')).not.toHaveAttribute('inert');

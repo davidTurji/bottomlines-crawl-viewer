@@ -163,6 +163,7 @@ export default function AskAIPanel({ onClose }: { onClose: () => void }) {
       >
         <Mark className="h-6 w-6" />
         <h2 className="ask-label-enter min-w-0 flex-1 truncate text-[13px] font-medium text-slate-900">Bottom Lines AI</h2>
+        <QuotaIndicator left={allowanceLeft} exhausted={budgetExhausted} />
         {messages.length > 0 && !pending && (
           <IconButton label="New conversation" onClick={clear}>
             <SquarePen className="h-[17px] w-[17px]" strokeWidth={1.8} />
@@ -299,7 +300,9 @@ export default function AskAIPanel({ onClose }: { onClose: () => void }) {
           </button>
           </div>
         </form>
-        <QuotaLine left={allowanceLeft} exhausted={budgetExhausted} disclaimer={status?.disclaimer} />
+        <p className="mt-2 whitespace-nowrap text-center text-[10px] leading-4 text-slate-500 sm:text-[11px]">
+          By chatting, you agree to the <PolicyLink>AI usage policy</PolicyLink>.
+        </p>
       </div>
     </section>
   );
@@ -408,9 +411,6 @@ function EmptyState({
           to check it against this report.
         </p>
       )}
-      <p className="mt-4 max-w-[380px] text-center text-[11.5px] leading-relaxed text-slate-400">
-        By asking a question you agree to the <PolicyLink>AI usage policy</PolicyLink>.
-      </p>
     </div>
   );
 }
@@ -667,55 +667,33 @@ function UsageNote({ message }: { message: AskMessage }) {
   return <span className="text-[11.5px] text-slate-400">Used {pct} of quota</span>;
 }
 
-/**
- * The quota, always in view under the composer: a small ring that empties as
- * the report's AI quota is spent, the percent left, and the caution. When the
- * quota is gone it says so, and that the report's own answers still work.
- */
-function QuotaLine({
-  left,
-  exhausted,
-}: {
-  left: number | null;
-  exhausted: boolean;
-  disclaimer?: string;
-}) {
-  const policy = <PolicyLink>AI usage policy</PolicyLink>;
-  if (left === null) {
-    return (
-      <p className="mt-2 px-2 text-center text-[11px] leading-snug text-slate-500">
-        Answers can be wrong. By chatting, you agree to the {policy}.
-      </p>
-    );
-  }
-  const pct = exhausted ? 0 : Math.max(0, Math.min(100, left));
-  const r = 5.5;
-  const c = 2 * Math.PI * r;
+/** Compact header quota; tap/keyboard also exposes the explanation on phones. */
+function QuotaIndicator({ left, exhausted }: { left: number | null; exhausted: boolean }) {
+  const pct = exhausted ? 0 : Math.max(0, Math.min(100, left ?? 0));
+  const label = left === null ? "AI quota loading" : `AI quota: ${pct}% remaining`;
+  const r = 6;
+  const circumference = 2 * Math.PI * r;
   return (
-    <p className="mt-2 flex items-center justify-center gap-1.5 px-2 text-center text-[11px] leading-snug text-slate-500">
-      <svg viewBox="0 0 14 14" className="h-3.5 w-3.5 flex-shrink-0 -rotate-90" aria-hidden>
-        <circle cx="7" cy="7" r={r} fill="none" stroke="currentColor" strokeOpacity="0.2" strokeWidth="2" />
-        <circle
-          cx="7"
-          cy="7"
-          r={r}
-          fill="none"
-          stroke={pct > 15 ? "hsl(var(--primary))" : "hsl(var(--tone-warn))"}
-          strokeWidth="2"
-          strokeLinecap="round"
-          strokeDasharray={`${(pct / 100) * c} ${c}`}
-        />
-      </svg>
-      <span className="min-w-0">
-        {exhausted ? (
-          <>AI quota used up. Report questions still work. By chatting, you agree to the {policy}.</>
-        ) : (
-          <>
-            {pct}% of AI quota left. Answers can be wrong. By chatting, you agree to the {policy}.
-          </>
-        )}
-      </span>
-    </p>
+    <details className="relative shrink-0">
+      <summary
+        aria-label={label}
+        title={label}
+        className="flex h-11 w-11 cursor-pointer list-none items-center justify-center rounded-full text-slate-500 hover:bg-slate-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/30 [&::-webkit-details-marker]:hidden"
+      >
+        <svg viewBox="0 0 16 16" className="h-4 w-4 -rotate-90" aria-hidden="true">
+          <circle cx="8" cy="8" r={r} fill="none" stroke="currentColor" strokeOpacity="0.2" strokeWidth="1.75" />
+          <circle cx="8" cy="8" r={r} fill="none"
+            stroke={pct > 15 ? "hsl(var(--primary))" : "hsl(var(--tone-warn))"}
+            strokeWidth="1.75" strokeLinecap="round"
+            strokeDasharray={`${(pct / 100) * circumference} ${circumference}`} />
+        </svg>
+      </summary>
+      <div className="absolute right-0 top-full z-20 w-56 rounded-xl border border-slate-200 bg-white p-3 text-[12px] leading-relaxed text-slate-600 shadow-lg">
+        <p className="font-medium text-slate-900" role="status">{label}</p>
+        <p className="mt-1">{exhausted ? "Model answers are off for this report. Free report checks still work." : "Shared across this report’s logins and devices. Refreshing does not reset it."}</p>
+        <p className="mt-2">Answers can be wrong. Verify important information.</p>
+      </div>
+    </details>
   );
 }
 
