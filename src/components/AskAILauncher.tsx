@@ -61,7 +61,9 @@ class PanelBoundary extends Component<{ children: ReactNode; onClose: () => void
 
 const MIN_W = 340;
 const MAX_W_FRACTION = 0.6;
-const DESKTOP = "(min-width: 640px)";
+// Phones remain fullscreen in landscape; a short mouse-driven desktop
+// window can still use the docked panel.
+const DESKTOP = "(min-width: 640px) and (min-height: 500px), (min-width: 640px) and (pointer: fine)";
 
 /** A third of the window, within sensible bounds. */
 function defaultWidth(): number {
@@ -99,7 +101,8 @@ export default function AskAILauncher() {
   const [width, setWidth] = useState<number | null>(() => {
     try {
       const raw = sessionStorage.getItem(widthKey);
-      return raw ? clampWidth(Number(raw)) : null;
+      const saved = Number(raw);
+      return raw && Number.isFinite(saved) && saved > 0 ? clampWidth(saved) : null;
     } catch {
       return null;
     }
@@ -110,6 +113,10 @@ export default function AskAILauncher() {
   const panelRef = useRef<HTMLElement>(null);
   const launcherRef = useRef<HTMLButtonElement>(null);
   const [viewport, setViewport] = useState<{ top: number; height: number } | null>(null);
+  const close = useCallback(() => {
+    setOpen(false);
+    requestAnimationFrame(() => launcherRef.current?.focus({ preventScroll: true }));
+  }, [setOpen]);
 
   // Keep the phone composer above the software keyboard and browser chrome.
   useEffect(() => {
@@ -121,6 +128,11 @@ export default function AskAILauncher() {
     visual?.addEventListener("scroll", sync);
     window.addEventListener("resize", sync);
     const overflow = document.body.style.overflow;
+    // The portal is outside #root: only the report behind the mobile modal
+    // becomes inert. Its scroll position and component state stay intact.
+    const reportRoot = document.getElementById("root");
+    const wasInert = reportRoot?.inert ?? false;
+    if (reportRoot) reportRoot.inert = true;
     document.body.style.overflow = "hidden";
     panelRef.current?.focus({ preventScroll: true });
     return () => {
@@ -128,6 +140,7 @@ export default function AskAILauncher() {
       visual?.removeEventListener("scroll", sync);
       window.removeEventListener("resize", sync);
       document.body.style.overflow = overflow;
+      if (reportRoot) reportRoot.inert = wasInert;
     };
   }, [open, desktop]);
 
@@ -158,8 +171,7 @@ export default function AskAILauncher() {
     if (!open) return;
     const onKey = (e: KeyboardEvent) => {
       if (e.key === "Escape") {
-        setOpen(false);
-        requestAnimationFrame(() => launcherRef.current?.focus({ preventScroll: true }));
+        close();
       }
       if (e.key === "Tab" && !desktop) {
         const items = Array.from(panelRef.current?.querySelectorAll<HTMLElement>(
@@ -176,7 +188,7 @@ export default function AskAILauncher() {
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [open, setOpen, desktop]);
+  }, [open, close, desktop]);
 
   const current = width ?? (typeof window !== "undefined" ? defaultWidth() : 440);
 
@@ -245,11 +257,13 @@ export default function AskAILauncher() {
           className={cn(
             "fixed z-50 flex flex-col overflow-hidden bg-white outline-none",
             resizing && "select-none",
-            // Phone: the whole screen.
-            "max-sm:inset-0 max-sm:z-[70]",
-            // Desktop: docked right, under the top bar, to the bottom.
-            "sm:bottom-0 sm:right-0 sm:top-14 sm:border-l sm:border-slate-200/80 sm:shadow-[-16px_0_48px_-24px_rgba(15,23,42,0.28)]",
-            !resizing && "sm:animate-sheet-in-right motion-reduce:animate-none",
+            desktop
+              ? "bottom-0 right-0 top-14 border-l border-slate-200/80 shadow-[-16px_0_48px_-24px_rgba(15,23,42,0.28)]"
+              : "inset-0 z-[70] pl-[env(safe-area-inset-left)] pr-[env(safe-area-inset-right)]",
+            // Keep this class during resize so releasing the handle cannot
+            // replay the entrance. Both animations use transforms only.
+            desktop ? "animate-sheet-in-right" : "animate-sheet-in-bottom",
+            "motion-reduce:animate-none",
           )}
         >
           {/* The resize edge: a 10px strip on the left; a visible hairline
@@ -287,9 +301,9 @@ export default function AskAILauncher() {
               />
             </div>
           )}
-          <PanelBoundary onClose={() => setOpen(false)}>
-            <Suspense fallback={<PanelNotice onClose={() => setOpen(false)} />}>
-              <AskAIPanel onClose={() => setOpen(false)} />
+          <PanelBoundary onClose={close}>
+            <Suspense fallback={<PanelNotice onClose={close} />}>
+              <AskAIPanel onClose={close} />
             </Suspense>
           </PanelBoundary>
         </section>
