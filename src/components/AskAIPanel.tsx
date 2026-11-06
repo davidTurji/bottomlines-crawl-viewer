@@ -162,7 +162,7 @@ export default function AskAIPanel({ onClose }: { onClose: () => void }) {
         )}
       >
         <Mark className="h-7 w-7" />
-        <h2 className="min-w-0 flex-1 truncate text-[14px] font-medium text-slate-900">Ask AI</h2>
+        <h2 className="ask-label-enter min-w-0 flex-1 truncate text-[14px] font-medium text-slate-900">Ask AI</h2>
         {messages.length > 0 && !pending && (
           <IconButton label="New conversation" onClick={clear}>
             <SquarePen className="h-[17px] w-[17px]" strokeWidth={1.8} />
