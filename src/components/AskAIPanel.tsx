@@ -161,8 +161,8 @@ export default function AskAIPanel({ onClose }: { onClose: () => void }) {
           "max-sm:h-auto max-sm:py-2 max-sm:pt-[max(0.5rem,env(safe-area-inset-top))]",
         )}
       >
-        <Mark className="h-7 w-7" />
-        <h2 className="ask-label-enter min-w-0 flex-1 truncate text-[14px] font-medium text-slate-900">Ask AI</h2>
+        <Mark className="h-6 w-6" />
+        <h2 className="ask-label-enter min-w-0 flex-1 truncate text-[13px] font-medium text-slate-900">Bottom Lines AI</h2>
         {messages.length > 0 && !pending && (
           <IconButton label="New conversation" onClick={clear}>
             <SquarePen className="h-[17px] w-[17px]" strokeWidth={1.8} />
@@ -225,7 +225,7 @@ export default function AskAIPanel({ onClose }: { onClose: () => void }) {
             e.preventDefault();
             submit();
           }}
-          className="rounded-[26px] bg-[#f4f4f4] p-2 transition-shadow focus-within:shadow-[0_0_0_1px_rgba(0,0,0,0.06)]"
+          className="rounded-[22px] bg-[#f4f4f4] p-1 transition-shadow focus-within:shadow-[0_0_0_1px_rgba(0,0,0,0.06)]"
         >
           {attachment && <AttachmentChip attachment={attachment} onRemove={detach} />}
           <div className={cn("flex items-end gap-1.5", expandedComposer && "flex-wrap")}>
@@ -244,9 +244,9 @@ export default function AskAIPanel({ onClose }: { onClose: () => void }) {
               onClick={() => fileRef.current?.click()}
               aria-label="Attach a file"
               title={status?.files?.hint ?? "Attach a CSV, TSV, TXT or XLSX file"}
-              className="flex h-11 w-11 flex-shrink-0 items-center justify-center rounded-full text-slate-600 transition-colors hover:bg-slate-200/70 hover:text-slate-900"
+              className="flex h-11 w-11 sm:[@media(pointer:fine)]:h-9 sm:[@media(pointer:fine)]:w-9 flex-shrink-0 items-center justify-center rounded-full text-slate-600 transition-colors hover:bg-slate-200/70 hover:text-slate-900"
             >
-              <Plus className="h-[19px] w-[19px]" strokeWidth={2} />
+              <Plus className="h-[18px] w-[18px]" strokeWidth={2} />
             </button>
             <textarea
               ref={inputRef}
@@ -277,7 +277,7 @@ export default function AskAIPanel({ onClose }: { onClose: () => void }) {
               maxLength={400}
               placeholder={fileReady ? "Ask about this file" : "Ask about your report"}
               className={cn(
-                "min-h-[44px] min-w-0 flex-1 resize-none bg-transparent py-2.5 text-[16px] sm:text-[17px] leading-6 text-slate-900 outline-none placeholder:text-slate-500",
+                "min-h-[44px] sm:[@media(pointer:fine)]:min-h-[36px] min-w-0 flex-1 resize-none bg-transparent py-2.5 sm:[@media(pointer:fine)]:py-1.5 text-[16px] sm:[@media(pointer:fine)]:text-[14px] leading-6 text-slate-900 outline-none placeholder:text-slate-500",
                 expandedComposer && "order-first basis-full px-3",
               )}
             />
@@ -286,15 +286,15 @@ export default function AskAIPanel({ onClose }: { onClose: () => void }) {
             disabled={!canSend}
             aria-label="Send"
             className={cn(
-              "group flex h-11 w-11 flex-shrink-0 items-center justify-center rounded-full",
+              "group flex h-11 w-11 sm:[@media(pointer:fine)]:h-9 sm:[@media(pointer:fine)]:w-9 flex-shrink-0 items-center justify-center rounded-full",
               expandedComposer && "ml-auto",
             )}
           >
             <span className={cn(
-              "flex h-8 w-8 items-center justify-center rounded-full transition-colors sm:h-9 sm:w-9",
+              "flex h-7 w-7 items-center justify-center rounded-full transition-colors",
               canSend ? "bg-primary text-primary-foreground group-hover:bg-primary/90" : "bg-slate-300/80 text-white",
             )}>
-              <ArrowUp className="h-[17px] w-[17px]" strokeWidth={2.5} />
+              <ArrowUp className="h-4 w-4" strokeWidth={2} />
             </span>
           </button>
           </div>
@@ -382,7 +382,7 @@ function EmptyState({
 }) {
   return (
     <div className="flex min-h-full flex-col items-center justify-center px-5 py-8">
-      <h3 className="max-w-[420px] text-center text-[24px] font-semibold leading-tight tracking-tight text-slate-900">
+      <h3 className="max-w-[420px] text-center text-[21px] font-medium leading-tight tracking-tight text-slate-900">
         {withFile ? "What do you want to know about this file?" : "What do you want to know?"}
       </h3>
       {suggestions.length > 0 && (
@@ -441,7 +441,7 @@ function Message({
             </div>
           </div>
         )}
-        <div className="max-w-[90%] whitespace-pre-wrap [overflow-wrap:anywhere] rounded-[24px] bg-[#f4f4f4] px-5 py-3 text-[16px] sm:text-[17px] leading-[1.65] text-[#0d0d0d]">
+        <div className="max-w-[90%] whitespace-pre-wrap [overflow-wrap:anywhere] rounded-[18px] bg-[#f4f4f4] px-4 py-2.5 text-[15px] leading-[1.6] text-[#0d0d0d]">
           {message.content}
         </div>
       </div>
@@ -460,7 +460,7 @@ function Message({
               reveal={Boolean(message.reveal)}
               onDone={() => { setWritten(true); onRevealDone(message.id); }}
               onProgress={onProgress}
-              className={cn("[overflow-wrap:anywhere] text-[16px] sm:text-[17px] leading-[1.75] [&>div]:leading-[inherit]", message.refused ? "text-slate-600" : "text-[#0d0d0d]")}
+              className={cn("[overflow-wrap:anywhere] text-[15px] leading-[1.65] [&>div]:leading-[inherit]", message.refused ? "text-slate-600" : "text-[#0d0d0d]")}
             />
             {written && message.download && !message.refused && (
               <DownloadRow message={message} attachment={attachment} onDownload={onDownload} />
@@ -498,7 +498,7 @@ function AttachmentChip({ attachment, onRemove }: { attachment: AskAttachment; o
         ? attachment.error
         : `${format} · ${rows?.toLocaleString() ?? 0} rows · Checked`;
   return (
-    <div className="mb-1.5 max-w-[360px] rounded-2xl border border-slate-200/80 bg-white py-1.5 pl-2.5 pr-1" aria-live="polite">
+    <div className="mb-1.5 max-w-[360px] rounded-xl border border-slate-200/80 bg-white py-1 pl-2 pr-1" aria-live="polite">
     <div className="flex max-w-full items-center gap-2.5">
       {attachment.state === "reading" ? (
         <span className="flex h-9 w-9 flex-shrink-0 items-center justify-center rounded-lg bg-slate-100">
@@ -528,7 +528,7 @@ function AttachmentChip({ attachment, onRemove }: { attachment: AskAttachment; o
         onClick={onRemove}
         aria-label="Remove file"
         title="Remove file"
-        className="flex h-11 w-11 flex-shrink-0 items-center justify-center rounded-full text-slate-500 transition-colors hover:bg-slate-100 hover:text-slate-700"
+        className="flex h-11 w-11 sm:[@media(pointer:fine)]:h-9 sm:[@media(pointer:fine)]:w-9 flex-shrink-0 items-center justify-center rounded-full text-slate-500 transition-colors hover:bg-slate-100 hover:text-slate-700"
       >
         <X className="h-4 w-4" strokeWidth={2} />
       </button>
