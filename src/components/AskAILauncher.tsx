@@ -87,6 +87,29 @@ export default function AskAILauncher() {
   const [resizing, setResizing] = useState(false);
   const [, bump] = useState(0);
   const start = useRef<{ px: number; w: number } | null>(null);
+  const panelRef = useRef<HTMLElement>(null);
+  const launcherRef = useRef<HTMLButtonElement>(null);
+  const [viewport, setViewport] = useState<{ top: number; height: number } | null>(null);
+
+  // Keep the phone composer above the software keyboard and browser chrome.
+  useEffect(() => {
+    if (!open || desktop) return;
+    const visual = window.visualViewport;
+    const sync = () => setViewport({ top: visual?.offsetTop ?? 0, height: visual?.height ?? window.innerHeight });
+    sync();
+    visual?.addEventListener("resize", sync);
+    visual?.addEventListener("scroll", sync);
+    window.addEventListener("resize", sync);
+    const overflow = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+    panelRef.current?.focus({ preventScroll: true });
+    return () => {
+      visual?.removeEventListener("resize", sync);
+      visual?.removeEventListener("scroll", sync);
+      window.removeEventListener("resize", sync);
+      document.body.style.overflow = overflow;
+    };
+  }, [open, desktop]);
 
   const remember = useCallback(
     (w: number | null) => {
@@ -114,11 +137,26 @@ export default function AskAILauncher() {
   useEffect(() => {
     if (!open) return;
     const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape") setOpen(false);
+      if (e.key === "Escape") {
+        setOpen(false);
+        requestAnimationFrame(() => launcherRef.current?.focus({ preventScroll: true }));
+      }
+      if (e.key === "Tab" && !desktop) {
+        const items = Array.from(panelRef.current?.querySelectorAll<HTMLElement>(
+          'button:not(:disabled), a[href], textarea, summary, [tabindex="0"]',
+        ) ?? []).filter((el) => el.getClientRects().length > 0);
+        const first = items[0];
+        const last = items[items.length - 1];
+        if (e.shiftKey && (document.activeElement === first || document.activeElement === panelRef.current)) {
+          e.preventDefault(); last?.focus();
+        } else if (!e.shiftKey && (document.activeElement === last || document.activeElement === panelRef.current)) {
+          e.preventDefault(); first?.focus();
+        }
+      }
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [open, setOpen]);
+  }, [open, setOpen, desktop]);
 
   const current = width ?? (typeof window !== "undefined" ? defaultWidth() : 440);
 
@@ -162,6 +200,7 @@ export default function AskAILauncher() {
           both the header's minimise is the way back. */}
       {!open && (
         <button
+          ref={launcherRef}
           type="button"
           onClick={() => setOpen(true)}
           aria-label="Ask AI"
@@ -177,17 +216,20 @@ export default function AskAILauncher() {
 
       {open && (
         <section
+          ref={panelRef}
+          tabIndex={-1}
           role={desktop ? "complementary" : "dialog"}
+          aria-modal={desktop ? undefined : true}
           aria-label="Ask AI"
-          style={desktop ? { width: current } : undefined}
+          style={desktop ? { width: current } : { top: viewport?.top ?? 0, height: viewport?.height ?? "100dvh", bottom: "auto" }}
           className={cn(
-            "fixed z-50 flex flex-col overflow-hidden bg-white",
+            "fixed z-50 flex flex-col overflow-hidden bg-white outline-none",
             resizing && "select-none",
             // Phone: the whole screen.
-            "max-sm:inset-0",
+            "max-sm:inset-0 max-sm:z-[70]",
             // Desktop: docked right, under the top bar, to the bottom.
             "sm:bottom-0 sm:right-0 sm:top-14 sm:border-l sm:border-slate-200/80 sm:shadow-[-16px_0_48px_-24px_rgba(15,23,42,0.28)]",
-            !resizing && "sm:animate-sheet-in-right",
+            !resizing && "sm:animate-sheet-in-right motion-reduce:animate-none",
           )}
         >
           {/* The resize edge: a 10px strip on the left; a visible hairline
@@ -197,13 +239,25 @@ export default function AskAILauncher() {
               role="separator"
               aria-orientation="vertical"
               aria-label="Resize Ask AI"
+              tabIndex={0}
+              aria-valuemin={MIN_W}
+              aria-valuemax={clampWidth(window.innerWidth)}
+              aria-valuenow={current}
               title="Drag to resize, double-click to reset"
+              onKeyDown={(e) => {
+                if (e.key === "Home") { e.preventDefault(); resetWidth(); }
+                if (e.key !== "ArrowLeft" && e.key !== "ArrowRight") return;
+                e.preventDefault();
+                const next = clampWidth(current + (e.key === "ArrowLeft" ? 20 : -20));
+                setWidth(next);
+                remember(next);
+              }}
               onPointerDown={beginResize}
               onPointerMove={onResizeMove}
               onPointerUp={endResize}
               onPointerCancel={endResize}
               onDoubleClick={resetWidth}
-              className="group absolute inset-y-0 left-0 z-10 w-2.5 cursor-col-resize touch-none"
+              className="group absolute inset-y-0 left-0 z-10 w-2.5 cursor-col-resize touch-none focus-visible:bg-primary/10 focus-visible:outline-none"
             >
               <span
                 className={cn(

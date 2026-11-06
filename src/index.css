@@ -1704,6 +1704,18 @@ a.line-source-reference:hover { color:hsl(var(--primary)); text-decoration-color
   -moz-osx-font-smoothing: grayscale;
 }
 
+/* Report headings use a display face globally. Chat keeps one quiet type family. */
+.ask-font :is(h1, h2, h3, button, textarea) {
+  font-family: var(--font-chat) !important;
+}
+.ask-font :is(button, summary, a):focus-visible {
+  outline: 2px solid hsl(var(--primary));
+  outline-offset: 3px;
+}
+@media (hover: none) {
+  .ask-copy { opacity: 1; }
+}
+
 /* Three quiet dots while an answer is written and checked. Its own name:
    the legacy .animate-dot-bounce is hidden app-wide above. */
 @keyframes ask-dot {

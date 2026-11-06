@@ -43,11 +43,12 @@ interface LayoutProps {
  * one-time offer of it on a first visit.
  */
 export default function Layout(props: LayoutProps) {
+  const { token } = useReportScope();
   // The Ask AI state wraps the shell so the header button and the side
   // pane read one source (lib/askAi); it needs the router and the report
   // scope, both of which are already above this component.
   return (
-    <AskAiProvider>
+    <AskAiProvider key={token}>
       <LayoutShell {...props} />
     </AskAiProvider>
   );

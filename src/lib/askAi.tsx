@@ -14,11 +14,14 @@ import {
   api,
   ApiError,
   type AskAnswer,
+  type AskFileCheck,
   type AskPage,
   type AskStatus,
   type AskTurn,
 } from "./api";
 import { useReportScope } from "./reportScope";
+import { attachmentId } from "./askAttachment";
+export { isPastedList } from "./askAttachment";
 
 /**
  * ASK AI, THE STATE BEHIND THE PANEL.
@@ -32,8 +35,8 @@ import { useReportScope } from "./reportScope";
  * many questions remain or whether the budget is spent; it shows what
  * `/ask/status` and each `/ask` answer say, and a refusal from the server
  * is rendered as the server worded it. The transcript is the one thing kept
- * here, per page, in sessionStorage, so a reload or a walk to another page
- * and back finds the conversation where it was.
+ * here, per page, in memory only. Closing the panel or changing pages keeps
+ * the conversation; a reload, logout or new login starts fresh.
  */
 
 export type AskMessage = {
@@ -50,7 +53,66 @@ export type AskMessage = {
   local?: boolean;
   /** This answer's share of the report's quota, in percent. */
   usedPct?: number;
+  /** A question sent with a file: the file's name and rows, shown on the bubble. */
+  file?: { name: string; rows: number };
+  /** An answer about a file: which rows to offer as a download ("all",
+   *  "carrying" or a status), and the file it was about. */
+  download?: string;
+  downloadFile?: string;
+  downloadId?: string;
 };
+
+/**
+ * The file attached to the conversation. Kept in this tab's memory only,
+ * never in storage, and sent again with each question: the server reads it
+ * per request and stores nothing.
+ */
+export type AskAttachment = {
+  id?: string;
+  name: string;
+  size: number;
+  /** The file's bytes, base64. Empty until read. */
+  data: string;
+  state: "reading" | "ready" | "error";
+  /** The server's sentence when it would not read the file. */
+  error?: string;
+  check?: AskFileCheck;
+  /** Shown once on the question it was first sent with. */
+  sent?: boolean;
+};
+
+/** The download choices in words. The statuses are the server's labels
+ *  (services/ask_files.STATUS_LABELS); a check's own counts win. */
+export const DOWNLOAD_LABEL: Record<string, string> = {
+  all: "All rows",
+  carrying: "Rows that carry your line",
+  carries: "Carries your line",
+  partner: "Through a partner",
+  lost: "Lost this week",
+  inactive: "Inactive",
+  not_this_line: "Not this seller ID",
+  your_line: "One of your lines",
+  not_your_line: "Not one of your lines",
+  not_in_report: "Not in this report",
+  cannot_match: "Cannot match this id",
+  not_recognised: "Not recognised",
+};
+
+/** What the file picker accepts when the server has not said. */
+export const DEFAULT_ACCEPT = ".csv,.tsv,.txt,.xlsx";
+const DEFAULT_MAX_BYTES = 5 * 1024 * 1024;
+
+function readAsBase64(file: Blob): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => {
+      const url = String(reader.result ?? "");
+      resolve(url.slice(url.indexOf(",") + 1));
+    };
+    reader.onerror = () => reject(reader.error ?? new Error("read failed"));
+    reader.readAsDataURL(file);
+  });
+}
 
 export const ASK_PAGES: AskPage[] = ["overview", "discovery", "declarations", "sellers", "schain"];
 
@@ -89,40 +151,28 @@ type AskAiState = {
   status: AskStatus | null;
   open: boolean;
   setOpen: (next: boolean) => void;
+  finishReveal: (id: string) => void;
   page: AskPage;
   messages: AskMessage[];
+  draft: string;
+  setDraft: (text: string) => void;
   pending: boolean;
   /** Percent of the report's AI quota left, null until the status has loaded. */
   allowanceLeft: number | null;
   budgetExhausted: boolean;
   send: (question: string) => void;
   clear: () => void;
+  attachment: AskAttachment | null;
+  /** Attach a file (picker, drop or paste): read here, checked by the server. */
+  attach: (file: File) => void;
+  /** Attach pasted text as a list. */
+  attachText: (text: string) => void;
+  detach: () => void;
+  /** Save the checked file: "all", "carrying" or a status, as CSV or Excel. */
+  download: (only: string, format: "csv" | "xlsx") => Promise<void>;
 };
 
 const AskAiContext = createContext<AskAiState | null>(null);
-
-const storageKey = (token: string, page: AskPage) => `pf.ask.${token}.${page}`;
-
-function loadTranscript(token: string, page: AskPage): AskMessage[] {
-  try {
-    const raw = sessionStorage.getItem(storageKey(token, page));
-    const parsed = raw ? (JSON.parse(raw) as AskMessage[]) : [];
-    // A question that was in flight when the tab closed never got its
-    // answer; showing it as still thinking would be a lie that never ends.
-    // A stored answer is shown whole: the reveal is for the moment it lands.
-    return parsed.filter((m) => !m.pending).map((m) => ({ ...m, reveal: false }));
-  } catch {
-    return [];
-  }
-}
-
-function saveTranscript(token: string, page: AskPage, messages: AskMessage[]) {
-  try {
-    sessionStorage.setItem(storageKey(token, page), JSON.stringify(messages));
-  } catch {
-    /* storage full or blocked: the conversation lives for this view only */
-  }
-}
 
 const newId = () => `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
 
@@ -153,34 +203,56 @@ export function AskAiProvider({ children }: { children: ReactNode }) {
   const [open, setOpen] = useState(false);
   const [pending, setPending] = useState(false);
   const [transcripts, setTranscripts] = useState<Partial<Record<AskPage, AskMessage[]>>>({});
+  const [drafts, setDrafts] = useState<Partial<Record<AskPage, string>>>({});
+  const draft = drafts[page] ?? "";
+  const setDraft = useCallback((text: string) => {
+    setDrafts((previous) => ({ ...previous, [page]: text }));
+  }, [page]);
   const pendingRef = useRef(false);
+  const [attachment, setAttachment] = useState<AskAttachment | null>(null);
+  // The newest attach wins: a slow check of a file the reader has since
+  // replaced or removed must not land.
+  const attachSeq = useRef(0);
 
-  // One status read per report. 503 (not offered) and any other failure
-  // both hide the button: a control the server will refuse is worse than
-  // no control. A 401 is the gate's business and locks the page itself.
+  // Refresh on opening/focus and while visible so operator changes reach
+  // already-open reports. Every backend endpoint independently enforces access.
   useEffect(() => {
     if (!token) return;
     let alive = true;
-    api
-      .askStatus(token)
-      .then((s) => {
-        if (!alive) return;
-        setStatus(s);
-        setAvailable(Boolean(s?.enabled));
-      })
-      .catch(() => {
-        if (alive) setAvailable(false);
-      });
+    let reading = false;
+    const refresh = async () => {
+      if (reading || document.visibilityState === "hidden") return;
+      reading = true;
+      try {
+        const next = await api.askStatus(token);
+        if (alive) {
+          setStatus(next);
+          setAvailable(Boolean(next?.enabled));
+          if (!next?.enabled) setOpen(false);
+        }
+      } catch {
+        if (alive) { setAvailable(false); setOpen(false); }
+      } finally { reading = false; }
+    };
+    void refresh();
+    window.addEventListener("focus", refresh);
+    document.addEventListener("visibilitychange", refresh);
+    const timer = window.setInterval(refresh, 30_000);
     return () => {
       alive = false;
+      window.clearInterval(timer);
+      window.removeEventListener("focus", refresh);
+      document.removeEventListener("visibilitychange", refresh);
     };
-  }, [token]);
+  }, [token, open]);
 
-  // Transcripts load lazily per page, once.
+  // Earlier versions stored chats in this tab. Retire only this report's
+  // legacy keys; new messages and files never go into browser storage.
   useEffect(() => {
-    if (!token) return;
-    setTranscripts((t) => (t[page] ? t : { ...t, [page]: loadTranscript(token, page) }));
-  }, [token, page]);
+    for (const reportPage of ASK_PAGES) {
+      try { sessionStorage.removeItem(`pf.ask.${token}.${reportPage}`); } catch { /* storage unavailable */ }
+    }
+  }, [token]);
 
   const messages = useMemo(() => transcripts[page] ?? [], [transcripts, page]);
 
@@ -188,12 +260,23 @@ export function AskAiProvider({ children }: { children: ReactNode }) {
     (forPage: AskPage, fn: (prev: AskMessage[]) => AskMessage[]) => {
       setTranscripts((t) => {
         const next = fn(t[forPage] ?? []);
-        saveTranscript(token, forPage, next);
         return { ...t, [forPage]: next };
       });
     },
-    [token],
+    [],
   );
+
+  const finishReveal = useCallback((id: string) => {
+    setTranscripts((previous) => {
+      for (const reportPage of ASK_PAGES) {
+        const thread = previous[reportPage];
+        if (thread?.some((message) => message.id === id && message.reveal)) {
+          return { ...previous, [reportPage]: thread.map((message) => message.id === id ? { ...message, reveal: false } : message) };
+        }
+      }
+      return previous;
+    });
+  }, []);
 
   const applyAllowance = useCallback((leftPct?: number, exhausted?: boolean) => {
     if (leftPct === undefined && exhausted === undefined) return;
@@ -208,9 +291,65 @@ export function AskAiProvider({ children }: { children: ReactNode }) {
     );
   }, []);
 
+  const attach = useCallback(
+    (file: File) => {
+      if (!token) return;
+      const seq = ++attachSeq.current;
+      const accept = (status?.files?.accept ?? DEFAULT_ACCEPT).split(",");
+      const maxBytes = status?.files?.max_bytes ?? DEFAULT_MAX_BYTES;
+      const name = file.name || "file";
+      const ext = name.includes(".") ? `.${name.split(".").pop()!.toLowerCase()}` : "";
+      const fail = (error: string) =>
+        setAttachment({ name, size: file.size, data: "", state: "error", error });
+      if (ext && !accept.includes(ext)) {
+        fail("Ask AI reads .csv, .tsv, .txt and .xlsx files.");
+        return;
+      }
+      if (file.size > maxBytes) {
+        fail("The file is larger than 5 MB. Ask AI reads files up to 5 MB.");
+        return;
+      }
+      setAttachment({ name, size: file.size, data: "", state: "reading" });
+      Promise.all([readAsBase64(file), attachmentId(file)])
+        .then(([data, id]) => {
+          if (seq !== attachSeq.current) return;
+          setAttachment({ id, name, size: file.size, data, state: "reading" });
+          return api.askFile(token, { name, data }).then((check) => {
+            if (seq !== attachSeq.current) return;
+            setAttachment({ id, name, size: file.size, data, state: "ready", check });
+          });
+        })
+        .catch((err: unknown) => {
+          if (seq !== attachSeq.current) return;
+          fail(refusalDetail(err)?.message || "The file could not be read. Try again.");
+        });
+    },
+    [token, status],
+  );
+
+  const attachText = useCallback(
+    (text: string) => attach(new File([text], "Pasted list.txt", { type: "text/plain" })),
+    [attach],
+  );
+
+  const detach = useCallback(() => {
+    attachSeq.current += 1;
+    setAttachment(null);
+  }, []);
+
+  const download = useCallback(
+    async (only: string, format: "csv" | "xlsx") => {
+      if (!token || !attachment || attachment.state !== "ready") return;
+      await api.askFileDownload(token, { name: attachment.name, data: attachment.data, only, format });
+    },
+    [token, attachment],
+  );
+
   const send = useCallback(
     (question: string) => {
-      const clean = question.trim();
+      if (attachment && attachment.state !== "ready") return;
+      const withFile = attachment?.state === "ready" ? attachment : null;
+      const clean = question.trim() || (withFile ? "Check this file against my report" : "");
       if (!clean || pendingRef.current || !token) return;
       const forPage = page;
       const prior = transcripts[forPage] ?? [];
@@ -224,13 +363,23 @@ export function AskAiProvider({ children }: { children: ReactNode }) {
       const botId = newId();
       pendingRef.current = true;
       setPending(true);
+      const fileNote =
+        withFile && !withFile.sent && withFile.check
+          ? { name: withFile.name, rows: withFile.check.file.rows }
+          : undefined;
+      if (withFile && !withFile.sent) setAttachment({ ...withFile, sent: true });
       update(forPage, (prev) => [
         ...prev,
-        { id: userId, role: "user", content: clean },
+        { id: userId, role: "user", content: clean, ...(fileNote ? { file: fileNote } : {}) },
         { id: botId, role: "assistant", content: "", pending: true },
       ]);
       api
-        .ask(token, { page: forPage, question: clean, history })
+        .ask(token, {
+          page: forPage,
+          question: clean,
+          history,
+          ...(withFile ? { attachment: { name: withFile.name, data: withFile.data } } : {}),
+        })
         .then((res: AskAnswer) => {
           update(forPage, (prev) =>
             prev.map((m) =>
@@ -243,6 +392,9 @@ export function AskAiProvider({ children }: { children: ReactNode }) {
                     reveal: true,
                     local: res.local,
                     usedPct: res.counted ? res.used_pct : 0,
+                    ...(withFile && res.download
+                      ? { download: res.download, downloadFile: withFile.name, downloadId: withFile.id }
+                      : {}),
                   }
                 : m,
             ),
@@ -262,11 +414,14 @@ export function AskAiProvider({ children }: { children: ReactNode }) {
           setPending(false);
         });
     },
-    [token, page, transcripts, update, applyAllowance],
+    [token, page, transcripts, update, applyAllowance, attachment],
   );
 
   const clear = useCallback(() => {
     update(page, () => []);
+    setDrafts((previous) => ({ ...previous, [page]: "" }));
+    attachSeq.current += 1;
+    setAttachment(null);
   }, [page, update]);
 
   const allowanceLeft = status ? status.allowance_left_pct ?? null : null;
@@ -277,15 +432,24 @@ export function AskAiProvider({ children }: { children: ReactNode }) {
       status,
       open,
       setOpen,
+      finishReveal,
       page,
       messages,
+      draft,
+      setDraft,
       pending,
       allowanceLeft,
       budgetExhausted: Boolean(status?.budget_exhausted),
       send,
       clear,
+      attachment,
+      attach,
+      attachText,
+      detach,
+      download,
     }),
-    [available, status, open, page, messages, pending, allowanceLeft, send, clear],
+    [available, status, open, finishReveal, page, messages, draft, setDraft, pending, allowanceLeft, send, clear, attachment, attach,
+     attachText, detach, download],
   );
 
   return <AskAiContext.Provider value={value}>{children}</AskAiContext.Provider>;

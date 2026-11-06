@@ -36,9 +36,10 @@ export function RevealedMarkdown({
   const [writing, setWriting] = useState(reveal);
 
   useEffect(() => {
-    if (!reveal) {
+    if (!reveal || window.matchMedia("(prefers-reduced-motion: reduce)").matches) {
       setCount(Number.MAX_SAFE_INTEGER);
       setWriting(false);
+      onDone?.();
       return;
     }
     // Split keeping the whitespace, so joining the prefix reproduces the

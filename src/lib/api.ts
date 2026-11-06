@@ -1171,13 +1171,55 @@ export const api = {
    */
   ask: async (
     token: string,
-    body: { page: AskPage; question: string; history: AskTurn[] },
+    body: { page: AskPage; question: string; history: AskTurn[]; attachment?: AskAttachmentIn },
   ): Promise<AskAnswer> => {
     if (MOCK) {
       const { mockAsk } = await import("./mockData");
       return mockAsk(body);
     }
     return req<AskAnswer>("POST", `/v1/viewer/${token}/ask`, body);
+  },
+  /**
+   * Check a file the reader attached against this report: counts, the
+   * first answer and the downloads on offer. Free (no model, no quota) and
+   * nothing is stored: the server reads the file for this request only.
+   * A file it will not read arrives as a 400 whose detail carries the one
+   * sentence to show.
+   */
+  askFile: async (token: string, body: AskAttachmentIn): Promise<AskFileCheck> => {
+    if (MOCK) {
+      const { mockAskFile } = await import("./mockData");
+      return mockAskFile(body);
+    }
+    return req<AskFileCheck>("POST", `/v1/viewer/${token}/ask/file`, body);
+  },
+  /** The checked file as CSV or Excel, handed to the browser to save. */
+  askFileDownload: async (
+    token: string,
+    body: AskAttachmentIn & { only: string; format: "csv" | "xlsx" },
+  ): Promise<void> => {
+    if (MOCK) {
+      const { mockAskFileDownload } = await import("./mockData");
+      const { blob, name } = mockAskFileDownload(body);
+      downloadBlob(blob, name);
+      return;
+    }
+    await whenSignedIn();
+    const res = await fetch(`${BASE}/v1/viewer/${token}/ask/file/download`, {
+      method: "POST",
+      credentials: "include",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    });
+    if (!res.ok) {
+      const detail = await res.text().catch(() => "");
+      throw new ApiError(res.status, detail || `download failed: ${res.status}`);
+    }
+    const blob = await res.blob();
+    const name =
+      /filename="?([^";]+)"?/.exec(res.headers.get("Content-Disposition") ?? "")?.[1] ??
+      `checked.${body.format}`;
+    downloadBlob(blob, name);
   },
 };
 
@@ -2456,6 +2498,39 @@ export type AskStatus = {
   budget_exhausted: boolean;
   suggestions: Record<AskPage, string[]>;
   disclaimer: string;
+  /** What the panel accepts as an attachment. Absent on an older API. */
+  files?: {
+    /** Comma-separated extensions, for the file picker. */
+    accept: string;
+    max_bytes: number;
+    max_rows: number;
+    hint: string;
+    suggestions: string[];
+  };
+};
+
+/** A file as the panel sends it: its name and its bytes in base64. */
+export type AskAttachmentIn = { name: string; data: string };
+
+/** The server's check of an attached file against this report. */
+export type AskFileCheck = {
+  file: {
+    name: string;
+    kind: string;
+    sheet: string | null;
+    rows: number;
+    /** The columns the server read, and as what. Every other column is never read. */
+    columns: { letter: string; name: string; read_as: string }[];
+    /** Every limit applied (other sheets, columns past the 50th, cut cells). */
+    notes: string[];
+  };
+  counts: { status: string; label: string; rows: number }[];
+  /** The first answer: what was read and what was found, in counts. */
+  summary: string;
+  /** The downloads on offer: "all", "carrying" and the statuses with rows. */
+  downloads: string[];
+  suggestions: string[];
+  crawl_date: string | null;
 };
 
 /** One answer, already checked by the server. */
@@ -2472,6 +2547,9 @@ export type AskAnswer = {
   used_pct: number;
   allowance_left_pct: number;
   budget_exhausted: boolean;
+  /** With a file attached: which rows the panel offers to download under
+   *  the answer ("" for none). Always one of the file check's downloads. */
+  download?: string;
 };
 
 // ---- schain export ----

@@ -45,6 +45,8 @@ import type {
   FoundInFilter,
   PlatformFilter,
   AskAnswer,
+  AskAttachmentIn,
+  AskFileCheck,
   AskPage,
   AskStatus,
   AskTurn,
@@ -3076,7 +3078,136 @@ export function mockAskStatus(): AskStatus {
     budget_exhausted: mockAskLeft <= 0,
     suggestions: MOCK_ASK_SUGGESTIONS,
     disclaimer: MOCK_ASK_DISCLAIMER,
+    files: {
+      accept: ".csv,.tsv,.txt,.xlsx",
+      max_bytes: 5 * 1024 * 1024,
+      max_rows: 50_000,
+      hint: "Attach a CSV, TSV, TXT or XLSX of app ids, store links, domains or seller IDs. Up to 5 MB and 50,000 rows. Files are not stored.",
+      suggestions: MOCK_FILE_SUGGESTIONS,
+    },
   };
+}
+
+const MOCK_FILE_SUGGESTIONS = [
+  "Which of these carry my lines?",
+  "Which of these are not in my report?",
+  "Add the store link to each app",
+  "Which of these lost my lines this week?",
+];
+
+const MOCK_FILE_LABELS: Record<string, string> = {
+  carries: "Carries your line",
+  partner: "Through a partner",
+  not_in_report: "Not in this report",
+};
+
+/** The mock's file check: every third row "not in this report", every
+ *  seventh "through a partner", the rest carrying. Stands in for the
+ *  server's check so the panel can be shown without a backend. */
+function mockFileRows(body: AskAttachmentIn): { header: string[]; rows: string[][]; status: string[] } {
+  let text = "";
+  try {
+    text = /\.xlsx$/i.test(body.name) ? "" : atob(body.data);
+  } catch {
+    text = "";
+  }
+  let lines = text.split(/\r?\n/).filter((l) => l.trim());
+  if (!lines.length) lines = Array.from({ length: 24 }, (_, i) => `com.madeupmedia.app${i + 1}`);
+  const split = (l: string) => l.split(/[,\t;]/).map((c) => c.trim());
+  const first = split(lines[0]);
+  const hasHeader = !first.some((c) => c.includes("."));
+  const header = hasHeader ? first : first.map((_, i) => `Column ${String.fromCharCode(65 + i)}`);
+  const rows = (hasHeader ? lines.slice(1) : lines).map(split);
+  const status = rows.map((_, i) => (i % 3 === 2 ? "not_in_report" : i % 7 === 6 ? "partner" : "carries"));
+  return { header, rows, status };
+}
+
+function mockCheck(body: AskAttachmentIn): AskFileCheck {
+  const { rows, status } = mockFileRows(body);
+  const tally = new Map<string, number>();
+  status.forEach((s) => tally.set(s, (tally.get(s) ?? 0) + 1));
+  const counts = ["carries", "partner", "not_in_report"]
+    .filter((s) => tally.get(s))
+    .map((s) => ({ status: s, label: MOCK_FILE_LABELS[s], rows: tally.get(s)! }));
+  const phrase: Record<string, string> = {
+    carries: "carry your line",
+    partner: "carry it only through an inventory partner",
+    not_in_report: "are not in this report",
+  };
+  return {
+    file: {
+      name: body.name,
+      kind: body.name.split(".").pop() ?? "txt",
+      sheet: null,
+      rows: rows.length,
+      columns: [{ letter: "A", name: "Column A", read_as: "app ids" }],
+      notes: [],
+    },
+    counts,
+    summary:
+      `I checked **${rows.length} rows** against this report, reading column A as app ids.\n\n` +
+      counts.map((c) => `- **${c.rows}** ${phrase[c.status]}`).join("\n"),
+    downloads: ["all", "carrying", ...counts.map((c) => c.status)],
+    suggestions: MOCK_FILE_SUGGESTIONS,
+    crawl_date: "2026-11-01",
+  };
+}
+
+export async function mockAskFile(body: AskAttachmentIn): Promise<AskFileCheck> {
+  await new Promise((r) => setTimeout(r, 700));
+  return mockCheck(body);
+}
+
+export function mockAskFileDownload(body: AskAttachmentIn & { only: string; format: "csv" | "xlsx" }): {
+  blob: Blob;
+  name: string;
+} {
+  const { header, rows, status } = mockFileRows(body);
+  const keep = rows
+    .map((r, i) => ({ r, s: status[i] }))
+    .filter(({ s }) =>
+      body.only === "all" ? true : body.only === "carrying" ? s === "carries" || s === "partner" : s === body.only,
+    );
+  const quote = (c: string) => (/[",\n]/.test(c) ? `"${c.replace(/"/g, '""')}"` : c);
+  const csv = [
+    [...header, "Status", "Store link"].map(quote).join(","),
+    ...keep.map(({ r, s }) =>
+      [...r, MOCK_FILE_LABELS[s], s === "not_in_report" ? "" : `https://play.google.com/store/apps/details?id=${r[0]}`]
+        .map(quote)
+        .join(","),
+    ),
+  ].join("\r\n");
+  const stem = body.name.replace(/\.[^.]+$/, "");
+  return { blob: new Blob(["\ufeff" + csv], { type: "text/csv" }), name: `${stem}-checked.csv` };
+}
+
+/** The mock's free answers about an attached file. */
+function mockFileAnswer(question: string, body: AskAttachmentIn): { answer: string; download: string } | null {
+  const q = question.toLowerCase();
+  const check = mockCheck(body);
+  const n = (s: string) => check.counts.find((c) => c.status === s)?.rows ?? 0;
+  if (q.startsWith("check this file")) return { answer: check.summary, download: "all" };
+  if (q.includes("not in my report")) {
+    return {
+      answer: `**${n("not_in_report")} of ${check.file.rows} rows** are not in this report. Their files did not carry your lines in this crawl, or they were not read; the report cannot tell which. They are in the download below.`,
+      download: "not_in_report",
+    };
+  }
+  if (q.includes("carry my line")) {
+    return {
+      answer: `**${n("carries")} of ${check.file.rows} rows** carry one of your lines in their own file as of the crawl on 1 Nov 2026.\n\n**${n("partner")}** carry it only through an inventory partner's ads.txt, which covers only inventory sold through that partner, with the partner named in the bid.`,
+      download: "carrying",
+    };
+  }
+  if (q.includes("store link") || q.includes("store url")) {
+    const links = n("carries") + n("partner");
+    return {
+      answer: `**${links} of ${check.file.rows} rows** now have a store link, in the Store link column of the download below. Links are added only for apps that are in this report; the other rows are left empty.`,
+      download: "all",
+    };
+  }
+  if (q.includes("lost")) return { answer: "None of the rows lost your lines this week.", download: "all" };
+  return null;
 }
 
 /** Canned answers, keyed by the words a question must contain. */
@@ -3151,7 +3282,23 @@ export async function mockAsk(body: {
   page: AskPage;
   question: string;
   history: AskTurn[];
+  attachment?: AskAttachmentIn;
 }): Promise<AskAnswer> {
+  const fileAnswer = body.attachment ? mockFileAnswer(body.question, body.attachment) : null;
+  if (fileAnswer) {
+    await new Promise((r) => setTimeout(r, 450));
+    return {
+      answerable: true,
+      answer: fileAnswer.answer,
+      reason: "",
+      counted: false,
+      local: true,
+      used_pct: 0,
+      allowance_left_pct: mockAskLeft,
+      budget_exhausted: mockAskLeft <= 0,
+      download: fileAnswer.download,
+    };
+  }
   const answer = mockAskAnswer(body.question);
   // Answers the report gives by itself: free.
   if (answer !== null) {
