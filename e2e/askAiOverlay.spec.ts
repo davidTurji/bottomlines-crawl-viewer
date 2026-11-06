@@ -20,7 +20,7 @@ test('desktop overlay never moves the report or replays its entrance after resiz
   await page.getByRole('button', { name: 'Ask AI', exact: true }).click();
   const panel = page.getByRole('complementary', { name: 'Ask AI', exact: true });
   await expect(panel.getByRole('textbox', { name: 'Message Ask AI' })).toBeVisible();
-  await expect(panel).toHaveCSS('transform', 'matrix(1, 0, 0, 1, 0, 0)');
+  await expect.poll(() => panel.evaluate(el => el.getAnimations().every(a => a.playState === 'finished'))).toBe(true);
   expect(await main.boundingBox()).toEqual(before);
   const start = await panel.evaluate(el => el.getAnimations()[0]?.startTime);
   const edge = await page.getByRole('separator', { name: 'Resize Ask AI' }).boundingBox();
