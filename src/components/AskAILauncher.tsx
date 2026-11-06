@@ -61,9 +61,10 @@ class PanelBoundary extends Component<{ children: ReactNode; onClose: () => void
 
 const MIN_W = 340;
 const MAX_W_FRACTION = 0.6;
-// Phones remain fullscreen in landscape; a short mouse-driven desktop
-// window can still use the docked panel.
-const DESKTOP = "(min-width: 640px) and (min-height: 500px), (min-width: 640px) and (pointer: fine)";
+// Touch devices stay fullscreen in either orientation, so the visual
+// viewport/keyboard handling also applies to tablets. Mouse-driven desktop
+// windows retain the docked panel once there is enough horizontal room.
+const DESKTOP = "(min-width: 640px) and (pointer: fine)";
 
 /** A third of the window, within sensible bounds. */
 function defaultWidth(): number {

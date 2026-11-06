@@ -3,13 +3,14 @@ import { mockAskStatus } from '../src/lib/mockData';
 import { installFakeApi, TOKEN } from './fakeApi';
 
 async function openReport(page: Page) {
-  await page.addInitScript(() => {
-    localStorage.setItem('pf_report_walkthrough_v1', JSON.stringify({ status: 'completed', stepId: null, open: false }));
-  });
   await installFakeApi(page);
+  // Settle the separate delayed walkthrough before measuring modal focus.
+  const declineTour = page.getByRole('button', { name: 'No thanks', exact: true });
+  await page.removeLocatorHandler(declineTour);
   await page.route(`**/api/v1/viewer/${TOKEN}/ask/status`, route => route.fulfill({ json: mockAskStatus() }));
   await page.goto(`/crawl-report/${TOKEN}`);
   await expect(page.getByRole('heading', { name: 'Your weekly crawl' })).toBeVisible();
+  await declineTour.click({ timeout: 15_000 });
 }
 
 test('desktop overlay never moves the report or replays its entrance after resizing', async ({ page }) => {
@@ -34,7 +35,7 @@ test('desktop overlay never moves the report or replays its entrance after resiz
   await expect(page.getByRole('button', { name: 'Ask AI', exact: true })).toBeFocused();
 });
 
-for (const viewport of [{ width: 320, height: 568 }, { width: 844, height: 390 }]) {
+for (const viewport of [{ width: 320, height: 568 }, { width: 844, height: 390 }, { width: 768, height: 1024 }]) {
   test.describe(`touch ${viewport.width}x${viewport.height}`, () => {
     test.use({ viewport, isMobile: true, hasTouch: true });
     test('fullscreen chat isolates the background and restores it on close', async ({ page }) => {
