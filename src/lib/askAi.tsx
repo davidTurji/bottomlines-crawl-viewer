@@ -173,6 +173,8 @@ type AskAiState = {
 };
 
 const AskAiContext = createContext<AskAiState | null>(null);
+// The report shell needs only this flag, not every keystroke/message/quota update.
+const AskAiAvailableContext = createContext(false);
 
 const newId = () => `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
 
@@ -452,7 +454,15 @@ export function AskAiProvider({ children }: { children: ReactNode }) {
      attachText, detach, download],
   );
 
-  return <AskAiContext.Provider value={value}>{children}</AskAiContext.Provider>;
+  return (
+    <AskAiAvailableContext.Provider value={available}>
+      <AskAiContext.Provider value={value}>{children}</AskAiContext.Provider>
+    </AskAiAvailableContext.Provider>
+  );
+}
+
+export function useAskAiAvailable(): boolean {
+  return useContext(AskAiAvailableContext);
 }
 
 export function useAskAi(): AskAiState {

@@ -1,11 +1,31 @@
 import { Sparkles } from "lucide-react";
-import { useCallback, useEffect, useRef, useState, type PointerEvent as ReactPointerEvent } from "react";
+import { Component, lazy, Suspense, useCallback, useEffect, useRef, useState, type PointerEvent as ReactPointerEvent, type ReactNode } from "react";
 import { createPortal } from "react-dom";
 
-import AskAIPanel from "@/components/AskAIPanel";
 import { useAskAi } from "@/lib/askAi";
 import { useReportScope } from "@/lib/reportScope";
 import { cn } from "@/lib/utils";
+
+// The report does not download or parse the chat UI until it is opened.
+const AskAIPanel = lazy(() => import("@/components/AskAIPanel"));
+
+function PanelNotice({ onClose, failed = false }: { onClose: () => void; failed?: boolean }) {
+  return (
+    <div className="p-4 text-sm text-slate-500">
+      <p role="status">{failed ? "Ask AI could not open. Refresh the page to try again." : "Opening Ask AI…"}</p>
+      <button type="button" onClick={onClose} className="mt-3 min-h-11 rounded-lg border px-4 text-slate-800">Close Ask AI</button>
+    </div>
+  );
+}
+
+// A failed chat chunk must never unmount the report or trap mobile readers.
+class PanelBoundary extends Component<{ children: ReactNode; onClose: () => void }, { failed: boolean }> {
+  state = { failed: false };
+  static getDerivedStateFromError() { return { failed: true }; }
+  render() {
+    return this.state.failed ? <PanelNotice failed onClose={this.props.onClose} /> : this.props.children;
+  }
+}
 
 /**
  * ASK AI AS A DOCKED SIDE PANEL.
@@ -267,7 +287,11 @@ export default function AskAILauncher() {
               />
             </div>
           )}
-          <AskAIPanel onClose={() => setOpen(false)} />
+          <PanelBoundary onClose={() => setOpen(false)}>
+            <Suspense fallback={<PanelNotice onClose={() => setOpen(false)} />}>
+              <AskAIPanel onClose={() => setOpen(false)} />
+            </Suspense>
+          </PanelBoundary>
         </section>
       )}
     </>,

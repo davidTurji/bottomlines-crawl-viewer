@@ -4,7 +4,7 @@ import { useReportScope } from "@/lib/reportScope";
 import { useLocation } from "react-router-dom";
 import { AppSidebar } from "./AppSidebar";
 import AskAILauncher from "./AskAILauncher";
-import { AskAiProvider, useAskAi } from "@/lib/askAi";
+import { AskAiProvider, useAskAiAvailable } from "@/lib/askAi";
 import {
   SidebarProvider,
   SidebarInset,
@@ -55,7 +55,7 @@ export default function Layout(props: LayoutProps) {
 }
 
 function LayoutShell({ children, email }: LayoutProps) {
-  const ask = useAskAi();
+  const askAvailable = useAskAiAvailable();
   /* THE IDENTITY SHOWN IS THE ONE THAT SIGNED IN, or nothing. The prop
      used to default to a placeholder address, so every report claimed its
      reader was you@publisherstudios.com -- a fabricated fact on a screen
@@ -220,7 +220,7 @@ function LayoutShell({ children, email }: LayoutProps) {
               aria-hidden={!showBackToTop}
               tabIndex={showBackToTop ? 0 : -1}
               className={`absolute right-4 z-30 flex items-center gap-1.5 rounded-full border border-primary/25 bg-white/95 p-2.5 text-[0.8125rem] font-medium text-primary shadow-lg backdrop-blur-sm transition-all duration-200 hover:bg-primary hover:text-primary-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring sm:right-6 sm:py-2 sm:pl-3 sm:pr-3.5 ${
-                ask.available
+                askAvailable
                   ? "bottom-[calc(max(1.25rem,env(safe-area-inset-bottom))+3.75rem)] sm:bottom-[5.25rem]"
                   : "bottom-[max(1.25rem,env(safe-area-inset-bottom))]"
               } ${
