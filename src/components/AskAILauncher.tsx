@@ -115,6 +115,8 @@ export default function AskAILauncher() {
   const launcherRef = useRef<HTMLButtonElement>(null);
   const [viewport, setViewport] = useState<{ top: number; height: number } | null>(null);
   const close = useCallback(() => {
+    start.current = null;
+    setResizing(false);
     setOpen(false);
     requestAnimationFrame(() => launcherRef.current?.focus({ preventScroll: true }));
   }, [setOpen]);

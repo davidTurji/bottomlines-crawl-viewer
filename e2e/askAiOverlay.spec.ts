@@ -31,6 +31,18 @@ test('desktop overlay never moves the report or replays its entrance after resiz
   await page.mouse.up();
   expect(await panel.evaluate(el => el.getAnimations()[0]?.startTime)).toBe(start);
   expect(await main.boundingBox()).toEqual(before);
+  // Closing during a drag must not leave a stale resize active on reopen.
+  const resizedEdge = await page.getByRole('separator', { name: 'Resize Ask AI' }).boundingBox();
+  await page.mouse.move(resizedEdge!.x + 2, resizedEdge!.y + 100);
+  await page.mouse.down();
+  await page.keyboard.press('Escape');
+  await page.mouse.up();
+  await page.getByRole('button', { name: 'Ask AI', exact: true }).click();
+  await expect.poll(() => panel.evaluate(el => el.getAnimations().every(a => a.playState === 'finished'))).toBe(true);
+  const reopened = await panel.boundingBox();
+  const reopenedEdge = await page.getByRole('separator', { name: 'Resize Ask AI' }).boundingBox();
+  await page.mouse.move(reopenedEdge!.x + 6, reopenedEdge!.y + 100);
+  expect((await panel.boundingBox())!.width).toBe(reopened!.width);
   await panel.getByRole('button', { name: 'Close', exact: true }).click();
   await expect(page.getByRole('button', { name: 'Ask AI', exact: true })).toBeFocused();
 });
