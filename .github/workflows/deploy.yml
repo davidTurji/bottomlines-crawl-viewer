@@ -42,6 +42,9 @@ permissions:
   contents: read
 
 jobs:
+  container:
+    uses: ./.github/workflows/container-smoke.yml
+
   security:
     uses: ./.github/workflows/security.yml
 
@@ -53,7 +56,7 @@ jobs:
   deploy:
     if: github.ref == 'refs/heads/main' && github.repository == 'davidTurji/bottomlines-crawl-viewer'
     environment: production
-    needs: [checks, security]
+    needs: [checks, security, container]
     runs-on: ubuntu-latest
     permissions:
       contents: read

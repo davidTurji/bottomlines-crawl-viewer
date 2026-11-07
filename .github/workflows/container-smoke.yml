@@ -6,8 +6,8 @@ on:
 permissions:
   contents: read
 concurrency:
-  group: container-smoke-${{ github.ref }}
-  cancel-in-progress: true
+  group: container-smoke-${{ github.workflow }}-${{ github.ref }}-${{ github.event_name }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 jobs:
   smoke:
     runs-on: ubuntu-latest
