@@ -1,5 +1,5 @@
 import { ArrowUp, Check, Copy, Download, FileSpreadsheet, Plus, Sparkles, SquarePen, X } from "lucide-react";
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useId, useRef, useState } from "react";
 
 import { copyText } from "@/components/PublisherLinks";
 import { RevealedMarkdown } from "@/components/RevealedMarkdown";
@@ -50,27 +50,25 @@ export default function AskAIPanel({ onClose }: { onClose: () => void }) {
   const fileRef = useRef<HTMLInputElement>(null);
   const dragDepth = useRef(0);
   const following = useRef(true);
-  const scrollSize = useRef({ width: 0, height: 0 });
+  const scrollSize = useRef({ width: 0, height: 0, contentHeight: 0 });
   const expandedComposer = value.includes("\n") || value.length > 80;
 
   // Follow the conversation as it grows, and as an answer is written out.
-  const follow = () => {
+  const follow = useCallback(() => {
     const el = scrollRef.current;
-    if (el && following.current) el.scrollTo({ top: el.scrollHeight });
-  };
+    if (!el) return;
+    scrollSize.current = { width: el.clientWidth, height: el.clientHeight, contentHeight: el.scrollHeight };
+    if (following.current) el.scrollTo({ top: el.scrollHeight });
+  }, []);
   useEffect(() => {
     const el = scrollRef.current;
-    if (el && following.current) el.scrollTo({ top: el.scrollHeight });
     if (!el) return;
-    scrollSize.current = { width: el.clientWidth, height: el.clientHeight };
-    const observer = new ResizeObserver(() => {
-      scrollSize.current = { width: el.clientWidth, height: el.clientHeight };
-      if (following.current) el.scrollTo({ top: el.scrollHeight });
-    });
+    follow();
+    const observer = new ResizeObserver(follow);
     observer.observe(el);
     if (el.firstElementChild) observer.observe(el.firstElementChild);
     return () => observer.disconnect();
-  }, [messages.length, pending]);
+  }, [follow, messages.length, pending]);
 
   // The composer is the point of opening the panel: focus it, once it exists.
   useEffect(() => {
@@ -158,7 +156,7 @@ export default function AskAIPanel({ onClose }: { onClose: () => void }) {
       {dragging && <DropOverlay />}
       <header
         className={cn(
-          "flex h-14 flex-shrink-0 items-center gap-2 border-b border-slate-200/80 pl-4 pr-2",
+          "relative flex h-14 flex-shrink-0 items-center gap-2 border-b border-slate-200/80 pl-4 pr-2",
           "max-sm:h-auto max-sm:py-2 max-sm:pt-[max(0.5rem,env(safe-area-inset-top))]",
         )}
       >
@@ -175,13 +173,15 @@ export default function AskAIPanel({ onClose }: { onClose: () => void }) {
         </IconButton>
       </header>
 
-      <div ref={scrollRef} className="min-h-0 flex-1 overflow-y-auto overscroll-contain"
+      {/* Keep positioned transcript content, including screen-reader copy
+          feedback, inside the scrolling region. */}
+      <div ref={scrollRef} className="relative min-h-0 flex-1 overflow-y-auto overscroll-contain"
         onScroll={(e) => {
           const el = e.currentTarget;
           // Layout changes can emit scroll events before ResizeObserver.
           // They must not look like the reader scrolled up and disable following.
           const size = scrollSize.current;
-          if (el.clientWidth !== size.width || el.clientHeight !== size.height) return;
+          if (el.clientWidth !== size.width || el.clientHeight !== size.height || el.scrollHeight !== size.contentHeight) return;
           following.current = el.scrollHeight - el.scrollTop - el.clientHeight < 80;
         }}>
         {empty ? (
@@ -672,31 +672,70 @@ function UsageNote({ message }: { message: AskMessage }) {
 
 /** Compact header quota; tap/keyboard also exposes the explanation on phones. */
 function QuotaIndicator({ left, exhausted }: { left: number | null; exhausted: boolean }) {
-  const pct = exhausted ? 0 : Math.max(0, Math.min(100, left ?? 0));
-  const label = left === null ? "AI quota loading" : `AI quota: ${pct}% remaining`;
+  const pct = exhausted ? 0 : left === null ? null : Math.max(0, Math.min(100, left));
+  const label = pct === null ? "AI quota unavailable" : `AI quota: ${pct}% remaining`;
   const r = 6;
   const circumference = 2 * Math.PI * r;
+  const [open, setOpen] = useState(false);
+  const popupId = useId();
+  const quotaRef = useRef<HTMLDivElement>(null);
+  const triggerRef = useRef<HTMLButtonElement>(null);
+
+  useEffect(() => {
+    if (!open) return;
+    const outside = (event: PointerEvent) => {
+      if (event.target instanceof Node && !quotaRef.current?.contains(event.target)) {
+        setOpen(false);
+      }
+    };
+    const escape = (event: KeyboardEvent) => {
+      if (event.key !== "Escape") return;
+      event.preventDefault();
+      event.stopPropagation();
+      setOpen(false);
+      triggerRef.current?.focus();
+    };
+    document.addEventListener("pointerdown", outside);
+    document.addEventListener("keydown", escape);
+    return () => {
+      document.removeEventListener("pointerdown", outside);
+      document.removeEventListener("keydown", escape);
+    };
+  }, [open]);
+
   return (
-    <details className="relative shrink-0">
-      <summary
+    <div ref={quotaRef} className="shrink-0">
+      <button
+        ref={triggerRef}
+        type="button"
         aria-label={label}
-        title={label}
-        className="flex h-11 w-11 cursor-pointer list-none items-center justify-center rounded-full text-slate-500 hover:bg-slate-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/30 [&::-webkit-details-marker]:hidden"
+        aria-expanded={open}
+        aria-controls={open ? popupId : undefined}
+        onClick={() => setOpen((shown) => !shown)}
+        className="flex h-11 w-11 items-center justify-center rounded-full text-slate-500 hover:bg-slate-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/30"
       >
         <svg viewBox="0 0 16 16" className="h-4 w-4 -rotate-90" aria-hidden="true">
           <circle cx="8" cy="8" r={r} fill="none" stroke="currentColor" strokeOpacity="0.2" strokeWidth="1.75" />
-          <circle cx="8" cy="8" r={r} fill="none"
+          {pct !== null && <circle cx="8" cy="8" r={r} fill="none"
             stroke={pct > 15 ? "hsl(var(--primary))" : "hsl(var(--tone-warn))"}
             strokeWidth="1.75" strokeLinecap="round"
-            strokeDasharray={`${(pct / 100) * circumference} ${circumference}`} />
+            strokeDasharray={`${(pct / 100) * circumference} ${circumference}`} />}
         </svg>
-      </summary>
-      <div className="absolute right-0 top-full z-20 w-56 rounded-xl border border-slate-200 bg-white p-3 text-[12px] leading-relaxed text-slate-600 shadow-lg">
-        <p className="font-medium text-slate-900" role="status">{label}</p>
-        <p className="mt-1">{exhausted ? "Model answers are off for this report. Free report checks still work." : "Shared across this report’s logins and devices. Refreshing does not reset it."}</p>
-        <p className="mt-2">Answers can be wrong. Verify important information.</p>
-      </div>
-    </details>
+      </button>
+      {open && (
+        <div
+          id={popupId}
+          className="absolute right-2 top-full z-20 mt-2 rounded-xl border border-slate-200 bg-white p-3 text-[12px] leading-relaxed text-slate-600 shadow-lg"
+          style={{ width: "min(224px, calc(100% - 16px))" }}
+        >
+          <p className="font-medium text-slate-900" role="status">{label}</p>
+          <p className="mt-1">{exhausted ? "Model answers are off for this report. Free report checks still work."
+            : pct === null ? "The latest quota could not be loaded. Try again shortly."
+            : "Shared across this report’s logins and devices. Refreshing does not reset it."}</p>
+          <p className="mt-2">Answers can be wrong. Verify important information.</p>
+        </div>
+      )}
+    </div>
   );
 }
 
