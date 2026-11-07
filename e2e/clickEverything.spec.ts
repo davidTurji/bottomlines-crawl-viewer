@@ -442,36 +442,39 @@ async function crawl(page: Page, vp: string): Promise<Run> {
 
 test.describe("click everything", () => {
   // One reader at a time: on a live link, light on the API.
-  test.describe.configure({ mode: "serial", retries: LIVE ? 0 : undefined });
+  test.describe.configure({ mode: LIVE ? "serial" : "parallel", retries: LIVE ? 0 : undefined });
 
-  test(LIVE ? "a real link: every click, desktop and phone, no crash" : "every click, desktop and phone, on the crawler's real shapes: no crash", async ({ browser }) => {
-    // Both viewports perform over 1,100 real interactions; CI needs headroom.
-    test.setTimeout(LIVE ? 20 * 60_000 : 10 * 60_000);
-    const failures: string[] = [];
-    // SMOKE_VIEWPORT=phone (or desktop) walks one screen only.
-    for (const vp of VIEWPORTS.filter((v) => !process.env.SMOKE_VIEWPORT || v.name === process.env.SMOKE_VIEWPORT)) {
-      const { ctx, page } = await signIn(browser, vp);
-      const run = await crawl(page, vp.name);
-      failures.push(...run.failures);
-      if (run.failures.length) {
-        await ctx.close();
-        break;
+  // CI gives each complete viewport walk its own existing timeout.
+  // Live mode preserves one serial, combined twenty-minute test.
+  const selected = VIEWPORTS.filter((v) => !process.env.SMOKE_VIEWPORT || v.name === process.env.SMOKE_VIEWPORT);
+  const walks = LIVE
+    ? [{ name: "desktop and phone", viewports: selected }]
+    : selected.map((vp) => ({ name: vp.name, viewports: [vp] }));
+  for (const walk of walks) {
+    test(`${LIVE ? "a real link" : "crawler's real shapes"}: every click on ${walk.name}, no crash`, async ({ browser }) => {
+      test.setTimeout(LIVE ? 20 * 60_000 : 10 * 60_000);
+      for (const vp of walk.viewports) {
+        const { ctx, page } = await signIn(browser, vp);
+        try {
+          const run = await crawl(page, vp.name);
+          console.log(
+            redact(
+              `${vp.name}: ${run.steps} steps; rows opened: ${Object.entries(run.opened)
+                .map(([k, v]) => `${k} ${v}`)
+                .join(", ")}`,
+            ),
+          );
+          if (!LIVE) {
+            // The crawl really reached every list (a renamed control would
+            // otherwise make this test pass by clicking nothing).
+            for (const list of ["publishers", "apps", "inactive", "discovery", "declarations", "sellers"])
+              expect(run.opened[list] ?? 0, `${vp.name}: rows opened on ${list}`).toBeGreaterThan(0);
+          }
+          expect(run.failures).toEqual([]);
+        } finally {
+          await ctx.close();
+        }
       }
-      console.log(
-        redact(
-          `${vp.name}: ${run.steps} steps; rows opened: ${Object.entries(run.opened)
-            .map(([k, v]) => `${k} ${v}`)
-            .join(", ")}`,
-        ),
-      );
-      if (!LIVE) {
-        // The crawl really reached every list (a renamed control would
-        // otherwise make this test pass by clicking nothing).
-        for (const list of ["publishers", "apps", "inactive", "discovery", "declarations", "sellers"])
-          expect(run.opened[list] ?? 0, `${vp.name}: rows opened on ${list}`).toBeGreaterThan(0);
-      }
-      await ctx.close();
-    }
-    expect(failures).toEqual([]);
-  });
+    });
+  }
 });

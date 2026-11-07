@@ -861,12 +861,12 @@ export async function installFakeApi(page: Page, scenario: Scenario = {}): Promi
           });
         }
         if (s.discoveryApi === "unwatched_new") {
-          // A report from 2026-10-11 whose baseline did not watch madeupmedia.la.
+          // A report from 2026-10-11 whose baseline did not watch madeup.tv.
           // The partial-overlap shape: other domains were watched, so their
           // lines keep last week; the totals are not compared.
-          r.totals = { ...r.totals, previous_lines: null, previous_placements: null, new_lines: null, previous_publishers: null, scope_changed: true, unwatched_domains: ["madeupmedia.la"] };
+          r.totals = { ...r.totals, previous_lines: null, previous_placements: null, new_lines: null, previous_publishers: null, scope_changed: true, unwatched_domains: ["madeup.tv"] };
           r.rows = r.rows.map((row) =>
-            row.ssp_domain === "madeupmedia.la" ? { ...row, previous_placements_count: null, previous_publishers_count: null, previous_watched: false } : row,
+            row.ssp_domain === "madeup.tv" ? { ...row, previous_placements_count: null, previous_publishers_count: null, previous_watched: false } : row,
           );
         }
         if (s.discoveryApi === "scope_dropped") {
