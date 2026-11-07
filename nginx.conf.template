@@ -10,66 +10,30 @@
 #
 # Port 8080 is Cloud Run's requirement (its ingress sends traffic there;
 # the default 80 is closed).
-# ── FLOOD GATE ───────────────────────────────────────────────────────
-#
-# This service is public and unauthenticated, so the only thing standing
-# between a stranger with a loop and a bandwidth bill is a limit. Cloud
-# Armor is the "proper" answer and needs a global load balancer in front,
-# which is ~$25-30/month of fixed cost to guard a service whose realistic
-# bill is nothing. So the limit lives here, in the container, for free.
-#
-# THE CLIENT IP IS NOT $remote_addr. Cloud Run terminates TLS and proxies
-# to the container, so $remote_addr is Google's frontend and every visitor
-# would share one bucket -- the first person through the door would spend
-# everyone's budget. The real address is the FIRST entry of
-# X-Forwarded-For; the rest of that header is attacker-suppliable and must
-# not be trusted, which is exactly why the regex takes only the first.
-map $http_x_forwarded_for $demo_client_ip {
-    "~^(?<xff_first>[^,]+)"  $xff_first;
-    default                  $remote_addr;
-}
-
-# 500 req/s sustained, per IP, with a 1000-request burst.
-#
-# THIS IS NOT A COST CONTROL. maxInstances is, and it is the hard ceiling:
-# a flood cannot buy more machine than that no matter what it does. What
-# this rule is for is FAIRNESS -- stopping one address from monopolising
-# the single instance so that everybody else's page stops loading.
-#
-# Which is why the threshold is set where it is. A measured end-to-end
-# session -- all four pages, the search boxes, expanding rows, three chat
-# answers and the Excel export -- makes 26 requests. This demo is being
-# sent to people who have never seen the product and will click everything,
-# repeatedly, possibly several of them behind one office address. None of
-# that comes within two orders of magnitude of 500 a second.
-#
-# A REAL VISITOR SEEING A 429 COSTS MORE THAN THE BANDWIDTH IT SAVES.
-# That is the whole trade, and it is why this number is set high and not
-# low. Anything sustaining five hundred requests a second from one address
-# is industrial, not a person who is interested.
-#
-# 10m of shared memory holds roughly 160k addresses.
-limit_req_zone $demo_client_ip zone=demo_flood:10m rate=500r/s;
-
-# 429, not the default 503: this is the client being told to slow down, not
-# the server claiming to be broken.
+# Shared per-instance flood ceiling. Do not derive this key from any client
+# header: arbitrary X-Forwarded-For prefixes must never mint a fresh budget.
+# Normal demo page loads need about 26 requests; retain the existing generous
+# 500 req/s ceiling and asset burst. This is not a distributed or billing cap:
+# instance limits and any shared edge control are separate deployment settings.
+limit_req_zone $server_name zone=demo_flood:1m rate=500r/s;
 limit_req_status 429;
-
-# Per-instance, and maxInstances is 1, so this IS the ceiling rather than a
-# number to multiply. A distributed flood from many addresses walks around
-# any per-IP rule; that case is bounded by the instance cap instead.
 
 server {
     listen 8080;
     server_name _;
     root /usr/share/nginx/html;
     index index.html;
+    # Inherited by direct /index.html and download paths as well.
+    limit_req zone=demo_flood burst=1000 nodelay;
+    add_header X-Frame-Options "DENY" always;
+    add_header X-Content-Type-Options "nosniff" always;
+    add_header Content-Security-Policy "default-src 'self'; base-uri 'none'; object-src 'none'; frame-ancestors 'none'; form-action 'self'; script-src 'self'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com; img-src 'self' data: blob: https:; connect-src 'self'; frame-src 'none'; worker-src 'self' blob:; media-src 'self' blob:" always;
 
     # This is a private, credentialed report viewer: never indexed, and
     # never leaking report URLs (which carry share tokens) via Referer.
     # NOTE: nginx add_header does NOT inherit into a location that adds
     # its own headers, so every location below that uses add_header must
-    # repeat these two.
+    # repeat the security headers as well.
     add_header X-Robots-Tag "noindex, nofollow" always;
     add_header Referrer-Policy "no-referrer" always;
 
@@ -89,6 +53,9 @@ server {
         # authenticate every caller and reduce the login to decoration.
         proxy_set_header Authorization $http_authorization;
         proxy_ssl_server_name on;
+        proxy_ssl_verify on;
+        proxy_ssl_trusted_certificate /etc/ssl/certs/ca-certificates.crt;
+        proxy_ssl_verify_depth 3;
         proxy_read_timeout 120s;
         # SSE-friendly: the future chat endpoint streams text/event-stream
         # frames, and nginx's default response buffering would hold them
@@ -132,11 +99,12 @@ server {
         # cookie on it, and its answers are files or JSON, never a page
         # that could run script here.
         proxy_hide_header Set-Cookie;
-        add_header X-Content-Type-Options "nosniff" always;
-        add_header Content-Security-Policy "default-src 'none'; sandbox" always;
+        add_header Content-Security-Policy "default-src 'none'; frame-ancestors 'none'; sandbox" always;
         add_header X-Robots-Tag "noindex, nofollow" always;
         add_header Referrer-Policy "no-referrer" always;
         add_header Cache-Control "no-store" always;
+        add_header X-Frame-Options "DENY" always;
+        add_header X-Content-Type-Options "nosniff" always;
     }
 
     # Long-cache immutable Vite chunks (they have hashed filenames).
@@ -146,6 +114,9 @@ server {
         # visitor asks for none of them.
         limit_req zone=demo_flood burst=2000 nodelay;
         add_header Cache-Control "public, max-age=31536000, immutable";
+        add_header X-Frame-Options "DENY" always;
+        add_header X-Content-Type-Options "nosniff" always;
+        add_header Content-Security-Policy "default-src 'self'; base-uri 'none'; object-src 'none'; frame-ancestors 'none'; form-action 'self'; script-src 'self'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com; img-src 'self' data: blob: https:; connect-src 'self'; frame-src 'none'; worker-src 'self' blob:; media-src 'self' blob:" always;
         add_header X-Robots-Tag "noindex, nofollow" always;
         add_header Referrer-Policy "no-referrer" always;
         try_files $uri =404;
@@ -156,6 +127,9 @@ server {
     # the viewer's privacy posture (report data behind it is credentialed).
     location = /index.html {
         add_header Cache-Control "no-store" always;
+        add_header X-Frame-Options "DENY" always;
+        add_header X-Content-Type-Options "nosniff" always;
+        add_header Content-Security-Policy "default-src 'self'; base-uri 'none'; object-src 'none'; frame-ancestors 'none'; form-action 'self'; script-src 'self'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com; img-src 'self' data: blob: https:; connect-src 'self'; frame-src 'none'; worker-src 'self' blob:; media-src 'self' blob:" always;
         add_header X-Robots-Tag "noindex, nofollow" always;
         add_header Referrer-Policy "no-referrer" always;
     }
@@ -167,6 +141,9 @@ server {
     location / {
         limit_req zone=demo_flood burst=1000 nodelay;
         add_header Cache-Control "no-store" always;
+        add_header X-Frame-Options "DENY" always;
+        add_header X-Content-Type-Options "nosniff" always;
+        add_header Content-Security-Policy "default-src 'self'; base-uri 'none'; object-src 'none'; frame-ancestors 'none'; form-action 'self'; script-src 'self'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com; img-src 'self' data: blob: https:; connect-src 'self'; frame-src 'none'; worker-src 'self' blob:; media-src 'self' blob:" always;
         add_header X-Robots-Tag "noindex, nofollow" always;
         add_header Referrer-Policy "no-referrer" always;
         try_files $uri $uri/ /index.html;
