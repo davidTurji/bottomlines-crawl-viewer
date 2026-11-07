@@ -20,20 +20,28 @@ concurrency:
   # A newer push to a PR replaces the older run; a deploy's run is never cut.
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
+permissions:
+  contents: read
+
 jobs:
   checks:
     name: typecheck, build, browser tests
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    # Browser/dependency installation can consume most of 15 minutes on a
+    # cold runner. Leave time for the full suite; do not skip any checks.
+    timeout-minutes: 30
     permissions:
       contents: read
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
-          node-version: '20'
+          persist-credentials: false
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: '22'
           cache: npm
-      - run: npm ci --no-audit --no-fund
+      - run: npm ci --ignore-scripts --no-audit --no-fund
+      - run: npm run test:security
       - run: npm run typecheck
       - run: npx playwright install --with-deps chromium
       # playwright.config.ts builds the app itself (npm run build, mock
@@ -41,7 +49,7 @@ jobs:
       - run: npx playwright test
         env:
           CI: "true"
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         if: failure()
         with:
           name: playwright-report

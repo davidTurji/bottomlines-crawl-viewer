@@ -54,35 +54,47 @@ concurrency:
 env:
   SERVICE: bl-crawl-viewer-demo
 
+permissions:
+  contents: read
+
 jobs:
+  security:
+    uses: ./.github/workflows/security.yml
+
   deploy:
+    needs: security
+    if: github.ref == 'refs/heads/demo' && github.repository == 'davidTurji/bottomlines-crawl-viewer'
+    environment: production-demo
     runs-on: ubuntu-latest
     permissions:
       contents: read
       id-token: write
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
 
       # Fail here, in a minute, rather than inside Cloud Build after a
       # source upload with the error buried in build logs. Same reasoning
       # as the viewer's workflow, and it builds in DEMO mode so a fixture
       # that no longer typechecks against the API types is caught before
       # anything is published.
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
-          node-version: '20'
+          node-version: '22'
           cache: npm
-      - run: npm ci --no-audit --no-fund
+      - run: npm ci --ignore-scripts --no-audit --no-fund
+      - run: npm run test:security
       - run: npm run build:demo
 
       - name: Authenticate to GCP
-        uses: google-github-actions/auth@v2
+        uses: google-github-actions/auth@c200f3691d83b41bf9bbd8638997a462592937ed # v2
         with:
           workload_identity_provider: ${{ secrets.GCP_WIF_PROVIDER }}
           service_account: ${{ secrets.GCP_SA_EMAIL }}
 
       - name: Set up gcloud
-        uses: google-github-actions/setup-gcloud@v2
+        uses: google-github-actions/setup-gcloud@e427ad8a34f8676edf47cf7d7925499adf3eb74f # v2
         with:
           project_id: ${{ secrets.GCP_PROJECT_ID }}
 
