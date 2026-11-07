@@ -23,7 +23,7 @@ test.beforeEach(async ({ page }) => {
 
 test('enforced browser policy allows the report and blocks injected inline script', async ({ page }) => {
   await page.goto(reportPath);
-  await expect(page.getByRole('heading', { name: 'Your weekly crawl' })).toBeVisible();
+  await expect(page.getByRole('heading', { name: 'Your weekly report' })).toBeVisible();
   const executed = await page.evaluate(() => {
     const script = document.createElement('script');
     script.textContent = 'window.__syntheticPolicyProbe = true';
@@ -42,5 +42,5 @@ test('a page cannot frame the protected report', async ({ page }) => {
   });
   await page.goto('/synthetic-frame-test');
   await violation;
-  await expect(page.frameLocator('iframe').getByRole('heading', { name: 'Your weekly crawl' })).toHaveCount(0);
+  await expect(page.frameLocator('iframe').getByRole('heading', { name: 'Your weekly report' })).toHaveCount(0);
 });
