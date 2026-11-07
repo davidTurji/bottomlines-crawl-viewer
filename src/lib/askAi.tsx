@@ -157,7 +157,7 @@ type AskAiState = {
   draft: string;
   setDraft: (text: string) => void;
   pending: boolean;
-  /** Percent of the report's AI quota left, null until the status has loaded. */
+  /** Percent of the report's AI quota left, or null when it is unknown. */
   allowanceLeft: number | null;
   budgetExhausted: boolean;
   send: (question: string) => void;
@@ -193,7 +193,9 @@ function refusalDetail(err: unknown): { code?: string; message?: string } | null
 }
 
 const UNAVAILABLE_NOW =
-  "The assistant is not available right now. Try again in a minute. This question was not counted.";
+  "The assistant is not available right now. Try again in a minute.";
+const STATUS_POLL_MS = 60_000;
+const STATUS_REFRESH_MIN_MS = 5_000;
 
 export function AskAiProvider({ children }: { children: ReactNode }) {
   const { token, basePath } = useReportScope();
@@ -201,8 +203,10 @@ export function AskAiProvider({ children }: { children: ReactNode }) {
   const page = pageOf(pathname, basePath);
 
   const [status, setStatus] = useState<AskStatus | null>(null);
-  const [available, setAvailable] = useState(false);
+  const available = Boolean(status?.enabled);
   const [open, setOpen] = useState(false);
+  const refreshStatus = useRef<(() => Promise<void>) | null>(null);
+  const allowanceRevision = useRef(0);
   const [pending, setPending] = useState(false);
   const [transcripts, setTranscripts] = useState<Partial<Record<AskPage, AskMessage[]>>>({});
   const [drafts, setDrafts] = useState<Partial<Record<AskPage, string>>>({});
@@ -216,37 +220,61 @@ export function AskAiProvider({ children }: { children: ReactNode }) {
   // replaced or removed must not land.
   const attachSeq = useRef(0);
 
-  // Refresh on opening/focus and while visible so operator changes reach
-  // already-open reports. Every backend endpoint independently enforces access.
+  // Fetch once for the launcher, and revalidate when the reader comes back.
+  // Every backend endpoint independently enforces access.
   useEffect(() => {
     if (!token) return;
     let alive = true;
     let reading = false;
+    let lastRead = -Infinity;
     const refresh = async () => {
-      if (reading || document.visibilityState === "hidden") return;
+      const now = performance.now();
+      if (reading || document.visibilityState === "hidden" || now - lastRead < STATUS_REFRESH_MIN_MS) return;
+      lastRead = now;
       reading = true;
+      const revision = allowanceRevision.current;
       try {
         const next = await api.askStatus(token);
         if (alive) {
-          setStatus(next);
-          setAvailable(Boolean(next?.enabled));
+          setStatus((current) => {
+            if (!next?.enabled || !current || revision === allowanceRevision.current) return next;
+            // A status read started before a question returned can carry an
+            // older balance. Keep the answer's quota and update the metadata.
+            return {
+              ...next,
+              allowance_left_pct: current.allowance_left_pct,
+              budget_exhausted: current.budget_exhausted,
+            };
+          });
           if (!next?.enabled) setOpen(false);
         }
-      } catch {
-        if (alive) { setAvailable(false); setOpen(false); }
+      } catch (err) {
+        // A throttle or transient outage must not dismiss a reader's chat.
+        if (alive && err instanceof ApiError && [401, 403, 404, 410].includes(err.status)) {
+          setStatus(null);
+          setOpen(false);
+        }
       } finally { reading = false; }
     };
+    refreshStatus.current = refresh;
     void refresh();
     window.addEventListener("focus", refresh);
     document.addEventListener("visibilitychange", refresh);
-    const timer = window.setInterval(refresh, 30_000);
     return () => {
       alive = false;
-      window.clearInterval(timer);
+      refreshStatus.current = null;
       window.removeEventListener("focus", refresh);
       document.removeEventListener("visibilitychange", refresh);
     };
-  }, [token, open]);
+  }, [token]);
+
+  useEffect(() => {
+    if (!open) return;
+    const refresh = () => void refreshStatus.current?.();
+    refresh();
+    const timer = window.setInterval(refresh, STATUS_POLL_MS);
+    return () => window.clearInterval(timer);
+  }, [open]);
 
   // Earlier versions stored chats in this tab. Retire only this report's
   // legacy keys; new messages and files never go into browser storage.
@@ -280,13 +308,14 @@ export function AskAiProvider({ children }: { children: ReactNode }) {
     });
   }, []);
 
-  const applyAllowance = useCallback((leftPct?: number, exhausted?: boolean) => {
+  const applyAllowance = useCallback((leftPct?: number | null, exhausted?: boolean) => {
     if (leftPct === undefined && exhausted === undefined) return;
+    allowanceRevision.current += 1;
     setStatus((s) =>
       s
         ? {
             ...s,
-            allowance_left_pct: leftPct ?? s.allowance_left_pct,
+            allowance_left_pct: leftPct === undefined ? s.allowance_left_pct : leftPct,
             budget_exhausted: exhausted ?? s.budget_exhausted,
           }
         : s,

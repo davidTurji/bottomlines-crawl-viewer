@@ -266,7 +266,8 @@ export default function AskAILauncher() {
           aria-label="Ask AI"
           style={desktop ? { width: current } : { top: viewport?.top ?? 0, height: viewport?.height ?? "100dvh", bottom: "auto" }}
           className={cn(
-            "fixed z-50 flex flex-col overflow-hidden bg-white outline-none",
+            // The transcript owns scrolling. Focus must not scroll the drawer.
+            "fixed z-50 flex flex-col overflow-clip bg-white outline-none",
             resizing && "select-none",
             desktop
               ? "bottom-0 right-0 top-14 border-l border-slate-200/80 shadow-[-16px_0_48px_-24px_rgba(15,23,42,0.28)]"
