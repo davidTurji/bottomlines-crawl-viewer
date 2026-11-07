@@ -4,13 +4,13 @@
 # service (upstream set at container start via CRAWLER_API_URL). Same-origin
 # means no CORS preflight to get wrong and the httpOnly session cookie from
 # POST /v1/viewer/auth just works.
-FROM node:20-alpine AS build
+FROM node:22-alpine@sha256:0e1754758c2df4cfa3e68d59e2e1b7374bb7fd9ea6328eaaacf15cc934af8202 AS build
 WORKDIR /app
 
 # Lockfile in the deps layer so `npm ci` is reproducible AND cache-hit
 # across every code-only push (house pattern, see manage-console).
 COPY package.json package-lock.json ./
-RUN npm ci --no-audit --no-fund
+RUN npm ci --ignore-scripts --no-audit --no-fund
 COPY . .
 
 # No VITE_* build args needed: the API base defaults to the same-origin
@@ -18,7 +18,8 @@ COPY . .
 # environment-specific is baked into the bundle.
 RUN npm run build
 
-FROM nginx:alpine
+FROM nginxinc/nginx-unprivileged:stable-alpine@sha256:f5116ed4606f3eb015dd4a8e28cb9b351476dc0ad4bc6e9f93b19cec130cdf03
+USER root
 COPY --from=build /app/dist /usr/share/nginx/html
 
 # The config is a template: nginx:alpine's stock entrypoint runs
@@ -40,6 +41,9 @@ ENV NGINX_ENVSUBST_TEMPLATE_SUFFIX=".template" \
 ENV CRAWLER_API_URL="" CRAWLER_API_HOST="localhost" \
     CORE_API_URL="" CORE_API_HOST="localhost"
 
+# Runtime config/template directory must be writable by nginx's unprivileged UID.
+RUN chown -R 101:101 /etc/nginx/conf.d
+USER 101:101
 EXPOSE 8080
 ENTRYPOINT ["/usr/local/bin/viewer-entrypoint.sh"]
 CMD ["nginx", "-g", "daemon off;"]

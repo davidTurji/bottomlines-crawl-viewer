@@ -1,0 +1,44 @@
+name: Security
+
+on:
+  pull_request:
+  workflow_call:
+  workflow_dispatch:
+  schedule:
+    - cron: '23 5 * * 1'
+
+permissions:
+  contents: read
+
+jobs:
+  security:
+    name: dependency and secret scan
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      # Advisory databases are downloaded; source/package inventory stays on the runner.
+      TRIVY_OFFLINE_SCAN: 'true'
+      TRIVY_DISABLE_TELEMETRY: 'true'
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+      - uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
+        with:
+          version: v0.70.0
+          scan-type: fs
+          scan-ref: .
+          scanners: vuln,secret
+          severity: HIGH,CRITICAL
+          ignore-unfixed: false
+          format: json
+          output: /tmp/bottomlines-security-scan.json
+          # The next step reports only IDs and locations, never matched secret text.
+          exit-code: '0'
+          cache: false
+          skip-dirs: node_modules,.venv,.next,dist,.git
+      - name: Summarize and enforce (no secret values)
+        run: python3 .github/scripts/security_scan_summary.py /tmp/bottomlines-security-scan.json
+      - name: Remove raw local scanner result
+        if: always()
+        run: rm -f /tmp/bottomlines-security-scan.json
