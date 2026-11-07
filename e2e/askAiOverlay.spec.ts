@@ -115,7 +115,7 @@ test('copies completed answers and refusals with aligned quota labels', async ({
     await expect.poll(() => page.evaluate(() => navigator.clipboard.readText())).toBe(replies[i].answer);
   }
 
-  const free = await page.getByText('From the report, no quota used', { exact: true }).boundingBox();
+  const free = await page.getByText('From your report, no quota used', { exact: true }).boundingBox();
   const counted = await page.getByText('Used 3% of quota', { exact: true }).boundingBox();
   expect(free?.x).toBeDefined();
   expect(free?.x).toBe(counted?.x);

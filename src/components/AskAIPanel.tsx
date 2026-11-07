@@ -663,7 +663,7 @@ function CopyButton({ text }: { text: string }) {
  */
 function UsageNote({ message }: { message: AskMessage }) {
   if (message.local) {
-    return <span className="text-[11.5px] text-slate-400">From the report, no quota used</span>;
+    return <span className="text-[11.5px] text-slate-400">From your report, no quota used</span>;
   }
   if (message.usedPct === undefined || message.usedPct <= 0) return null;
   const pct = message.usedPct < 1 ? "under 1%" : `${Math.round(message.usedPct)}%`;
