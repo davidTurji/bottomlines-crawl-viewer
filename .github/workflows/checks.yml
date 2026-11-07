@@ -24,7 +24,9 @@ jobs:
   checks:
     name: typecheck, build, browser tests
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    # Browser/dependency installation can consume most of 15 minutes on a
+    # cold runner. Leave time for the full suite; do not skip any checks.
+    timeout-minutes: 30
     permissions:
       contents: read
     steps:

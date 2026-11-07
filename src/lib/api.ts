@@ -60,13 +60,6 @@ function mockInactiveVariant(s: Summary): Summary {
   return mode === "legacy" ? rest : { ...rest, gone: undefined };
 }
 
-// ── AI chat flag ─────────────────────────────────────────────────
-// The MVP backend ships no chat endpoint, so the Ask AI surface is
-// available only in mock-mode demos. A production build cannot expose
-// a control whose backend endpoint has not shipped.
-export const ENABLE_CHAT = MOCK &&
-  (import.meta.env.VITE_ENABLE_CHAT as string | undefined) === "true";
-
 export class ApiError extends Error {
   constructor(public status: number, message: string) {
     super(message);
@@ -1159,45 +1152,74 @@ export const api = {
     downloadBlob(blob, name);
     return { used, limit };
   },
-  chat: async function* (
-    token: string,
-    prompt: string,
-  ): AsyncGenerator<ChatFrame> {
+  /**
+   * Ask AI: whether the panel is offered on this report, and what is left.
+   * The server owns every number here; the pane shows them.
+   */
+  askStatus: async (token: string): Promise<AskStatus> => {
     if (MOCK) {
-      const { mockChatStream } = await import("./mockData");
-      for await (const frame of mockChatStream(prompt)) yield frame;
+      const { mockAskStatus } = await import("./mockData");
+      return mockAskStatus();
+    }
+    return req<AskStatus>("GET", `/v1/viewer/${token}/ask/status`);
+  },
+  /**
+   * One question about this report. The answer is already checked by the
+   * server against the frozen report; a refusal arrives as `answerable:
+   * false` with the sentence to show. A spent page or budget arrives as a
+   * 429 whose JSON detail carries `code` and `message` (see lib/askAi).
+   */
+  ask: async (
+    token: string,
+    body: { page: AskPage; question: string; history: AskTurn[]; attachment?: AskAttachmentIn },
+  ): Promise<AskAnswer> => {
+    if (MOCK) {
+      const { mockAsk } = await import("./mockData");
+      return mockAsk(body);
+    }
+    return req<AskAnswer>("POST", `/v1/viewer/${token}/ask`, body);
+  },
+  /**
+   * Check a file the reader attached against this report: counts, the
+   * first answer and the downloads on offer. Free (no model, no quota) and
+   * nothing is stored: the server reads the file for this request only.
+   * A file it will not read arrives as a 400 whose detail carries the one
+   * sentence to show.
+   */
+  askFile: async (token: string, body: AskAttachmentIn): Promise<AskFileCheck> => {
+    if (MOCK) {
+      const { mockAskFile } = await import("./mockData");
+      return mockAskFile(body);
+    }
+    return req<AskFileCheck>("POST", `/v1/viewer/${token}/ask/file`, body);
+  },
+  /** The checked file as CSV or Excel, handed to the browser to save. */
+  askFileDownload: async (
+    token: string,
+    body: AskAttachmentIn & { only: string; format: "csv" | "xlsx" },
+  ): Promise<void> => {
+    if (MOCK) {
+      const { mockAskFileDownload } = await import("./mockData");
+      const { blob, name } = mockAskFileDownload(body);
+      downloadBlob(blob, name);
       return;
     }
     await whenSignedIn();
-    const res = await fetch(`${BASE}/v1/viewer/${token}/chat`, {
+    const res = await fetch(`${BASE}/v1/viewer/${token}/ask/file/download`, {
       method: "POST",
       credentials: "include",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ prompt }),
+      body: JSON.stringify(body),
     });
-    if (!res.ok || !res.body) {
-      throw new ApiError(res.status, `chat stream failed: ${res.status}`);
+    if (!res.ok) {
+      const detail = await res.text().catch(() => "");
+      throw new ApiError(res.status, detail || `download failed: ${res.status}`);
     }
-    const reader = res.body.pipeThrough(new TextDecoderStream()).getReader();
-    let buffer = "";
-    for (;;) {
-      const { value, done } = await reader.read();
-      if (done) break;
-      buffer += value;
-      const parts = buffer.split("\n\n");
-      buffer = parts.pop() ?? "";
-      for (const raw of parts) {
-        const line = raw.trim();
-        if (!line.startsWith("data:")) continue;
-        const chunk = line.slice(5).trim();
-        if (!chunk) continue;
-        try {
-          yield JSON.parse(chunk) as ChatFrame;
-        } catch {
-          /* skip */
-        }
-      }
-    }
+    const blob = await res.blob();
+    const name =
+      /filename="?([^";]+)"?/.exec(res.headers.get("Content-Disposition") ?? "")?.[1] ??
+      `checked.${body.format}`;
+    downloadBlob(blob, name);
   },
 };
 
@@ -2458,11 +2480,77 @@ export type DeclarationRowsPayload = {
  */
 export type DeclarationsPayload = Declarations | DeclarationRowsPayload;
 
-export type ChatFrame =
-  | { type: "text"; delta: string }
-  | { type: "tool_call"; name: string; args: unknown; result_preview: unknown }
-  | { type: "done" }
-  | { type: "error"; message: string };
+// ---- Ask AI ----
+
+/** The report's pages as the rail lists them. The Changes tabs live on
+ *  the Overview, so a reader on /changes asks as the Overview. */
+export type AskPage = "overview" | "discovery" | "declarations" | "sellers" | "schain";
+
+export type AskTurn = { role: "user" | "assistant"; content: string };
+
+/** What `/ask/status` says: whether the panel shows and how much of the
+ *  report's AI quota is left, as a percentage. Never money. */
+export type AskStatus = {
+  enabled: boolean;
+  pages: AskPage[];
+  /** Whole percent of the report's AI quota left, rounded down. */
+  allowance_left_pct: number;
+  budget_exhausted: boolean;
+  suggestions: Record<AskPage, string[]>;
+  disclaimer: string;
+  /** What the panel accepts as an attachment. Absent on an older API. */
+  files?: {
+    /** Comma-separated extensions, for the file picker. */
+    accept: string;
+    max_bytes: number;
+    max_rows: number;
+    hint: string;
+    suggestions: string[];
+  };
+};
+
+/** A file as the panel sends it: its name and its bytes in base64. */
+export type AskAttachmentIn = { name: string; data: string };
+
+/** The server's check of an attached file against this report. */
+export type AskFileCheck = {
+  file: {
+    name: string;
+    kind: string;
+    sheet: string | null;
+    rows: number;
+    /** The columns the server read, and as what. Every other column is never read. */
+    columns: { letter: string; name: string; read_as: string }[];
+    /** Every limit applied (other sheets, columns past the 50th, cut cells). */
+    notes: string[];
+  };
+  counts: { status: string; label: string; rows: number }[];
+  /** The first answer: what was read and what was found, in counts. */
+  summary: string;
+  /** The downloads on offer: "all", "carrying" and the statuses with rows. */
+  downloads: string[];
+  suggestions: string[];
+  crawl_date: string | null;
+};
+
+/** One answer, already checked by the server. */
+export type AskAnswer = {
+  answerable: boolean;
+  /** The text to show: the answer, or the server's refusal sentence. */
+  answer: string;
+  reason: string;
+  /** False when nothing was charged (answered from the report, or the model never answered). */
+  counted: boolean;
+  /** Answered from the report itself, without the model: free. */
+  local: boolean;
+  /** This answer's share of the report's quota, in percent (one decimal). */
+  used_pct: number;
+  allowance_left_pct: number;
+  budget_exhausted: boolean;
+  /** With a file attached: which rows the panel offers to download under
+   *  the answer ("" for none). Always one of the file check's downloads. */
+  download?: string;
+};
 
 // ---- schain export ----
 

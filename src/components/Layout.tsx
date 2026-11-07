@@ -3,6 +3,8 @@ import { LineSelectionProvider } from "@/components/PublisherLinks";
 import { useReportScope } from "@/lib/reportScope";
 import { useLocation } from "react-router-dom";
 import { AppSidebar } from "./AppSidebar";
+import AskAILauncher from "./AskAILauncher";
+import { AskAiProvider, useAskAiAvailable } from "@/lib/askAi";
 import {
   SidebarProvider,
   SidebarInset,
@@ -40,7 +42,20 @@ interface LayoutProps {
  * components/tour): a "How this works" button beside the account menu, and a
  * one-time offer of it on a first visit.
  */
-export default function Layout({ children, email }: LayoutProps) {
+export default function Layout(props: LayoutProps) {
+  const { token } = useReportScope();
+  // The Ask AI state wraps the shell so the header button and the side
+  // pane read one source (lib/askAi); it needs the router and the report
+  // scope, both of which are already above this component.
+  return (
+    <AskAiProvider key={token}>
+      <LayoutShell {...props} />
+    </AskAiProvider>
+  );
+}
+
+function LayoutShell({ children, email }: LayoutProps) {
+  const askAvailable = useAskAiAvailable();
   /* THE IDENTITY SHOWN IS THE ONE THAT SIGNED IN, or nothing. The prop
      used to default to a placeholder address, so every report claimed its
      reader was you@publisherstudios.com -- a fabricated fact on a screen
@@ -204,7 +219,11 @@ export default function Layout({ children, email }: LayoutProps) {
               aria-label="Back to top"
               aria-hidden={!showBackToTop}
               tabIndex={showBackToTop ? 0 : -1}
-              className={`absolute bottom-[max(1.25rem,env(safe-area-inset-bottom))] right-4 z-30 flex items-center gap-1.5 rounded-full border border-primary/25 bg-white/95 p-2.5 text-[0.8125rem] font-medium text-primary shadow-lg backdrop-blur-sm transition-all duration-200 hover:bg-primary hover:text-primary-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring sm:right-6 sm:py-2 sm:pl-3 sm:pr-3.5 ${
+              className={`absolute right-4 z-30 flex items-center gap-1.5 rounded-full border border-primary/25 bg-white/95 p-2.5 text-[0.8125rem] font-medium text-primary shadow-lg backdrop-blur-sm transition-all duration-200 hover:bg-primary hover:text-primary-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring sm:right-6 sm:py-2 sm:pl-3 sm:pr-3.5 ${
+                askAvailable
+                  ? "bottom-[calc(max(1.25rem,env(safe-area-inset-bottom))+3.75rem)] sm:bottom-[5.25rem]"
+                  : "bottom-[max(1.25rem,env(safe-area-inset-bottom))]"
+              } ${
                 showBackToTop
                   ? "translate-y-0 opacity-100"
                   : "pointer-events-none translate-y-3 opacity-0"
@@ -213,6 +232,10 @@ export default function Layout({ children, email }: LayoutProps) {
               <ArrowUp className="h-3.5 w-3.5" />
               <span className="hidden sm:inline">Back to top</span>
             </button>
+
+            {/* Ask AI: the pill in the corner and the drawer it opens,
+                both portalled to the body. See AskAILauncher. */}
+            <AskAILauncher />
           </div>
         </SidebarInset>
       </div>

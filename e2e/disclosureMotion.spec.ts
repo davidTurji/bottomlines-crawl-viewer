@@ -8,6 +8,25 @@ async function panelFor(page:Page,button:Locator){
   const id=await button.getAttribute('aria-controls');
   return id?page.locator(`[id="${id}"]`):button.locator('..').locator(':scope > .report-expansion');
 }
+// Arm in the browser before the keypress. Sampling after press/expect round
+// trips can miss an entire 200ms transition on a busy CI worker.
+async function toggleSamples(button: Locator, panel: Locator) {
+  await button.evaluate(el => el.addEventListener('keydown', () => {
+    const target = document.querySelector('[data-panel-motion-probe="active"]') as HTMLElement & { motionSamples: Promise<number[]> };
+    target.motionSamples = new Promise(resolve => {
+      const values = [target.getBoundingClientRect().height];
+      const until = performance.now() + 320;
+      const sample = () => {
+        values.push(target.getBoundingClientRect().height);
+        if (performance.now() < until) requestAnimationFrame(sample);
+        else resolve(values);
+      };
+      requestAnimationFrame(sample);
+    });
+  }, { once: true }));
+  await button.press('Enter');
+  return panel.evaluate(el => (el as HTMLElement & { motionSamples: Promise<number[]> }).motionSamples);
+}
 async function exercise(page:Page,button:Locator,panel:Locator,reduced:boolean){
   await page.locator('[data-motion-probe]').evaluateAll(items=>items.forEach(el=>el.removeAttribute('data-motion-probe')));
   await page.locator('[data-panel-motion-probe]').evaluateAll(items=>items.forEach(el=>el.removeAttribute('data-panel-motion-probe')));
@@ -15,16 +34,16 @@ async function exercise(page:Page,button:Locator,panel:Locator,reduced:boolean){
   panel=page.locator('[data-panel-motion-probe="active"]');
   await button.evaluate(el=>el.setAttribute('data-motion-probe','active'));
   button=page.locator('[data-motion-probe="active"]');
-  await button.scrollIntoViewIfNeeded();await button.press('Enter');
+  await button.scrollIntoViewIfNeeded();
+  const heights=await toggleSamples(button,panel);
   await expect(button).toHaveAttribute('aria-expanded','true');
-  const heights=await panel.evaluate(async el=>{const values:number[]=[];const until=performance.now()+320;do{await new Promise(requestAnimationFrame);values.push(el.getBoundingClientRect().height);}while(performance.now()<until);return values;});
   expect(heights.at(-1)!).toBeGreaterThan(0);
   expect(await panel.evaluate(el=>(el as HTMLElement).inert)).toBe(false);
   expect(await panel.evaluate(el=>getComputedStyle(el).transitionDuration)).toBe(reduced?'0s':'0.2s, 0.14s');
   if(!reduced)expect(heights.some(h=>h>0&&h<heights.at(-1)!-1)).toBe(true);
-  await button.press('Enter');await expect(button).toHaveAttribute('aria-expanded','false');
+  const closing=await toggleSamples(button,panel);
+  await expect(button).toHaveAttribute('aria-expanded','false');
   expect(await panel.evaluate(el=>(el as HTMLElement).inert)).toBe(true);
-  const closing=await panel.evaluate(async el=>{const values:number[]=[];const until=performance.now()+320;do{await new Promise(requestAnimationFrame);values.push(el.getBoundingClientRect().height);}while(performance.now()<until);return values;});
   expect(closing.at(-1)).toBe(0);
   if(!reduced)expect(closing.some(h=>h>0&&h<heights.at(-1)!)).toBe(true);
 }

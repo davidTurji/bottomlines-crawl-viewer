@@ -126,8 +126,9 @@ export function ReportTourProvider({ children }: { children: React.ReactNode }) 
     let delay = 0;
     let deferrals = 0;
     const offer = () => {
-      // A delayed welcome must never compete with a modal or filter menu.
-      if (document.querySelector('[data-radix-popper-content-wrapper], [role="dialog"]:not([data-state="closed"]), .list-toolbar-filters[data-open="true"]')) {
+      // A delayed welcome must never compete with a modal, filter menu,
+      // or the desktop chat while a reader is attaching/downloading a file.
+      if (document.querySelector('[data-radix-popper-content-wrapper], [role="dialog"]:not([data-state="closed"]), [role="complementary"][aria-label="Ask AI"], .list-toolbar-filters[data-open="true"]')) {
         if (++deferrals < 120) delay = window.setTimeout(offer, 250);
         return;
       }
