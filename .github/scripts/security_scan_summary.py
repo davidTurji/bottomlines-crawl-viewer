@@ -25,6 +25,11 @@ if __name__ == "__main__":
     report = json.loads(Path(sys.argv[1]).read_text())
     if not isinstance(report, dict) or "Results" not in report:
         raise SystemExit("Scanner did not produce a valid result; refusing a false green")
+    packages = sum(len(result.get("Packages") or []) for result in report["Results"]
+                   if result.get("Type") == "npm" and str(result.get("Target", "")).endswith("package-lock.json"))
+    if packages == 0:
+        raise SystemExit("Scanner found no npm lockfile inventory; refusing a false green")
+    print(f"npm lockfile packages scanned: {packages}")
     findings = summarize(report)
     for finding in findings:
         print(json.dumps(finding, sort_keys=True))
