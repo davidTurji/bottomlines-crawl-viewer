@@ -1,3 +1,4 @@
+import { fixtureRows as readAll } from "./fixtureRows";
 import { groupByLine, pageChangeGroups } from "../src/lib/changeGroups";
 import type { ChangeFilters } from "../src/lib/api";
 /**
@@ -214,8 +215,8 @@ function listSummaryOf(base: Summary, matchType: MatchTypeFilter, lines: string[
       ...base.counters,
       matched: {
         ...base.counters.matched,
-        developers: readAll((p) => mockMatchedDevelopers(p, "", lines, matchType)).length,
-        apps: readAll((p) => mockMatchedApps(p, "", lines, matchType)).length,
+        developers: readAll((p, size) => mockMatchedDevelopers(p, "", lines, matchType, size)).length,
+        apps: readAll((p, size) => mockMatchedApps(p, "", lines, matchType, null, size)).length,
       },
       matched_moves: { developers: null, apps: null },
     },
@@ -225,17 +226,6 @@ function listSummaryOf(base: Summary, matchType: MatchTypeFilter, lines: string[
     },
     list_filters: { match_type: matchType, found_in: null, platform: null, publishers: true, apps: true, line_totals: true },
   };
-}
-
-/** Every row of a paged mock list. */
-function readAll<T>(readPage: (page: number) => { rows: T[]; total: number }): T[] {
-  const all: T[] = [];
-  for (let p = 1; p < 10_000; p++) {
-    const r = readPage(p);
-    all.push(...r.rows);
-    if (!r.rows.length || all.length >= r.total) break;
-  }
-  return all;
 }
 
 /** An app's platform, as the platform crawler names it: from its store. */
@@ -589,12 +579,27 @@ export async function installFakeApi(page: Page, scenario: Scenario = {}): Promi
   let signedIn = !s.signedOut && !s.expired;
   const calls: Calls = [];
 
+  // One scenario owns at most two generated catalogues. Paging an export
+  // must not reconstruct 25,000 apps (and their line arrays) on every read.
+  // Keep the API response paging/filter semantics; cache only its fixture source.
+  const catalogues = new Map<string, unknown>();
+  function catalogue<T extends { rows: unknown[]; total: number }>(key: unknown[], read: () => T): T {
+    const id = JSON.stringify(key);
+    if (catalogues.has(id)) return catalogues.get(id) as T;
+    const result = read();
+    if (result.rows.length !== result.total) throw new Error('Incomplete generated catalogue');
+    if (catalogues.size >= 2) catalogues.delete(catalogues.keys().next().value!);
+    catalogues.set(id, result);
+    return result;
+  }
+
   await page.route("**/api/**", async (route: Route) => {
     const req = route.request();
     const url = new URL(req.url());
     const path = url.pathname.replace(/^\/api/, "");
     const q = url.searchParams;
     const page_ = Number(q.get("page") ?? 1);
+    const listPageSize = Number(q.get("page_size") ?? 25);
     // The list filter of crawler #348, read only by a report that has it
     // (an older API ignores the parameter and answers in full).
     const matchType = s.matchType ? ((q.get("match_type") ?? "all") as MatchTypeFilter) : null;
@@ -713,12 +718,14 @@ export async function installFakeApi(page: Page, scenario: Scenario = {}): Promi
         return reply(200, { format: "xlsx", line_export: true, excel_row_limit: 1_048_576 });
       case "developer-events": {
         const event = (q.get("event") ?? "added") as "added" | "removed" | "changed";
-        let r = mockDeveloperEvents(event, page_, lines, matchType, q.get("q") ?? "");
+        const source = catalogue([tail, event, lines, matchType, q.get("q")],
+          () => mockDeveloperEvents(event, 1, lines, matchType, q.get("q") ?? "", 100_000));
+        let r = { ...source, page: page_, page_size: listPageSize, rows: source.rows.slice((page_ - 1) * listPageSize, page_ * listPageSize) };
         if (s.foundIn === "single" && (q.get("found_in") ?? "").includes(",")) return reply(422, { detail: [{ type: "string_pattern_mismatch" }] });
         if (s.foundIn) {
           const asked = q.get("found_in");
-          const f = split(readAll((p) => mockDeveloperEvents(event, p, lines, matchType, q.get("q") ?? "")), (d) => fakeFoundIn(d as unknown as Record<string, unknown>), ["ads_txt", "app_ads_txt", "both"], asked);
-          r = { ...r, rows: f.kept.slice((page_ - 1) * 25, page_ * 25), total: f.kept.length, found_in_counts: f.counts, found_in: asked ?? "all" } as typeof r;
+          const f = split(source.rows, (d) => fakeFoundIn(d as unknown as Record<string, unknown>), ["ads_txt", "app_ads_txt", "both"], asked);
+          r = { ...r, rows: f.kept.slice((page_ - 1) * listPageSize, page_ * listPageSize), total: f.kept.length, found_in_counts: f.counts, found_in: asked ?? "all" } as typeof r;
         }
         r.rows = r.rows.map(eventRow).map((d) => (s.removalReasons ? withRemovalReasons(d) : d));
         const ev = s.realShapes ? realList(r) : r;
@@ -751,10 +758,12 @@ export async function installFakeApi(page: Page, scenario: Scenario = {}): Promi
         return reply(200, { ...r, rows: s.realShapes ? rows.map((e, i) => realEvent(e, i)) : rows });
       }
       case "matched-developers": {
-        let r = mockMatchedDevelopers(page_, q.get("q") ?? "", lines, matchType);
+        const source = catalogue([tail, lines, matchType, q.get("q")],
+          () => mockMatchedDevelopers(1, q.get("q") ?? "", lines, matchType, 100_000));
+        let r = { ...source, page: page_, page_size: listPageSize, rows: source.rows.slice((page_ - 1) * listPageSize, page_ * listPageSize) };
         if (s.foundIn === "single" && (q.get("found_in") ?? "").includes(",")) return reply(422, { detail: [{ type: "string_pattern_mismatch" }] });
         if (s.watchTabs || s.foundIn) {
-          let all = readAll((p) => mockMatchedDevelopers(p, q.get("q") ?? "", lines, matchType));
+          let all = source.rows;
           const extra: Record<string, unknown> = {};
           if (s.watchTabs) {
             extra.change_counts = Object.fromEntries(Object.entries(WATCH_RULE).map(([k, f]) => [k, all.filter((_, i) => f(i)).length]));
@@ -771,7 +780,7 @@ export async function installFakeApi(page: Page, scenario: Scenario = {}): Promi
             extra.found_in_counts = f.counts;
             extra.found_in = asked ?? "all";
           }
-          r = { ...r, ...extra, rows: all.slice((page_ - 1) * 25, page_ * 25), total: all.length } as typeof r;
+          r = { ...r, ...extra, rows: all.slice((page_ - 1) * listPageSize, page_ * listPageSize), total: all.length } as typeof r;
         }
         r.rows = r.rows
           .map((d) =>
@@ -789,9 +798,11 @@ export async function installFakeApi(page: Page, scenario: Scenario = {}): Promi
         const asked = q.get("change") || null;
         const watch = s.watchTabs && asked !== null && asked in WATCH_RULE;
         const change = s.appChange && !watch ? (asked as AppChange | null) : null;
-        let r = mockMatchedApps(page_, q.get("q") ?? "", lines, matchType, change);
+        const source = catalogue([tail, lines, matchType, change, q.get("q")],
+          () => mockMatchedApps(1, q.get("q") ?? "", lines, matchType, change, 100_000));
+        let r = { ...source, page: page_, page_size: listPageSize, rows: source.rows.slice((page_ - 1) * listPageSize, page_ * listPageSize) };
         if (s.watchTabs || s.appPlatform) {
-          let all = readAll((p) => mockMatchedApps(p, q.get("q") ?? "", lines, matchType, change));
+          let all = source.rows;
           const extra: Record<string, unknown> = {};
           if (s.watchTabs) {
             extra.change_counts = Object.fromEntries(Object.entries(WATCH_RULE).map(([k, f]) => [k, all.filter((_, i) => f(i)).length]));
@@ -810,7 +821,7 @@ export async function installFakeApi(page: Page, scenario: Scenario = {}): Promi
             const word = { ctv: "CTV", mobile: "Mobile", web: "Web" } as const;
             all = all.map((a) => { const p = fakeAppPlatform(a); return { ...a, platform: p ? word[p] : "" }; });
           }
-          r = { ...r, ...extra, rows: all.slice((page_ - 1) * 25, page_ * 25), total: all.length } as typeof r;
+          r = { ...r, ...extra, rows: all.slice((page_ - 1) * listPageSize, page_ * listPageSize), total: all.length } as typeof r;
         }
         r.rows = r.rows
           .map((a) => (hostApp && appKey(a) === appKey(hostApp) ? appAtHost(appRow(a)) : appRow(a)))

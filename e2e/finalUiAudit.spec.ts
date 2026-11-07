@@ -2,7 +2,7 @@ import { expect, test, type Locator } from '@playwright/test';
 import { readFile } from 'node:fs/promises';
 import { expectReportCentered } from './modalGeometry';
 import { installFakeApi, TOKEN } from './fakeApi';
-import { mockDeclarationRows } from '../src/lib/mockData';
+import { mockDeclarationRows, mockDiscoveredLines } from '../src/lib/mockData';
 import { normalizeDeclarations, declarationsCsv } from '../src/lib/declarations';
 const BASE = `/crawl-report/${TOKEN}`;
 const quietTour = () => localStorage.setItem('pf_report_walkthrough_v1',JSON.stringify({status:'completed',stepId:null,open:false}));
@@ -66,7 +66,7 @@ for(const width of [1440,390]){
     await intro.getByRole('button',{name:'Show less about Discovery'}).click();await expect(more).toHaveAttribute('aria-expanded','false');
     const top=page.getByRole('button',{name:'Export CSV',exact:true});await green(top);
     let ready=page.waitForEvent('download');await top.click();let download=await ready;
-    let text=await readFile((await download.path())!,'utf8');expect(text).toContain('in_your_sellers_json');expect(text.trim().split(/\r?\n/).length).toBe(175);
+    let text=await readFile((await download.path())!,'utf8');expect(text).toContain('in_your_sellers_json');expect(text.trim().split(/\r?\n/).length).toBe(mockDiscoveredLines({ page: 1, page_size: 1 }).total + 1);
     await page.locator('[data-discovered-line] > button').first().click();
     const nested=page.getByRole('button',{name:'Export every publisher source file carrying this line as CSV'});await green(nested);
     ready=page.waitForEvent('download');await nested.click();download=await ready;
