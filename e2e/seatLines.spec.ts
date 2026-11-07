@@ -12,6 +12,8 @@
 import { expect, test, type Locator, type Page } from "@playwright/test";
 
 import { installFakeApi, TOKEN, type Scenario } from "./fakeApi";
+import { mockMatchedDevelopers } from "../src/lib/mockData";
+import { fixtureRows } from "./fixtureRows";
 
 const BASE = `/crawl-report/${TOKEN}`;
 /** Word for word (SellerRoles.ROLES_LATER; that module reads the API at
@@ -51,20 +53,19 @@ const oneToN = (n: number, from = 1) => Array.from({ length: n }, (_, i) => from
 const openCard = (page: Page) =>
   page.locator("button[aria-expanded='true']").first().locator("xpath=ancestor::div[contains(@class,'report-row')][1]");
 
-/** Opens Overview rows in turn until one shows the flat "Matched seat
- *  lines" list (a row that moved shows change windows instead). */
+/** Select a genuinely steady fixture row through the reader's search.
+ * The large demo's first page can contain only changed publishers. */
 async function openSteadyRow(page: Page): Promise<Locator> {
-  const rows = page.locator('button[aria-label^="Show the seat lines of"], button[aria-label^="Hide the seat lines of"]');
-  await expect(rows.first()).toBeVisible();
-  const n = await rows.count();
-  for (let i = 0; i < n; i++) {
-    const row = rows.nth(i);
-    if ((await row.getAttribute("aria-expanded")) !== "true") await row.click();
-    const list = openCard(page).locator("[data-seat-lines]");
-    await expect(openCard(page).locator("[data-line-no]").first()).toBeVisible();
-    if (await list.count()) return list.first();
-  }
-  throw new Error("no steady row on the first page");
+  const rows = fixtureRows((page, size) => mockMatchedDevelopers(page, "", [], undefined, size));
+  const steady = rows.find(row => !row.lines_added && !row.lines_removed && !row.lines_cert_changed && (row.matched_lines?.length ?? 0) > 1);
+  expect(steady, "fixture has a steady publisher with multiple seat lines").toBeDefined();
+  if (!steady?.domain) throw new Error("Steady fixture publisher must have a domain");
+  await page.getByRole("textbox", { name: "Search matched publishers" }).fill(steady.domain);
+  const card = page.locator(".report-row").filter({ has: page.getByText(steady.domain, { exact: true }) }).first();
+  await card.getByRole("button", { name: /^Show the seat lines of/ }).click();
+  const list = card.locator("[data-seat-lines]");
+  await expect(list).toBeVisible();
+  return list;
 }
 
 
@@ -132,6 +133,7 @@ test.describe("line numbers", () => {
     // A steady row, then a row on Added (each line with its dates under it).
     await openSteadyRow(page);
     await check("matched seat lines");
+    await page.getByRole("textbox", { name: "Search matched publishers" }).fill("");
     await page.getByRole("tab", { name: "Added", exact: true }).click();
     await page.locator('button[aria-label^="Show the seat lines of"]').first().click();
     await expect(openCard(page).locator("[data-line-dates]").first()).toBeVisible();

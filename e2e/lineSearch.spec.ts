@@ -19,7 +19,7 @@ for (const width of [1440, 390, 320]) {
     const choices = page.getByRole('group', { name: 'Seat lines', exact: true }).getByRole('menuitemcheckbox');
     const apply = page.getByRole('menuitem', { name: 'Apply', exact: true });
     const initialUrl = page.url();
-    await search.fill('MAGNITE 14991 RESELLER');
+    await search.fill(`${CUSTOMER_SEATS[0].ssp_domain} ${CUSTOMER_SEATS[0].publisher_id} ${CUSTOMER_SEATS[0].relationship}`.toUpperCase());
     await expect(choices).toHaveCount(1);
     await expect(choices.first()).toHaveAttribute('aria-checked', 'true');
     await expect(apply).toBeDisabled();
@@ -58,8 +58,8 @@ test('search typing, arrows and Escape preserve normal keyboard selection and ca
   const search = page.getByRole('textbox', { name: 'Search seat lines', exact: true });
   const initialUrl = page.url();
   await page.getByRole('menuitem', { name: /^All lines/ }).click();
-  await search.pressSequentially('magnite 14991');
-  await expect(search).toHaveValue('magnite 14991');
+  await search.pressSequentially(`${CUSTOMER_SEATS[0].ssp_domain} ${CUSTOMER_SEATS[0].publisher_id}`);
+  await expect(search).toHaveValue(`${CUSTOMER_SEATS[0].ssp_domain} ${CUSTOMER_SEATS[0].publisher_id}`);
   await expect(search).toBeFocused();
   const choice = page.getByRole('menuitemcheckbox').first();
   await search.press('ArrowDown');

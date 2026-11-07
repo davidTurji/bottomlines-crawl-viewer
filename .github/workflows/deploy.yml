@@ -38,29 +38,42 @@ concurrency:
 env:
   SERVICE: bl-crawl-viewer
 
+permissions:
+  contents: read
+
 jobs:
+  container:
+    uses: ./.github/workflows/container-smoke.yml
+
+  security:
+    uses: ./.github/workflows/security.yml
+
   # The same gate as every pull request (typecheck, build, browser tests).
   # Nothing ships unless it passes, even a push that skipped the PR.
   checks:
     uses: ./.github/workflows/checks.yml
 
   deploy:
-    needs: checks
+    if: github.ref == 'refs/heads/main' && github.repository == 'davidTurji/bottomlines-crawl-viewer'
+    environment: production
+    needs: [checks, security, container]
     runs-on: ubuntu-latest
     permissions:
       contents: read
       id-token: write
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
 
       - name: Authenticate to GCP
-        uses: google-github-actions/auth@v2
+        uses: google-github-actions/auth@c200f3691d83b41bf9bbd8638997a462592937ed # v2
         with:
           workload_identity_provider: ${{ secrets.GCP_WIF_PROVIDER }}
           service_account: ${{ secrets.GCP_SA_EMAIL }}
 
       - name: Set up gcloud
-        uses: google-github-actions/setup-gcloud@v2
+        uses: google-github-actions/setup-gcloud@e427ad8a34f8676edf47cf7d7925499adf3eb74f # v2
         with:
           project_id: ${{ secrets.GCP_PROJECT_ID }}
 

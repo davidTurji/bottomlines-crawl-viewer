@@ -1,4 +1,5 @@
 import { selectStatus } from "./statusChoice";
+import { fixtureRows } from "./fixtureRows";
 /**
  * The report must open in every shape a real report comes in.
  *
@@ -10,7 +11,7 @@ import { selectStatus } from "./statusChoice";
  */
 import { expect, test, type Page } from "@playwright/test";
 
-import { mockDiscoveredLinePlacements, mockDiscoveredLines, mockInactiveBlock } from "../src/lib/mockData";
+import { mockDiscoveredLinePlacements, mockDiscoveredLines, mockInactiveBlock, mockSummaryFor, MOCK_CRAWL_AT, MOCK_COMPARED_CRAWL_AT } from "../src/lib/mockData";
 import { PAGE_SIZE } from "../src/lib/paging";
 import { DECLARED_HOST, declaredHostApp, installFakeApi, TOKEN, type Scenario } from "./fakeApi";
 
@@ -322,11 +323,23 @@ test.describe("the matched list", () => {
 });
 
 test.describe("inactive", () => {
+  test.use({ locale: "en-US", timezoneId: "UTC" });
+  // The demo advances its report dates. Check the user-facing format against
+  // the fixture timestamps independently; never pin the product to August.
+  const day = (iso: string) => new Intl.DateTimeFormat("en-US", {
+    month: "short", day: "numeric", year: "numeric", timeZone: "UTC",
+  }).format(new Date(iso));
+  const timestamp = (iso: string) => {
+    const date = new Date(iso);
+    return `${new Intl.DateTimeFormat("en-GB", { day: "numeric", month: "short", year: "numeric", timeZone: "UTC" }).format(date)}, ${new Intl.DateTimeFormat("en-GB", { hour: "2-digit", minute: "2-digit", hourCycle: "h23", timeZone: "UTC" }).format(date)}`;
+  };
+  const since = day(MOCK_COMPARED_CRAWL_AT);
+  const current = day(MOCK_CRAWL_AT);
+  const evidenceStart = day(new Date(Date.parse(MOCK_CRAWL_AT) - 14 * 86_400_000).toISOString());
   const counts = mockInactiveBlock.counts;
   const section = (page: Page) => page.getByTestId("inactive-section");
   const sub = (page: Page, name: string) => page.getByRole("button", { name: new RegExp(`Matched ${name.toLowerCase()}`) }).first();
-  // The mock report compares the crawl of Aug 25 with the one of Aug 18.
-  const SINCE = /since Aug 18, 2026/;
+  const SINCE = `since ${since}`;
 
   test("the quiet line opens the Inactive tab, two lists of what went inactive between the two crawls", async ({ page }) => {
     const errors = watchErrors(page);
@@ -334,7 +347,7 @@ test.describe("inactive", () => {
     await expectOverview(page);
     const quiet = page.getByTestId("inactive-quiet");
     await expect(quiet).toContainText(
-      `${counts.publishers} publishers and ${counts.apps} apps went inactive since Aug 18, 2026, not counted above.`,
+      `${counts.publishers} publishers and ${counts.apps} apps went inactive since ${since}, not counted above.`,
     );
     await expect(quiet).not.toContainText("lines");
     await quiet.getByRole("button", { name: "See them" }).click();
@@ -350,7 +363,7 @@ test.describe("inactive", () => {
     // The matched card, greyed: an Inactive chip and the strip on top.
     const strips = section(page).getByTestId("inactive-strip");
     await expect(strips).toHaveCount(counts.publishers);
-    await expect(strips.filter({ hasText: "Inactive since Aug 25, 2026: The domain no longer exists" })).toHaveCount(1);
+    await expect(strips.filter({ hasText: `Inactive since ${current}: The domain no longer exists` })).toHaveCount(1);
     await expect(section(page).getByText("Inactive", { exact: true })).toHaveCount(counts.publishers);
     await sub(page, "Apps").click();
     await expect(section(page).getByRole("button", { name: /Show the seat lines of/ })).toHaveCount(counts.apps);
@@ -364,7 +377,7 @@ test.describe("inactive", () => {
     await expectOverview(page);
     await selectStatus(page, "Inactive");
     await expect(section(page).getByText("Quokkaplay Legacy")).toBeVisible();
-    // Found dead by the compared crawl itself (Aug 18), and older: the
+    // Found dead by the compared crawl itself, and older: the
     // report before, never this one.
     for (const p of mockInactiveBlock.outside.publishers) {
       await expect(section(page).getByText(p.name ?? p.domain)).toHaveCount(0);
@@ -381,7 +394,7 @@ test.describe("inactive", () => {
     await open(page, {});
     await expectOverview(page);
     await selectStatus(page, "Inactive");
-    await expect(section(page).getByText("Failed in 3 crawls in a row, from Aug 11, 2026 to Aug 25, 2026").first()).toBeVisible();
+    await expect(section(page).getByText(`Failed in 3 crawls in a row, from ${evidenceStart} to ${current}`).first()).toBeVisible();
     await section(page).getByRole("button", { name: "Show the seat lines of Quokkaplay Legacy" }).click();
     await expect(section(page).getByText("Your seat lines it carried")).toBeVisible();
     await sub(page, "Apps").click();
@@ -421,10 +434,9 @@ test.describe("inactive", () => {
   test("the header says the two crawls the summary names", async ({ page }) => {
     await open(page, {});
     await expectOverview(page);
-    // Local date and 24 hour time, so the day can slip by one either side
-    // of UTC on the machine running this.
+    // The browser timezone is explicit; assert both exact crawl timestamps.
     await expect(
-      page.getByText(/Data current as of 2[456] Aug 2026, \d{2}:\d{2}, compared with the crawl of 1[789] Aug 2026, \d{2}:\d{2}\./),
+      page.getByText(`Data current as of ${timestamp(MOCK_CRAWL_AT)}, compared with the crawl of ${timestamp(MOCK_COMPARED_CRAWL_AT)}.`, { exact: true }),
     ).toBeVisible();
   });
 
@@ -432,7 +444,7 @@ test.describe("inactive", () => {
     await open(page, { firstReport: true });
     await expectOverview(page);
     await expect(
-      page.getByText(/Data current as of 2[456] Aug 2026, \d{2}:\d{2}\. First report, nothing to compare with yet\./),
+      page.getByText(`Data current as of ${timestamp(MOCK_CRAWL_AT)}. First report, nothing to compare with yet.`, { exact: true }),
     ).toBeVisible();
     await expect(page.getByText(/compared with the crawl of/)).toHaveCount(0);
   });
@@ -440,7 +452,7 @@ test.describe("inactive", () => {
   test("without the summary's dates the window starts at last week's crawl", async ({ page }) => {
     await open(page, { crawlDates: false });
     await expectOverview(page);
-    await expect(page.getByTestId("inactive-quiet")).toContainText("went inactive since Aug 18, 2026");
+    await expect(page.getByTestId("inactive-quiet")).toContainText(`went inactive since ${since}`);
   });
 
   test("with no date for the compared crawl it says so in words", async ({ page }) => {
@@ -517,7 +529,7 @@ test.describe("inactive", () => {
       const errors = watchErrors(page);
       await open(page, scenario);
       await expectOverview(page);
-      await expect(page.getByTestId("inactive-quiet")).toContainText("3 publishers and 5 apps went inactive since Aug 18, 2026");
+      await expect(page.getByTestId("inactive-quiet")).toContainText(`3 publishers and 5 apps went inactive since ${since}`);
       await selectStatus(page, "Inactive");
       await expect(section(page).getByRole("tab")).toHaveCount(0);
       await expect(section(page).getByText("Quokkaplay Legacy")).toBeVisible();
@@ -619,18 +631,27 @@ test.describe("discovery checks each line against your sellers.json", () => {
   const WIDE = keyOf("madeupmedia.com", "1042318", "RESELLER", "4a7be0c1d9f23b58");
   const WIDE_KEY = { ssp_domain: "madeupmedia.com", publisher_id: "1042318", relationship: "RESELLER", cert_id: "4a7be0c1d9f23b58" };
   /** The mock's own answer for a line, so a test asserts what the API said. */
-  const rowOf = (key: string) => mockDiscoveredLines({ page: 1, page_size: 500 }).rows.find((r) => keyOf(r.ssp_domain, r.publisher_id, r.relationship, r.cert_id) === key)!;
-  /** New lines sort first, so a line may sit on a later page. */
+  const rowOf = (key: string) => fixtureRows((page, page_size) => mockDiscoveredLines({ page, page_size })).find((r) => keyOf(r.ssp_domain, r.publisher_id, r.relationship, r.cert_id) === key)!;
+  /** The demo has more than a thousand lines. Locate the target in the
+   * complete fixture, then use the reader's page-jump control; never assume
+   * it is in the first eight pages. Keep any active publisher search intact. */
   async function find(page: Page, key: string) {
+    await expect(cards(page).first()).toBeVisible();
+    if (await card(page, key).count()) return card(page, key);
+    const q = await page.getByPlaceholder("Search seller IDs or publishers").inputValue();
+    const rows = fixtureRows((page, page_size) => mockDiscoveredLines({ page, page_size, q }));
+    const index = rows.findIndex(r => keyOf(r.ssp_domain, r.publisher_id, r.relationship, r.cert_id) === key);
+    expect(index, `Discovery fixture contains ${key}`).toBeGreaterThanOrEqual(0);
+    const target = Math.floor(index / PAGE_SIZE) + 1;
     const pager = page.getByRole("navigation", { name: "Pages" }).first();
-    for (let n = 2; n <= 8 && (await card(page, key).count()) === 0; n += 1) {
-      const btn = pager.getByRole("button", { name: `Page ${n}`, exact: true });
-      if ((await btn.count()) === 0) break;
-      await btn.click();
-      // Wait for the page to be the current one, never a fixed sleep.
-      await expect(pager.getByRole("button", { name: `Page ${n}`, exact: true })).toHaveAttribute("aria-current", "page");
-      await expect(cards(page).first()).toBeVisible();
-    }
+    const compactJump = pager.getByRole("button", { name: /enter a page$/ });
+    if (await compactJump.isVisible()) await compactJump.click();
+    else await pager.getByRole("button", { name: "Go to a page", exact: true }).first().click();
+    const input = pager.getByRole("textbox", { name: /^Go to page/ });
+    await input.fill(String(target));
+    await input.press("Enter");
+    await expect(pager.locator('[aria-current="page"]')).toHaveAttribute("aria-label", `Page ${target}`);
+    await expect(card(page, key)).toBeVisible();
     return card(page, key);
   }
   async function noTour(page: Page) {
@@ -653,7 +674,7 @@ test.describe("discovery checks each line against your sellers.json", () => {
     await noTour(page);
     // The subtitle names the domains the report looked for, from the summary.
     await page.getByRole("button", { name: "Show more about Discovery" }).click();
-    await expect(page.locator(".report-description")).toContainText("madeupmedia.com, madeupmedia.la");
+    await expect(page.locator(".report-description")).toContainText(mockSummaryFor([]).watchlist!.discover.join(", "));
     // The three stats; the sellers.json coverage is the Lines caption and nothing else.
     const kpi = page.locator('[data-tour="discovery-kpi"]');
     await expect(kpi.getByText("Across every publisher we scanned, against last week")).toBeVisible();
@@ -672,7 +693,7 @@ test.describe("discovery checks each line against your sellers.json", () => {
     await expect(placeholder.getByRole("link", { name: "Needs fixing" })).toBeVisible();
     await expect(placeholder.getByText("The seller ID is a placeholder, not one of yours, and 1 more")).toBeVisible();
     // A seller the file types the other way is a fix, with the file's word for it.
-    const mismatch = await find(page, keyOf("madeupmedia-ads.com", "cm41288", "RESELLER", "77d3b0e9c142a5fb"));
+    const mismatch = await find(page, keyOf("madeupmediagroup.com", "cm41288", "RESELLER", "77d3b0e9c142a5fb"));
     await expect(mismatch.getByText("Your sellers.json lists this seller as PUBLISHER, the line says RESELLER")).toBeVisible();
 
     // In the file: the seller's name and type beside the badge, as the API said them.
@@ -922,8 +943,8 @@ test.describe("discovery checks each line against your sellers.json", () => {
   test("a new report names the domain last week did not watch, and its lines are not new", async ({ page }) => {
     await open(page, { discovery: true, discoveryApi: "unwatched_new" }, "/discovery");
     await noTour(page);
-    await expect(page.getByText("Last week's report did not watch madeupmedia.la, so the totals are not compared")).toBeVisible();
-    const c = await find(page, keyOf("madeupmedia.la", "774061", "RESELLER", "9c02ea41b7d5f6a8"));
+    await expect(page.getByText("Last week's report did not watch madeup.tv, so the totals are not compared")).toBeVisible();
+    const c = await find(page, keyOf("madeup.tv", "774061", "RESELLER", "9c02ea41b7d5f6a8"));
     await expect(c.getByText("new this week")).toHaveCount(0);
   });
 

@@ -1,3 +1,4 @@
+import { fixtureRows as allRows } from "./fixtureRows";
 import { revealStatuses } from "./statusChoice";
 import { chooseFilter } from "./filterChoice";
 /**
@@ -28,17 +29,6 @@ import { installFakeApi, TOKEN, type Calls, type Scenario } from "./fakeApi";
 const BASE = `/crawl-report/${TOKEN}`;
 const FULL: Scenario = { matchType: true, appChange: true };
 const WATCH: Scenario = { ...FULL, watchTabs: true };
-
-/** Every row of a paged mock list. */
-function allRows<T>(readPage: (page: number) => { rows: T[]; total: number }): T[] {
-  const out: T[] = [];
-  for (let p = 1; p < 10_000; p++) {
-    const r = readPage(p);
-    out.push(...r.rows);
-    if (!r.rows.length || out.length >= r.total) break;
-  }
-  return out;
-}
 
 function watchErrors(page: Page): string[] {
   const errors: string[] = [];
@@ -102,7 +92,7 @@ test.describe("the Changes page's statuses, as tabs", () => {
     await tab(page, "Started watching").click();
     await expect(page.locator("[data-scope-note]")).toContainText("Not counted as added");
     await settled(page);
-    const pubs = allRows((p) => mockMatchedDevelopers(p, "", [], "all"));
+    const pubs = allRows((p, size) => mockMatchedDevelopers(p, "", [], "all", size));
     const n = pubs.filter((_, i) => i % 3 === 0).length;
     await expect(page.locator("[data-list-count]")).toContainText(`${n.toLocaleString()} publishers`);
     expect(calls.some((c) => c.path.endsWith("/matched-developers") && c.query.includes("change=started_watching"))).toBe(true);

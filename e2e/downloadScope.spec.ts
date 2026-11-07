@@ -1,3 +1,4 @@
+import { fixtureRows as allRows } from "./fixtureRows";
 import { readFile } from "node:fs/promises";
 import { expect, test } from "@playwright/test";
 import { fakeAppPlatform, fakeFoundIn, installFakeApi, TOKEN } from "./fakeApi";
@@ -13,11 +14,6 @@ const cases = [
   ["Unconfirmed", "unconfirmed", "all NOUN with unconfirmed lines"],
 ] as const;
 
-function allRows<T>(read: (page: number) => { rows: T[]; total: number }): T[] {
-  const first = read(1); const rows = [...first.rows];
-  for (let page = 2; rows.length < first.total; page++) rows.push(...read(page).rows);
-  return rows;
-}
 const watch: Record<string, (index: number) => boolean> = {
   started_watching: i => i % 3 === 0, stopped_watching: i => i % 7 === 1, unconfirmed: i => i % 11 === 2,
 };
@@ -55,12 +51,22 @@ for (const kind of ["publishers", "apps"] as const) {
       const csv = await readFile((await file.path())!, "utf8");
       const records = csv.split("\r\n").slice(1);
       expect(records.length).toBeGreaterThan(0);
-      const expected = kind === "publishers"
+      // Build the expected scope independently from the unsearched catalogue.
+      // Search covers identity AND IPD partner/platform fields, as the API
+      // promises; a publisher can match through a partner with another name.
+      const source = kind === "publishers"
         ? (status === "added" || status === "removed" || status === "changed"
-          ? allRows(p => mockDeveloperEvents(status, p, [], "all", "a")).map(row => row.developer_domain)
-          : allRows(p => mockMatchedDevelopers(p, "a", [], "all")).filter((_, i) => !watch[status] || watch[status](i)).map(row => row.domain))
-        : allRows(p => mockMatchedApps(p, "a", [], "all", status === "added" || status === "removed" || status === "changed" ? status : null))
-          .filter((_, i) => !watch[status] || watch[status](i)).map(row => row.bundle_id);
+          ? allRows((p, size) => mockDeveloperEvents(status, p, [], "all", "", size))
+          : allRows((p, size) => mockMatchedDevelopers(p, "", [], "all", size)))
+        : allRows((p, size) => mockMatchedApps(p, "", [], "all", status === "added" || status === "removed" || status === "changed" ? status : null, size));
+      const searched = source.filter(row => {
+        const fields = row as unknown as Record<string, unknown>;
+        return ["name", "domain", "developer_name", "developer_domain", "app_name", "bundle_id", "owner_domain", "ipd_partner", "ipd_platform"]
+          .some(key => typeof fields[key] === "string" && fields[key].toLowerCase().includes("a"));
+      });
+      const expected = searched.filter((_, i) => !watch[status] || watch[status](i))
+        .map(row => kind === "apps" ? (row as { bundle_id: string }).bundle_id
+          : "developer_domain" in row ? row.developer_domain : (row as { domain: string }).domain);
       const actual = records.map(record => record.match(/"(?:[^"]|"")*"/g)![kind === "publishers" ? 0 : 2].slice(1, -1));
       expect(actual.sort()).toEqual(expected.sort());
       const exported = calls.slice(start).filter(c => /\/(matched-developers|developer-events|matched-apps)$/.test(c.path));
@@ -80,27 +86,23 @@ for (const kind of ["publishers", "apps"] as const) {
         }
       }
       // CSV has exactly all rows reported by these paginated requests, including
-      // matches beyond the page on screen. Every identity includes the search.
+      // matches beyond the page on screen. Every exported identity belongs to the independently searched scope.
       const last = exported.at(-1)!;
       const params = new URLSearchParams(last.query);
       const lastPage = Number(params.get("page"));
-      expect(lastPage).toBe(Math.ceil(records.length / 25));
-      for (const record of records) {
-        const cells = record.match(/"(?:[^"]|"")*"/g)!;
-        const identity = kind === "publishers" ? cells.slice(0, 2).join(" ") : cells.slice(0, 5).join(" ");
-        expect(identity.toLowerCase()).toContain("a");
-      }
+      expect(lastPage).toBe(Math.ceil(records.length / Number(params.get("page_size"))));
+      expect(records.length).toBeGreaterThan(25);
       expect(downloads).toBe(1);
       expect(calls.filter(c => /\/export(\.xlsx)?$/.test(c.path))).toEqual([]);
     });
   }
 }
 
-test("preview publisher change search: roost never includes unrelated publishers", () => {
+test("preview publisher change search: netherbymedia.tv never includes unrelated publishers", () => {
   for (const event of ["added", "removed", "changed"] as const) {
     for (const mt of [null, "all", "own", "ipd"] as const) {
       const full = mockDeveloperEvents(event, 1, [], mt, "", 200).rows;
-      for (const query of ["roost", " ROOST ", "zz-no-match-zz"]) {
+      for (const query of ["netherbymedia.tv", " NETHERBYMEDIA.TV ", "zz-no-match-zz"]) {
         const wanted = full.filter(row => `${row.developer_name} ${row.developer_domain}`.toLowerCase().includes(query.trim().toLowerCase()));
         const actual = mockDeveloperEvents(event, 1, [], mt, query, 200);
         expect(actual.rows).toEqual(wanted);
@@ -109,7 +111,7 @@ test("preview publisher change search: roost never includes unrelated publishers
       }
     }
   }
-  expect(mockDeveloperEvents("added", 1, [], "all", "roost").rows.map(row => row.developer_name)).toEqual(["Roost Media"]);
+  expect(mockDeveloperEvents("added", 1, [], "all", "netherbymedia.tv").rows.map(row => row.developer_name)).toEqual(["Netherby Media"]);
 });
 
 for (const width of [320, 390]) test(`download info fits ${width}px without a second download action`, async ({ page }) => {
@@ -118,12 +120,12 @@ for (const width of [320, 390]) test(`download info fits ${width}px without a se
   await installFakeApi(page, { matchType: true, appChange: true });
   await page.goto(`/crawl-report/${TOKEN}`);
   await page.getByLabel("Matched status", { exact: true }).selectOption("added");
-  await page.getByRole("textbox", { name: "Search matched publishers" }).fill("roost");
-  await expect(page.locator("[data-list-rows]")).toContainText("Roost Media");
-  await expect(page.locator("[data-list-rows]")).not.toContainText("Chomp");
+  await page.getByRole("textbox", { name: "Search matched publishers" }).fill("netherbymedia.tv");
+  await expect(page.locator("[data-list-rows]")).toContainText("Netherby Media");
+  await expect(page.locator("[data-list-rows]")).not.toContainText("Cobbleton");
   await page.getByRole("button", { name: "About this download" }).click();
   const info = page.getByRole("note", { name: "What this downloads" });
-  await expect(info).toContainText("all added publishers matching “roost”");
+  await expect(info).toContainText("all added publishers matching “netherbymedia.tv”");
   const box = await info.boundingBox();
   expect(box!.x).toBeGreaterThanOrEqual(0);
   expect(box!.x + box!.width).toBeLessThanOrEqual(width);
@@ -141,8 +143,8 @@ for (const kind of ["publishers", "apps"] as const) for (const changed of [false
     await page.getByRole("textbox", { name: `Search matched ${kind}` }).fill("a");
     await chooseFilter(page, "match-type", "Own");
     const source = kind === "publishers"
-      ? (changed ? allRows(p => mockDeveloperEvents("added", p, [], "own", "a")) : allRows(p => mockMatchedDevelopers(p, "a", [], "own")))
-      : allRows(p => mockMatchedApps(p, "a", [], "own", changed ? "removed" : null));
+      ? (changed ? allRows((p, size) => mockDeveloperEvents("added", p, [], "own", "a", size)) : allRows((p, size) => mockMatchedDevelopers(p, "a", [], "own", size)))
+      : allRows((p, size) => mockMatchedApps(p, "a", [], "own", changed ? "removed" : null, size));
     const file = kind === "publishers" ? fakeFoundIn(source[0] as unknown as Record<string, unknown>)! : fakeAppPlatform(source[0] as { store?: string | null })!;
     const labels: Record<string, string> = { ads_txt: "ads.txt", app_ads_txt: "app-ads.txt", both: "Both", ctv: "CTV", mobile: "Mobile", web: "Web" };
     await chooseFilter(page, kind === "publishers" ? "found-in" : "platform", labels[file]);
