@@ -62,16 +62,18 @@ export function Skeleton({
 export function SkeletonScreen({
   label,
   children,
+  fadeIn = true,
 }: {
   label: string;
   children: React.ReactNode;
+  fadeIn?: boolean;
 }) {
   return (
     <div
       role="status"
       aria-live="polite"
       aria-busy="true"
-      className="animate-in fade-in space-y-5 duration-500"
+      className={cn("space-y-5", fadeIn && "motion-safe:animate-in motion-safe:fade-in motion-safe:duration-500")}
     >
       <span className="sr-only">{label}</span>
       {children}
@@ -289,9 +291,9 @@ export function SkeletonRows({
  * full-screen spinner on a page that has painted nothing at all yet, so it
  * carries its own header, hero cards and list.
  */
-export function OverviewSkeleton() {
+export function OverviewSkeleton({ label = "Loading your crawl", fadeIn }: { label?: string; fadeIn?: boolean } = {}) {
   return (
-    <SkeletonScreen label="Loading your crawl">
+    <SkeletonScreen label={label} fadeIn={fadeIn}>
       <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
         <HeaderBlock />
         <div className="flex flex-wrap items-center gap-2">

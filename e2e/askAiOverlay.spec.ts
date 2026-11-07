@@ -9,7 +9,7 @@ async function openReport(page: Page) {
   await page.removeLocatorHandler(declineTour);
   await page.route(`**/api/v1/viewer/${TOKEN}/ask/status`, route => route.fulfill({ json: mockAskStatus() }));
   await page.goto(`/crawl-report/${TOKEN}`);
-  await expect(page.getByRole('heading', { name: 'Your weekly crawl' })).toBeVisible();
+  await expect(page.getByRole('heading', { name: 'Your weekly report' })).toBeVisible();
   await declineTour.click({ timeout: 15_000 });
 }
 
@@ -18,9 +18,12 @@ test('desktop overlay never moves the report or replays its entrance after resiz
   await openReport(page);
   const main = page.locator('[data-report-main]');
   const before = await main.boundingBox();
-  await page.getByRole('button', { name: 'Ask AI', exact: true }).click();
+  const launcher = page.getByRole('button', { name: 'Ask AI', exact: true });
+  await expect(launcher).toHaveCSS('animation-name', 'report-open-reveal');
+  await launcher.click();
   const panel = page.getByRole('complementary', { name: 'Ask AI', exact: true });
   await expect(panel.getByRole('textbox', { name: 'Message Ask AI' })).toBeVisible();
+  await expect(panel.getByRole('heading', { name: 'Bottomlines.ai', exact: true })).toBeVisible();
   await expect.poll(() => panel.evaluate(el => el.getAnimations().every(a => a.playState === 'finished'))).toBe(true);
   expect(await main.boundingBox()).toEqual(before);
   const start = await panel.evaluate(el => el.getAnimations()[0]?.startTime);
@@ -44,7 +47,8 @@ test('desktop overlay never moves the report or replays its entrance after resiz
   await page.mouse.move(reopenedEdge!.x + 6, reopenedEdge!.y + 100);
   expect((await panel.boundingBox())!.width).toBe(reopened!.width);
   await panel.getByRole('button', { name: 'Close', exact: true }).click();
-  await expect(page.getByRole('button', { name: 'Ask AI', exact: true })).toBeFocused();
+  await expect(launcher).toBeFocused();
+  await expect(launcher).toHaveCSS('animation-name', 'none');
 });
 
 for (const viewport of [{ width: 320, height: 568 }, { width: 844, height: 390 }, { width: 768, height: 1024 }]) {
@@ -71,7 +75,7 @@ for (const viewport of [{ width: 320, height: 568 }, { width: 844, height: 390 }
       await expect(panel).toHaveCount(0);
       await expect(page.locator('#root')).not.toHaveAttribute('inert');
       await expect(page.getByRole('button', { name: 'Ask AI', exact: true })).toBeFocused();
-      await expect(page.getByRole('heading', { name: 'Your weekly crawl' })).toBeVisible();
+      await expect(page.getByRole('heading', { name: 'Your weekly report' })).toBeVisible();
     });
   });
 }
@@ -82,6 +86,37 @@ test('a failed chat chunk leaves the report usable', async ({ page }) => {
   await page.getByRole('button', { name: 'Ask AI', exact: true }).click();
   await expect(page.getByText('Ask AI could not open. Refresh the page to try again.')).toBeVisible();
   await page.getByRole('button', { name: 'Close Ask AI', exact: true }).click();
-  await expect(page.getByRole('heading', { name: 'Your weekly crawl' })).toBeVisible();
+  await expect(page.getByRole('heading', { name: 'Your weekly report' })).toBeVisible();
   await expect(page.getByRole('button', { name: 'Ask AI', exact: true })).toBeFocused();
+});
+
+test('copies completed answers and refusals with aligned quota labels', async ({ page, context }) => {
+  await context.grantPermissions(['clipboard-read', 'clipboard-write']);
+  await page.emulateMedia({ reducedMotion: 'reduce' });
+  const replies = [
+    { answer: 'Your lines carry **42 publishers**.', answerable: true, local: true, counted: false, used_pct: 0 },
+    { answer: 'That information is outside this report.', answerable: false, local: false, counted: true, used_pct: 3 },
+  ];
+  await openReport(page);
+  let index = 0;
+  await page.route(`**/api/v1/viewer/${TOKEN}/ask`, (route) => route.fulfill({
+    json: { ...replies[index++], allowance_left_pct: 97, budget_exhausted: false },
+  }));
+  await page.getByRole('button', { name: 'Ask AI', exact: true }).click();
+  const composer = page.getByRole('textbox', { name: 'Message Ask AI' });
+  const copy = page.getByRole('button', { name: 'Copy answer', exact: true });
+  for (const [i, question] of ['How many publishers carry my lines?', 'What is outside my report?'].entries()) {
+    await composer.fill(question);
+    await composer.press('Enter');
+    await expect(copy).toHaveCount(i + 1);
+    await copy.nth(i).focus();
+    await expect(copy.nth(i).locator('..')).toHaveCSS('opacity', '1');
+    await copy.nth(i).press('Enter');
+    await expect.poll(() => page.evaluate(() => navigator.clipboard.readText())).toBe(replies[i].answer);
+  }
+
+  const free = await page.getByText('From the report, no quota used', { exact: true }).boundingBox();
+  const counted = await page.getByText('Used 3% of quota', { exact: true }).boundingBox();
+  expect(free?.x).toBeDefined();
+  expect(free?.x).toBe(counted?.x);
 });

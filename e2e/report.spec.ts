@@ -10,7 +10,7 @@ import { selectStatus } from "./statusChoice";
  */
 import { expect, test, type Page } from "@playwright/test";
 
-import { mockDiscoveredLinePlacements, mockDiscoveredLines, mockInactiveBlock } from "../src/lib/mockData";
+import { mockAskStatus, mockDiscoveredLinePlacements, mockDiscoveredLines, mockInactiveBlock } from "../src/lib/mockData";
 import { PAGE_SIZE } from "../src/lib/paging";
 import { DECLARED_HOST, declaredHostApp, installFakeApi, TOKEN, type Scenario } from "./fakeApi";
 
@@ -45,7 +45,7 @@ async function open(page: Page, scenario: Scenario, path = "") {
 
 /** The report opened: its heading shows and nothing replaced it. */
 async function expectOverview(page: Page) {
-  await expect(page.getByRole("heading", { name: "Your weekly crawl" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Your weekly report" })).toBeVisible();
   await expect(page.getByText(EXPIRED)).toHaveCount(0);
   await expect(page.getByText("Could not load this report")).toHaveCount(0);
   await expect(page.getByText(CRASHED)).toHaveCount(0);
@@ -96,31 +96,69 @@ test.describe("the rail lists only what the report has", () => {
     await expect(rail(page).getByRole("link", { name: "Discovery" })).toBeVisible();
   });
 
-  test("every optional page holds its place from the first moment, then becomes its link", async ({ page }) => {
-    // David, 2026-11-01: the pages never pop into the rail late; while a
-    // page is being asked about, its row is a skeleton in its own place.
+  test("core metrics open while Ask AI, export and the first rows are still pending", async ({ page }) => {
+    let releaseAsk!: () => void;
+    let releaseDetails!: () => void;
+    const askHeld = new Promise<void>((resolve) => (releaseAsk = resolve));
+    const detailsHeld = new Promise<void>((resolve) => (releaseDetails = resolve));
+    await installFakeApi(page, { sellers: "page", schain: "ok", discovery: true });
+    await page.route("**/ask/status", async (route) => {
+      await askHeld;
+      await route.fulfill({ json: mockAskStatus() });
+    });
+    await page.route((url) =>
+      url.pathname.endsWith("/export-info") || (
+        url.pathname.endsWith("/matched-developers")
+        && url.searchParams.get("page") === "1"
+        && url.searchParams.get("page_size") === String(PAGE_SIZE)
+      ), async (route) => {
+        await detailsHeld;
+        await route.fallback();
+      });
+    await page.goto(BASE);
+
+    const ask = page.getByRole("button", { name: "Ask AI", exact: true });
+    const download = page.getByRole("button", { name: "Download full report", exact: true });
+    const rows = page.locator("[data-list-rows]");
+    await expectOverview(page);
+    await expect(page.getByRole("region", { name: "Weekly performance" })).toBeVisible();
+    await expect(rail(page).getByRole("link", { name: "Discovery", exact: true })).toBeVisible();
+    await expect(ask).toHaveCount(0);
+    await expect(download).toHaveCount(0);
+    await expect(rows).toHaveCount(0);
+    await expect(page.getByText("Loading matched publishers", { exact: true })).toBeAttached();
+
+    releaseAsk();
+    await expect(ask).toBeVisible();
+    await expect(rows).toHaveCount(0);
+    releaseDetails();
+    await expect(download).toBeVisible();
+    await expect(rows).toBeVisible();
+    await expect(download.locator('..')).toHaveCSS('animation-name', 'report-open-rise');
+
+    await rail(page).getByRole("link", { name: "Declarations", exact: true }).click();
+    await rail(page).getByRole("link", { name: "Overview", exact: true }).click();
+    await expectOverview(page);
+    await expect(download.locator('..')).toHaveCSS('animation-name', 'none');
+  });
+
+  test("an unanswered optional read cannot hold the opening indefinitely", async ({ page }) => {
     let release!: () => void;
     const held = new Promise<void>((r) => (release = r));
-    await page.addInitScript(() => {
-      localStorage.setItem("pf_report_walkthrough_v1", JSON.stringify({ status: "completed", stepId: null, open: false }));
-    });
-    await installFakeApi(page, { sellers: "page", schain: "ok", discovery: true });
-    await page.route(/\/(discovered-lines|schain|sellers-fix)(\?|$)/, async (route) => {
+    await installFakeApi(page, { discovery: true, schain: "ok" });
+    await page.route(/\/schain$/, async (route) => {
       await held;
       await route.fallback();
     });
+    await page.route("**/ask/status", (route) => route.fulfill({ json: mockAskStatus() }));
     await page.goto(BASE);
-    const pending = rail(page).locator("[data-nav-pending]");
-    await expect(pending).toHaveCount(3);
-    expect(await pending.evaluateAll((els) => els.map((e) => e.getAttribute("data-nav-pending"))))
-      .toEqual(["Discovery", "Sellers.json", "Schain"]);
-    // Never a link before it is known; the always-there pages are links at once.
-    await expect(rail(page).getByRole("link", { name: "Discovery" })).toHaveCount(0);
-    await expect(rail(page).getByRole("link", { name: "Declarations" })).toBeVisible();
+    await expectOverview(page);
+    await expect(page.getByRole("button", { name: "Ask AI", exact: true })).toBeVisible();
+    await expect(rail(page).getByRole("link", { name: "Schain" })).toHaveCount(0);
+    await expect(rail(page).getByRole("link", { name: "Discovery" })).toBeVisible();
     release();
-    await expect(pending).toHaveCount(0);
-    for (const name of ["Discovery", "Sellers.json", "Schain"])
-      await expect(rail(page).getByRole("link", { name })).toBeVisible();
+    await expect(rail(page).getByRole("link", { name: "Schain" })).toBeVisible();
+    await expectOverview(page);
   });
 
   test("none of them", async ({ page }) => {

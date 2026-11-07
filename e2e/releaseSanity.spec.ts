@@ -66,7 +66,7 @@ for (const width of [1440,390,320]) {
     for(const entry of ['[Content_Types].xml','xl/workbook.xml','xl/worksheets/sheet1.xml','Matched publishers'])expect(saved.includes(Buffer.from(entry))).toBe(true);
     expect(requests).toBe(1);
     await expect(page).toHaveURL(BASE);
-    await expect(page.getByRole('heading',{name:'Your weekly crawl'})).toBeVisible();
+    await expect(page.getByRole('heading',{name:'Your weekly report'})).toBeVisible();
   });
 }
 
@@ -135,14 +135,14 @@ for(const readable of [false,true]){
       await page.goto(`${prefix}/${alias}${selection}`);
       await expect(page).toHaveURL(`${prefix}${alias==='discovered'?'/discovery':''}${selection}`);
       if(alias==='discovered')await expect(page.getByRole('heading',{name:'Discovery',exact:true})).toBeVisible();
-      else await expect(page.getByRole('heading',{name:'Your weekly crawl'})).toBeVisible();
+      else await expect(page.getByRole('heading',{name:'Your weekly report'})).toBeVisible();
       await page.reload();await expect(page).toHaveURL(new RegExp(`^.*${prefix}.*lines=`));
       expect(calls.filter(c=>c.path.includes('/summary')).every(c=>c.path.includes(TOKEN))).toBe(true);
     }
     await page.getByRole('link',{name:'Declarations',exact:true}).click();
     await expect(page).toHaveURL(`${prefix}/declarations`);
     await page.goBack();await expect(page).toHaveURL(`${prefix}${selection}`);
-    await expect(page.getByRole('heading',{name:'Your weekly crawl'})).toBeVisible();
+    await expect(page.getByRole('heading',{name:'Your weekly report'})).toBeVisible();
   });
 }
 

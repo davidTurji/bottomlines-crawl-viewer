@@ -69,7 +69,7 @@ test.describe("why a removed line was removed", () => {
   test("Overview, Removed tab: each removed line says why, and is still counted", async ({ page }) => {
     const errors = watchErrors(page);
     await open(page, { removalReasons: true });
-    await expect(page.getByRole("heading", { name: "Your weekly crawl" })).toBeVisible();
+    await expect(page.getByRole("heading", { name: "Your weekly report" })).toBeVisible();
     await page.getByRole("tab", { name: "Removed", exact: true }).click();
     const first = mockDeveloperEvents("removed", 1).rows[0];
     const lines = first.removed_lines ?? [];
@@ -83,7 +83,7 @@ test.describe("why a removed line was removed", () => {
   test("Overview, All matched: a publisher row's expanded removed lines say why", async ({ page }) => {
     const errors = watchErrors(page);
     await open(page, { removalReasons: true });
-    await expect(page.getByRole("heading", { name: "Your weekly crawl" })).toBeVisible();
+    await expect(page.getByRole("heading", { name: "Your weekly report" })).toBeVisible();
     const d = mockMatchedDevelopers(1).rows.find((r) => (r.removed_lines ?? []).length > 1)!;
     expect(d).toBeTruthy();
     await page.getByRole("textbox", { name: "Search matched publishers" }).fill(d.domain!);
@@ -95,7 +95,7 @@ test.describe("why a removed line was removed", () => {
   test("a report frozen before the field says nothing about why", async ({ page }) => {
     const errors = watchErrors(page);
     await open(page, {});
-    await expect(page.getByRole("heading", { name: "Your weekly crawl" })).toBeVisible();
+    await expect(page.getByRole("heading", { name: "Your weekly report" })).toBeVisible();
     await page.getByRole("tab", { name: "Removed", exact: true }).click();
     const first = mockDeveloperEvents("removed", 1).rows[0];
     const name = first.developer_name || first.developer_domain!;
