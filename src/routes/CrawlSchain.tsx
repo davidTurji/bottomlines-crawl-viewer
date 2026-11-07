@@ -1,3 +1,4 @@
+import { useReportOpeningReady } from "@/lib/reportOpening";
 import { StoreBadge } from "@/components/StoreBadge";
 import { Collapse, toggleWithoutJump } from "@/components/Motion";
 import * as Dialog from "@radix-ui/react-dialog";
@@ -116,6 +117,8 @@ export default function CrawlSchain() {
       cancelled = true;
     };
   }, [sdk, token, refreshTick]);
+
+  useReportOpeningReady(summarySettled && (overview !== null || error !== null));
 
   const sdkReady = !!read && read !== "reading" && read.ok;
   const live = !!read && read !== "reading" && read.ok && read.source === "live";

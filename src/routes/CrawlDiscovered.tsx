@@ -1,3 +1,4 @@
+import { useReportOpeningReady } from "@/lib/reportOpening";
 import { ReportKpiGrid } from "@/components/ReportKpiGrid";
 import { csvLine, downloadCsvParts } from "@/lib/csvDownload";
 import { ReportButton } from "@/components/ReportButton";
@@ -130,6 +131,8 @@ export default function CrawlDiscovered() {
       cancelled = true;
     };
   }, [token]);
+
+  useReportOpeningReady(summarySettled && !loading);
 
   useEffect(() => setPage(1), [filter, show]);
 

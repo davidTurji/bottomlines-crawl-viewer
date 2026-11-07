@@ -2,7 +2,10 @@ import { useReportDialogBounds } from "@/lib/useReportDialogBounds";
 import { LineSelectionProvider } from "@/components/PublisherLinks";
 import { useReportScope } from "@/lib/reportScope";
 import { useLocation } from "react-router-dom";
-import { AppSidebar } from "./AppSidebar";
+import { AppSidebar, useReportNavigation } from "./AppSidebar";
+import { PageShell } from "./PageShell";
+import { OverviewSkeleton } from "./Skeleton";
+import { ReportOpeningContext } from "@/lib/reportOpening";
 import AskAILauncher from "./AskAILauncher";
 import { AskAiProvider, useAskAiAvailable } from "@/lib/askAi";
 import {
@@ -20,10 +23,13 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
-import { useEffect, useState, useRef } from "react";
+import { useEffect, useLayoutEffect, useState, useRef } from "react";
 import { ReportTourProvider } from "./tour/useReportTour";
 import { ReportTour } from "./tour/ReportTour";
 import { WalkthroughButton } from "./tour/WalkthroughButton";
+
+// Bound the initial skeletons if a page or sidebar request is stalled.
+const REPORT_OPENING_GRACE_MS = 2_400;
 
 interface LayoutProps {
   children: React.ReactNode;
@@ -55,14 +61,14 @@ export default function Layout(props: LayoutProps) {
 }
 
 function LayoutShell({ children, email }: LayoutProps) {
-  const askAvailable = useAskAiAvailable();
+  const askEnabled = useAskAiAvailable();
   /* THE IDENTITY SHOWN IS THE ONE THAT SIGNED IN, or nothing. The prop
      used to default to a placeholder address, so every report claimed its
      reader was you@publisherstudios.com -- a fabricated fact on a screen
      whose whole job is verified facts. The gate stores the username at
      sign-in, keyed by token; a cookie-only revisit that never re-typed it
      simply shows no identity line rather than a fake one. */
-  const { token } = useReportScope();
+  const { token, basePath } = useReportScope();
   let storedUser: string | null = null;
   try {
     storedUser = sessionStorage.getItem(`pf.username.${token}`);
@@ -71,6 +77,29 @@ function LayoutShell({ children, email }: LayoutProps) {
   }
   const shownIdentity = email ?? storedUser;
   const location = useLocation();
+  const initialOverview = useRef(location.pathname.replace(/\/$/, "") === basePath).current;
+  const navigation = useReportNavigation(token);
+  const [readyPath, setReadyPath] = useState<string | null>(null);
+  const [opened, setOpened] = useState(false);
+  const [graceExpired, setGraceExpired] = useState(false);
+  const opening = !opened && !graceExpired && readyPath !== location.pathname;
+  const navigationReady = navigation.hasDiscovered !== null
+    && navigation.hasSchain !== null && navigation.hasSellers !== null;
+  const sidebarOpening = opening || (!navigationReady && !graceExpired);
+  const askAvailable = !opening && askEnabled;
+
+  useEffect(() => {
+    if (!sidebarOpening) return;
+    const timer = window.setTimeout(() => setGraceExpired(true), REPORT_OPENING_GRACE_MS);
+    return () => window.clearTimeout(timer);
+  }, [sidebarOpening]);
+
+  // Latch the core reveal. Late optional features and in-report navigation
+  // must never bring the opening skeleton back.
+  useLayoutEffect(() => {
+    if (!opening && !opened) setOpened(true);
+  }, [opening, opened]);
+
   const [showBackToTop, setShowBackToTop] = useState(false);
   const mainRef = useRef<HTMLElement>(null);
   useReportDialogBounds(mainRef);
@@ -151,7 +180,7 @@ function LayoutShell({ children, email }: LayoutProps) {
     <ReportTourProvider>
     <SidebarProvider defaultOpen={true}>
       <div className="h-screen h-[100dvh] w-full flex bg-background overflow-hidden md:pt-0">
-        <AppSidebar />
+        <AppSidebar navigation={navigation} opening={sidebarOpening} />
         <SidebarInset className="flex-1 min-w-0 flex flex-col h-full overflow-hidden">
           {/* Header — same shape as the console: h-12 sm:h-14, hairline
               divider, mobile SidebarTrigger on the left, account menu on
@@ -165,7 +194,7 @@ function LayoutShell({ children, email }: LayoutProps) {
             </div>
 
             <div className="flex items-center gap-2">
-              <WalkthroughButton />
+              <WalkthroughButton disabled={opening} />
               <DropdownMenu>
                 <DropdownMenuTrigger asChild>
                   <button
@@ -208,9 +237,20 @@ function LayoutShell({ children, email }: LayoutProps) {
               // The walkthrough slides the page in here when it moves between
               // pages (data-page-move, see index.css and ReportTour).
               data-report-main
-              className="flex-1 overflow-auto overscroll-contain safe-area-bottom scroll-y"
+              className={`flex-1 overscroll-contain safe-area-bottom scroll-y ${opening ? "overflow-hidden" : "overflow-auto"}`}
             >
-              <LineSelectionProvider key={location.pathname}>{children}</LineSelectionProvider>
+              {opening && (
+                <PageShell className="space-y-5">
+                  <OverviewSkeleton fadeIn={false} label={location.pathname === basePath ? undefined : "Loading your report"} />
+                </PageShell>
+              )}
+              {/* Keep the route mounted so its normal reads start in parallel
+                  with the shell's probes. Hidden content is also unfocusable. */}
+              <div hidden={opening} className={!opening && !initialOverview ? "report-open-reveal" : undefined}>
+                <ReportOpeningContext.Provider value={opening ? setReadyPath : null}>
+                  <LineSelectionProvider key={location.pathname}>{children}</LineSelectionProvider>
+                </ReportOpeningContext.Provider>
+              </div>
             </main>
 
             {/* Floating back-to-top, same styling as the console. */}
@@ -235,13 +275,13 @@ function LayoutShell({ children, email }: LayoutProps) {
 
             {/* Ask AI: the pill in the corner and the drawer it opens,
                 both portalled to the body. See AskAILauncher. */}
-            <AskAILauncher />
+            {!opening && <AskAILauncher />}
           </div>
         </SidebarInset>
       </div>
       {/* Portals to document.body; mounted here, inside the router and the
           provider, so it survives navigation between report pages. */}
-      <ReportTour />
+      {!opening && <ReportTour />}
     </SidebarProvider>
     </ReportTourProvider>
   );

@@ -28,7 +28,7 @@ for (const kind of ["publishers", "apps"] as const) {
       await page.addInitScript(() => localStorage.setItem("pf_report_walkthrough_v1", JSON.stringify({ status: "completed", stepId: null, open: false })));
       const calls = await installFakeApi(page, { matchType: true, appChange: true, watchTabs: true });
       await page.goto(`/crawl-report/${TOKEN}`);
-      await expect(page.getByRole("heading", { name: "Your weekly crawl" })).toBeVisible();
+      await expect(page.getByRole("heading", { name: "Your weekly report" })).toBeVisible();
       if (kind === "apps") await page.getByRole("button", { name: /Matched apps/ }).first().click();
       await revealStatuses(page);
       await page.getByRole("tab", { name: label, exact: true }).click();
@@ -135,7 +135,7 @@ for (const kind of ["publishers", "apps"] as const) for (const changed of [false
     await page.addInitScript(() => localStorage.setItem("pf_report_walkthrough_v1", JSON.stringify({ status: "completed", stepId: null, open: false })));
     const calls = await installFakeApi(page, { matchType: true, appChange: true, foundIn: true, appPlatform: true });
     await page.goto(`/crawl-report/${TOKEN}`);
-    await expect(page.getByRole("heading", { name: "Your weekly crawl" })).toBeVisible();
+    await expect(page.getByRole("heading", { name: "Your weekly report" })).toBeVisible();
     if (kind === "apps") await page.getByRole("button", { name: /Matched apps/ }).first().click();
     if (changed) await page.getByRole("tab", { name: kind === "apps" ? "Removed" : "Added", exact: true }).click();
     await page.getByRole("textbox", { name: `Search matched ${kind}` }).fill("a");

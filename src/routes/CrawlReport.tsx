@@ -1,3 +1,4 @@
+import { useReportOpeningReady } from "@/lib/reportOpening";
 import { requestReportDownload } from "@/lib/reportDownload";
 import { ReportButton } from "@/components/ReportButton";
 import { appPlatformOf, PlatformBadge, storeHint } from "@/components/StoreBadge";
@@ -134,7 +135,7 @@ import {
 } from "@/components/SeatLines";
 
 /**
- * OVERVIEW page, "Your weekly crawl".
+ * OVERVIEW page, "Your weekly report".
  *
  * Layout mirrors bottomlines-app's PerformanceDashboard "Your Bottom Line"
  * template: a page header with a date chip, then two side-by-side hero
@@ -206,11 +207,7 @@ export default function CrawlReport() {
   const { token } = useReportScope();
   const [summary, setSummary] = useState<Summary | null>(null);
   const [previous, setPrevious] = useState<Summary | null>(null);
-  // What Export hands over; the safe default until it answers.
-  const [exportInfo, setExportInfo] = useState<ExportInfo>({
-    format: "xlsx",
-    line_export: false,
-  });
+  const [exportInfo, setExportInfo] = useState<ExportInfo | null>(null);
   const [error, setError] = useState<string | null>(null);
   // Which matched list the section below shows. The two matched-inventory
   // cards act as its selector; publishers is the default.
@@ -518,6 +515,8 @@ export default function CrawlReport() {
     glideTo(listRef.current);
   };
 
+  const animateEntry = useReportOpeningReady(summary !== null || error !== null);
+
   if (error) {
     return (
       <div className="mx-auto max-w-3xl px-4 py-10 sm:px-6">
@@ -667,14 +666,14 @@ export default function CrawlReport() {
   };
 
   return (
-    <PageShell className="space-y-5">
+    <PageShell className={cn("space-y-5", animateEntry && "report-open-reveal report-open-rise")}>
       {/* Page header. One line summary of what got scanned, no floating
           date chip. The h1 and its subtitle already carry the week. The
           export sits top right, the one action this page offers. */}
       <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
         <div className="min-w-0" data-tour="overview-header">
           <h1 className="font-display text-xl font-semibold leading-tight tracking-tight text-slate-900 sm:text-2xl">
-            Your weekly crawl
+            Your weekly report
           </h1>
           <p className="mt-1 text-sm text-slate-500">{currentLine}</p>
           {/* A crawl that did not finish says so, quietly, in the Excel's
@@ -712,16 +711,20 @@ export default function CrawlReport() {
             onChange={setLines}
             busy={linesRefreshing}
           />
-          {exportInfo.format !== "none" && (
+          {!exportInfo && !summary.trial && (
+            <Skeleton className="h-9 w-44 max-w-full rounded-lg max-sm:h-10 max-sm:w-full" />
+          )}
+          {exportInfo && exportInfo.format !== "none" && (
             <ExportResultsButton
               token={token}
               summary={summary}
               lines={lines}
               info={exportInfo}
+              animateEntry={animateEntry}
             />
           )}
-          {exportInfo.format === "none" && !summary.trial && !exportInfo.trial && (
-            <p role="status" className="max-w-xs text-xs text-slate-500">The report download is not ready yet. Please refresh shortly.</p>
+          {exportInfo?.format === "none" && !summary.trial && !exportInfo.trial && (
+            <p role="status" className={cn("max-w-xs text-xs text-slate-500", animateEntry && "report-open-reveal report-open-rise")}>The report download is not ready yet. Please refresh shortly.</p>
           )}
         </div>
       </div>
@@ -742,14 +745,14 @@ export default function CrawlReport() {
               {lines.length === 1 ? "the selected line" : `${lines.length} selected lines`}
             </span>
             . Line totals and the week&apos;s changes follow the same filter
-            {exportInfo.line_export ? ", and so does Export." : ". Export gives the full report."}
+            {exportInfo?.line_export ? ", and so does Export." : ". Export gives the full report."}
           </>
         )}
         {/* The one exception to "Export is an Excel", said before the click
             (David, 2026-09-28: it must not be confusing at all), whenever
             Export hands over the full report: no filter, or a filter this
             report cannot be cut by. */}
-        {(lines.length === 0 || !exportInfo.line_export) && exportInfo.format === "zip" && (
+        {(lines.length === 0 || !exportInfo?.line_export) && exportInfo?.format === "zip" && (
           <span className="text-critical">
             {lines.length > 0 && " "}
             {zipExplanation(exportInfo)}
@@ -1580,11 +1583,13 @@ function ExportResultsButton({
   summary,
   lines,
   info,
+  animateEntry,
 }: {
   token: string;
   summary: Summary;
   lines: string[];
   info: ExportInfo;
+  animateEntry: boolean;
 }) {
   // Under a line filter the download carries only those lines, when the
   // report can be cut that way (the crawler says so in export-info). An
@@ -1651,7 +1656,7 @@ function ExportResultsButton({
      selected lines says so instead, because calling that file complete
      would be false. */
   return (
-    <div className="report-download flex max-w-full flex-col items-start gap-1.5">
+    <div className={cn("report-download flex max-w-full flex-col items-start gap-1.5", animateEntry && "report-open-reveal report-open-rise")}>
     <button
       type="button"
       onClick={onClick}

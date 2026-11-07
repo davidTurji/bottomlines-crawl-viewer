@@ -72,7 +72,7 @@ test.describe("line numbers", () => {
   test("an expanded publisher row and an app row number their lines 1, 2, 3, per list", async ({ page }) => {
     const errors = watchErrors(page);
     await open(page, {});
-    await expect(page.getByRole("heading", { name: "Your weekly crawl" })).toBeVisible();
+    await expect(page.getByRole("heading", { name: "Your weekly report" })).toBeVisible();
     await page.locator('button[aria-label^="Show the seat lines of"]').first().click();
     await expect(openCard(page).locator("[data-line-no]").first()).toBeVisible();
     const lists = openCard(page).locator("[data-seat-lines], section ul");
@@ -105,7 +105,7 @@ test.describe("line numbers", () => {
     // starting at one x.
     const errors = watchErrors(page);
     await open(page, {});
-    await expect(page.getByRole("heading", { name: "Your weekly crawl" })).toBeVisible();
+    await expect(page.getByRole("heading", { name: "Your weekly report" })).toBeVisible();
     const check = async (where: string) => {
       // Closing panels retain their children briefly for the transition.
       const rows = openCard(page).locator("li:has([data-line-no])");
@@ -232,7 +232,7 @@ test.describe("seller roles live on the Sellers.json page", () => {
   test("the Overview never shows a seller fact, even on a report that has them", async ({ page }) => {
     const errors = watchErrors(page);
     await open(page, { sellers: "page", matchType: true, sellersReads: true, realShapes: true });
-    await expect(page.getByRole("heading", { name: "Your weekly crawl" })).toBeVisible();
+    await expect(page.getByRole("heading", { name: "Your weekly report" })).toBeVisible();
     const rows = page.locator('button[aria-label^="Show the seat lines of"]');
     await expect(rows.first()).toBeVisible();
     for (let i = 0; i < Math.min(6, await rows.count()); i++) {

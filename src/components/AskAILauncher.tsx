@@ -113,6 +113,7 @@ export default function AskAILauncher() {
   const start = useRef<{ px: number; w: number } | null>(null);
   const panelRef = useRef<HTMLElement>(null);
   const launcherRef = useRef<HTMLButtonElement>(null);
+  const launcherEntered = useRef(false);
   const [viewport, setViewport] = useState<{ top: number; height: number } | null>(null);
   const close = useCallback(() => {
     start.current = null;
@@ -237,9 +238,16 @@ export default function AskAILauncher() {
         <button
           ref={launcherRef}
           type="button"
-          onClick={() => setOpen(true)}
+          onClick={() => {
+            launcherEntered.current = true;
+            setOpen(true);
+          }}
+          onAnimationEnd={(event) => {
+            if (event.animationName === "report-open-reveal") launcherEntered.current = true;
+          }}
           aria-label="Ask AI"
           className={cn(
+            !launcherEntered.current && "report-open-reveal",
             "fixed right-4 z-[60] inline-flex h-11 items-center justify-center gap-2 rounded-full bg-primary px-4 text-[13.5px] font-semibold text-primary-foreground shadow-lg transition-all duration-200 hover:-translate-y-0.5 hover:shadow-xl focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50 sm:right-6 sm:h-12 sm:px-5 sm:text-sm",
             "bottom-[max(1rem,env(safe-area-inset-bottom))] sm:bottom-6",
           )}

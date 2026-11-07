@@ -35,7 +35,7 @@ async function open(page: Page, scenario: Scenario, routes?: () => Promise<unkno
   await installFakeApi(page, scenario);
   if (routes) await routes();
   await page.goto(BASE);
-  await expect(page.getByRole("heading", { name: "Your weekly crawl" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Your weekly report" })).toBeVisible();
 }
 
 /** Big counts, the widest pills a real report draws. */

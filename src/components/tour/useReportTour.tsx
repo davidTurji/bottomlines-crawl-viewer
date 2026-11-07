@@ -135,7 +135,8 @@ export function ReportTourProvider({ children }: { children: React.ReactNode }) 
       setPrompting("offer");
     };
     const timer = window.setInterval(() => {
-      if (document.querySelector(READY_ANCHOR)) {
+      const anchor = document.querySelector(READY_ANCHOR);
+      if (anchor && !anchor.closest("[hidden]")) {
         window.clearInterval(timer);
         delay = window.setTimeout(offer, PROMPT_DELAY_MS);
       } else if (++attempts >= READY_ATTEMPTS) {

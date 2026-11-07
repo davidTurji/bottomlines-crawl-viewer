@@ -1,3 +1,4 @@
+import { useReportOpeningReady } from "@/lib/reportOpening";
 import { Pager, usePaging } from "@/components/ListControls";
 import { Collapse, Settle } from "@/components/Motion";
 import LockedTail from "@/components/LockedTail";
@@ -181,6 +182,8 @@ export default function CrawlDeclarations() {
       cancelled = true;
     };
   }, [token]);
+
+  useReportOpeningReady(summarySettled && !loading);
 
   // A new filter is a new list; a page number held over from the old one
   // would open on an empty page.

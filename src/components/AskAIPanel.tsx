@@ -1,6 +1,7 @@
 import { ArrowUp, Check, Copy, Download, FileSpreadsheet, Plus, Sparkles, SquarePen, X } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 
+import { copyText } from "@/components/PublisherLinks";
 import { RevealedMarkdown } from "@/components/RevealedMarkdown";
 import {
   AI_POLICY_URL,
@@ -162,7 +163,7 @@ export default function AskAIPanel({ onClose }: { onClose: () => void }) {
         )}
       >
         <Mark className="h-6 w-6" />
-        <h2 className="ask-label-enter min-w-0 flex-1 truncate text-[13px] font-medium text-slate-900">Bottom Lines AI</h2>
+        <h2 className="ask-label-enter min-w-0 flex-1 truncate text-[13px] font-medium text-slate-900">Bottomlines.ai</h2>
         <QuotaIndicator left={allowanceLeft} exhausted={budgetExhausted} />
         {messages.length > 0 && !pending && (
           <IconButton label="New conversation" onClick={clear}>
@@ -466,9 +467,9 @@ function Message({
               <DownloadRow message={message} attachment={attachment} onDownload={onDownload} />
             )}
             {written && (
-              <div className="mt-1 flex items-center gap-2">
-                {!message.refused && <CopyButton text={message.content} />}
+              <div className="mt-1 flex items-center gap-2 text-left">
                 <UsageNote message={message} />
+                <CopyButton text={message.content} />
               </div>
             )}
           </>
@@ -628,27 +629,29 @@ function DropOverlay() {
 
 /** Copy the answer. Shown on hover so a resting thread stays quiet. */
 function CopyButton({ text }: { text: string }) {
-  const [copied, setCopied] = useState(false);
+  const [feedback, setFeedback] = useState("");
+  useEffect(() => {
+    if (!feedback) return;
+    const timer = window.setTimeout(() => setFeedback(""), 1500);
+    return () => window.clearTimeout(timer);
+  }, [feedback]);
+
   const copy = async () => {
-    try {
-      await navigator.clipboard.writeText(text);
-      setCopied(true);
-      setTimeout(() => setCopied(false), 1500);
-    } catch {
-      /* clipboard unavailable: the text is on screen and selectable */
-    }
+    setFeedback(await copyText(text) ? "Answer copied" : "Could not copy answer");
   };
+
   return (
-    <div className="ask-copy flex items-center opacity-0 transition-opacity focus-within:opacity-100 group-hover:opacity-100">
+    <div className="ask-copy ml-auto flex shrink-0 items-center opacity-0 transition-opacity focus-within:opacity-100 group-hover:opacity-100 motion-reduce:transition-none">
       <button
         type="button"
         onClick={copy}
         aria-label="Copy answer"
-        title="Copy"
-        className="flex h-9 w-9 items-center justify-center rounded-lg text-slate-500 hover:bg-slate-100 hover:text-slate-700"
+        title={feedback || "Copy answer"}
+        className="flex h-9 w-9 items-center justify-center rounded-lg text-slate-500 hover:bg-slate-100 hover:text-slate-700 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50"
       >
-        {copied ? <Check className="h-3.5 w-3.5 text-primary" /> : <Copy className="h-3.5 w-3.5" />}
+        {feedback === "Answer copied" ? <Check aria-hidden className="h-3.5 w-3.5 text-primary" /> : <Copy aria-hidden className="h-3.5 w-3.5" />}
       </button>
+      <span role="status" className="sr-only">{feedback}</span>
     </div>
   );
 }

@@ -1,3 +1,4 @@
+import { useReportOpeningReady } from "@/lib/reportOpening";
 import { SellerSetup } from "@/components/SellerSetup";
 import { ReportKpiGrid } from "@/components/ReportKpiGrid";
 import {
@@ -153,6 +154,8 @@ export default function CrawlSellers() {
       cancelled = true;
     };
   }, [token]);
+
+  useReportOpeningReady(summarySettled && (data !== null || failed));
 
   const creating = data != null && data.file == null;
 

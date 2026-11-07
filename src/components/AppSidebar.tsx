@@ -28,18 +28,9 @@ import { Skeleton } from "@/components/Skeleton";
  * idiomatic for a share-by-link viewer where the assistant is scoped to the
  * report rather than being a top-level surface.
  */
-export function AppSidebar() {
-  const { isMobile, openMobile, setOpenMobile } = useSidebar();
-  const { basePath, token } = useReportScope();
-
-  // Does this crawl have discovered lines at all? One cheap probe (a single
-  // row, we only read `total`) decides whether the rail carries the
-  // "Discovered lines" entry. EVERY ENTRY'S PLACE FROM THE FIRST MOMENT
-  // (David, 2026-11-01): while a probe has not answered (null) the rail
-  // holds the entry's place with a skeleton row, so the pages never pop in
-  // late; an answer turns it into the link, or takes it away. Any failure
-  // (401 before login, dead token, offline) takes it away, the honest
-  // default for a section we cannot prove exists.
+export function useReportNavigation(token: string) {
+  // A single discovery row answers whether the optional page exists.
+  // An error settles a probe without advertising an unverified feature.
   const [hasDiscovered, setHasDiscovered] = useState<boolean | null>(null);
   useEffect(() => {
     if (!token) return;
@@ -83,6 +74,18 @@ export function AppSidebar() {
   // Does this report carry the sellers.json page? The same probe the
   // Discovery badges link with (lib/useSellersPage).
   const hasSellers = useSellersPageState(token);
+  return { hasDiscovered, hasSchain, hasSellers };
+}
+
+export function AppSidebar({
+  navigation: { hasDiscovered, hasSchain, hasSellers },
+  opening,
+}: {
+  navigation: ReturnType<typeof useReportNavigation>;
+  opening: boolean;
+}) {
+  const { isMobile, openMobile, setOpenMobile } = useSidebar();
+  const { basePath } = useReportScope();
 
   const handleMobileNavClick = () => {
     if (isMobile && openMobile) setOpenMobile(false);
@@ -98,7 +101,7 @@ export function AppSidebar() {
   type Entry = { to: string; label: string; tour: string; end?: boolean; pending?: boolean };
   /** An optional page: its link once known, a skeleton row until then. */
   const optional = (known: boolean | null, entry: Entry): Entry[] =>
-    known === null ? [{ ...entry, pending: true }] : known ? [entry] : [];
+    opening ? [{ ...entry, pending: true }] : known === true ? [entry] : [];
   const items: Entry[] = [
     { to: basePath, label: "Overview", tour: "nav-overview", end: true },
     // Listed ONLY when this crawl actually discovered something (David,
@@ -155,16 +158,16 @@ export function AppSidebar() {
           <SidebarGroup className="px-2.5 py-3" data-tour="report-nav">
             <SidebarGroupContent>
               <SidebarMenu className="gap-0.5">
-                {items.map((item) => item.pending ? (
+                {items.map((item) => opening || item.pending ? (
                   // Its place, held: the row's height, a bar the label's
                   // width, never a link until the page is known to exist.
-                  <SidebarMenuItem key={item.to} aria-hidden data-nav-pending={item.label}>
+                  <SidebarMenuItem key={item.to} aria-hidden data-nav-pending={item.pending ? item.label : undefined}>
                     <div className="flex h-9 items-center px-3">
                       <Skeleton className="nav-skeleton h-3 rounded" style={{ width: `${Math.max(3, item.label.length) * 0.5}rem` }} />
                     </div>
                   </SidebarMenuItem>
                 ) : (
-                  <SidebarMenuItem key={item.to}>
+                  <SidebarMenuItem key={item.to} className={isMobile ? undefined : "report-open-reveal report-open-rise"}>
                     <SidebarMenuButton
                       asChild
                       className="h-9 rounded-md px-3 transition-colors duration-150"
