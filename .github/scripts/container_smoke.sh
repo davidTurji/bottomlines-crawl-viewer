@@ -108,4 +108,15 @@ if [ "$kind" = viewer ] || [ "$kind" = demo ]; then
   assert_headers "$trusted_url/api/synthetic-tls-probe" 200
   grep -q 'synthetic upstream' "$fixture/body"
 fi
+if [ "$kind" = viewer ]; then
+  # The only frameable API response is the native workbook download. JSON
+  # refusals must remain readable by the same-origin parent report.
+  curl --silent --show-error --max-time 10 -D "$fixture/headers" -o /dev/null "$trusted_url/api/v1/viewer/synthetic/export.xlsx?lines=synthetic"
+  grep -iq '^x-frame-options: SAMEORIGIN' "$fixture/headers"
+  grep -iq "^content-security-policy:.*frame-ancestors 'self'" "$fixture/headers"
+  for path in /api/v1/viewer/synthetic/summary /api/v1/viewer/synthetic/export.xlsx/extra /crawl-report/synthetic; do
+    assert_headers "$trusted_url$path" 200
+    grep -iq "^content-security-policy:.*frame-ancestors 'none'" "$fixture/headers"
+  done
+fi
 echo "PASS: $kind image runs unprivileged with expected headers and applicable TLS checks"
