@@ -45,17 +45,24 @@ JS
   chmod 644 "$fixture"/*
   node_image=$(awk '/^FROM node:/{ print $2; exit }' Dockerfile)
   docker run -d --name "$upstream" --network "$network" --network-alias upstream \
-    --user 1000:1000 -p 127.0.0.1::8443 -v "$fixture:/fixture:ro" \
+    --user 1000:1000 -v "$fixture:/fixture:ro" \
     "$node_image" node /fixture/server.cjs >/dev/null
   runtime=(-e CRAWLER_API_URL=https://upstream:8443 -e CORE_API_URL=https://upstream:8443)
 fi
 start_app() {
   local container=$1
   shift
-  docker run -d --name "$container" --network "$network" -p 127.0.0.1::8080 \
+  docker run -d --name "$container" --network "$network" \
     "${runtime[@]}" "$@" "$image" >/dev/null
 }
-address() { docker port "$1" "$2/tcp" | head -1; }
+address() {
+  # Internal networks deliberately do not publish ports. The runner can probe
+  # the private bridge address without exposing any port outside this job.
+  local ip
+  ip=$(docker inspect -f '{{range .NetworkSettings.Networks}}{{.IPAddress}}{{end}}' "$1")
+  test -n "$ip"
+  printf '%s:%s' "$ip" "$2"
+}
 wait_ready() {
   local url=$1
   for _ in $(seq 1 60); do
@@ -69,7 +76,10 @@ assert_headers() {
   local url=$1 expected=$2
   local status
   status=$(curl --silent --show-error --max-time 10 -D "$fixture/headers" -o "$fixture/body" -w '%{http_code}' "$url")
-  test "$status" = "$expected"
+  if [ "$status" != "$expected" ]; then
+    echo "Unexpected status $status (wanted $expected) for synthetic probe" >&2
+    return 1
+  fi
   grep -iq '^x-frame-options: DENY' "$fixture/headers"
   grep -iq '^x-content-type-options: nosniff' "$fixture/headers"
   grep -iq '^content-security-policy:.*frame-ancestors' "$fixture/headers"

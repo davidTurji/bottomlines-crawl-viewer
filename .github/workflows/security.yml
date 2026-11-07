@@ -20,6 +20,7 @@ jobs:
       TRIVY_OFFLINE_SCAN: 'true'
       TRIVY_DISABLE_TELEMETRY: 'true'
       TRIVY_LIST_ALL_PKGS: 'true'
+      TRIVY_INCLUDE_DEV_DEPS: 'true'
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
