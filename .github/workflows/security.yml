@@ -19,6 +19,7 @@ jobs:
       # Advisory databases are downloaded; source/package inventory stays on the runner.
       TRIVY_OFFLINE_SCAN: 'true'
       TRIVY_DISABLE_TELEMETRY: 'true'
+      TRIVY_LIST_ALL_PKGS: 'true'
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
