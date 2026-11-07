@@ -15,12 +15,15 @@ server {
     server_name _;
     root /usr/share/nginx/html;
     index index.html;
+    add_header X-Frame-Options "DENY" always;
+    add_header X-Content-Type-Options "nosniff" always;
+    add_header Content-Security-Policy "default-src 'self'; base-uri 'none'; object-src 'none'; frame-ancestors 'none'; form-action 'self'; script-src 'self'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com; img-src 'self' data: blob: https:; connect-src 'self'; frame-src 'none'; worker-src 'self' blob:; media-src 'self' blob:" always;
 
     # This is a private, credentialed report viewer: never indexed, and
     # never leaking report URLs (which carry share tokens) via Referer.
     # NOTE: nginx add_header does NOT inherit into a location that adds
     # its own headers, so every location below that uses add_header must
-    # repeat these two.
+    # repeat the security headers as well.
     add_header X-Robots-Tag "noindex, nofollow" always;
     add_header Referrer-Policy "no-referrer" always;
 
@@ -39,6 +42,9 @@ server {
         # authenticate every caller and reduce the login to decoration.
         proxy_set_header Authorization $http_authorization;
         proxy_ssl_server_name on;
+        proxy_ssl_verify on;
+        proxy_ssl_trusted_certificate /etc/ssl/certs/ca-certificates.crt;
+        proxy_ssl_verify_depth 3;
         proxy_read_timeout 120s;
         # SSE-friendly: the future chat endpoint streams text/event-stream
         # frames, and nginx's default response buffering would hold them
@@ -82,16 +88,20 @@ server {
         # cookie on it, and its answers are files or JSON, never a page
         # that could run script here.
         proxy_hide_header Set-Cookie;
-        add_header X-Content-Type-Options "nosniff" always;
-        add_header Content-Security-Policy "default-src 'none'; sandbox" always;
+        add_header Content-Security-Policy "default-src 'none'; frame-ancestors 'none'; sandbox" always;
         add_header X-Robots-Tag "noindex, nofollow" always;
         add_header Referrer-Policy "no-referrer" always;
         add_header Cache-Control "no-store" always;
+        add_header X-Frame-Options "DENY" always;
+        add_header X-Content-Type-Options "nosniff" always;
     }
 
     # Long-cache immutable Vite chunks (they have hashed filenames).
     location /assets/ {
         add_header Cache-Control "public, max-age=31536000, immutable";
+        add_header X-Frame-Options "DENY" always;
+        add_header X-Content-Type-Options "nosniff" always;
+        add_header Content-Security-Policy "default-src 'self'; base-uri 'none'; object-src 'none'; frame-ancestors 'none'; form-action 'self'; script-src 'self'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com; img-src 'self' data: blob: https:; connect-src 'self'; frame-src 'none'; worker-src 'self' blob:; media-src 'self' blob:" always;
         add_header X-Robots-Tag "noindex, nofollow" always;
         add_header Referrer-Policy "no-referrer" always;
         try_files $uri =404;
@@ -102,6 +112,9 @@ server {
     # the viewer's privacy posture (report data behind it is credentialed).
     location = /index.html {
         add_header Cache-Control "no-store" always;
+        add_header X-Frame-Options "DENY" always;
+        add_header X-Content-Type-Options "nosniff" always;
+        add_header Content-Security-Policy "default-src 'self'; base-uri 'none'; object-src 'none'; frame-ancestors 'none'; form-action 'self'; script-src 'self'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com; img-src 'self' data: blob: https:; connect-src 'self'; frame-src 'none'; worker-src 'self' blob:; media-src 'self' blob:" always;
         add_header X-Robots-Tag "noindex, nofollow" always;
         add_header Referrer-Policy "no-referrer" always;
     }
@@ -112,6 +125,9 @@ server {
     # location's), so the no-store rule is repeated here.
     location / {
         add_header Cache-Control "no-store" always;
+        add_header X-Frame-Options "DENY" always;
+        add_header X-Content-Type-Options "nosniff" always;
+        add_header Content-Security-Policy "default-src 'self'; base-uri 'none'; object-src 'none'; frame-ancestors 'none'; form-action 'self'; script-src 'self'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com; img-src 'self' data: blob: https:; connect-src 'self'; frame-src 'none'; worker-src 'self' blob:; media-src 'self' blob:" always;
         add_header X-Robots-Tag "noindex, nofollow" always;
         add_header Referrer-Policy "no-referrer" always;
         try_files $uri $uri/ /index.html;
