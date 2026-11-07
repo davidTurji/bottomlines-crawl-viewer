@@ -2493,8 +2493,8 @@ export type AskTurn = { role: "user" | "assistant"; content: string };
 export type AskStatus = {
   enabled: boolean;
   pages: AskPage[];
-  /** Whole percent of the report's AI quota left, rounded down. */
-  allowance_left_pct: number;
+  /** Whole percent left, or null when the ledger could not be read. */
+  allowance_left_pct: number | null;
   budget_exhausted: boolean;
   suggestions: Record<AskPage, string[]>;
   disclaimer: string;
@@ -2545,7 +2545,7 @@ export type AskAnswer = {
   local: boolean;
   /** This answer's share of the report's quota, in percent (one decimal). */
   used_pct: number;
-  allowance_left_pct: number;
+  allowance_left_pct: number | null;
   budget_exhausted: boolean;
   /** With a file attached: which rows the panel offers to download under
    *  the answer ("" for none). Always one of the file check's downloads. */

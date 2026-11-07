@@ -96,7 +96,7 @@ export function reportTourSteps(f: ReportFeatures): ReportTourStep[] {
       page: "",
       anchor: "overview-header",
       eyebrow: "Overview",
-      title: "Your weekly crawl",
+      title: "Your weekly report",
       body: (
         <p>
           Who carries <strong>your seat lines</strong>, and what <strong>changed</strong> since last week.

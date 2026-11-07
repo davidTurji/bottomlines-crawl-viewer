@@ -93,7 +93,7 @@ async function signIn(browser: Browser, vp: (typeof VIEWPORTS)[number]): Promise
         throw new Error(redact(e.message));
       });
     const button = page.getByRole("button", { name: "Sign in", exact: true });
-    const overview = page.getByRole("heading", { name: "Your weekly crawl" });
+    const overview = page.getByRole("heading", { name: "Your weekly report" });
     // A link that signs in by itself lands on the report; otherwise the
     // form is filled from the link, and one click signs in.
     await expect(button.or(overview).first()).toBeVisible({ timeout: 60_000 });
@@ -119,7 +119,7 @@ async function signIn(browser: Browser, vp: (typeof VIEWPORTS)[number]): Promise
     await page.locator("input[autocomplete=username]").fill("reader", { timeout: 3_000 });
     await page.locator("input[autocomplete=current-password]").fill("any-password", { timeout: 3_000 });
     await page.getByRole("button", { name: "Sign in", exact: true }).click();
-    await expect(page.getByRole("heading", { name: "Your weekly crawl" })).toBeVisible();
+    await expect(page.getByRole("heading", { name: "Your weekly report" })).toBeVisible();
   }
   return { ctx, page };
 }

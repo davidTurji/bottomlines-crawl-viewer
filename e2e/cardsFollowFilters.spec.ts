@@ -26,7 +26,7 @@ async function open(page: Page, scenario: Scenario): Promise<Calls> {
   });
   const calls = await installFakeApi(page, scenario);
   await page.goto(`/crawl-report/${TOKEN}`);
-  await expect(page.getByRole("heading", { name: "Your weekly crawl" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Your weekly report" })).toBeVisible();
   const noThanks = page.getByRole("button", { name: "No thanks" });
   await noThanks.click({ timeout: 8000 }).catch(() => {});
   return calls;

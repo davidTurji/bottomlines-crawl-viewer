@@ -57,7 +57,7 @@ async function open(page: Page, scenario: Scenario, path = "", routes?: () => Pr
   const calls = await installFakeApi(page, scenario);
   if (routes) await routes();
   await page.goto(`${BASE}${path}`);
-  await expect(page.getByRole("heading", { name: "Your weekly crawl" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Your weekly report" })).toBeVisible();
   await revealStatuses(page);
   return calls;
 }

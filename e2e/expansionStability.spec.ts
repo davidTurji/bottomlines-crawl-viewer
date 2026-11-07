@@ -42,7 +42,7 @@ test('tablet navigation stays full width; mobile drawer closes without losing th
   await expect(page.getByRole('button', { name: 'Close navigation' })).toBeVisible();
   await page.getByRole('button', { name: 'Close navigation' }).click();
   await expect(page.locator('[data-mobile="true"]')).toHaveCount(0);
-  await expect(page.getByRole('heading', { name: 'Your weekly crawl' })).toBeVisible();
+  await expect(page.getByRole('heading', { name: 'Your weekly report' })).toBeVisible();
 });
 
 test('Discovery connects search, filters, export and pagination with inline comparisons', async ({ page }) => {

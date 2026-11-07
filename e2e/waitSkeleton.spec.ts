@@ -32,7 +32,7 @@ async function open(page: Page, path = "", before?: () => Promise<unknown>) {
   await installFakeApi(page, FULL);
   if (before) await before();
   await page.goto(`${BASE}${path}`);
-  await expect(page.getByRole("heading", { name: "Your weekly crawl" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Your weekly report" })).toBeVisible();
 }
 
 /** Holds every answer matching `url` until released. */

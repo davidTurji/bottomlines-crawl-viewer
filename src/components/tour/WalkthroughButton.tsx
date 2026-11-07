@@ -17,13 +17,14 @@ import { Compass } from "lucide-react";
 
 import { useReportTour } from "./useReportTour";
 
-export function WalkthroughButton() {
+export function WalkthroughButton({ disabled = false }: { disabled?: boolean } = {}) {
   const { introduce } = useReportTour();
   return (
     <button
       type="button"
       data-tour="walkthrough-button"
       onClick={introduce}
+      disabled={disabled}
       // Compact (David, 2026-11-01, tighter 2026-11-02): the compass tight
       // to its words, set like the Download button's text (12px, semibold),
       // so the button is no wider or taller than what it says. A phone
